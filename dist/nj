@@ -3860,6 +3860,7 @@ function cmdUnarchive(flags) {
 // src/core/help.ts
 var HELP = `nj \u2014 NanoJira, a local file-based task tool for agents
 
+  nj --version                           print the version and exit
   nj                                     short status: counts, top ready, problems
   nj init                                create the backlog layout
   nj <any command> --backlog=<path>      use this backlog (else NJ_BACKLOG, else .njrc/backlog/ upward)
@@ -3892,11 +3893,24 @@ every named element; results come back as {ok, results: [...]}.
 Exit codes: 0 success \xB7 1 command failed \xB7 2 doctor found at least one error.
 `;
 
+// src/core/version.ts
+var VERSION = "3.4.0";
+
 // src/nj.ts
 function main(argv) {
+  const pre = parseArgs(argv);
+  output.json = pre.flags.has("json");
+  if (pre.flags.has("version")) {
+    const onlyVersionAndJson = Array.from(pre.flags.keys()).every((k) => k === "version" || k === "json");
+    if (onlyVersionAndJson && pre.positional.length === 0) {
+      process.stdout.write(output.json ? JSON.stringify({ version: VERSION }) + "\n" : `nj ${VERSION}
+`);
+      return 0;
+    }
+    fail("unknown_field", `unknown field 'version'.`, "--version takes no other flag and names no command");
+  }
   const cmd = argv[0] !== void 0 && !argv[0].startsWith("--") ? argv[0] : null;
   const { flags, positional } = parseArgs(cmd === null ? argv : argv.slice(1));
-  output.json = flags.has("json");
   if (cmd === "help" || flags.has("help")) {
     process.stdout.write(HELP);
     return 0;

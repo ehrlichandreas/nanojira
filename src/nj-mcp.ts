@@ -23,12 +23,16 @@ import { findBacklog } from './core/config.ts';
 import { Fail } from './core/output.ts';
 import type { FieldSpec } from './core/flag-table.ts';
 import { commandFields } from './core/flag-table.ts';
+import { VERSION } from './core/version.ts';
 
 const MODERN_VERSION = '2026-07-28';
 const LEGACY_VERSION = '2025-11-25';
 const META_VERSION_KEY = 'io.modelcontextprotocol/protocolVersion';
 const SERVER_NAME = 'nj-mcp';
-const SERVER_VERSION = '1.0.0';
+// The identical value `nj --version` reports (§ 9, § 17, D151) — one
+// package.json source embedded into both binaries at build time, never a
+// separately maintained string.
+const SERVER_VERSION = VERSION;
 
 // `tools/list`'s exact, fixed order (§ 17 "Tool surface"). `rm` is never
 // present — omitted unconditionally, not merely gated.
@@ -59,8 +63,40 @@ function buildToolList(allowDestructive: boolean) {
 
 // -------------------------------------------------------------------- main
 
+// The complete set of startup arguments nj-mcp recognises (§ 17, D152): a
+// typo here must not pass silently and start the server as if it had been
+// left off — the same "a typo must not pass" rule `nj`'s own checkFlags
+// already enforces, mirrored here since nj-mcp has no per-command flag
+// table of its own, only this one fixed startup shape.
+const KNOWN_STARTUP_FLAGS = ['backlog', 'allow-destructive', 'version'];
+const KNOWN_STARTUP_HINT = `Known: ${KNOWN_STARTUP_FLAGS.map((f) => '--' + f).join(', ')}`;
+
+/** Before any backlog resolution or stdio protocol traffic (D152): one
+ * stderr line naming the offending argument, nothing on stdout. */
+function rejectStartup(message: string): never {
+  process.stderr.write(`nj-mcp: ${message} ${KNOWN_STARTUP_HINT}\n`);
+  process.exit(1);
+}
+
 function main() {
   const argv = parseArgs(process.argv.slice(2));
+
+  for (const name of argv.flags.keys()) {
+    if (!KNOWN_STARTUP_FLAGS.includes(name)) rejectStartup(`unknown argument '--${name}'.`);
+  }
+  if (argv.positional.length > 0) rejectStartup(`unknown argument '${argv.positional[0]}'.`);
+
+  // Same rule as `nj --version` (§ 9, § 17, D151/D152): checked before the
+  // backlog resolution below, so it works anywhere, resolving no backlog —
+  // and, like `nj --version`, combined with anything else (nj-mcp has no
+  // --json) it is rejected rather than silently printing the version.
+  if (argv.flags.has('version')) {
+    const others = Array.from(argv.flags.keys()).filter((k) => k !== 'version');
+    if (others.length > 0) rejectStartup(`--version takes no other argument (got '--${others[0]}').`);
+    process.stdout.write(`nj-mcp ${VERSION}\n`);
+    process.exit(0);
+  }
+
   const allowDestructive = argv.flags.has('allow-destructive');
 
   // Resolved exactly once, by the same rules as every CLI command (§ 4),

@@ -29,13 +29,30 @@ import { cmdTree } from './commands/cmd-tree.ts';
 import { cmdUnarchive } from './commands/cmd-unarchive.ts';
 import { HELP } from './core/help.ts';
 import { Fail, fail, output, emitFailure } from './core/output.ts';
+import { VERSION } from './core/version.ts';
 
 // --------------------------------------------------------------------- main
 
 function main(argv: string[]) {
+  // `--version` is checked on the raw, full argument list — before a
+  // command is even picked out of it — so it works ahead of any backlog
+  // resolution a command (including bare `nj`) would otherwise perform
+  // (§ 9 "--version"). It recognises only itself and `--json`; combined
+  // with anything else (another flag, or a bare word that would otherwise
+  // be a command/positional) it is `unknown_field`, not a special case.
+  const pre = parseArgs(argv);
+  output.json = pre.flags.has('json');
+  if (pre.flags.has('version')) {
+    const onlyVersionAndJson = Array.from(pre.flags.keys()).every((k) => k === 'version' || k === 'json');
+    if (onlyVersionAndJson && pre.positional.length === 0) {
+      process.stdout.write(output.json ? JSON.stringify({ version: VERSION }) + '\n' : `nj ${VERSION}\n`);
+      return 0;
+    }
+    fail('unknown_field', `unknown field 'version'.`, '--version takes no other flag and names no command');
+  }
+
   const cmd = argv[0] !== undefined && !argv[0].startsWith('--') ? argv[0] : null;
   const { flags, positional } = parseArgs(cmd === null ? argv : argv.slice(1));
-  output.json = flags.has('json');
 
   if (cmd === 'help' || flags.has('help')) { process.stdout.write(HELP); return 0; }
 

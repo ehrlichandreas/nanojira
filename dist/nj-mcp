@@ -305,12 +305,15 @@ function commandFields(command) {
   return spec(command).fields;
 }
 
+// src/core/version.ts
+var VERSION = "3.4.0";
+
 // src/nj-mcp.ts
 var MODERN_VERSION = "2026-07-28";
 var LEGACY_VERSION = "2025-11-25";
 var META_VERSION_KEY = "io.modelcontextprotocol/protocolVersion";
 var SERVER_NAME = "nj-mcp";
-var SERVER_VERSION = "1.0.0";
+var SERVER_VERSION = VERSION;
 var TOOL_NAMES = [
   "list",
   "show",
@@ -341,8 +344,26 @@ function buildToolList(allowDestructive) {
     inputSchema: inputSchema(toolFields(name, allowDestructive))
   }));
 }
+var KNOWN_STARTUP_FLAGS = ["backlog", "allow-destructive", "version"];
+var KNOWN_STARTUP_HINT = `Known: ${KNOWN_STARTUP_FLAGS.map((f) => "--" + f).join(", ")}`;
+function rejectStartup(message) {
+  process.stderr.write(`nj-mcp: ${message} ${KNOWN_STARTUP_HINT}
+`);
+  process.exit(1);
+}
 function main() {
   const argv = parseArgs(process.argv.slice(2));
+  for (const name of argv.flags.keys()) {
+    if (!KNOWN_STARTUP_FLAGS.includes(name)) rejectStartup(`unknown argument '--${name}'.`);
+  }
+  if (argv.positional.length > 0) rejectStartup(`unknown argument '${argv.positional[0]}'.`);
+  if (argv.flags.has("version")) {
+    const others = Array.from(argv.flags.keys()).filter((k) => k !== "version");
+    if (others.length > 0) rejectStartup(`--version takes no other argument (got '--${others[0]}').`);
+    process.stdout.write(`nj-mcp ${VERSION}
+`);
+    process.exit(0);
+  }
   const allowDestructive = argv.flags.has("allow-destructive");
   let backlog;
   try {

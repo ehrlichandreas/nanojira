@@ -25,6 +25,10 @@ const path = require('path');
 const esbuild = require('esbuild');
 
 const ROOT = path.resolve(__dirname, '..');
+// The one version source (§ 9 "--version", D151): read here, at build
+// time, and handed to esbuild's `define` below so both bundles embed the
+// literal string — neither binary reads package.json at runtime.
+const PKG_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 const TARGETS = [
   { entry: path.join(ROOT, 'src', 'nj.ts'), out: path.join(ROOT, 'dist', 'nj') },
   { entry: path.join(ROOT, 'src', 'nj-mcp.ts'), out: path.join(ROOT, 'dist', 'nj-mcp') },
@@ -69,6 +73,7 @@ for (const { entry, out: OUT } of TARGETS) {
     // output depends only on the sources, never on where `bundle.js` was run.
     absWorkingDir: ROOT,
     metafile: true, // gives the exact set of files actually bundled, for checkStrict
+    define: { __NJ_VERSION__: JSON.stringify(PKG_VERSION) },
   });
   if (result.errors.length) {
     for (const e of result.errors) process.stderr.write(`bundle: ${e.text}\n`);

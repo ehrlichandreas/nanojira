@@ -2005,6 +2005,64 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      conditions. **The released scope (D110, D122) is now complete without
      open items**; publishing (tag/push) is the user's call.
 
+151. **v3.4 released by the user: onboarding** (2026-10-05, "Dann sollten
+     wir die Lücken schließen"; minimum Node version and distribution
+     explicitly out of scope). Three items, small enough to rule directly
+     without a separate proposal:
+     - *`--version`:* `nj --version` and `nj-mcp --version` print
+       `nj <version>` / `nj-mcp <version>` and exit 0. With `--json`, `nj`
+       prints `{"version": "<version>"}`. Neither resolves a backlog or reads
+       any file other than its own, so both work anywhere. `nj version` is
+       not added. There is one version source: a `"version"` field in
+       package.json (set to `3.4.0`), embedded at build time into both
+       bundles. nj-mcp's serverInfo/initialize version uses the same value
+       (today a hard-coded '1.0.0'). `--version` combined with any command
+       or other flag is `unknown_field`/argument error per the existing
+       rules; the Oracle states which.
+     - *Install section* in GUIDE: copy or symlink `dist/nj` and
+       `dist/nj-mcp` into a directory on PATH (they are self-contained);
+       per project `nj init`; per project an nj-mcp entry (link to § 3 "Many
+       projects"). Verify with `nj --version`.
+     - *Agent-instructions template* `docs/AGENT-INSTRUCTIONS.md`: a
+       copy-paste block for a project's AGENTS.md. Always
+       `--json`; read before write; `nj claim` before working,
+       `nj release` or `done` after; never edit backlog files by hand;
+       `nj check` for checkboxes; `nj note --as` to sign; codes are the
+       contract and prose is not. Strictly consistent with the spec.
+     Process: Oracle (spec § 9 `--version` + AC-39, then docs) →
+     Implementer → Verifier → acceptance; replay against c7 must show only
+     the help class (if help mentions `--version`). Backlog: EPIC-010 /
+     TSK-040.
+
+152. **V3.4 verified with one gap (e5758d8): nj-mcp's startup arguments
+     become strict.** `nj --version`, the install section and
+     AGENT-INSTRUCTIONS.md pass (followed literally in a PATH sandbox; every
+     template command runs). The gap: `nj-mcp --version` does not enforce
+     § 9/§ 17's exclusivity (`--version --backlog=x` prints the version),
+     because nj-mcp's startup parser silently ignores anything it does not
+     know, typos included (`--allow-destrutive` would quietly start without
+     the flag). *Ruling:* nj-mcp's startup arguments are validated before
+     any protocol traffic. Known: `--backlog=<path>`, `--allow-destructive`,
+     `--version`. Anything else, or `--version` with any other argument
+     (nj-mcp has no `--json`), is an error: exit 1 and one line on stderr
+     naming the offending argument and the known ones, with nothing on
+     stdout. That matches nj's "a typo must not pass" rule. The Oracle
+     updates § 17 and adds an nj-mcp combination and unknown-flag leg to
+     AC-39; the Implementer applies it; the Verifier checks the delta.
+
+153. **v3.4 accepted: onboarding complete.** `nj --version` /
+     `nj-mcp --version` (single source package.json 3.4.0, embedded at
+     build; nj-mcp serverInfo in both eras), strict nj-mcp startup
+     arguments (D152), the GUIDE install section and
+     docs/AGENT-INSTRUCTIONS.md all pass verification
+     (docs/verification/v3-4-onboarding.md: e5758d8; D152 delta 1f8b16d).
+     The install section was followed literally in a PATH sandbox, and
+     every template command was run. AC-39 59/59, and its new legs
+     discriminate (27 red against the pre-fix build). The replay against
+     c7-baseline differs only in the 6 help calls (the --version line).
+     TSK-040 and EPIC-010 are done; tag `v3.4`. Out of scope by the user's
+     decision: a minimum Node version, and distribution (no remote).
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now
