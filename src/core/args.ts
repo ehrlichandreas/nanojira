@@ -29,7 +29,11 @@ function parseArgs(argv: string[]) {
   return { flags, positional };
 }
 
-function checkFlags(flags: Flags, allowedFields: string[], allowedControls: Set<string>, isWrite: boolean) {
+// Controls every command takes, so no call site can forget one (§ 9).
+const GLOBAL_CONTROLS = ['backlog'];
+
+function checkFlags(flags: Flags, allowedFields: string[], commandControls: Set<string>, isWrite: boolean) {
+  const allowedControls = new Set([...commandControls, ...GLOBAL_CONTROLS]);
   for (const name of flags.keys()) {
     if (allowedControls.has(name)) continue;
     if (allowedFields.includes(name)) continue;

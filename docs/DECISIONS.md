@@ -804,6 +804,239 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     how much output reaches the pipe before the reader closes depends on timing,
     so its calls cannot be byte-recorded. Its verdict still gates.
 
+86. **Specification v3: backlog location and layout become configurable —
+    written down, not implemented.** Requested by the user on 2026-09-24: the
+    backlog path settable by parameter, environment variable or a config file
+    "like .bashrc", a better-structured and configurable folder layout, and
+    defaults for all of it. The user decided in two rounds of questions:
+
+        location   --backlog > NJ_BACKLOG > upward search, where each
+                   directory offers .njrc first, then backlog/ -- a project
+                   file ./.njrc searched upward, not ~/.njrc
+        grouping   configurable: type (default) | hierarchy | flat, plus
+                   configurable folder names
+        status     not as folders: a generated overview file, STATUS.md
+        internals  moved into one hidden folder .nanojira/
+
+    Then: "schreibe einfach alle md files passend runter" — no token budget
+    left for implementation. v3 therefore exists as text only;
+    `dist/nj` still implements v2, and the spec header says so.
+
+    **Decided by the lead, open to the user's veto:**
+
+    - *Nearest wins* in the upward search, `.njrc` before `backlog/` within a
+      directory — the way git finds `.git`; a repository-root `.njrc` never
+      overrides a project's own deeper `backlog/`.
+    - *A chosen source is binding.* A `--backlog`, `NJ_BACKLOG` or `.njrc`
+      that points at nothing is a hard error naming the source, never a fall
+      through — the § 4 rule against silently reading the wrong backlog,
+      applied to the new sources.
+    - *`.njrc` is strict* (unknown key, missing `=`, repeated key → exit 1),
+      for the same reason unknown flags are.
+    - *The frontmatter stays the truth under every grouping;* the location is
+      derived. `nj` has no `--parent`, so under `hierarchy` files move only
+      through `archive`, `doctor --fix` or by hand. Changing the grouping and
+      migrating a v2 backlog are the same operation: `doctor` reports the
+      old places, `doctor --fix` moves.
+    - *Elements are found wherever they lie* (every `*.md` below the backlog
+      except `README.md`, `STATUS.md`, `.nanojira/`). Needed so a layout
+      change never breaks the commands between editing the config and
+      running `--fix`. Consequence, accepted: a stray `*.md` anywhere in the
+      backlog is now read as an element and reported, where v2 read only the
+      type folders.
+    - *`STATUS.md` is committed*, so a forge shows it; it can therefore
+      conflict in merges and go stale in races. Tolerated and surfaced
+      (`backlog:status_stale`, warning), repaired by `doctor --fix`; a failed
+      overview never fails the write. It costs one full scan per write.
+    - *The additive-only rule of § 7 holds:* `type:folder` keeps its exact
+      meaning for group `type`; the other groupings get the new code
+      `layout:misplaced` instead of a renamed one. New failure codes:
+      `invalid_backlog_flag`, `invalid_backlog_njrc`, `invalid_njrc`,
+      `legacy_layout`.
+    - *Legacy backlogs are refused, not read.* Reading both layouts forever
+      would double every path in the code; one `doctor --fix` migrates.
+
+    **Implementation order, each step behind the previous one** — ordered so
+    the corpus replay keeps proving "nothing else changed" as long as
+    possible:
+
+        V3-1  location sources (--backlog, .njrc, binding errors, init)
+              purely additive: replay 0 diffs + new AC-21 suite
+        V3-2  layout block: folder names, groups hierarchy/flat, recursive
+              element scan, layout:misplaced, doctor --fix moves
+              default "type" is v2 behaviour: replay 0 diffs + AC-22 --
+              except calls where the corpus has a *.md outside the type
+              folders; each such diff must be exactly that, and is named
+        V3-3  STATUS.md -- intended behaviour change: AC-23, new golden,
+              re-record under a new c-baseline (DECISIONS 85)
+        V3-4  .nanojira/ + legacy migration -- intended, breaks v2 paths:
+              AC-24; ~20 test files name .nanojira.json or .ids/ and must
+              follow in one test batch; re-record, new c-baseline; our own
+              backlog/ is migrated with the released doctor --fix
+
+    Each step: tests first, written from the spec by someone other than the
+    implementer; author ≠ verifier; the gate of DECISIONS 84 plus perf. The
+    user approves v3 before V3-1 starts.
+
+87. **v3 is released for implementation — by the lead, on the user's
+    mandate, open to the user's veto.** On 2026-09-28 the user handed the
+    project to a team lead with "Verbessere nanojira soweit es geht" and
+    permission to staff the team. DECISIONS 86 requires the user's approval
+    of v3 before V3-1; the lead reads that mandate as the approval and says
+    so here rather than letting it pass silently. The spec text is unchanged
+    by this entry. Roles per 86: an oracle author writes AC-21..24 from the
+    spec only, a separate implementer builds V3-1..4, a third agent verifies
+    each step; author ≠ implementer ≠ verifier.
+
+88. **V3-1 readings of § 4, settled by the lead before the suite and the
+    code meet.** Raised by the implementer on 2026-09-28:
+
+    - *"Holds a backlog" in V3-1 means `.nanojira.json` exists.* v3 says
+      `.nanojira/config.json`, which only arrives with V3-4; until then the
+      v2 file is the marker. A `--backlog`, `NJ_BACKLOG` or `.njrc` target
+      that is not a directory, or a directory without the marker, is
+      `invalid_backlog_{flag,env,njrc}`. `backlog_without_config` stays for a
+      `backlog/` reached by the search (and, from V3-4, a `.nanojira/`
+      without `config.json`). `doctor`, lenient as before, accepts any
+      existing directory from any source.
+    - *All three binding errors use one form*, § 4's
+      `no backlog at <abs> (from <source>)`, and one code each — including
+      `NJ_BACKLOG` naming a non-directory, which v2 reported in its own
+      words. Consistency with the normative table wins over "0 diffs": the
+      replay diffs this causes are intended, and must be exactly those calls.
+      § 9's reserved list no longer names `invalid_backlog_env`, which the
+      table pins — the two contradicted each other.
+    - *The prefix stays the implementation's `Error: `.* § 4's `nj: ` lines
+      are illustrative of the message, not of the prefix.
+    - *Nearest wins strictly:* the nearest `backlog/` ends the search even
+      without a config and yields `backlog_without_config`; v2 skipped it and
+      kept climbing. That is what § 4 says; any replay diff must be exactly
+      a nested config-less `backlog/`.
+    - *`--backlog` is listed in every "Known flags:" line*, because § 9 says it
+      appears in every command's list of known flags; the "Known fields:"
+      line of `set`/`new` lists schema fields only and stays unchanged. The
+      replay diffs are that one class (~13 `unknown_field` calls), named.
+    - *`nj help` gains one `--backlog` line*, from § 9's command list — a
+      fourth named replay diff class (`help`, `help --json`, `--help`).
+
+89. **AC-21 ambiguities 50–53, 55 ruled by the lead** (test/AMBIGUITIES.md):
+
+    - *50* A repeated `.njrc` key reports the line of the repetition.
+    - *51* An empty key (` = x`) is an unknown key.
+    - *52* `init` reads § 4 literally: it consults `--backlog`, `NJ_BACKLOG`
+      and the nearest `.njrc`, and never looks at `backlog/` folders — also
+      not at a nearer one between the working directory and that `.njrc`.
+      "The upward search for an existing `backlog/` is not used by `init`"
+      is the whole rule; bending it for one case would make `init`'s target
+      depend on unrelated folders.
+    - *53* `--backlog=` with an empty value is `missing_value`, like a bare
+      `--backlog`. `NJ_BACKLOG=` (empty) counts as unset — v2 behaviour,
+      kept. `~/` is expanded only inside `.njrc`; `--backlog` and
+      `NJ_BACKLOG` are literal (the shell expands `~` before `nj` sees it).
+    - *55* An existing empty directory is "anything exists": `init` refuses
+      with `exists` — v2 behaviour, kept.
+
+90. **Pre-flight findings ruled by the lead** (docs/verification/v3-preflight.md,
+    Verifier, 2026-09-28):
+
+    - *Gate procedure for a step that adds a suite (B1).* The recorded
+      corpus pins the test digest, and a new suite makes the recording
+      source red, so neither "verify against HEAD test/" nor "re-record
+      against c2" can run. Procedure: in a throwaway worktree at the step's
+      commit, `git checkout <last oracle-frozen tag> -- test/`, replay
+      with `--nj=<step's dist/nj>`; run HEAD's `test/` separately with
+      `run-all.js`. After acceptance the step becomes the next c-baseline
+      and is recorded with the new `test/` under a new `oracle-frozen` tag.
+    - *The harness must gate on verdicts (B2).* `verify` exiting 0 with a red
+      oracle suite, and `scratch/verify.js` always exiting 0, turn the
+      instrument into something that has to be read by hand. Fixed as
+      tooling work, separate from product and suite. `scratch/verify.js`'s
+      pin "NJ_BACKLOG at a config-less dir → backlog_without_config" follows
+      DECISIONS 88: it is `invalid_backlog_env` now, a fifth named change
+      with 0 corpus calls.
+    - *Closed-vocabulary suites (B3)* gain the v3 codes with the V3-4 test
+      batch, or earlier if a step emits them from a path those suites probe.
+    - *`.njrc` lexing and odd files* — pinned in § 4: BOM dropped, CRLF
+      tolerated, split at the first `=`, keys case-sensitive, `#` only as
+      whole-line comment; a `.njrc` that is not a readable regular file is
+      `invalid_njrc` without a line number; a symlinked `.njrc` resolves
+      against the link's directory; `~/.njrc` is an ordinary ancestor.
+    - *`init` → `exists`* added to § 9's table; AC-21's binding-error clause
+      excepts `init`.
+    - *Hierarchy archive dead end.* Archiving a child first creates
+      `archive/EPIC-001/` as an empty ancestor; the epic's own one-rename
+      archive would then hit `exists` forever. Ruled: such an ancestor folder
+      is a merge target, not an occupied path — the subtree's entries move
+      in one `rename` each, the emptied source is removed; only an element
+      file, or a folder holding one, occupies a target. The loss of the
+      single-rename atomicity in this one case is disclosed in § 12
+      (`archive:split` after a crash, reported by `doctor`).
+    - *Perf is not gateable today.* The machine runs on battery in Low Power
+      Mode; even the build DECISIONS 84 measured at 206 ms now takes ~390 ms.
+      Until a quiet run on mains power, the perf gate is an interleaved A/B
+      against the previous accepted `dist/nj`: "no regression". The absolute
+      § 13 numbers are re-measured once, before EPIC-006 closes.
+
+91. **V3-2 pre-flight points B11–B17 ruled by the lead**
+    (docs/verification/v3-preflight.md):
+
+    - *B11 Scan bounds.* The element scan never follows a directory
+      symlink and never descends into a directory whose name starts with
+      `.` (this covers `.nanojira/`, `.git`, `.obsidian`). A symlinked
+      *file* is read like a file. The suffix `.md` is case-sensitive.
+      `node_modules` has no special role.
+    - *B12* The `README.md`/`STATUS.md` exclusions hold at the backlog's top
+      level only; a `README.md` anywhere deeper is an element file and is
+      reported.
+    - *B13* `backlog` is forbidden as a `layout.folders` value
+      (case-insensitively): it would capture discovery from inside the
+      backlog. `invalid_config`.
+    - *B14* "Pairwise distinct" and the "not shaped like an ID" check on
+      folder names compare case-insensitively: APFS and NTFS are
+      case-insensitive by default.
+    - *B15* Under `hierarchy` a task or subtask without `parent` has a
+      computable place — the top of the tree (`<backlog>/TSK-n/TSK-n.md`,
+      `<backlog>/SUB-n.md`) — and is judged like any other element. An
+      element whose place cannot be computed (`parent:dangling`,
+      `parent:cycle`, or an ancestor with either) gets **no** layout code
+      and is never moved; its own error already reports it. So
+      `parent:orphaned` stays a non-blocking warning.
+    - *B16 Archive order under `hierarchy`* is the v2 order: every file's
+      `archived:`/`updated` is written in place first (guarded, as today),
+      then the move — one `rename`, or the merge `rename`s of DECISIONS 90.
+      `NJ_FAULT=before-rename` fires before the first `rename`. A crash in
+      between leaves exactly the state a v2 crash leaves; no new code.
+    - *B17* The typed deriver chain and the `FixCtx` step chain grow with
+      V3-2; the four D84 counter-probes are re-run after it and must still
+      be compile errors.
+
+92. **V3-2 questions Q1–Q4 of the implementer, ruled by the lead:**
+
+    - *Q1* `init` keeps writing the v2 `.nanojira.json` byte-identical in
+      V3-2; the full `layout` block is written from V3-4, when the config
+      moves. A config without `layout` is the defaults (§ 5).
+      `layout.statusFile` is validated from V3-2, effective from V3-3.
+    - *Q2 Renaming the archive folder.* Archived-ness stays location-based
+      (§ 4). `archived:` in the frontmatter decides only the **target** of a
+      move, never by itself that a file is misplaced: a file that is
+      already misplaced (e.g. below the old archive folder after a rename)
+      and carries `archived:` belongs below the archive folder, and
+      `--fix` moves it there; without `archived:` it belongs to its active
+      place. A file lying at a valid active place with a hand-written
+      `archived:` gets no finding — v2 behaviour. So `doctor --fix` never
+      un-archives an element and never archives one.
+    - *Q3* As DECISIONS 91 B11/B12.
+    - *Q4 Archive precondition under `hierarchy`.* An epic or task moves as
+      its folder, a subtask as its file. The element must lie in its own
+      folder with its whole subtree inside it and no foreign element file in
+      it; otherwise `archive` refuses, moves nothing, and points at
+      `nj doctor --fix`: new code `refused:misplaced` (additive, § 9). The
+      merge rule of DECISIONS 90 applies to the target.
+    - *Minor, accepted as proposed:* an unresolvable chain gets no layout
+      code (as 91 B15); `type:folder` for an undeterminable type stays in
+      every group; `--fix` step 3 removes emptied hierarchy folders (names of
+      ID shape only) with `rmdir`, never recursively.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

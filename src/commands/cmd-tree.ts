@@ -12,7 +12,7 @@ import { fail, out, problemSuffix } from '../core/output.ts';
 
 function cmdTree(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'all', 'id']), false);
-  const ctx = context();
+  const ctx = context(flags);
   const all = flags.has('all');
   const scope = ctx.elements.filter((e: Element) => all || !e.archived);
   const id = flagString(flags, 'id');

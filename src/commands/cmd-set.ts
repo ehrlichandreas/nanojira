@@ -22,7 +22,7 @@ function cmdSet(flags: Flags) {
   const json = flags.has('json');
   const force = flags.has('force');
   const allowOpen = flags.has('allow-open-children');
-  const ctx = context();
+  const ctx = context(flags);
   const el = resolveTarget(ctx, flags, true);
   requireWritable(el);
   requireActive(el, 'set');

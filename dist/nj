@@ -522,7 +522,9 @@ function parseArgs(argv) {
   }
   return { flags, positional };
 }
-function checkFlags(flags, allowedFields, allowedControls, isWrite) {
+var GLOBAL_CONTROLS = ["backlog"];
+function checkFlags(flags, allowedFields, commandControls, isWrite) {
+  const allowedControls = /* @__PURE__ */ new Set([...commandControls, ...GLOBAL_CONTROLS]);
   for (const name of flags.keys()) {
     if (allowedControls.has(name)) continue;
     if (allowedFields.includes(name)) continue;
@@ -614,6 +616,7 @@ var path4 = __toESM(require("path"), 1);
 
 // src/core/config.ts
 var fs2 = __toESM(require("fs"), 1);
+var os = __toESM(require("os"), 1);
 var path = __toESM(require("path"), 1);
 function validateConfig(obj) {
   const errs = [];
@@ -662,33 +665,110 @@ function loadConfig(backlog) {
     errors: []
   };
 }
-function findBacklog(lenient) {
-  const env = process.env.NJ_BACKLOG;
-  if (env !== void 0 && env !== "") {
-    const dir2 = path.resolve(env);
-    if (!isDir(dir2)) fail("invalid_backlog_env", `NJ_BACKLOG points at '${dir2}', which is not a directory`);
-    if (!lenient && !fs2.existsSync(path.join(dir2, ".nanojira.json"))) {
-      fail("backlog_without_config", `no .nanojira.json in NJ_BACKLOG '${dir2}'`, "run `nj doctor` for details, or `nj init` to create a backlog");
-    }
-    return dir2;
-  }
-  let dir = process.cwd();
-  let headless = null;
-  for (; ; ) {
-    const candidate = path.join(dir, "backlog");
-    if (fs2.existsSync(path.join(candidate, ".nanojira.json"))) return candidate;
-    if (lenient && isDir(candidate)) return candidate;
-    if (headless === null && isDir(candidate)) headless = candidate;
-    const up = path.dirname(dir);
-    if (up === dir) break;
-    dir = up;
-  }
-  if (headless !== null) {
+var SOURCE_CODE = { flag: "invalid_backlog_flag", env: "invalid_backlog_env", njrc: "invalid_backlog_njrc" };
+function sourceName(src) {
+  return src.kind === "flag" ? "--backlog" : src.kind === "env" ? "NJ_BACKLOG" : src.file;
+}
+function claim(dir, src, lenient) {
+  if (!isDir(dir)) fail(SOURCE_CODE[src.kind], `no backlog at ${dir} (from ${sourceName(src)})`);
+  if (!lenient && !fs2.existsSync(path.join(dir, ".nanojira.json"))) {
     fail(
-      "backlog_without_config",
-      `${headless} exists but has no .nanojira.json`,
-      "run `nj doctor` \u2014 it tolerates the missing file and reports config:invalid"
+      SOURCE_CODE[src.kind],
+      `no backlog at ${dir} (from ${sourceName(src)})`,
+      "the directory has no .nanojira.json \u2014 check the path, or run `nj init` with the same source to create a backlog there"
     );
+  }
+  return dir;
+}
+function explicitLocation(flags) {
+  const flag = flagString(flags, "backlog");
+  if (flag !== void 0) {
+    if (flag === "") fail("missing_value", "--backlog needs a value (use --backlog=\u2026)");
+    return { dir: path.resolve(flag), src: { kind: "flag" } };
+  }
+  const env = process.env.NJ_BACKLOG;
+  if (env !== void 0 && env !== "") return { dir: path.resolve(env), src: { kind: "env" } };
+  return null;
+}
+function njrcLocation(dir) {
+  const file = path.join(dir, ".njrc");
+  const raw = readNjrc(file);
+  if (raw === null) return null;
+  const value = parseNjrc(file, raw).get("backlog");
+  if (value === void 0) return null;
+  const expanded = value.startsWith("~/") ? path.join(os.homedir(), value.slice(2)) : value;
+  return { dir: path.resolve(dir, expanded), src: { kind: "njrc", file } };
+}
+function readNjrc(file) {
+  try {
+    fs2.lstatSync(file);
+  } catch {
+    return null;
+  }
+  const bad = (reason) => fail("invalid_njrc", `invalid .njrc at ${file}: ${reason}`);
+  let st;
+  try {
+    st = fs2.statSync(file);
+  } catch {
+    return bad("it is a dangling symlink");
+  }
+  if (!st.isFile()) return bad(st.isDirectory() ? "it is a directory, not a file" : "it is not a regular file");
+  let raw;
+  try {
+    raw = fs2.readFileSync(file, "utf8");
+  } catch (e) {
+    return bad(`cannot read it \u2014 ${e.code || e.message}`);
+  }
+  return raw.startsWith("\uFEFF") ? raw.slice(1) : raw;
+}
+var NJRC_KEYS = ["backlog"];
+function parseNjrc(file, raw) {
+  const values = /* @__PURE__ */ new Map();
+  const bad = (n, reason) => fail(
+    "invalid_njrc",
+    `invalid .njrc at ${file}: line ${n}: ${reason}`,
+    `one \`key = value\` per line, a line starting with \`#\` is a comment; known keys: ${NJRC_KEYS.join(", ")}`
+  );
+  raw.split("\n").forEach((line, i) => {
+    const t = line.trim();
+    if (t === "" || t.startsWith("#")) return;
+    const eq = t.indexOf("=");
+    if (eq === -1) bad(i + 1, `no '=' in '${t}'`);
+    const key = t.slice(0, eq).trim();
+    const value = t.slice(eq + 1).trim();
+    if (!NJRC_KEYS.includes(key)) bad(i + 1, `unknown key '${key}'`);
+    if (value === "") bad(i + 1, `empty value for '${key}'`);
+    if (values.has(key)) bad(i + 1, `repeated key '${key}'`);
+    values.set(key, value);
+  });
+  return values;
+}
+function initLocation(flags) {
+  const explicit = explicitLocation(flags);
+  if (explicit !== null) return explicit.dir;
+  for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+    const rc = njrcLocation(dir);
+    if (rc !== null) return rc.dir;
+    if (path.dirname(dir) === dir) break;
+  }
+  return path.resolve(process.cwd(), "backlog");
+}
+function findBacklog(flags, lenient) {
+  const explicit = explicitLocation(flags);
+  if (explicit !== null) return claim(explicit.dir, explicit.src, lenient);
+  for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+    const rc = njrcLocation(dir);
+    if (rc !== null) return claim(rc.dir, rc.src, lenient);
+    const candidate = path.join(dir, "backlog");
+    if (isDir(candidate)) {
+      if (lenient || fs2.existsSync(path.join(candidate, ".nanojira.json"))) return candidate;
+      fail(
+        "backlog_without_config",
+        `${candidate} exists but has no .nanojira.json`,
+        "run `nj doctor` \u2014 it tolerates the missing file and reports config:invalid"
+      );
+    }
+    if (path.dirname(dir) === dir) break;
   }
   return fail(
     "no_backlog",
@@ -1169,8 +1249,8 @@ function deriveGraph(elements, backlog) {
 }
 
 // src/core/context.ts
-function context(opts) {
-  const backlog = findBacklog(Boolean(opts && opts.lenient));
+function context(flags, opts) {
+  const backlog = findBacklog(flags, Boolean(opts && opts.lenient));
   const { config, errors } = loadConfig(backlog);
   if (errors.length > 0 && !(opts && opts.tolerateConfig)) {
     fail("invalid_config", `invalid configuration in ${path4.join(backlog, ".nanojira.json")}: ${errors[0]}`, "run `nj doctor` for the full report");
@@ -1261,7 +1341,7 @@ function requireActive(el, verb) {
 function cmdArchive(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "id", "file"]), true);
   const json = flags.has("json");
-  const ctx = context();
+  const ctx = context(flags);
   requireNoStubs(ctx, "archive");
   const el = resolveTarget(ctx, flags, true);
   requireActive(el, "archive");
@@ -1421,8 +1501,8 @@ function describeFinding(code, el, dupGroups) {
 function cmdDoctor(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "fix"]), false);
   const json = flags.has("json");
-  if (flags.has("fix")) return doctorFix(json);
-  const ctx = context({ lenient: true, tolerateConfig: true });
+  if (flags.has("fix")) return doctorFix(flags, json);
+  const ctx = context(flags, { lenient: true, tolerateConfig: true });
   const findings = collectFindings(ctx);
   const errors = findings.filter((f) => f.severity === "error");
   const warnings = findings.filter((f) => f.severity === "warning");
@@ -1450,10 +1530,10 @@ function fixSkip(el, notes) {
   }
   return false;
 }
-function makeFixCtx() {
+function makeFixCtx(flags) {
   const actions = [];
   const notes = [];
-  const reload = () => context({ lenient: true, tolerateConfig: true });
+  const reload = () => context(flags, { lenient: true, tolerateConfig: true });
   const skipped = /* @__PURE__ */ new Set();
   const guard = (el) => {
     if (!el.problems.has("file:unreadable") && !el.problems.has("frontmatter:unreadable")) return false;
@@ -1602,8 +1682,8 @@ function fixStep8(fc) {
   const findings = collectFindings(ctx);
   return { ...fc, stage: 9, ctx, findings };
 }
-function doctorFix(json) {
-  const fc0 = makeFixCtx();
+function doctorFix(flags, json) {
+  const fc0 = makeFixCtx(flags);
   const fc1 = fixSnapshotMtimes(fc0);
   const fc2 = fixStep1(fc1);
   const fc3 = fixStep2(fc2);
@@ -1637,7 +1717,7 @@ var path7 = __toESM(require("path"), 1);
 function cmdInit(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json"]), false);
   const json = flags.has("json");
-  const backlog = path7.resolve(process.cwd(), "backlog");
+  const backlog = initLocation(flags);
   if (fs8.existsSync(backlog)) fail("exists", `${backlog} already exists`);
   fs8.mkdirSync(backlog, { recursive: true });
   for (const d of ["epics", "tasks", "subtasks", "archive", ".ids"]) {
@@ -1711,7 +1791,7 @@ function applyFilters(elements, flags, cfg) {
 }
 function cmdList(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "ready", "all", "status", "type", "tag", "parent", "assignee"]), false);
-  const ctx = context();
+  const ctx = context(flags);
   const scope = ctx.elements.filter((e) => flags.has("all") || !e.archived);
   const filtered = applyFilters(ctx.elements, flags, ctx.cfg);
   if (flags.has("ready")) {
@@ -1800,7 +1880,7 @@ function validateNewFlags(ctx, flags) {
 function cmdNew(flags) {
   checkFlags(flags, NEW_FIELDS, /* @__PURE__ */ new Set(["json"]), true);
   const json = flags.has("json");
-  const ctx = context();
+  const ctx = context(flags);
   const { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections } = validateNewFlags(ctx, flags);
   const id = allocateId(ctx.backlog, type, ctx.elements);
   const ts = nowIso();
@@ -1841,7 +1921,7 @@ function cmdNew(flags) {
 function cmdNote(flags, positional) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "force", "id", "file"]), true);
   const json = flags.has("json");
-  const ctx = context();
+  const ctx = context(flags);
   const el = resolveTarget(ctx, flags, true);
   requireWritable(el);
   requireActive(el, "note");
@@ -1891,7 +1971,7 @@ var fs10 = __toESM(require("fs"), 1);
 function cmdRm(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "cascade", "id", "file"]), true);
   const json = flags.has("json");
-  const ctx = context();
+  const ctx = context(flags);
   requireNoStubs(ctx, "rm");
   const el = resolveTarget(ctx, flags, true);
   requireActive(el, "rm");
@@ -1941,7 +2021,7 @@ function cmdSet(flags) {
   const json = flags.has("json");
   const force = flags.has("force");
   const allowOpen = flags.has("allow-open-children");
-  const ctx = context();
+  const ctx = context(flags);
   const el = resolveTarget(ctx, flags, true);
   requireWritable(el);
   requireActive(el, "set");
@@ -2043,7 +2123,7 @@ function describeField(el, field) {
 // src/commands/cmd-show.ts
 function cmdShow(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "id", "file"]), false);
-  const ctx = context();
+  const ctx = context(flags);
   const el = resolveTarget(ctx, flags, false);
   const scope = ctx.elements;
   const shown = flags.has("file") ? [el] : ctx.elements.filter((e) => e.id === el.id).sort(compareElements);
@@ -2085,7 +2165,7 @@ function showOne(el) {
 // src/commands/cmd-status.ts
 function cmdStatus(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json"]), false);
-  const ctx = context();
+  const ctx = context(flags);
   const scope = ctx.elements.filter((e) => !e.archived);
   const counts = countsOf(scope);
   const ready = scope.filter((e) => isReady(e, ctx.cfg)).sort(compareElements).slice(0, 5);
@@ -2122,7 +2202,7 @@ function cmdStatus(flags) {
 // src/commands/cmd-tree.ts
 function cmdTree(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "all", "id"]), false);
-  const ctx = context();
+  const ctx = context(flags);
   const all = flags.has("all");
   const scope = ctx.elements.filter((e) => all || !e.archived);
   const id = flagString(flags, "id");
@@ -2169,6 +2249,7 @@ var HELP = `nj \u2014 NanoJira, a local file-based task tool for agents
 
   nj                                     short status: counts, top ready, problems
   nj init                                create the backlog layout
+  nj <any command> --backlog=<path>      use this backlog (else NJ_BACKLOG, else .njrc/backlog/ upward)
   nj new   --type=task --parent=EPIC-001 --title="\u2026"
            [--status=\u2026] [--priority=\u2026] [--tags=a,b] [--assignee=\u2026] [--depends-on=\u2026]
            [--description=\u2026 | --description-file=\u2026] [--acceptance=\u2026 | --acceptance-file=\u2026]

@@ -1011,8 +1011,83 @@ by not reading the rest of the output.
 `edge/stdout-epipe.js`.
 
 
+## 49–55. Spec v3 § 4, backlog location (AC-21)
+
+Raised while writing `ac/ac-21-backlog-location.js` from spec v3 alone, before
+V3-1 is committed. **All seven are ruled:** 49 and 54 by DECISIONS 88, 50–53
+and 55 by DECISIONS 89. 50–51 confirmed the readings the suite already
+asserted; 52, 53 and 55 were untested until the ruling and are now asserted
+in `ac/ac-21-backlog-location.js`.
+
+**49. What "holds a backlog" means before V3-4. — RULED (DECISIONS 88):**
+until V3-4 the v2 marker `.nanojira.json` decides; a source's target that is
+not a directory, or lacks the marker, is `invalid_backlog_{flag,env,njrc}`.
+The suite's reading below already matched; the non-directory cases were added.
+*Was unpinned:* § 4 defines it as
+`.nanojira/config.json` existing, but DECISIONS 86 makes V3-1 purely additive
+over the v2 layout (`.nanojira.json`, `.ids/`) and moves the files only in
+V3-4. *Reading used:* the suite never builds a layout itself — every backlog
+is made by `H.mkBacklog()` and renamed into place — so "a backlog" is whatever
+the harness builds, and the V3-4 test batch that moves the harness moves AC-21
+with it. The "points at nothing" cases use a missing path, an empty directory
+and a project directory that merely contains `backlog/`, all three of which
+hold no backlog under either layout.
+
+**50. The line number of a repeated key. — RULED (DECISIONS 89):** the line of
+the repetition, as read below. *Was unpinned:* § 4: "a repeated key: exit 1 with
+`invalid_njrc` and … `line <n>`" — which line, the first occurrence or the
+repetition? *Reading used:* the repetition, the first line that makes the file
+invalid (consistent with a line-by-line parser reporting where it stopped).
+
+**51. An empty key (` = value`). — RULED (DECISIONS 89):** an unknown key, as
+read below. *Was unpinned:* § 4 lists unknown key, missing `=`, empty
+value and repeated key; a line with `=` but nothing before it is none of them
+by name. *Reading used:* an empty key is an unknown key (it is not `backlog`),
+so `invalid_njrc` with that line's number.
+
+**52. `init` and a `.njrc` beyond a nearer `backlog/`. — RULED (DECISIONS 89):**
+`init` reads § 4 literally — `--backlog`, `NJ_BACKLOG`, the nearest `.njrc`,
+never a `backlog/` folder, not even a nearer one. Now asserted. *Was:* § 4 `nj init` uses
+"the nearest `.njrc`" and says the upward search for an existing `backlog/` is
+not used by `init`. Read literally, from `repo/proj/src` with `repo/proj/backlog/`
+and `repo/.njrc`, `init` targets the `.njrc`'s location, while every other
+command from the same directory uses `repo/proj/backlog/` (nearest wins). Does
+`init`'s walk stop at a directory holding `backlog/`?
+
+**53. Empty values: `--backlog=`, `NJ_BACKLOG=`. — RULED (DECISIONS 89):**
+`--backlog=` is `missing_value`; an empty `NJ_BACKLOG` counts as unset (v2
+behaviour); `~/` is expanded only inside `.njrc`, `--backlog` and `NJ_BACKLOG`
+are literal. All three now asserted. *Was:* § 9 pins only "`--backlog`
+without a value is `missing_value`". Whether `--backlog=` is also "without a
+value", and whether an empty `NJ_BACKLOG` counts as set (then
+`invalid_backlog_env`?) or unset (search continues), is open. Likewise whether
+`nj` itself expands `~/` in `--backlog`/`NJ_BACKLOG` — § 4 grants the
+expansion only to `.njrc` values.
+
+**54. `invalid_backlog_env` is both spec-named and "reserved". — RULED
+(DECISIONS 88, `c473e75`):** § 9's reserved list no longer names it.
+*Was:* § 9's
+spec-named table maps "`NJ_BACKLOG` names a place without a backlog" to
+`invalid_backlog_env`, but the paragraph below the table still lists
+`invalid_backlog_env` among the codes "that no passage above names" and calls
+it reserved. *Reading used:* the table is normative and later-written; the
+suite asserts `invalid_backlog_env`. The reserved-list sentence should drop it.
+
+**55. `init` at an existing empty directory. — RULED (DECISIONS 89):** an
+empty directory is "anything exists" — `exists` (v2 behaviour). Now asserted,
+through `--backlog` and as an empty `./backlog`. *Was:* § 4: `init` "refuses with
+`exists` if anything already exists at the target". Is an empty directory
+"anything"?
+
 ## Not an ambiguity, recorded because it looks like one
 
+- **The prefix of the § 4 location errors.** § 4 spells the messages as
+  `nj: no backlog at /abs/path (from <source>)` and `nj: invalid .njrc at <abs
+  path>: line <n>: <reason>`; the implementation's other hard errors print
+  `Error: …`. DECISIONS 88 rules the `nj: ` lines illustrative of the message,
+  not of the prefix: AC-21 asserts `Error: ` followed by § 4's message. (§ 8's
+  `nj: id allocation failed …`, pinned with its prefix by
+  `stress/concurrency.js`, is not affected by that ruling.)
 - **`archive:not_done` severity.** § 11's prose used to say "warning" while the
   table said the code blocks `--ready`. v2 resolved this: the code is `error`
   because the invariant "archived ⇒ done" carries `depends_on` satisfaction into

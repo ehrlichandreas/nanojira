@@ -11,7 +11,7 @@ import { out } from '../core/output.ts';
 
 function cmdStatus(flags: Flags) {
   checkFlags(flags, [], new Set(['json']), false);
-  const ctx = context();
+  const ctx = context(flags);
   const scope = ctx.elements.filter((e) => !e.archived);
   const counts = countsOf(scope);
   const ready = scope.filter((e) => isReady(e, ctx.cfg)).sort(compareElements).slice(0, 5);

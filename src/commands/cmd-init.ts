@@ -7,13 +7,14 @@ import type { Flags } from '../core/types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { checkFlags } from '../core/args.ts';
+import { initLocation } from '../core/config.ts';
 import { DEFAULT_CONFIG } from '../core/constants.ts';
 import { fail, out } from '../core/output.ts';
 
 function cmdInit(flags: Flags) {
   checkFlags(flags, [], new Set(['json']), false);
   const json = flags.has('json');
-  const backlog = path.resolve(process.cwd(), 'backlog');
+  const backlog = initLocation(flags);
   if (fs.existsSync(backlog)) fail('exists', `${backlog} already exists`);
 
   fs.mkdirSync(backlog, { recursive: true });

@@ -14,8 +14,8 @@ import { fail } from './output.ts';
 
 // ------------------------------------------------------------------ context
 
-function context(opts?: { lenient?: boolean; tolerateConfig?: boolean }): Context {
-  const backlog = findBacklog(Boolean(opts && opts.lenient));
+function context(flags: Flags, opts?: { lenient?: boolean; tolerateConfig?: boolean }): Context {
+  const backlog = findBacklog(flags, Boolean(opts && opts.lenient));
   const { config, errors } = loadConfig(backlog);
   if (errors.length > 0 && !(opts && opts.tolerateConfig)) {
     fail('invalid_config', `invalid configuration in ${path.join(backlog, '.nanojira.json')}: ${errors[0]}`, 'run `nj doctor` for the full report');

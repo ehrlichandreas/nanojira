@@ -96,7 +96,7 @@ function validateNewFlags(ctx: Context, flags: Flags): NewFlags {
 function cmdNew(flags: Flags) {
   checkFlags(flags, NEW_FIELDS, new Set(['json']), true);
   const json = flags.has('json');
-  const ctx = context();
+  const ctx = context(flags);
 
   const { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections } =
     validateNewFlags(ctx, flags);

@@ -4,6 +4,13 @@ For someone opening this repository for the first time. Every claim below was
 measured against the code on 2026-09-23 (exports, import edges, commands) —
 not recalled from memory or from the task history that produced this code.
 
+It describes the code as built, which implements spec **v2** plus the first
+v3 step, V3-1 (backlog location: `--backlog`, `NJ_BACKLOG`, `.njrc`, in
+`core/config.ts`; DECISIONS 86, 88). The remaining v3 steps change
+`core/config.ts` (`layout`), `core/load.ts` (element scan wherever files lie),
+the writers (`STATUS.md`) and `cmd-doctor.ts` (`--fix` steps 0, 3 and 9), and
+this document follows.
+
 ## 1. Build
 
 ```
@@ -70,8 +77,8 @@ would actually reach for, not every name; "imported by" is exact.
 | `core/derive.ts` | Read-only views over a loaded `Element`: sort order, readiness, JSON entry shape | `elementProblems`, `isReady`, `compareElements`, `entryJson`, `countsOf` | `context`, `output`, 7×`cmd-*` |
 | `core/parse.ts` | Frontmatter grammar and body-section editing, no `Element` knowledge | `parseFile`, `serialize`, `syncH1`, `applySections` | `args`, `load`, `store`, 3×`cmd-*` |
 | `core/output.ts` | The `Fail` error type, `--json` state, all printing — and the one module with a real load-time side effect (below) | `fail`, `hardExit`, `out`, `writeFeedback`, `emitWriteResult`, `emitFailure` | 16 modules: `args`, `config`, `context`, `nj`, `store`, every `cmd-*` |
-| `core/args.ts` | CLI flag parsing and validation, no filesystem access | `parseArgs`, `checkFlags`, `flagString`, `readSectionFlags` | `context`, `nj`, every `cmd-*` |
-| `core/config.ts` | `.nanojira.json` load/validate, backlog discovery | `loadConfig`, `findBacklog`, `listMd` | `context`, `load` |
+| `core/args.ts` | CLI flag parsing and validation, no filesystem access; `--backlog` is accepted by every command here, in `checkFlags` | `parseArgs`, `checkFlags`, `flagString`, `readSectionFlags` | `config`, `context`, `nj`, every `cmd-*` |
+| `core/config.ts` | `.nanojira.json` load/validate, backlog location (`--backlog` > `NJ_BACKLOG` > upward search, `.njrc` before `backlog/` per directory), the strict `.njrc` parser | `loadConfig`, `findBacklog`, `initLocation`, `listMd` | `context`, `load`, `cmd-init` |
 | `core/store.ts` | Clock, tombstones, atomic file writes, the write-time compare guard | `nowIso`, `atomicWrite`, `compareGuard`, `guardedWrite`, `renderElement` | `load`, 5×`cmd-*` |
 | `core/load.ts` | `loadElement` (nine derivers), `deriveGraph` (ten passes), `loadBacklog` | `loadElement`, `deriveGraph`, `childMap`, `descendants`, `loadBacklog` | `context`, 6×`cmd-*` |
 | `core/context.ts` | Per-command setup: backlog+config+elements, target resolution, the four `require*` guards | `context`, `resolveTarget`, `requireWritable`, `requireNoStubs`, `requireActive` | all 10 `cmd-*` modules |
@@ -88,7 +95,7 @@ every import edge above, not assumed).
 argv
  └─ parseArgs (args.ts)                  → { flags, positional }
      └─ context() (context.ts)
-         ├─ findBacklog + loadConfig (config.ts)
+         ├─ findBacklog(flags) + loadConfig (config.ts)
          └─ loadBacklog (load.ts)
              ├─ loadElement × N          — nine derivers, Skeleton→…→Element
              └─ deriveGraph × 1          — ten passes over the whole set
