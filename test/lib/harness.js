@@ -31,6 +31,16 @@ const NJ = (() => {
 })();
 const NODE = process.env.NJ_NODE || process.execPath;
 
+/* `dist/nj-mcp` (§ 17 "MCP Interface"), resolved the same way NJ is:
+ * NJ_MCP wins if set, otherwise the sibling `nj-mcp` next to whatever NJ
+ * resolved to (both ship from the same `dist/` directory, § 3). Not
+ * required to exist — tests that need it check with requireNjMcp(). */
+const NJ_MCP = (() => {
+  const given = process.env.NJ_MCP || null;
+  if (given) return path.resolve(given);
+  return NJ ? path.join(path.dirname(NJ), 'nj-mcp') : null;
+})();
+
 /* Fixed clock for every run (§ 12). Timestamps are the only non-deterministic
  * part of a NanoJira file, so pinning the clock is what makes byte-exact
  * golden comparison possible without normalisation. */
@@ -567,6 +577,16 @@ function requireNj() {
   if (!fs.existsSync(NJ)) abortNoImplementation('nj not found at ' + NJ);
 }
 
+/**
+ * Assert that a runnable `nj-mcp` was supplied (§ 17). `nj-mcp` is written
+ * after `nj` itself, so this reports CANNOT RUN — not a failure — until it
+ * exists, the same "the oracle is built first" discipline requireNj() has.
+ */
+function requireNjMcp() {
+  if (!NJ_MCP) abortNoImplementation('no nj-mcp path given (set NJ_MCP, or NJ next to a sibling nj-mcp)');
+  if (!fs.existsSync(NJ_MCP)) abortNoImplementation('nj-mcp not found at ' + NJ_MCP);
+}
+
 function cleanup() {
   if (process.env.NJ_KEEP === '1') return;
   for (const d of _tmpDirs) {
@@ -575,12 +595,12 @@ function cleanup() {
 }
 
 module.exports = {
-  NJ, NODE, FIXED_NOW, LATER_NOW, DEFAULT_CONFIG,
+  NJ, NJ_MCP, NODE, FIXED_NOW, LATER_NOW, DEFAULT_CONFIG,
   CONFIG_REL, IDS_REL, INDEX_REL, GITIGNORE,
   T,
   renderStatus, statusFor, writeStatus, configValidForStatus,
   freshDir, mkBacklog, writeRaw, readInBacklog, existsInBacklog, listFiles, lsOrEmpty, readOrNull,
-  requireNj,
+  requireNj, requireNjMcp,
   element, mkElement, completeBody,
   doctorSet, summaryLine,
   sha256, golden, goldenPath,

@@ -6,6 +6,7 @@ import type { Flags, Element } from '../core/types.ts';
 
 import { resolveActingName } from '../core/actor.ts';
 import { checkFlags } from '../core/args.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireActive } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
@@ -43,7 +44,7 @@ function withNote(el: Element, text: string, signer: string, ts: string): string
 }
 
 function cmdNote(flags: Flags, positional: string[]) {
-  checkFlags(flags, [], new Set(['json', 'force', 'id', 'file', 'as']), true);
+  checkFlags(flags, [], new Set(['json', 'force', ...cliFieldNames('note')]), true);
   const json = flags.has('json');
   const ctx = context(flags);
 

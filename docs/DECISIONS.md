@@ -1912,6 +1912,99 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      The Oracle folds these into the proposal; then the Verifier reviews
      it before promotion (D122).
 
+145. **v3.3 proposal review adopted (13c0a02: needs changes).** *Protocol
+     era:* the Verifier fetched the published MCP spec (revision
+     2026-07-28). Requests now carry their protocol version in per-request
+     `_meta`, `server/discover` is mandatory, and the spec names
+     modern/legacy/dual-era tiers; a modern-only client against a
+     legacy-only server "fails". *Ruling:* `nj-mcp` is a **dual-era**
+     server. It answers `server/discover` and honours the per-request
+     version (modern), and keeps the `initialize` handshake (legacy),
+     each pinned to one named revision. That costs a little more protocol
+     code but does not shut out clients as they move to the modern era.
+     The SDK-client tests exercise both paths. *Also adopted:* (a) the
+     schema generator reads only per-command flags, never the global
+     `--backlog`, and an AC asserts that no tool schema has a backlog
+     field; (b) every spawned child gets `--backlog=<the server's
+     resolved path>` explicitly, so confinement is mechanical; (c) an
+     AC-15-style test runs `dist/nj-mcp` copied alone with no node_modules;
+     (d) the proposal states how argument/schema validation failures are
+     reported (`-32602` vs a tool result with `isError`) and what
+     capabilities the server declares. The Oracle folds these in; the
+     lead checks the diff; then promotion into § 17.
+
+146. **v3.3 proposal final (f7ce0c7); promotion into § 17 starts.** The
+     lead checked the D145 diff: the dual-era server actually implements
+     `server/discover` (a `DiscoverResult` with supportedVersions
+     2026-07-28 and 2025-11-25, capabilities `{tools: {}}`), keeps legacy
+     `initialize` pinned to 2025-11-25, answers an unsupported modern
+     version with `-32022`, uses `-32602` only for schema-shape failures
+     before any child spawns, and makes a CLI rejection a tool result with
+     `isError`. Backlog confinement is explicit, and AC-34/37/38 cover it.
+     One consistency point for the promotion: § B's "zero dependencies,
+     even at build time" must not contradict D144's test-only
+     devDependency on the official SDK **client**; the spec states both
+     precisely. Backlog: EPIC-009 / TSK-039. Order: § 17 + AC-32..38
+     (Oracle) → implementation (Implementer) → verification (Verifier) →
+     acceptance.
+
+147. **§ 17 and AC-32..38 in place (05485ae, b749c6c); the SDK client
+     may be installed as a pinned devDependency.** Per D144, the official
+     `@modelcontextprotocol/sdk` serves only the conformance test
+     (ac-32-mcp-sdk.js). It is installed with an **exact** version (no
+     caret), recorded in package.json and package-lock.json in **its own
+     commit**, with the version and the lockfile integrity named in the
+     commit message. `node_modules` stays ignored. It is never imported by
+     src/ or bundled into dist/nj or dist/nj-mcp; AC-38 (nj-mcp copied
+     alone) and a bundle check prove that. The oracle stays runnable
+     offline: without the package, ac-32-mcp-sdk.js reports CANNOT RUN
+     and is not a failure, like the root gaps. The Oracle installs it;
+     then the Implementer builds `dist/nj-mcp`.
+
+148. **V3.3 accepted: `nj-mcp` ships.** § 17 MCP Interface (AC-32..38)
+     passes independent verification (docs/verification/v3-3-mcp.md,
+     26ab9b0: accept). AC-36 holds: the shared flag table (8995a5d) leaves
+     the CLI byte-identical against c7-baseline, including the "Known
+     fields"/"Known flags" hints. The dual-era protocol, `-32022`, and
+     `-32602` before any spawn were confirmed. stdout stays pure even with
+     a crashing child. Confinement holds against a decoy `NJ_BACKLOG`, a
+     `backlog` argument, argv-shaped values and `--file` into another
+     backlog. Pipelined calls are matched by id; stdin EOF kills in-flight
+     children. `rm` is absent and `doctor` fix is schema-gated by
+     `--allow-destructive`. No `@modelcontextprotocol` code is in either
+     bundle, even with the SDK installed (bundle byte-identical).
+     dist/nj-mcp is 17.5 KB, cold start p50 about 19–21 ms, per-call
+     overhead in single-digit ms (budget 50 ms). The ac-32-mcp-sdk leg is
+     CANNOT RUN inside gate worktrees without network (by design, D147).
+     TSK-039 and EPIC-009 are done. *State of the released scope (D110,
+     D122):* v3.1, v3.2 and v3.3 are complete and verified. *Still open:*
+     TSK-033, the absolute § 13 perf measurement on a quiet machine
+     (blocked by foreign load, another process, which the lead does not
+     stop).
+
+149. **User docs brought to v3.3 and verified.** README, GUIDE and
+     ARCHITECTURE describe v3.1–v3.3 and nj-mcp (ea2c5c8, de65c3f, a4a6c96),
+     including a "Many projects on one machine" section: one install serves
+     every project; each project resolves its own backlog (§ 4); one
+     nj-mcp server per project (§ 17). Every GUIDE example is now pasted
+     from a real run (NJ_NOW pinned). The Verifier found 10 doc-side
+     mismatches and no behavioural defect (0689f98); all 10 are fixed and
+     re-checked byte for byte (7a85a43). Still open: TSK-033 (quiet-machine
+     perf) and, for the user to decide, a release tag or push.
+
+150. **TSK-033 measured: the § 13 comfort bar holds at v3.3.** On a quiet
+     machine (AC power, no Low Power Mode, foreign load below perf.js's
+     bar; load average 1.7), `node tools/perf.js` at 075dbb1 with 10,000
+     elements, 5 runs each, median/max: `list` 185/220 ms, `list --json`
+     186/187, `tree` 189/192, `doctor` 188/191; all within median ≤ 250 /
+     max ≤ 500. Writes (reported, no bar): `new` 230/237, `set --title`
+     221/223, `note` 215/218. These match the pre-v3 figures (about 190 ms),
+     so v3–v3.3 added no measurable read cost, consistent with every
+     per-step `--ab` check. TSK-033 and EPIC-007 are done. The Oracle
+     updates § 13's measured figures to these, naming commit and
+     conditions. **The released scope (D110, D122) is now complete without
+     open items**; publishing (tag/push) is the user's call.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

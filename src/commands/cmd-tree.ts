@@ -5,13 +5,14 @@
 import type { Flags, Element } from '../core/types.ts';
 
 import { checkFlags, flagString } from '../core/args.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import { context } from '../core/context.ts';
 import { compareElements, entryJson, countsOf } from '../core/derive.ts';
 import { childMap } from '../core/load.ts';
 import { fail, out, problemSuffix } from '../core/output.ts';
 
 function cmdTree(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', 'all', 'id']), false);
+  checkFlags(flags, [], new Set(['json', 'all', ...cliFieldNames('tree')]), false);
   const ctx = context(flags);
   const all = flags.has('all');
   const scope = ctx.elements.filter((e: Element) => all || !e.archived);

@@ -5,6 +5,7 @@
 import type { Flags, Element } from '../core/types.ts';
 
 import { checkFlags } from '../core/args.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import { applyFilters } from './cmd-list.ts';
 import { context } from '../core/context.ts';
 import { entryJson, countsOf } from '../core/derive.ts';
@@ -26,7 +27,7 @@ function matchContext(el: Element, needle: string, fold: (s: string) => string):
 }
 
 function cmdFind(flags: Flags, positional: string[]) {
-  checkFlags(flags, [], new Set(['json', 'all', 'status', 'type', 'tag', 'parent', 'assignee', 'case-sensitive']), false);
+  checkFlags(flags, [], new Set(['json', 'all', ...cliFieldNames('find')]), false);
   if (positional.length === 0) fail('missing_argument', 'nj find needs the search text as an argument', 'nj find "<text>"');
   const text = positional.join(' ');
   // The literal empty string is a caller's mistake, not "find nothing" (the

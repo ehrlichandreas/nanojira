@@ -7,7 +7,8 @@ import type { Flags, Context, Element } from '../core/types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { checkFlags, flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
-import { TYPE_FOLDER_ROLE, TYPES, PARENT_TYPE, PRIORITIES, FIELD_ORDER, SECTION_ROLES, NEW_FIELDS } from '../core/constants.ts';
+import { TYPE_FOLDER_ROLE, TYPES, PARENT_TYPE, PRIORITIES, FIELD_ORDER, SECTION_ROLES } from '../core/constants.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import { context } from '../core/context.ts';
 import { folderOf, expectedPlace } from '../core/layout.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
@@ -122,7 +123,7 @@ function newPlace(ctx: Context, type: string, id: string, parent: string | undef
 }
 
 function cmdNew(flags: Flags) {
-  checkFlags(flags, NEW_FIELDS, new Set(['json']), true);
+  checkFlags(flags, cliFieldNames('new'), new Set(['json']), true);
   const json = flags.has('json');
   const ctx = context(flags);
 

@@ -5,12 +5,13 @@
 import type { Flags, Element } from '../core/types.ts';
 
 import { checkFlags } from '../core/args.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import { context, resolveTarget } from '../core/context.ts';
 import { elementProblems, compareElements, entryJson, countsOf } from '../core/derive.ts';
 import { out } from '../core/output.ts';
 
 function cmdShow(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', 'id', 'file']), false);
+  checkFlags(flags, [], new Set(['json', ...cliFieldNames('show')]), false);
   const ctx = context(flags);
   const el = resolveTarget(ctx, flags, false);
   const scope = ctx.elements;

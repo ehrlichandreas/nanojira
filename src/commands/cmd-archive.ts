@@ -7,6 +7,7 @@ import type { Flags, Element, Context } from '../core/types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { checkFlags } from '../core/args.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import { removeClaimDirWholesale } from '../core/claims.ts';
 import { context, resolveTarget, requireWritable, requireNoStubs, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
 import { elementProblems, entryJson } from '../core/derive.ts';
@@ -86,7 +87,7 @@ function archiveHierarchy(ctx: Context, el: Element, subtree: Element[], ts: str
 }
 
 function cmdArchive(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', 'id', 'file']), true);
+  checkFlags(flags, [], new Set(['json', ...cliFieldNames('archive')]), true);
   const json = flags.has('json');
   const ctx = context(flags);
   requireNoStubs(ctx, 'archive');

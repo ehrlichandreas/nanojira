@@ -6,6 +6,7 @@ import type { Flags, Element, Config } from '../core/types.ts';
 
 import { actingNameForRead } from '../core/actor.ts';
 import { checkFlags, flagString } from '../core/args.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import { readClaim } from '../core/claims.ts';
 import { TYPES } from '../core/constants.ts';
 import { context } from '../core/context.ts';
@@ -54,7 +55,7 @@ function applyFilters(elements: Element[], flags: Flags, cfg: Config) {
 }
 
 function cmdList(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', 'ready', 'all', 'status', 'type', 'tag', 'parent', 'assignee']), false);
+  checkFlags(flags, [], new Set(['json', 'ready', 'all', ...cliFieldNames('list')]), false);
   const ctx = context(flags);
   const scope = ctx.elements.filter((e: Element) => flags.has('all') || !e.archived);
   const filtered = applyFilters(ctx.elements, flags, ctx.cfg);
