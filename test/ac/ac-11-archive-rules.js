@@ -210,10 +210,12 @@ function changedFiles(before, after) {
   T.exit('doctor exits 2 while the archive rules are broken', r, 2);
   const problems = (r.json && r.json.problems) || [];
   const found = problems.map(p => p.code + ':' + p.severity);
-  T.check('doctor reports archive:split as an error', found.includes('archive:split:error'),
-    J(found));
-  T.check('doctor reports archive:not_done as an error', found.includes('archive:not_done:error'),
-    J(found));
+  /* Set equality, not containment: § 7 produces exactly two errors for this
+   * fixture — TSK-001 sits outside the archive while its parent EPIC-001 is
+   * inside (`archive:split`), and TSK-002 is archived while `doing`
+   * (`archive:not_done`). Containment could not see a third, wrong finding. */
+  T.sameSet('the findings are exactly the two § 7 archive errors', found,
+    ['archive:not_done:error', 'archive:split:error']);
   T.check('doctor ok is false when an error finding exists', r.json && r.json.ok === false,
     (r.parseError || J(r.json)).slice(0, 300));
 

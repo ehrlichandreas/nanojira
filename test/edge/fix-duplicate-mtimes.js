@@ -46,9 +46,17 @@ fs.utimesSync(p(d, 'tasks/TSK-001.md'), T_A, T_A);
 fs.utimesSync(p(d, 'tasks/TSK-002.md'), T_B, T_B);
 
 const before = H.runJson(['doctor'], { cwd: d });
-T.check('the fixture really holds a duplicate id',
-  ((before.json && before.json.problems) || []).filter(x => x.code === 'duplicate_id').length >= 1,
-  JSON.stringify((before.json && before.json.problems) || []));
+/* The complete § 7 set for this fixture, not just the duplicate: both files
+ * carry `id: TSK-001` (`duplicate_id` ×2), TSK-002.md's name disagrees with
+ * that id (`id:mismatch`), neither declares `type` (`type:derived` ×2) or
+ * `created` (`missing:created` ×2), and EPIC-001 does not exist in this
+ * fixture at all (`parent:dangling` ×2). */
+T.sameSet('the fixture holds exactly § 7\'s set, duplicate id included',
+  H.doctorSet(before) || ['<no problems array>'],
+  ['duplicate_id:error', 'duplicate_id:error', 'id:mismatch:error',
+    'type:derived:warning', 'type:derived:warning',
+    'missing:created:warning', 'missing:created:warning',
+    'parent:dangling:error', 'parent:dangling:error']);
 
 const fix = H.runNj(['doctor', '--fix'], { cwd: d, env: { NJ_NOW: H.LATER_NOW } });
 // § 14: "0 when no error remains, 2 when one does" — and separately, "Never

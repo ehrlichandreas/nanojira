@@ -64,6 +64,9 @@ if (OUT) {
     const ctx = {
       projectRoot: path.resolve(__dirname, '..', '..'),
       home: process.env.HOME || null,
+      // Our own fixture root, so its deliberately named directories keep their
+      // names instead of being mistaken for mkdtemp output.
+      fixtureRoot: process.env.HARNESS_SCRATCH || null,
     };
     const backlog = R.findBacklog(cwd, env);
     const rec = {

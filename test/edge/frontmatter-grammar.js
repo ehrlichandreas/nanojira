@@ -117,6 +117,15 @@ const BASE_BODY = '\n# T\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x
   const doc = H.runJson(['doctor'], { cwd: d });
   const findings = ((doc.json && doc.json.problems) || [])
     .filter(x => x.element === 'TSK-001' || x.file === 'TSK-001.md');
+  /* NOT converted to set equality, deliberately. The code for a bad *line*
+   * inside a parsable block is unpinned (see the note above), and a first
+   * attempt to pin the finding COUNT instead ("one bad line is one defect")
+   * was an over-derivation: § 7 says the line "is reported as a problem",
+   * not that it is the element's only problem — a line that fails to parse
+   * takes its field with it, which can satisfy further § 7 conditions. With
+   * neither the code nor the count derivable, this site stays containment
+   * and stays blind to an extra finding; it is reported as such rather than
+   * closed by guessing. */
   T.check('doctor reports the element as a finding', findings.length >= 1,
     JSON.stringify((doc.json && doc.json.problems) || []));
   T.check('the finding carries a line number',

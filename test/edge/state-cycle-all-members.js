@@ -104,6 +104,11 @@ const MEMBERS = ['TSK-001', 'TSK-002', 'TSK-003'];
    * not break this file — only the per-member claim is asserted. */
   const doc = H.runJson(['doctor'], { cwd: d, timeout: 20000 });
   T.exit('doctor with a 3-cycle', doc, 2);
+  /* CODE-set equality, not element-set: which nodes are flagged is the
+   * (a)/(b) reading this file deliberately leaves open, but nothing outside
+   * `depends_on:cycle` may be reported. */
+  T.sameSet('depends_on:cycle is the only code reported for this fixture',
+    [...new Set(H.doctorSet(doc) || ['<no problems array>'])], ['depends_on:cycle:error']);
   const cycleFindings = ((doc.json && doc.json.problems) || [])
     .filter(p => p.code === 'depends_on:cycle');
   for (const id of MEMBERS) {
@@ -134,6 +139,8 @@ const MEMBERS = ['TSK-001', 'TSK-002', 'TSK-003'];
    * empirically by the dependency-free control in the block above. */
   const doc = H.runJson(['doctor'], { cwd: d, timeout: 20000 });
   T.exit('doctor with a 2-cycle', doc, 2);
+  T.sameSet('depends_on:cycle is the only code reported for the 2-cycle',
+    [...new Set(H.doctorSet(doc) || ['<no problems array>'])], ['depends_on:cycle:error']);
   const elements = ((doc.json && doc.json.problems) || [])
     .filter(p => p.code === 'depends_on:cycle')
     .map(p => p.element).sort();

@@ -156,6 +156,43 @@ function sha256(s) {
   return crypto.createHash('sha256').update(s).digest('hex');
 }
 
+/**
+ * A doctor run's findings as a comparable set: `code:severity` per finding,
+ * the two axes § 7's table defines together. Pass the result of
+ * `runJson(['doctor'], …)`.
+ *
+ * Returns `null` when there is no `problems` array at all — § 9 pins
+ * doctor's shape as `{backlog, ok, problems}`, so a missing array is a
+ * contract breach, and `null` makes `sameSet` report it instead of silently
+ * comparing against an empty set.
+ */
+function doctorSet(result) {
+  const problems = result && result.json && result.json.problems;
+  if (!Array.isArray(problems)) return null;
+  return problems.map(p => String(p && p.code) + ':' + String(p && p.severity));
+}
+
+/**
+ * The § 14 summary line, built from the spec's own example:
+ *
+ *   backlog/: 47 entries, 2 errors, 1 warning
+ *
+ * Two things that example pins and that nothing in the oracle asserted: the
+ * **warning** count exists at all (`ac-16` only checks that the word
+ * "entries" occurs), and the counts are singularised — "2 errors" next to
+ * "1 warning" is what fixes `error`/`warning` as `s`-at-≠1.
+ *
+ * AMBIGUOUS: the singular of "entries" is not shown anywhere in § 14, so a
+ * one-element backlog is not pinned. Callers must avoid N = 1 rather than
+ * guess between "1 entry" and "1 entries"; `entriesWord` exists only to make
+ * that choice explicit at the call site if a ruling ever lands.
+ */
+function summaryLine(label, entries, errors, warnings, entriesWord) {
+  const s = (k, word) => k + ' ' + word + (k === 1 ? '' : 's');
+  return label + ': ' + entries + ' ' + (entriesWord || 'entries') + ', ' +
+    s(errors, 'error') + ', ' + s(warnings, 'warning');
+}
+
 /** Golden file bytes, as frozen in test/golden. */
 function golden(name) {
   return fs.readFileSync(path.join(GOLDEN_DIR, name), 'utf8');
@@ -265,6 +302,40 @@ const T = {
       'expected to contain ' + JSON.stringify(needle) + '\n     in  ' + JSON.stringify(trunc(haystack)));
   },
 
+  /**
+   * Assert that two collections hold EXACTLY the same items — nothing
+   * missing and, crucially, nothing extra.
+   *
+   * WHY THIS EXISTS. The oracle's doctor assertions were written as
+   * containment (`found.includes(code)`, `problems.some(p => …)`), and a
+   * containment check cannot see an *additional* item by construction. A
+   * blindness matrix over one-part mutants of `nj` measured the cost: a
+   * mutant that appends one spurious `title:h1_mismatch` WARNING whenever
+   * real findings already exist left 19 suites green and was caught by none
+   * of them. On *clean* backlogs five suites catch it, via
+   * `problems.length === 0` — but the moment a genuine finding exists, an
+   * extra misclassification became invisible across the whole oracle.
+   *
+   * So the oracle was good at catching what goes MISSING and blind to what
+   * gets ADDED. `sameSet` closes that half: the expected set is derived from
+   * § 7's problem-code table — which condition produces which code at which
+   * severity — and anything beyond it is a failure, not a tolerated extra.
+   *
+   * Order-insensitive on purpose: § 9 pins doctor's problem *shape*, and the
+   * ordering question belongs to `edge/order-doctor-problems-severity.js`.
+   */
+  sameSet(desc, actual, expected) {
+    const a = [...actual].map(String).sort();
+    const e = [...expected].map(String).sort();
+    if (a.length === e.length && a.every((v, i) => v === e[i])) return this.check(desc, true);
+    const missing = e.filter(v => !a.includes(v));
+    const extra = a.filter(v => !e.includes(v));
+    return this.check(desc, false,
+      (missing.length ? 'MISSING    ' + JSON.stringify(missing) + '\n     ' : '') +
+      (extra.length ? 'UNEXPECTED ' + JSON.stringify(extra) + '\n     ' : '') +
+      'expected ' + JSON.stringify(e) + '\n     got      ' + JSON.stringify(a));
+  },
+
   finish() {
     const name = this._name;
     if (this._failures.length === 0) {
@@ -345,6 +416,7 @@ module.exports = {
   freshDir, mkBacklog, writeRaw, readInBacklog, existsInBacklog, listFiles, lsOrEmpty, readOrNull,
   requireNj,
   element, mkElement, completeBody,
+  doctorSet, summaryLine,
   sha256, golden, goldenPath,
   runNj, runJson,
   fetchJson: runJson,

@@ -307,6 +307,246 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     lines; echoing it into a one-line summary would be noise, and the ⚠ completeness
     hints below it already report whether the section now counts as present.
 
+75. **The refactor step order, and why S4 never moves up.** The plan is option B
+    plus S8, reviewed and approved by the verifier, with **no spec change**. The
+    steps are: **S0** baseline harness (precondition — no step runs before it) ·
+    **S1** `deriveGraph` into 8 passes · **S2** `deriveGraph` uses `childMap()`
+    instead of its own children map (`nj:630-635`, a duplicate since round two) ·
+    **S3** `loadElement` into 8 derivers · **S4** `doctorFix` into `fixCtx` plus 8
+    step functions · **S5** extract `cmdNew` validation · **S6** extract `cmdSet`
+    overrides · **S7** `JSON_MODE` into an `output` object · **S8** JSDoc and the
+    header map.
+
+    The order is **S0 → baseline recording → S6, S5 → S1 → S2 → S3 → S4 → S7 → S8**,
+    and it is dependency, not taste. S6 and S5 are small and independent, so they
+    prove the per-step gate cheaply before anything structural moves. **S4 is never
+    pulled forward.** It is the largest hotspot and it met the weakest part of the
+    oracle: seven sites accepted `[0, 2]` instead of § 14 s rule, and three defects
+    landed in exactly those sites across three rounds. Those seven sites have since
+    been pinned to a single § 14-derived value each and `T.exit` now refuses the
+    array form outright — but S4 still runs after S1–S3, because its blast radius is
+    largest and it should meet an oracle that three steps have already exercised.
+
+    Per step, all of these must hold before the next one starts: `node --check`
+    clean · replay against the S0 corpus reports zero diffs · the full oracle green
+    (56 suites, 2239 checks as of `oracle-frozen`) · exit matrix unchanged ·
+    performance within the 10k budget. A red step is **rolled back**, not patched — but
+    **roll back to the last green step, not to the baseline.** The first version of
+    this entry said `git checkout c1-baseline -- nj`; that is right only for the
+    very first step. From S6 onward it would discard every green step already
+    committed. The implementer hit exactly this during S5, where obeying the
+    written rule would have thrown away a finished and verified S6. Take the commit
+    of the last step that passed all five gates. A second limit of the same command:
+    it restores `nj` only, so a step that also touched `tools/` or `test/` needs
+    `git checkout <commit> -- .` instead.
+
+    **Third limit, and it cost a near-miss.** `git checkout <ref> -- <path>` writes
+    the **index** as well as the working tree. The recording procedure fetches the
+    baseline `nj` that way, then restores the working tree from a saved diff — which
+    touches the working tree only. The index is left holding the baseline. The git
+    index is shared across every agent, so the next `git add` by anyone would have
+    carried a `nj` that reverts S1 into a commit about something else. It was caught
+    only because the implementer read `git status` before committing instead of
+    committing blind. To fetch a version into the working tree use
+    `git show <ref>:nj > nj`: same result, no index side effect. Reserve
+    `git checkout <ref> -- <path>` for the rollback itself, where staging the
+    restored file is what you want.
+
+    Recorded here because until now this order lived only in `/tmp` and in a
+    handover message. The one constraint most likely to be lost that way is the one
+    that matters most: **S4 never moves up.**
+
+76. **A change to the measuring device is harmless only once the header and the
+    code agree again.** The refactor harness stores a digest of the oracle tree
+    in its recorded header and recomputes it on every `verify`; a mismatch
+    aborts with code 6 ("stale baseline, not an nj regression").
+
+    That guard is correct, and it is also a trap for whoever edits the harness.
+    Twice within twenty minutes the same mistake was made from both sides — once
+    by the lead, once by the implementer. Both times someone touched something
+    the guard watches and declared in the same breath that it would not matter:
+    "that can be ignored", "makes no foreign run red". Neither had checked what
+    code 6 actually does. It **aborts**. A verifier was mid-way through an hour
+    of mutation probes at the time; every one of those runs would have died for
+    a reason that had nothing to do with `nj`.
+
+    The rule that came out of it, in the implementer's wording: while header and
+    code disagree, the tree is poisoned **for everyone else**, no matter how
+    small the diff looks. Either finish the change and re-record, or park it —
+    but do not leave the two out of step and call it harmless.
+
+    The deeper failure is not the mismatch, it is the reflex of relativising a
+    guard that has just fired. A protection explained away once is no protection
+    the next time, and the next time it may be firing for a real reason. Remove
+    the trigger, do not soften the warning.
+
+    Scope note: the digest deliberately covers what determines test *behaviour*
+    (`ac/ edge/ fault/ stress/ lib/ golden/` plus `run-all.js`, the driver that
+    decides what is collected and how results are classified), not prose. An
+    earlier version spanned all of `test/`, so editing a documentation file
+    raised a false stale-baseline alarm — the same class of harm as a flaky
+    gate. The scope is named in the header so it stays auditable.
+
+77. **The pass order in `deriveGraph` is free — and the condition that makes it
+    free is the thing to write down, not the order.** After S1, `deriveGraph` is
+    a list of ten passes. Three mutants that reorder or duplicate passes
+    (`indexChildren` pulled ahead of the cycle pass, `markDuplicateIds` moved
+    back, `markParentCycles` run twice) pass **both** safety nets: oracle 56/56
+    and replay unchanged.
+
+    That is not a hole. The reordering genuinely changes nothing observable, and
+    the reason is measurable: **every access to `problems` inside the passes is
+    an `.add`, never a read** — ten occurrences, ten writes, zero reads. No pass
+    consumes what another produced. Sets are unordered and `elementProblems` is
+    sorted on output, so the accumulated result cannot depend on the order in
+    which it accumulated.
+
+    **Ruled: do not pin the order.** A corpus pin on an order that demonstrably
+    has no effect would be a pin on a non-property. It would go red at the first
+    legitimate reordering while nothing is broken — the false-alarm failure this
+    project has already paid for twice (the flaky mkdtemp gate, the over-broad
+    test digest). Pin properties, not accidents.
+
+    **Pin the condition instead**, as a constraint on future passes rather than a
+    description of today: *no pass may read another pass's `problems` set.* The
+    day one does, the order becomes load-bearing — and nothing currently in
+    place would notice. That sentence belongs in the comment at `deriveGraph`,
+    where the next person to add a pass will read it.
+
+    The two index builds are a separate case and need no protection: their
+    dependants (`markOpenChildren`, `attachGraph`) read `children`, so moving a
+    build after its reader yields `undefined` and the run **crashes**. The
+    dependency is enforced by failure, not by convention, which is why pulling
+    `indexChildren` forward was harmless.
+
+    If the invariant should later become mechanical rather than conventional —
+    the way `T.exit` now refuses arrays instead of merely discouraging them —
+    the trigger is a first violation, or a pass count beyond what one comment
+    can police. A white-box check that greps for reads would work, but it buys
+    nothing while the count of violations is zero.
+
+78. **"Red means roll back" is only true for exit 1. Every other non-zero code
+    says the measurement did not happen.** Decision 75 fixed the per-step gate
+    and the rule that a red step is rolled back rather than patched. That rule
+    was written when the harness had one failure mode. It now has several, and
+    the difference matters more than the colour:
+
+    | Code | Meaning | What to do |
+    |---|---|---|
+    | 0 | behaviour unchanged | continue |
+    | **1** | **behaviour changed** | **roll back to the last green step** |
+    | 2 | invocation error | fix the call |
+    | 4 | coverage gap — a probe contributed nothing | fix the probe, do not trust the run |
+    | 5 | oracle red while recording | fix the oracle first |
+    | 6 | stale baseline — tree digest ≠ header | re-record or revert the tree edit |
+    | 7 | header and corpus do not belong together | re-record; says nothing about `nj` |
+
+    Only **1** is a statement about the code under test. Codes 4, 6 and 7 are
+    statements about the *instrument*, and rolling back a step because of them
+    would discard good work for a reason that has nothing to do with it. That is
+    not hypothetical: a verifier's control run against **unmodified** `nj` came
+    back red — two runs had collided on a shared scratch path, and the diff was
+    indistinguishable from a real regression. Whoever followed the rule as
+    written would have thrown away a clean step.
+
+    Hence the design principle the implementer applied when closing that hole:
+    **a collision must never carry the form of a finding.** Where exclusion was
+    possible it was taken (scratch root and raw corpus are now per-run unique);
+    where two writers can still meet, the mismatch is *detected* and reported
+    under its own code rather than prevented by a lock. A lock brings stale
+    locks after a crash — the failure shape `nj`'s own § 12 rejects, and the
+    tooling should not adopt what the tool forbids.
+
+    **Granularity limit, measured after this entry was written.** Code 4 fires
+    when a *corpus part* cannot run — a whole probe or suite. A mutation that
+    breaks only some calls within a part still lands in code 1 with content
+    diffs. The separation between "statement about the instrument" and
+    "statement about the code under test" therefore works at part granularity,
+    not per call. Do not read a code 1 as proof that the instrument was healthy
+    for every call it made.
+
+    Second-order note, because it was nearly the cost of the fix: per-run unique
+    roots leave a garbage pile unless each mode removes its scratch at the end.
+    `HARNESS_KEEP=1` preserves it for forensics. A fix that creates a new problem
+    while solving the old one is not finished.
+
+79. **The oracle is good at catching what is missing and blind to what is
+    added — because its assertions test inclusion, not equality.** A systematic
+    audit (20 single-part mutants × every suite, each mutant logging a hit only
+    when it actually changed bytes) turned one earlier finding into a structural
+    one.
+
+    The earlier finding: a mutant that produced an extra, wrong WARNING slipped
+    past `ac-11`, the suite that runs the very call. The audit shows `ac-11` was
+    not special. **A spurious finding next to genuine findings is invisible to
+    all nineteen suites that produce findings — nobody in the oracle covers it.**
+    On a clean backlog five suites catch it, via `problems.length === 0`. The
+    moment one real finding exists, an additional misclassification is invisible
+    to the entire oracle.
+
+    The cause is a shape of assertion, not a missing fixture:
+    `found.includes(code)` asks whether something is present. Such a check
+    cannot, by construction, see something extra. The same shape recurs
+    throughout: `typeof x === 'number'` is true of the wrong number too; "the
+    code is in the vocabulary" is true of the wrong valid code too. The contract
+    suite `ac-13` checks the *form* of the JSON and not its *content*, and is
+    therefore blind to `counts.incomplete`, `counts.errors`, `counts.total` and
+    to an extra-but-valid code in `_problems`.
+
+    Further parts that **no** suite covers: `counts.incomplete` (15 blind), the
+    warning counter and the entry counter in `doctor`'s summary line, and
+    `notes[]` in `doctor --fix --json`. And parts carried by exactly one suite:
+    the write-feedback hint lines of AC-4 rest on `ac-04` alone, with 23 suites
+    blind to them.
+
+    **Remedy, one pattern for most of it:** assert set equality over
+    `code:severity`, derived from § 7's Doctor column and the fixture, instead of
+    membership; pin `doctor`'s summary line as the exact string § 14 prescribes;
+    check `counts` as values rather than types.
+
+    **The general lesson is worth more than the fix.** An assertion that asks
+    "is the expected thing there?" passes a run that also produced something
+    unexpected. For a refactor gate that is the wrong question: the contract is
+    *exactly this and nothing else*. Where the spec fixes a set, assert the set.
+
+80. **A freeze is something you confirm, not something you announce — and then
+    you measure it.** Recording a baseline reads the whole oracle tree. If a file
+    is saved while that read is in flight, the corpus captures a state that never
+    existed as a whole, and the digest in its header describes a tree nobody can
+    reproduce.
+
+    This was learned the expensive way. The lead announced a twenty-minute hold
+    on writes to `test/` and started the recording. Both writers had work already
+    in flight; one read the message only after saving, and said so unprompted.
+    The measurements afterwards:
+
+        recorded digest   c1486f9e
+        tree just after   27c9f9c9
+        +20 s             7625f2ab
+        +20 s             66891340
+
+    The tree moved in bursts during and after the run. The recording was not
+    wrong — 3317 calls, oracle 61/61 — it was merely **early**, and described a
+    moment no one wanted to freeze. It had to be discarded and repeated.
+
+    **The rule that follows has two halves, and the second is the one that was
+    missing.** An announcement is not an agreement: messages cross, and an agent
+    mid-edit has already written by the time it reads. So (a) collect an explicit
+    acknowledgement from every writer that they have stopped, and only then
+    (b) **measure quiescence yourself** — sample the digest twice, separated in
+    time, and require both to match before recording. A confirmation says what
+    an agent believes; the two samples say what the filesystem did.
+
+    The same lead had spent the day insisting that reports be re-measured rather
+    than believed, and then trusted his own announcement without measuring it.
+    Saying a thing is so does not make it so, and that applies to one's own
+    instructions first.
+
+    Practical corollary: while any batch of oracle work is open, do not open a
+    recording window for it piecemeal. **One window per batch, after the batch is
+    closed** — otherwise the window chases a moving target and each attempt costs
+    a full recording.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

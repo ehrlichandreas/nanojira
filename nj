@@ -650,17 +650,55 @@ function loadBacklog(backlog, cfg) {
   return elements;
 }
 
-function deriveGraph(elements, backlog) {
+/**
+ * Index by id. FIRST WINS on duplicates: the parent-type and archive:split
+ * checks below resolve through this map, so which of two same-id files they
+ * see is observable. `counts` is kept separately because the map alone can no
+ * longer tell whether an id appeared twice.
+ */
+function indexById(elements) {
   const byId = new Map();
   const counts = new Map();
   for (const el of elements) {
     counts.set(el.id, (counts.get(el.id) || 0) + 1);
     if (!byId.has(el.id)) byId.set(el.id, el);
   }
+  return { byId, counts };
+}
+
+/**
+ * Parent → children, in scan order. The single implementation; it serves three
+ * DIFFERENT input sets and must keep serving all three:
+ *   - deriveGraph's element array, rebuilt on every one of its five calls
+ *   - cmdTree's `scope`, a FILTERED array (archived hidden without --all)
+ *   - descendants(), over the whole context
+ * None of them may be quietly turned into another. In particular this is not
+ * memoised: four of deriveGraph's five calls happen AFTER a write, on freshly
+ * derived arrays, and handing them a cached index built before the write would
+ * break markOpenChildren and attachGraph on the second graph.
+ *
+ * Depends on the `parent` normalisation in loadElement: empty or whitespace
+ * becomes `null`, never `''`. That is what makes `=== null` here equivalent to
+ * a falsy test — without it the two would part ways on a blank `parent:` line.
+ * Neither side used to say so, which is how an invariant disappears.
+ */
+function childMap(elements) {
+  const m = new Map();
+  for (const e of elements) {
+    if (e.parent === null) continue;
+    const a = m.get(e.parent);
+    if (a) a.push(e); else m.set(e.parent, [e]);
+  }
+  return m;
+}
+
+function markDuplicateIds(elements, counts) {
   for (const el of elements) {
     if (counts.get(el.id) > 1) el.problems.add('duplicate_id');
   }
+}
 
+function markParentEdges(elements, byId) {
   for (const el of elements) {
     if (el.parent === null) continue;
     const p = byId.get(el.parent);
@@ -670,7 +708,10 @@ function deriveGraph(elements, backlog) {
     }
     if (p.archived && !el.archived) el.problems.add('archive:split');
   }
+}
 
+/** Walks upward per element; the seen set is what stops a self-parent (§ 7). */
+function markParentCycles(elements, byId) {
   for (const el of elements) {
     const seen = new Set([el.id]);
     let cur = el;
@@ -683,7 +724,9 @@ function deriveGraph(elements, backlog) {
       cur = next;
     }
   }
+}
 
+function markDependsOnEdges(elements, byId) {
   for (const el of elements) {
     for (const dep of el.depends_on) {
       const t = byId.get(dep);
@@ -691,7 +734,17 @@ function deriveGraph(elements, backlog) {
       if (t.archived) el.problems.add('active_refs_archived');
     }
   }
+}
 
+/**
+ * The memo is cleared PER ELEMENT, and that is semantics, not a missed
+ * optimisation: without the reset only the first member of a cycle reaching
+ * `hasCycle` would be marked, and the rest would be memoised as 'done'. The
+ * reset is what makes every member of a 3-cycle carry `depends_on:cycle`.
+ * Keeping it costs a re-walk per element; removing it would change WHICH
+ * elements carry the code.
+ */
+function markDependsOnCycles(elements, byId) {
   const state = new Map();
   const hasCycle = (id) => {
     const st = state.get(id);
@@ -710,28 +763,63 @@ function deriveGraph(elements, backlog) {
     state.clear();
     if (hasCycle(el.id)) el.problems.add('depends_on:cycle');
   }
+}
 
-  const children = new Map();
-  for (const el of elements) {
-    if (el.parent === null) continue;
-    if (!children.has(el.parent)) children.set(el.parent, []);
-    children.get(el.parent).push(el);
-  }
+/** Archived children count as done — § 11's "archived ⇒ done" (decision 23). */
+function markOpenChildren(elements, children) {
   for (const el of elements) {
     if (el.status !== 'done') continue;
     const kids = children.get(el.id) || [];
     if (kids.some((k) => !k.archived && k.status !== 'done')) el.problems.add('done:open_children');
   }
+}
 
+function markMissingTombstones(elements, backlog) {
   const ids = readTombstones(backlog);
   for (const el of elements) {
     if (!ids.has(el.id)) el.problems.add('id:no_tombstone');
   }
+}
 
+/**
+ * Last, and MUTATING. Two readers, both on the first graph: `el.byId` in
+ * isReady(), `el.children` in the children_open check of `nj set`. Commands
+ * call deriveGraph a second time after writing, on a derived array, and rely
+ * on the marks above landing on the real objects — a pass that computed into
+ * copies would leave the feedback lines and `_problems` empty while every
+ * oracle suite stayed green (pinned in the corpus, scenario
+ * `attach-second-derive`).
+ */
+function attachGraph(elements, byId, children) {
   for (const el of elements) {
     el.byId = byId;
     el.children = children.get(el.id) || [];
   }
+}
+
+/**
+ * Eight passes over the element list. They are listed here in the order they
+ * must run: the index builds sit exactly where they sat before, because the
+ * children index is built after the cycle pass and hoisting it would reorder
+ * execution for no gain.
+ *
+ * RULE FOR WHOEVER ADDS THE NEXT PASS: a pass must not read another pass's
+ * `problems` set. Today none does — every access is an `.add` — and that alone
+ * is why the order of the mark passes is free and reordering them is
+ * unobservable. The first pass that reads what another wrote makes the order
+ * load-bearing, and nothing here would notice the breach.
+ */
+function deriveGraph(elements, backlog) {
+  const { byId, counts } = indexById(elements);
+  markDuplicateIds(elements, counts);
+  markParentEdges(elements, byId);
+  markParentCycles(elements, byId);
+  markDependsOnEdges(elements, byId);
+  markDependsOnCycles(elements, byId);
+  const children = childMap(elements);
+  markOpenChildren(elements, children);
+  markMissingTombstones(elements, backlog);
+  attachGraph(elements, byId, children);
   return byId;
 }
 
@@ -1177,11 +1265,19 @@ Useful commands: \`nj\`, \`nj list --ready\`, \`nj show --id=…\`,
 \`nj new --type=task --parent=EPIC-001 --title="…"\`, \`nj doctor\`.
 `;
 
-function cmdNew(flags) {
-  checkFlags(flags, NEW_FIELDS, new Set(['json']), true);
-  const json = flags.has('json');
-  const ctx = context();
-
+/**
+ * Validate everything `nj new` needs, before anything is created.
+ *
+ * The ORDER of these checks is observable: with several bad flags at once the
+ * first failing check decides the reported code, so type → title → parent
+ * (exists → readable → right type → active) → status → priority → deps →
+ * section sources must stay exactly as it is.
+ *
+ * Nothing in here allocates or writes. That is the point: `nj new` must not
+ * burn a tombstone for a call it is going to refuse (§ 8, decision 31), so the
+ * caller allocates only after this returns.
+ */
+function validateNewFlags(ctx, flags) {
   const type = flagString(flags, 'type');
   if (type === undefined) fail('missing_argument', '--type is required', `Known types: ${TYPES.join(', ')}`);
   if (!TYPES.includes(type)) fail('invalid_value', `unknown type '${type}'`, `Known types: ${TYPES.join(', ')}`);
@@ -1233,6 +1329,17 @@ function cmdNew(flags) {
   // here must not burn a tombstone (§ 8, decision 31).
   const sections = readSectionFlags(flags);
 
+  return { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections };
+}
+
+function cmdNew(flags) {
+  checkFlags(flags, NEW_FIELDS, new Set(['json']), true);
+  const json = flags.has('json');
+  const ctx = context();
+
+  const { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections } =
+    validateNewFlags(ctx, flags);
+
   const id = allocateId(ctx.backlog, type, ctx.elements);
   const ts = nowIso();
 
@@ -1280,6 +1387,42 @@ function cmdSet(flags) {
   requireWritable(el);
   requireActive(el, 'set');
 
+  const { overrides, changed, newBody } = collectSetOverrides(ctx, el, flags, allowOpen);
+
+  if (changed.length === 0) {
+    if (json) emitWriteResult(true, el, []);
+    else writeFeedback(el, ctx.cfg, `${el.id} unchanged`);
+    return 0;
+  }
+
+  overrides.set('updated', nowIso());
+  guardedWrite(el, renderElement(el, overrides, newBody), force, ctx.backlog);
+
+  const fresh = loadElement(el.file, el.folder, ctx.cfg);
+  deriveGraph(ctx.elements.map((e) => (e.file === el.file ? fresh : e)), ctx.backlog);
+  if (json) emitWriteResult(true, fresh, changed);
+  else writeFeedback(fresh, ctx.cfg, `${fresh.id} → ${changed.map((c) => `${c}=${describeField(fresh, c)}`).join(', ')}`);
+  return 0;
+}
+
+/**
+ * Decide what `nj set` would change, without changing anything.
+ *
+ * Three orderings in here are load-bearing and must not be tidied:
+ *  - the section flags are read FIRST, so a rejected value source fails before
+ *    any other validation reports a different code;
+ *  - `changed` follows the flag processing order (title, status, priority,
+ *    assignee, tags, depends_on, then the section roles) — it is observable in
+ *    the JSON result, so the sequence is part of the contract;
+ *  - the children_open check runs BEFORE `status !== el.status`, which is why
+ *    `--status=done` on an already-done parent with open children refuses
+ *    instead of being a no-op. That looks like an oversight and is not.
+ *
+ * Returns the overrides, the ordered `changed` list, and a replacement body —
+ * `newBody` stays undefined unless the title sync or a section write produced
+ * one, because an unchanged body must be written back byte-identical.
+ */
+function collectSetOverrides(ctx, el, flags, allowOpen) {
   const sections = readSectionFlags(flags);
   const overrides = new Map();
   const changed = [];
@@ -1349,20 +1492,7 @@ function cmdSet(flags) {
     changed.push(...applied.changed);
   }
 
-  if (changed.length === 0) {
-    if (json) emitWriteResult(true, el, []);
-    else writeFeedback(el, ctx.cfg, `${el.id} unchanged`);
-    return 0;
-  }
-
-  overrides.set('updated', nowIso());
-  guardedWrite(el, renderElement(el, overrides, newBody), force, ctx.backlog);
-
-  const fresh = loadElement(el.file, el.folder, ctx.cfg);
-  deriveGraph(ctx.elements.map((e) => (e.file === el.file ? fresh : e)), ctx.backlog);
-  if (json) emitWriteResult(true, fresh, changed);
-  else writeFeedback(fresh, ctx.cfg, `${fresh.id} → ${changed.map((c) => `${c}=${describeField(fresh, c)}`).join(', ')}`);
-  return 0;
+  return { overrides, changed, newBody };
 }
 
 function describeField(el, field) {
@@ -1576,20 +1706,6 @@ function cmdTree(flags) {
 
 // A parent cycle (including a self-parent) must not recurse forever (§ 7,
 // `parent:cycle`); the visited set also stops an element being listed twice.
-// Parent → children, built once. Scanning the whole element list per node made
-// `tree`, `rm --cascade` and `archive` O(n²) — 971 ms at 10 000 elements
-// against ~222 ms with the map (§ 13). Insertion order is the scan order, so
-// the unsorted callers keep their previous output byte for byte.
-function childMap(elements) {
-  const m = new Map();
-  for (const e of elements) {
-    if (e.parent === null) continue;
-    const a = m.get(e.parent);
-    if (a) a.push(e); else m.set(e.parent, [e]);
-  }
-  return m;
-}
-
 function descendants(ctx, el) {
   if (!ctx.kids) ctx.kids = childMap(ctx.elements);
   const out = [];

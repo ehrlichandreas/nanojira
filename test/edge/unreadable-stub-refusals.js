@@ -91,6 +91,19 @@ for (const scope of SCOPES) {
   /* Guard against a vacuous fixture: the stub must actually be producing the
    * condition the rule keys on, before the refusal proves anything. */
   const doc = H.runJson(['doctor'], { cwd: d });
+  /* Two findings, both § 7 conditions literally met: the stub cannot be read
+   * (`file:unreadable`, error) and nothing in `.ids/` claims the id its file
+   * name implies (`id:no_tombstone`, warning — the fixture's only tombstone
+   * is STUB-001).
+   *
+   * AMBIGUOUS: § 7 does not say whether an unreadable file is still subject
+   * to the tombstone check, whose id can only come from the file name since
+   * the frontmatter is unreachable. Reading used: both are reported — the
+   * same co-occurrence reading taken for `backlog:ids_missing` +
+   * `id:no_tombstone` in `edge/exit-doctor-fix.js`. */
+  T.sameSet(scope.name + ' — the findings are exactly § 7\'s set for a stub',
+    H.doctorSet(doc) || ['<no problems array>'],
+    ['file:unreadable:error', 'id:no_tombstone:warning']);
   const findings = ((doc.json && doc.json.problems) || []).filter(x => x.code === 'file:unreadable');
   T.check(scope.name + ' — the fixture really produces file:unreadable', findings.length === 1,
     JSON.stringify((doc.json && doc.json.problems) || []));

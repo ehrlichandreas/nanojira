@@ -228,6 +228,28 @@ S('flag-errors', (c) => {
   c.both('list-filter-bad-status', ['list', '--status=nope'], { cwd: d });
   c.both('list-filter-bad-parent', ['list', '--parent=NOPE-1'], { cwd: d });
   c.both('tags-bracket', ['set', '--id=EPIC-001', '--tags=a]b'], { cwd: d });
+
+  // Which check wins when a section SOURCE and another flag are both invalid.
+  // Nothing else in the corpus or the oracle combines the two, so a step that
+  // moved readSectionFlags past the status check would pass every gate while
+  // silently changing which code the caller sees.
+  //
+  // The two verbs are deliberately asymmetric, and that asymmetry is the point:
+  //   set  reads the sections FIRST  -> the section source decides
+  //   new  reads the sections LAST   -> the field validation decides,
+  //                                     because `new` must not allocate an id
+  //                                     for a call it will refuse (§ 8).
+  // It looks like an inconsistency and is not. Anyone "unifying" the two will
+  // break one of the two contracts, so both legs are pinned here.
+  c.both('prec-set-missing-file', ['set', '--id=EPIC-001', '--status=nope', '--description-file=/nope/missing.txt'], { cwd: d });
+  c.both('prec-new-missing-file', ['new', '--type=task', '--parent=EPIC-001', '--title=x', '--status=nope', '--description-file=/nope/missing.txt'], { cwd: d });
+  // Both legs answer invalid_value here, so only the HINT tells them apart —
+  // that is why stderr is recorded byte for byte and not just the code.
+  c.both('prec-set-both-stdin', ['set', '--id=EPIC-001', '--status=nope', '--description-file=-', '--acceptance-file=-'], { cwd: d });
+  c.both('prec-new-both-stdin', ['new', '--type=task', '--parent=EPIC-001', '--title=x', '--status=nope', '--description-file=-', '--acceptance-file=-'], { cwd: d });
+  // A wrong-type parent against a section source: parent resolution sits
+  // between the two in `new`, so this leg pins the middle of the order.
+  c.both('prec-new-parent-vs-section', ['new', '--type=task', '--parent=EPIC-999', '--title=x', '--description-file=/nope/missing.txt'], { cwd: d });
 });
 
 S('parent-rules', (c) => {
@@ -537,6 +559,143 @@ S('sections', (c) => {
   c.both('sec-epic-acceptance', ['set', '--id=EPIC-001', '--acceptance=- [ ] on an epic'], { cwd: d });
   c.both('sec-note-untouched', ['note', '--id=TSK-001', 'a note that must survive'], { cwd: d });
   c.both('sec-after-note', ['set', '--id=TSK-001', '--description=rewritten after the note'], { cwd: d });
+});
+
+S('attach-second-derive', (c) => {
+  // The SECOND deriveGraph call. `cmdNew`, `cmdSet`, `cmdNote` and `cmdArchive`
+  // each re-run it on a derived array after the write, and it mutates the
+  // element objects in place. Nothing reads the attached `byId`/`children`
+  // afterwards — what the second call really delivers is the `problems` set on
+  // the freshly reloaded element, and that IS observable: it drives the ⚠ lines
+  // of the prose feedback and `_problems` in the JSON result.
+  //
+  // A pass-based rewrite that computes a pass without writing it back, or that
+  // attaches before the marks have run, lands exactly here. Before this
+  // scenario the path was covered only indirectly.
+  const d = c.dir('attach');
+  c.backlog(d, [
+    { id: 'EPIC-001', type: 'epic', title: 'Parent', status: 'todo', created: TS, updated: TS },
+    { id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'Open child', status: 'todo', created: TS, updated: TS },
+    { id: 'TSK-002', type: 'task', parent: 'EPIC-001', title: 'Dangling dep', status: 'todo', depends_on: ['TSK-404'], created: TS, updated: TS },
+    { id: 'TSK-003', type: 'task', folder: 'archive', parent: 'EPIC-001', title: 'Archived', status: 'done', created: TS, updated: TS, archived: TS },
+    { id: 'TSK-004', type: 'task', parent: 'EPIC-001', title: 'Refs archived', status: 'todo', depends_on: ['TSK-003'], created: TS, updated: TS },
+  ]);
+
+  // The write SUCCEEDS, so the ⚠ line below can only come from the second
+  // deriveGraph having marked the reloaded element.
+  c.both('attach-set-done-open-children', ['set', '--id=EPIC-001', '--status=done', '--allow-open-children'], { cwd: d });
+  // Same path through `note`, which reports the element's problems too.
+  c.both('attach-note-dangling', ['note', '--id=TSK-002', 'note on a dangling dependent'], { cwd: d });
+  // …and through `new`, whose result carries the problems of the fresh element.
+  c.both('attach-new-refs-archived', ['new', '--type=task', '--parent=EPIC-001', '--title=New refs archived', '--depends-on=TSK-003'], { cwd: d });
+  // `archive` emits the union over everything it moved (decision 62).
+  c.both('attach-archive-union', ['archive', '--id=TSK-002'], { cwd: d });
+
+  // The two readers of the attached fields, on the FIRST graph:
+  // `el.byId` in isReady(), and `el.children` in the children_open check.
+  c.both('attach-ready-byid', ['list', '--ready'], { cwd: d });
+  c.both('attach-status-byid', [], { cwd: d });
+  c.both('attach-children-refusal', ['set', '--id=EPIC-001', '--status=done'], { cwd: d });
+});
+
+S('dup-across-archive', (c) => {
+  // The third failure form: `byId.set` without its `has` guard, i.e. last-wins
+  // instead of first-wins. Exactly the slip a pass rewrite makes, and today it
+  // passes BOTH nets — the oracle stays green, and no byte probe reacts.
+  //
+  // It only becomes observable when the duplicated id exists twice with
+  // DIFFERENT archived-ness and something resolves through it:
+  //   TSK-001 lives in tasks/ (todo) and in archive/ (done)
+  //   SUB-001 hangs under TSK-001      -> the archive:split side
+  //   TSK-002 depends_on TSK-001       -> the active_refs_archived side
+  // first-wins resolves both to the ACTIVE twin, so neither code appears.
+  // last-wins resolves to the archived one and invents both.
+  //
+  // Which of two duplicates counts as a parent or dependency target is nj's
+  // reading, not the spec's — § 9 only says reads show both entries. The
+  // corpus may hold that; the oracle may not.
+  const d = c.dir('dup-archive');
+  c.backlog(d, [
+    { id: 'EPIC-001', type: 'epic', title: 'E', status: 'todo', created: TS, updated: TS },
+    { id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'Active twin', status: 'todo', created: TS, updated: TS },
+    { id: 'TSK-001', type: 'task', folder: 'archive', parent: 'EPIC-001', title: 'Archived twin', status: 'done', created: TS, updated: TS, archived: TS },
+    { id: 'SUB-001', type: 'subtask', parent: 'TSK-001', title: 'Child of the duplicate', status: 'todo', created: TS, updated: TS },
+    { id: 'TSK-002', type: 'task', parent: 'EPIC-001', title: 'Dependent on the duplicate', status: 'todo', depends_on: ['TSK-001'], created: TS, updated: TS },
+  ]);
+  // The two carriers. Under first-wins both are clean; last-wins puts
+  // archive:split on the child and active_refs_archived on the dependent.
+  c.both('dupacr-child', ['show', '--id=SUB-001'], { cwd: d });
+  c.both('dupacr-dependent', ['show', '--id=TSK-002'], { cwd: d });
+  // doctor counts the findings, so the error total moves too (2 vs 3).
+  c.both('dupacr-doctor', ['doctor'], { cwd: d });
+  c.both('dupacr-list', ['list', '--all'], { cwd: d });
+  c.both('dupacr-tree', ['tree', '--all'], { cwd: d });
+  // `--ready` resolves depends_on through byId, so it reads the same map.
+  c.both('dupacr-ready', ['list', '--ready'], { cwd: d });
+  // show --id on the duplicate itself must still surface BOTH entries (§ 9).
+  c.both('dupacr-show-both', ['show', '--id=TSK-001'], { cwd: d });
+});
+
+S('dup-across-archive-epic', (c) => {
+  // Zweite Form derselben Fehlerklasse, unabhaengig vom Verifier gebaut
+  // (seine Sonde: scoping/pending/probe-lastwins.js). Sie trifft den
+  // first-wins-Mechanismus von einer anderen Seite:
+  //
+  //   dup-across-archive        das KIND haengt an einer duplizierten TASK,
+  //                             dazu ein depends_on auf dieselbe ID
+  //   dup-across-archive-epic   das duplizierte Element ist der ELTERNTEIL,
+  //                             und darunter haengt eine gewoehnliche Task
+  //
+  // Zwei Formen aus zwei Koepfen treffen den Mechanismus aus zwei Richtungen.
+  // Haengt eine von ihnen an einer Eigenheit ihrer eigenen Konstruktion, faellt
+  // das nur auf, wenn eine zweite danebensteht.
+  const d = c.dir('dup-archive-epic');
+  c.backlog(d, [
+    { id: 'EPIC-001', type: 'epic', title: 'Active twin', status: 'todo', created: TS, updated: TS },
+    { id: 'EPIC-001', type: 'epic', folder: 'archive', title: 'Archived twin', status: 'done', created: TS, updated: TS, archived: TS },
+    { id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'Child', status: 'todo', created: TS, updated: TS },
+  ]);
+  // first-wins loest auf den AKTIVEN Zwilling auf -> das Kind bleibt sauber.
+  // last-wins loest auf den archivierten -> archive:split auf TSK-001.
+  c.both('dupepic-child', ['show', '--id=TSK-001'], { cwd: d });
+  c.both('dupepic-list-all', ['list', '--all'], { cwd: d });
+  c.both('dupepic-doctor', ['doctor'], { cwd: d });
+  c.both('dupepic-tree-all', ['tree', '--all'], { cwd: d });
+  c.both('dupepic-show-both', ['show', '--id=EPIC-001'], { cwd: d });
+});
+
+S('archived-child-not-done', (c) => {
+  // Decision 23: archivierte Kinder zaehlen als done. Kein Orakel-Fixture hat
+  // ein archiviertes Kind -- die Regel haengt damit allein am Korpus.
+  //
+  // Dass das Orakel sie nicht deckt, ist nicht dasselbe wie "kein Test fuehrt
+  // den Aufruf aus": ac-11 fuehrt ihn aus und bleibt gruen, weil es nur die
+  // beiden ERROR-Findings assertiert und die zusaetzliche WARNING samt der
+  // Summenzeile nicht ansieht. Deckung der EINGABE ist keine Deckung des
+  // VERHALTENS.
+  //
+  // Beide Kopien des Praedikats (markOpenChildren und die children_open-Pruefung
+  // in cmdSet) tragen dieselbe Ausnahme. Wer sie zusammenfuehrt, ohne dass das
+  // hier haengt, fuehrt zwei Praedikate zusammen, deren Uebereinstimmung nichts
+  // prueft.
+  const d = c.dir('archived-child');
+  c.backlog(d, [
+    { id: 'EPIC-001', type: 'epic', title: 'Done parent', status: 'done', created: TS, updated: TS },
+    // archiviert UND nicht done: zaehlt trotzdem als done fuers Elternteil
+    { id: 'TSK-001', type: 'task', folder: 'archive', parent: 'EPIC-001', title: 'Archived, not done', status: 'todo', created: TS, updated: TS, archived: TS },
+    // aktives, fertiges Geschwister -- damit die Liste nicht leer ist
+    { id: 'TSK-002', type: 'task', parent: 'EPIC-001', title: 'Active and done', status: 'done', created: TS, updated: TS },
+  ]);
+  // Ohne die Ausnahme traegt EPIC-001 done:open_children -- sichtbar als
+  // zusaetzliche WARNING und in der Summenzeile von doctor.
+  c.both('archkid-doctor', ['doctor'], { cwd: d });
+  c.both('archkid-show-parent', ['show', '--id=EPIC-001'], { cwd: d });
+  c.both('archkid-list-all', ['list', '--all'], { cwd: d });
+  c.both('archkid-tree-all', ['tree', '--all'], { cwd: d });
+  // Die zweite Kopie des Praedikats: die children_open-Pruefung in `set`.
+  // Ohne die Ausnahme wuerde dieser Aufruf verweigert statt durchzugehen.
+  c.both('archkid-set-done-again', ['set', '--id=EPIC-001', '--status=done'], { cwd: d });
+  c.both('archkid-set-doing', ['set', '--id=EPIC-001', '--status=doing'], { cwd: d });
 });
 
 module.exports = { scenarios, Ctx };

@@ -41,11 +41,12 @@ const bl = path.join(d, 'backlog');
 
 /* ---- it surfaces ------------------------------------------------------ */
 const doc = H.runJson(['doctor'], { cwd: d });
-const codes = ((doc.json && doc.json.problems) || []).map(p => p.code);
-T.check('id:no_tombstone is reported', codes.includes('id:no_tombstone'),
-  JSON.stringify(codes));
-T.check('backlog:ids_missing is NOT reported (the directory exists)',
-  !codes.includes('backlog:ids_missing'), JSON.stringify(codes));
+/* Set equality rather than containment: the point of this fixture is that
+ * exactly ONE element lost its tombstone, so exactly one warning may appear.
+ * `includes` could not tell that from "every element lost one", and could not
+ * see an unrelated extra finding at all. */
+T.sameSet('the findings are exactly one id:no_tombstone warning',
+  H.doctorSet(doc) || ['<no problems array>'], ['id:no_tombstone:warning']);
 T.eq('no error-severity finding, so doctor exits 0', doc.status, 0);
 
 const p = ((doc.json && doc.json.problems) || []).filter(x => x.code === 'id:no_tombstone');

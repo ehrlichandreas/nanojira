@@ -105,9 +105,20 @@ const CASES = [
     // with `---` and is never closed, so nothing in it can be trusted.
     // AMBIGUOUS (AMBIGUITIES.md #9): which *further* codes such a block produces
     // (id:derived, missing:title, missing:status, parent:orphaned, …) is not
-    // pinned, so this case asserts that the code is present, not that it is the
-    // only one. The bad-*line* variant inside an otherwise parsable block is
-    // unpinned as well and is covered by edge/frontmatter-grammar.js.
+    // pinned. The containment check above therefore stays as the spec-derived
+    // assertion.
+    //
+    // `also` exists so the set-equality check below can still run: without it
+    // this row would be the one hole left in the file, and the blindness this
+    // conversion removes would survive exactly here. The two extra codes are
+    // NOT a derivation — they are the reading currently in force, recorded so
+    // a ruling on #9 becomes a one-line edit instead of a hunt. Both are at
+    // least consistent with § 7 ("the readable lines stay in use"): with the
+    // block unclosed, `title` is unreachable (missing:title, error) and so is
+    // `parent` on a task (parent:orphaned, warning).
+    also: ['missing:title:error', 'parent:orphaned:warning'],
+    // The bad-*line* variant inside an otherwise parsable block is unpinned
+    // as well and is covered by edge/frontmatter-grammar.js.
     bad: { 'tasks/TSK-001.md':
       '---\nid: TSK-001\ntype: task\nparent: EPIC-001\ntitle: Login route\n' +
       'status: todo\ncreated: ' + C + '\nupdated: ' + C + '\n\n' + bodyOf('Login route') } },
@@ -253,6 +264,20 @@ for (const c of CASES) {
       mine.length >= 1 && mine.every(p => p.severity === (c.doctor === 2 ? 'error' : 'warning')),
       'problems: ' + JSON.stringify(probs));
   }
+
+  /* Set equality over the WHOLE finding list, not just this row's code.
+   *
+   * The containment checks above are what a blindness matrix caught: a mutant
+   * appending one spurious `title:h1_mismatch` warning alongside real findings
+   * scored 21 hits in this file and left it green, because `mine` filters to
+   * the row's own code and never looks at what else came back. The expected
+   * set is § 7's Doctor column for the row (a `—` row contributes nothing),
+   * plus `also` where the fixture unavoidably satisfies a second condition —
+   * each one justified at the row. */
+  const expected = (c.finding === false ? [] :
+    [name + ':' + (c.doctor === 2 ? 'error' : 'warning')]).concat(c.also || []);
+  T.sameSet(name + ' — the findings are exactly § 7\'s set for this fixture',
+    H.doctorSet(dj) || ['<no problems array>'], expected);
 
   const rd = H.runJson(['list', '--ready'], { cwd: d });
   T.exit(name + ' — list --ready', rd, 0);
