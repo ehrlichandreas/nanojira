@@ -3,7 +3,9 @@
 A local, file-based task tool for agents: Epics → Tasks → Subtasks, one
 Markdown file per element, no database, no server, no runtime dependencies.
 See `docs/SPECIFICATION.md` for the full spec.
-How to use it: `docs/GUIDE.md` (upgrading a v2 backlog: `docs/MIGRATION-v3.md`).
+How to use it: `docs/GUIDE.md` (install: `docs/GUIDE.md` § 1; upgrading a v2
+backlog: `docs/MIGRATION-v3.md`). Wiring an agent up to it: copy-paste block
+for a project's `AGENTS.md` in `docs/AGENT-INSTRUCTIONS.md`.
 
 `dist/nj` (the CLI) and `dist/nj-mcp` (an MCP server exposing the same
 commands as tools over stdio, § 17) implement spec v3 through **v3.3**

@@ -695,6 +695,7 @@ line, file, JSON output. The agent translates nothing.
 ### Commands (round one)
 
 ```
+nj --version                           print the version and exit (§ 9, below)
 nj                                     short status: counts, top ready, problems
 nj init                                create backlog layout (§ 4)
 nj <any command> --backlog=<path>      use this backlog (§ 4, Backlog location)
@@ -731,6 +732,32 @@ known flags; `--backlog` without a value is `missing_value`.
 `set`, `note`, `check`, `claim` and `release` additionally accept
 `--id=A,B,C` (two or more comma-separated IDs) in place of a single `--id`
 — see "Batch writes" below.
+
+### `--version`
+
+`nj --version` prints `nj <version>` and exits 0; with `--json`, it
+prints `{"version": "<version>"}` instead — the only two forms. It
+resolves no backlog and reads no file other than its own, so it works
+anywhere, including a directory with no backlog and no `.njrc` anywhere
+above it. `nj version` (a subcommand) is not added; `--version` is a flag
+only, checked before a command is even dispatched — ahead of the backlog
+resolution every other command (including bare `nj`) performs.
+
+**There is exactly one version source**: the `"version"` field in
+`package.json` (`3.4.0` as of this round), embedded at build time into
+`dist/nj` and `dist/nj-mcp` alike, so the two binaries can never report
+different versions of themselves from drifting independently.
+
+`--version` combined with anything beyond `--json` — another flag (`--
+help`, `--backlog=…`, …) or an explicit subcommand (`nj list --version`)
+— is `unknown_field`, exactly the same code and the same reason a typo'd
+flag already is: `--version` is not a known flag for whatever command
+context applies once something else is present (the subcommand named, or
+the implicit bare command when none is). It is not a special case that
+tolerates being combined with anything; it recognises only itself and
+`--json`, nothing more.
+
+`nj help` lists `--version` in its command summary.
 
 ### The acting name
 
@@ -1142,6 +1169,7 @@ its code. These mappings are normative:
 | backlog in the v2 layout (any command except `doctor`) | `legacy_layout` | § 4 |
 | `.nanojira/config.json` violates § 5 | `invalid_config` | § 5 |
 | unknown field flag | `unknown_field` | § 9 |
+| `--version` combined with another flag or an explicit subcommand | `unknown_field` | § 9 |
 | unknown subcommand | `unknown_command` | § 9 |
 | a required flag or its value is missing | `missing_argument` / `missing_value` | § 9 |
 | a value fails validation (`--status`, `--priority`, `--type`) | `invalid_value` | § 9 |
@@ -2397,6 +2425,16 @@ reported, not guessed at.
     `dist/nj-mcp` starts and completes both an `initialize`/`tools/list`
     round trip (legacy) and a `server/discover`/`tools/list` round trip
     (modern).
+39. **`--version`.** `nj --version` prints `nj <version>` and exits 0,
+    with no backlog resolved and no file read but `nj`'s own — confirmed
+    by running it in an empty directory with no `.njrc` anywhere above
+    it and `NJ_BACKLOG` unset. `nj --version --json` prints exactly
+    `{"version": "<version>"}`. `nj-mcp --version` behaves identically
+    for `nj-mcp`, and reports the same version `nj --version` does — the
+    one `package.json` source embedded into both at build time; the same
+    value is what `nj-mcp`'s `server/discover`/`initialize` responses
+    declare as `serverInfo`'s version. `--version` combined with any
+    other flag or an explicit subcommand is `unknown_field`.
 
 ---
 
@@ -2430,8 +2468,29 @@ document.
 ### Shape and backlog confinement
 
 ```
-dist/nj-mcp [--backlog=<path>]
+dist/nj-mcp [--backlog=<path>] [--allow-destructive]
+dist/nj-mcp --version
 ```
+
+**`nj-mcp --version`** follows the same rule § 9 states for `nj
+--version`: prints `nj-mcp <version>`, exit 0, no backlog resolved, works
+anywhere, and the version is the identical `package.json` value `nj
+--version` reports — the two binaries never drift apart because both
+embed the same one source at build time. The `serverInfo`/`initialize`
+version this server declares over MCP (below) is the same value again,
+not a separately maintained string.
+
+**Startup arguments are validated strictly, before any protocol traffic**
+(D152): the known ones are `--backlog=<path>`, `--allow-destructive` and
+`--version`. Anything else — an unknown flag, a typo'd one
+(`--allow-destrutive`) — or `--version` together with any other argument
+at all (`nj-mcp` has no `--json` to pair it with, so even that combination
+is rejected) is an error: exit 1, exactly one line on stderr naming the
+offending argument and the known ones, nothing on stdout. This is the same
+"a typo must not pass" discipline `nj`'s own argument parsing already
+holds (§ 9) — `nj-mcp` silently ignoring an unknown or misspelled startup
+flag would otherwise start in a state the caller never asked for (e.g.
+without `--allow-destructive` despite typing it).
 
 `nj-mcp` resolves its backlog exactly once, at startup, by the same rules
 as every command (§ 4: `--backlog`, then `NJ_BACKLOG`, then the nearest
@@ -2481,10 +2540,14 @@ lifetime.
   "<nj-mcp's own version>"}}}`. This is what lets a dual-era client's own
   stdio backward-compatibility probe succeed against `nj-mcp` directly,
   rather than falling through an unknown-method error.
-- **`initialize`** (legacy) responds declaring `2025-11-25` and the same
-  `capabilities: {tools: {}}` object. A version mismatch on this path is
-  the client's decision: it sees the declared revision and disconnects
-  if it cannot work with it; `nj-mcp` does not special-case a mismatch.
+- **`initialize`** (legacy) responds declaring `2025-11-25`, the same
+  `capabilities: {tools: {}}` object, and `serverInfo: {name: "nj-mcp",
+  version: "<nj-mcp's own version>"}` — the identical field
+  `server/discover` carries in its own `_meta`, same value, same source
+  (§ 17 "Shape and backlog confinement" above). A version mismatch on the
+  protocol revision is the client's decision: it sees the declared
+  revision and disconnects if it cannot work with it; `nj-mcp` does not
+  special-case a mismatch.
 - **An unsupported version on the modern path** (a request whose `_meta`
   names a version other than `2026-07-28`) gets
   `UnsupportedProtocolVersionError`, JSON-RPC code **`-32022`**, `data:

@@ -8,6 +8,7 @@ import type {} from './types.ts';
 
 const HELP = `nj — NanoJira, a local file-based task tool for agents
 
+  nj --version                           print the version and exit
   nj                                     short status: counts, top ready, problems
   nj init                                create the backlog layout
   nj <any command> --backlog=<path>      use this backlog (else NJ_BACKLOG, else .njrc/backlog/ upward)

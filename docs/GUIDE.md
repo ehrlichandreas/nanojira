@@ -2,24 +2,43 @@
 
 `nj` keeps a backlog of epics, tasks and subtasks as one Markdown file per
 element, next to your code. This guide shows how to use it; the rules behind
-every answer are in `docs/SPECIFICATION.md` (spec v3, through v3.3), and
+every answer are in `docs/SPECIFICATION.md` (spec v3, through v3.4), and
 where this guide and the spec differ, the spec wins.
 
 **Upgrading an existing backlog?** `nj` refuses to touch a v2 backlog
 (`.nanojira.json`/`.ids/` at the top level) until you run the one
 `doctor --fix` that migrates it — see `docs/MIGRATION-v3.md`.
 
-This describes spec v3.3's end state. Most examples below were run directly
+This describes spec v3.4's end state. Most examples below were run directly
 against `dist/nj`; output is shown as it is printed, with the
 machine-specific path shortened to `…`.
 
 ```sh
-alias nj="$PWD/dist/nj"       # or: <runtime-node> dist/nj  (§ 3)
+alias nj="$PWD/dist/nj"       # or: <runtime-node> dist/nj  (§ 4)
 ```
 
 ---
 
-## 1. Start a backlog
+## 1. Install
+
+`dist/nj` and `dist/nj-mcp` are each a single, self-contained file (no
+runtime dependencies, § 3 of the spec) — there is nothing to `npm install`
+on the machine that runs them.
+
+- Put `dist/nj` on your `PATH`, either by copying it somewhere already on
+  `PATH` or by symlinking it there (`ln -s /path/to/dist/nj /usr/local/bin/nj`,
+  or wherever your `PATH` already reaches); `dist/nj-mcp` the same way if you
+  also want it runnable by name. One install serves every project on the
+  machine (§ 4, below) — nothing further to install per project.
+- Per project: run `nj init` once (§ 2) to create that project's `backlog/`.
+- Per project, if the project uses `nj-mcp`: add one `nj-mcp` entry to that
+  project's MCP client config, pointed at that project with its own
+  `--backlog=` (§ 4, below, and § 17's client-config shape) — never a single
+  shared entry meant to serve several projects.
+- Verify the install with `nj --version`, which prints `nj <version>` and
+  exits 0 from anywhere, without needing a backlog (§ 9 of the spec).
+
+## 2. Start a backlog
 
 ```sh
 $ nj init
@@ -40,7 +59,7 @@ tombstones (`.nanojira/ids/`) are what guarantee that an ID is never reused.
 - `init` refuses with `exists` if anything is already at the target, even an
   empty directory.
 
-## 2. Point nj at a backlog
+## 3. Point nj at a backlog
 
 Every command finds its backlog from the **first** of these that is set:
 
@@ -106,12 +125,12 @@ Error: invalid .njrc at …/repo/.njrc: line 2: unknown key 'backlogs'
 - A `.njrc` without `backlog` (only comments) sets nothing; the search goes
   on upward.
 
-## 3. Many projects on one machine
+## 4. Many projects on one machine
 
 One `nj` install serves every project on the machine — there is nothing
 project-specific to install per project. What's project-specific is the
 **backlog**: each project resolves its own, by the same search as above
-(§ 2) — `--backlog`, then `NJ_BACKLOG`, then the nearest `.njrc` or
+(§ 3) — `--backlog`, then `NJ_BACKLOG`, then the nearest `.njrc` or
 `backlog/` folder upward from the current directory. Two projects never
 share state unless they're pointed at the same backlog on purpose: claims,
 IDs (the tombstones in `.nanojira/ids/`) and `STATUS.md` are all per
@@ -119,17 +138,17 @@ backlog, not global to the machine.
 
 A `.njrc` can point at a backlog anywhere — outside the project, or shared
 by several projects on purpose — the same way `repo/.njrc` redirecting to
-`../shared/backlog` already works in § 2's example.
+`../shared/backlog` already works in § 3's example.
 
 **`nj-mcp`, differently: one server process is fixed to one backlog for its
-whole life**, resolved once at startup (§ 16 below, § 17 of the spec) —
+whole life**, resolved once at startup (§ 17 below, § 17 of the spec) —
 there is no per-call backlog switch. With several projects, configure one
 `nj-mcp` entry **per project** (each with its own `--backlog=`, or each
 started with that project as its working directory), not one shared entry
 meant to serve all of them: a single `nj-mcp` process can only ever answer
 for the one backlog it started with.
 
-## 4. The daily loop (and `--json` for agents)
+## 5. The daily loop (and `--json` for agents)
 
 ```sh
 $ nj new --type=epic --title="Login" --description="Users can sign in."
@@ -175,7 +194,7 @@ TSK-001 → status=done
   written — `--statuss=done` does not "almost work".
 - Reads: bare `nj` (short status), `nj list [--status --type --tag --parent
   --assignee --ready --all]`, `nj tree`, `nj show --id=…`, `nj find "<text>"`
-  (§ 14 below).
+  (§ 15 below).
 
 **For agents: add `--json` to every call.** Reads return `{backlog, counts,
 entries}`, writes `{ok, id, changed, entry, _problems}`, and **every** failure
@@ -184,7 +203,7 @@ returns `{"ok": false, "error": "<code>", "hint": "…"}` on stdout with exit 1
 `_problems`, never on prose. Exit codes: `0` success, `1` failed, `2` only
 from `doctor`: at least one error finding.
 
-## 5. Descriptions and acceptance criteria
+## 6. Descriptions and acceptance criteria
 
 `--description` and `--acceptance` write the configured sections of the body
 on `nj new` and `nj set`, each in one of three forms:
@@ -204,7 +223,7 @@ printf 'Line one\nLine two\n' | nj set --id=TSK-002 --description-file=-   # std
   for byte. Don't put a `## ` heading inside the content: it would read as
   the next section.
 
-## 6. Layouts
+## 7. Layouts
 
 Where element files lie is configurable in the configuration's `layout`
 block (`.nanojira/config.json`, written by `init` in full):
@@ -250,11 +269,11 @@ backlog/: 3 entries, 0 errors, 0 warnings remaining
   and `STATUS.md` and anything in a directory starting with `.` — a stray
   Markdown file elsewhere is read as an element and reported.
 
-## 7. `STATUS.md`
+## 8. `STATUS.md`
 
 A generated overview of the active backlog by status, readable in an editor
 or a forge without `nj` — here for a backlog configured with the statuses
-`todo`, `doing`, `done` (§ 4's example):
+`todo`, `doing`, `done` (§ 5's example):
 
 ```
 # Status
@@ -286,7 +305,7 @@ or a forge without `nj` — here for a backlog configured with the statuses
 - `layout.statusFile: false` turns it off; an existing file is then left
   alone.
 
-## 8. Archive
+## 9. Archive
 
 ```sh
 $ nj archive --id=EPIC-001
@@ -312,7 +331,7 @@ TSK-001 archived → …/backlog/archive/TSK-001.md
   check can't be trusted. Fix the permissions (`nj doctor` names the
   directory) and retry.
 
-## 9. `doctor` and `doctor --fix`
+## 10. `doctor` and `doctor --fix`
 
 `nj doctor` checks the configuration, every element against the problem
 table (§ 7 of the spec), duplicate IDs, misplaced files, tombstones, stray
@@ -336,7 +355,7 @@ reported, never repaired. While the configuration is invalid it writes
 nothing at all — so a mistyped `--backlog` cannot scatter tombstones into
 the wrong directory.
 
-## 10. Who's acting: `NJ_AUTHOR` and `--as`
+## 11. Who's acting: `NJ_AUTHOR` and `--as`
 
 `nj note`, `nj claim` and `nj release` need to know who is acting. In order:
 an explicit `--as=<name>` where the command has one, else `NJ_AUTHOR=<name>`
@@ -354,7 +373,7 @@ outranks a malformed `NJ_AUTHOR`). Names are labels, not identities: there
 is no registry, no authentication; two callers using the same name are the
 same actor.
 
-## 11. `nj unarchive`
+## 12. `nj unarchive`
 
 Moves an archived element — and its archived subtree — back to where it
 would live today, byte-identical except `updated` and a removed
@@ -371,7 +390,7 @@ under an archived parent, `refused:misplaced` if its hierarchy chain can't
 be resolved first — `nj doctor --fix`, same pointer `archive`'s own
 refusals give.
 
-## 12. `nj claim` / `nj release`
+## 13. `nj claim` / `nj release`
 
 One acting name at a time can hold an element. A claim is exclusive only
 against another claim — never against a read or any other write:
@@ -403,7 +422,7 @@ changed hands, not to whom it previously belonged.
   Nothing is ever auto-released or auto-stolen — it's a signal for a human
   or agent to act on with `--steal`, never something `nj` acts on itself.
 
-## 13. `nj check`
+## 14. `nj check`
 
 Ticks or unticks one Markdown checkbox in the body, without touching
 anything else:
@@ -421,7 +440,7 @@ TSK-001 checked
   matched. `--text` naming zero countable checkboxes is `not_found`; two or
   more is `ambiguous_target`.
 
-## 14. `nj find`
+## 15. `nj find`
 
 Full-text search over title, body and notes:
 
@@ -443,7 +462,7 @@ match each other; `--case-sensitive` for an exact match. Combines with
 `--assignee`) as an AND; `--all` includes the archive. The literal empty
 string is `invalid_value`.
 
-## 15. Batch writes: `--id=A,B,C`
+## 16. Batch writes: `--id=A,B,C`
 
 `set`, `note`, `check`, `claim` and `release` take a comma-separated `--id`
 to apply the same field map or action to several elements in one call:
@@ -460,7 +479,7 @@ competing claim) never stops the others. The result is `{ok, results:
 [{id, ok, …}]}` instead of one write's usual shape; a single `--id=A` (no
 comma) is unaffected.
 
-## 16. `nj-mcp` — the MCP wrapper
+## 17. `nj-mcp` — the MCP wrapper
 
 `dist/nj-mcp` is a second binary, built alongside `dist/nj`, that exposes
 the same commands as MCP tools over stdio instead of a CLI an agent has to
@@ -485,7 +504,7 @@ $ dist/nj-mcp --backlog=./backlog [--allow-destructive]
   { "command": "node", "args": ["/path/to/dist/nj-mcp", "--backlog=/path/to/backlog"] }
   ```
 
-## 17. Failure codes an agent should handle
+## 18. Failure codes an agent should handle
 
 With `--json`, `error` is one of a closed set. The ones an agent meets:
 
