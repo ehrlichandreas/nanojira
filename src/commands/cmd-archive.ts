@@ -118,7 +118,7 @@ function cmdArchive(flags: Flags) {
     out(JSON.stringify({
       ok: true, ids: moved.map((m) => m.id), changed: ['archived'],
       entries: moved.map((m) => entryJson(m, ctx.backlog, ctx.cfg)),
-      _problems: Array.from(new Set(moved.flatMap(elementProblems))).sort(),
+      _problems: Array.from(new Set(moved.flatMap((m) => elementProblems(m, ctx.cfg.problems.ignore)))).sort(),
     }, null, 2));
   } else {
     for (const m of moved) out(`${m.id} archived → ${m.file}`);

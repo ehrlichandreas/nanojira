@@ -1,7 +1,8 @@
 'use strict';
 /* AC-46 — per-command `--help`, docs/SPECIFICATION.md § 9 "`--help`
  * (per-command)" and "Feedback after writes" (v3.6, DECISIONS 158
- * EV-2/EV-3/PA-2, promoted: commit 755820e).
+ * EV-2/EV-3/PA-2, promoted: commit 755820e; v3.7 DECISIONS 163 A adds
+ * `rm`'s own flag lines, P7 below).
  *
  * AC-46 (§ 15): "nj new --help prints new's own synopsis and flags, not
  * the general command list; nj --help/nj help (no command word) are
@@ -19,7 +20,10 @@
  * Found by an outside team (feedback/team-b-tests TSK-002/TSK-003):
  * `nj <command> --help` printed the general help, and the allowed
  * --priority/--status/--type values weren't discoverable from the CLI
- * at all.
+ * at all. `rm`'s own gap (P7, DECISIONS 163 A) was found by the Verifier,
+ * D161: `rm` is never an `nj-mcp` tool (§ 17), so it had no
+ * `core/flag-table.ts` entry either, and `--help` silently fell back to
+ * just its synopsis line.
  *
  * Written before the fix lands: red against the current build for every
  * case the bug covers.
@@ -167,6 +171,35 @@ function fixture(label) {
   T.exit('P6 nj set (still incomplete): exit 0', r2, 0);
   T.check('P6 set also names incomplete:acceptance', /no acceptance criteria/.test(r2.stdout), J(r2.stdout));
   T.check('P6 set also names incomplete:description', /no description/.test(r2.stdout), J(r2.stdout));
+}
+
+/* ===================================================================== */
+/* P7 (DECISIONS 163 A) — `nj rm --help` gets its own per-flag lines     */
+/* too, same as every other command. `rm` has no `core/flag-table.ts`    */
+/* entry today (it is never an `nj-mcp` tool, § 17, so nothing had ever   */
+/* added one) — written red against the current build, which falls back  */
+/* to just rm's synopsis line and no flag detail at all.                  */
+/* ===================================================================== */
+{
+  const dir = fixture('ac46-p7');
+  const r = run(['rm', '--help'], dir);
+  T.exit('P7 nj rm --help: exit 0', r, 0);
+  T.check('P7 is NOT byte-identical to the general help', r.stdout !== run(['--help'], dir).stdout, J(r.stdout));
+  // A real per-flag DETAIL line, not just the word appearing in rm's own
+  // synopsis (`--id=TSK-009 [--cascade]`) — exactly `  --<name>` (or
+  // `=<value>   allowed: ...` for a closed vocabulary) on its own line,
+  // the same shape every other command's flag block already has (blank
+  // line, then one `  --name` line per flag).
+  T.check('P7 has a blank-line-separated flag-detail block (not just the synopsis line)',
+    /\n\n {2}--/.test(r.stdout), J(r.stdout));
+  T.check('P7 has a real --id detail line (not just the synopsis mentioning it)',
+    /\n {2}--id\n/.test(r.stdout), J(r.stdout));
+  T.check('P7 has a real --file detail line (rm\'s own target flag)',
+    /\n {2}--file\n/.test(r.stdout), J(r.stdout));
+  T.check('P7 has a real --cascade detail line (not just the synopsis mentioning it)',
+    /\n {2}--cascade\n/.test(r.stdout), J(r.stdout));
+  T.check('P7 does NOT list --backlog/--json as rm-specific flags (control flags, excluded everywhere)',
+    !/\n {2}--backlog\b/.test(r.stdout) && !/\n {2}--json\b/.test(r.stdout), J(r.stdout));
 }
 
 T.finish();

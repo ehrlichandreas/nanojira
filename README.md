@@ -9,19 +9,27 @@ for a project's `AGENTS.md` in `docs/AGENT-INSTRUCTIONS.md`.
 Upgrading from an earlier nj release: `docs/CHANGES.md`.
 
 `dist/nj` (the CLI) and `dist/nj-mcp` (an MCP server exposing the same
-commands as tools over stdio, § 17) implement spec v3 through **v3.6**
+commands as tools over stdio, § 17) implement spec v3 through **v3.7**
 (`docs/SPECIFICATION.md`): backlog location via `--backlog`, `NJ_BACKLOG` or
 `.njrc`, accepted before the command word as well as after; configurable
-layout (`type`, `hierarchy`, `flat`, folder names); a generated `STATUS.md`;
-internal files in `.nanojira/`; claims, `nj check`, `nj find`, batch writes
-(`--id=A,B,C`), `nj --version`, `nj next` (claim the top `--ready` leaf in
-one call, respecting an existing `assignee`, § 12b) and `nj log`
-(derive-only change history, § 12c). `nj <command> --help` shows that
-command's own flags and allowed values, and an invalid `--type`/`--status`/
-`--priority` names the nearest valid one ("did you mean?") when there is
-one. A v2 backlog is migrated once with `nj doctor --fix`
-(`docs/MIGRATION-v3.md`). Decisions behind it: `docs/DECISIONS.md` 86–160;
-independent verification reports: `docs/verification/`.
+layout (`type`, `hierarchy`, `flat`, folder names); a generated `STATUS.md`
+(switchable off per backlog, `layout.statusFile: false`, for several
+agents sharing one working tree); internal files in `.nanojira/`; claims,
+`nj check`, `nj find`, batch writes (`--id=A,B,C`), `nj --version`, `nj
+next` (claim the top `--ready` leaf in one call, respecting an existing
+`assignee`, § 12b), `nj log` (derive-only change history, § 12c) and `nj
+set --add-tags`/`--remove-tags` (incremental tag edits, batch-aware). `nj
+<command> --help` (including `nj rm --help`) shows that command's own
+flags and allowed values, and an invalid `--type`/`--status`/`--priority`
+names the nearest valid one ("did you mean?") when there is one. Two new,
+never-blocking `doctor` warnings flag acceptance-criteria quality, each
+switchable off per backlog via `"problems": {"ignore": [...]}`; an
+unrecognised config key is a warning too, not a hard failure, and an
+optional `"minVersion"` fails every command with a clear message on an
+`nj` too old to honour the rest of this paragraph. A v2 backlog is
+migrated once with `nj doctor --fix` (`docs/MIGRATION-v3.md`). Decisions
+behind it: `docs/DECISIONS.md` 86–167; independent verification reports:
+`docs/verification/`.
 
 ## Layout
 

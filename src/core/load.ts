@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { PREFIX_TYPE, TYPE_FOLDER_ROLE, TYPES, PARENT_TYPE, PRIORITIES } from './constants.ts';
 import { scanBacklog, folderOf, inArchive, samePlace, foldEq, expectedPlace, misplacedCode } from './layout.ts';
-import { parseFile, h1Of, sectionPresent, normalizeTitle } from './parse.ts';
+import { parseFile, h1Of, sectionPresent, sectionHasCheckbox, normalizeTitle } from './parse.ts';
 import { mtimeIso, readTombstones } from './store.ts';
 
 // ------------------------------------------------------------- element load
@@ -229,7 +229,22 @@ function deriveBody(el: WithArchiveState, p: ParsedFile, cfg: Config): WithArchi
     const descOk = sectionPresent(p.body, cfg.sections.description);
     if (!descOk) el.problems.add('incomplete:description');
     if (el.type === 'task' || el.type === 'subtask') {
-      if (!sectionPresent(p.body, cfg.sections.acceptance)) el.problems.add('incomplete:acceptance');
+      const acceptanceOk = sectionPresent(p.body, cfg.sections.acceptance);
+      if (!acceptanceOk) {
+        el.problems.add('incomplete:acceptance');
+        // F, done:no_acceptance (§ 7, DECISIONS 163, 167): independent of
+        // incomplete:acceptance, which still fires too -- `done` can never
+        // reach --ready regardless (it isn't statuses[0]), so this is not a
+        // new leniency, just a second, more specific warning on top. Live
+        // elements only (DECISIONS 167): an archived element is exempt.
+        if (el.status === 'done' && !el.archived) el.problems.add('done:no_acceptance');
+      } else if (!sectionHasCheckbox(p.body, cfg.sections.acceptance) && !el.archived) {
+        // E, acceptance:no_checkbox (§ 7, DECISIONS 163, 167): mutually
+        // exclusive with incomplete:acceptance -- this one requires content
+        // to exist at all, which the `acceptanceOk` branch above already
+        // confirmed. Live elements only: an archived element is exempt.
+        el.problems.add('acceptance:no_checkbox');
+      }
     }
   }
   return el;

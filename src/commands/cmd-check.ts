@@ -11,15 +11,17 @@ import { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWr
 import { entryJson } from '../core/derive.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, out, writeFeedback, emitWriteResult } from '../core/output.ts';
+import { CHECKBOX_RE } from '../core/parse.ts';
 import { refreshStatus } from '../core/status.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement } from '../core/store.ts';
 
-// After optional leading whitespace: a list marker (-, *, +, or an ordered
-// <digits>. / <digits>)), one space, then [ ]/[x]/[X]. Captures leading
-// whitespace, the marker, the box content and everything after ']' — the
-// write reconstructs the line from exactly these pieces, so only the box
-// content ever changes (§ 10a).
-const CHECKBOX_RE = /^([ \t]*)(-|\*|\+|\d+\.|\d+\))\ \[( |x|X)\](.*)$/;
+// CHECKBOX_RE (core/parse.ts): after optional leading whitespace, a list
+// marker (-, *, +, or an ordered <digits>. / <digits>)), one space, then
+// [ ]/[x]/[X]. Captures leading whitespace, the marker, the box content and
+// everything after ']' — the write reconstructs the line from exactly these
+// pieces, so only the box content ever changes (§ 10a). Shared with
+// `acceptance:no_checkbox` (§ 7, DECISIONS 163 E) so the two can never
+// disagree on what counts as a checkbox.
 
 interface Checkbox { line: number; rest: string; ticked: boolean }
 

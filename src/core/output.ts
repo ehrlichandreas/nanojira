@@ -51,21 +51,23 @@ process.stdout.on('error', (err: NodeJS.ErrnoException) => {
 
 function out(s: string) { process.stdout.write(s + '\n'); }
 
-function problemSuffix(el: Element) {
-  const codes = elementProblems(el);
+function problemSuffix(el: Element, cfg: Config) {
+  const codes = elementProblems(el, cfg.problems.ignore);
   return codes.length > 0 ? '  ' + codes.join(' ') : '';
 }
 
 function printEntryLine(el: Element, cfg: Config) {
   const arch = el.archived ? ' (archived)' : '';
-  out(`  ${el.id}  ${el.status.padEnd(8)} ${el.title}${arch}${problemSuffix(el)}`);
+  out(`  ${el.id}  ${el.status.padEnd(8)} ${el.title}${arch}${problemSuffix(el, cfg)}`);
 }
 
 function writeFeedback(el: Element, cfg: Config, headline: string) {
   out(headline);
-  for (const code of elementProblems(el)) {
+  for (const code of elementProblems(el, cfg.problems.ignore)) {
     if (code === 'incomplete:acceptance') out(`⚠ ${el.id} has no acceptance criteria. Add them before starting.`);
     else if (code === 'incomplete:description') out(`⚠ ${el.id} has no description. Add one before starting.`);
+    else if (code === 'acceptance:no_checkbox') out(`⚠ ${el.id} has acceptance criteria with no checkbox items — nothing for check to tick.`);
+    else if (code === 'done:no_acceptance') out(`⚠ ${el.id} is done with no acceptance criteria.`);
     else out(`⚠ ${el.id}: ${code}`);
   }
 }

@@ -112,6 +112,10 @@ export interface Config {
   layout: Layout;
   /** § 5 `claims`: not written by `init`; 0 disables `claim:stale` (§ 7, § 12 "Claims"). */
   claims: { staleAfterHours: number };
+  /** § 5 `problems.ignore` (DECISIONS 165/166): warning-severity codes
+   * suppressed everywhere they're reported, never in the readiness
+   * computation. Default empty -- nothing suppressed. */
+  problems: { ignore: string[] };
 }
 
 /** One walk over the backlog (layout.ts `scanBacklog`). */
@@ -128,6 +132,10 @@ export interface Context {
   backlog: string;
   cfg: Config;
   configErrors: string[];
+  /** Unrecognised config keys/ignore-list codes (DECISIONS 166): warnings,
+   * never invalidate the configuration. `doctor` reports each as a
+   * `config:unknown_key`/`config:unknown_code` finding. */
+  configWarnings: { code: string; message: string }[];
   elements: Element[];
   /** The walk the elements were loaded from; `doctor` reads its folders too. */
   scan: Scan;

@@ -28,10 +28,12 @@ function cmdInit(flags: Flags) {
     }
     // The full block, so the defaults are visible where they are changed
     // (§ 5, DECISIONS 92 Q1) — at the v3 place, nothing at the top level.
-    // `claims` is excluded: § 5 says it is "not written by init" — its
-    // absence IS the 24h default, not merely an unset key (DECISIONS 130).
-    const { claims, ...written } = DEFAULT_CONFIG;
+    // `claims` and `problems` are both excluded: § 5 says neither is
+    // "written by init" — their absence IS the default (24h staleness,
+    // empty ignore list), not merely an unset key (DECISIONS 130, 165).
+    const { claims, problems, ...written } = DEFAULT_CONFIG;
     void claims;
+    void problems;
     fs.writeFileSync(path.join(backlog, '.nanojira', 'config.json'), JSON.stringify(written, null, 2) + '\n', 'utf8');
     fs.writeFileSync(path.join(backlog, '.gitignore'), '.nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n', 'utf8');
     fs.writeFileSync(path.join(backlog, 'README.md'), V3_README, 'utf8');

@@ -2,7 +2,7 @@
 
 `nj` keeps a backlog of epics, tasks and subtasks as one Markdown file per
 element, next to your code. This guide shows how to use it; the rules behind
-every answer are in `docs/SPECIFICATION.md` (spec v3, through v3.6), and
+every answer are in `docs/SPECIFICATION.md` (spec v3, through v3.7), and
 where this guide and the spec differ, the spec wins.
 
 **Upgrading an existing backlog?** `nj` refuses to touch a v2 backlog
@@ -11,7 +11,7 @@ where this guide and the spec differ, the spec wins.
 from an earlier v3 release (this guide already describes the latest):
 `docs/CHANGES.md`.
 
-This describes spec v3.6's end state. Most examples below were run directly
+This describes spec v3.7's end state. Most examples below were run directly
 against `dist/nj`; output is shown as it is printed, with the
 machine-specific path shortened to `…`.
 
@@ -241,6 +241,20 @@ TSK-001 → status=done
 - Fields are the frontmatter names: `--title --status --priority --tags
   --assignee --depends-on`. An unknown flag is rejected and nothing is
   written — `--statuss=done` does not "almost work".
+- **`--tags=` replaces the whole list** — easy to lose one by hand if you
+  only meant to change one. `nj set --add-tags=<list>` /
+  `--remove-tags=<list>` edit it incrementally instead: remove takes
+  effect first, then add appends anything not already present.
+
+  ```sh
+  $ nj set --id=EPIC-001 --remove-tags=waiting:user --add-tags=blocked:review
+  EPIC-001 → tags=repo:app-test,blocked:review
+  ```
+
+  Adding a tag already there, or removing one that isn't, is a no-op for
+  that tag, not an error. Combined with `--tags=` in the same call is
+  rejected — pick one or the other. Works in batch (`--id=A,B,C`) too,
+  each ID's own tags read and changed independently.
 - Reads: bare `nj` (short status), `nj list [--status --type --tag --parent
   --assignee --ready --all]`, `nj tree`, `nj show --id=…`, `nj find "<text>"`
   (§ 17 below).
@@ -385,6 +399,40 @@ or a forge without `nj` — here for a backlog configured with the statuses
 - `layout.statusFile: false` turns it off; an existing file is then left
   alone.
 
+**Several agents committing from one working tree?** (DECISIONS 163 C)
+`STATUS.md` is rewritten after every successful write — in a tree shared by
+several agents, each one's commit carries a `STATUS.md` change too, and
+partial `git add`/staging across agents collides on that one file even
+when their actual work doesn't overlap at all. Turning it off is one line
+in `.nanojira/config.json`:
+
+```json
+{
+  "layout": { "statusFile": false }
+}
+```
+
+(merge with whatever else `layout` already has — only `statusFile` needs
+to change). Verified live: with it off, `nj doctor` does not check
+`STATUS.md` at all (no `backlog:status_stale`, clean either way) and
+`STATUS.md` itself, if one already existed from before the flag was
+flipped, is simply left wherever it was — `nj` never touches it again.
+Nothing else about the backlog changes: IDs, claims and every element's
+own file are exactly as they'd be with the file on.
+
+The same overview `STATUS.md` gave for free still has two `nj` equivalents,
+neither of which writes anything:
+
+```sh
+$ nj                 # bare: counts, top 5 ready, same "Ready to work" as always
+$ nj list --json     # every element, filterable the same way STATUS.md's
+                      # sections group them (--status, --type, --tag, …)
+```
+
+A forge or an editor browsing the repo directly loses the generated
+Markdown view, but every agent (and `nj doctor`) already gets the same
+information from `nj`/`nj list` on demand, without the merge noise.
+
 ## 9. Archive
 
 ```sh
@@ -434,6 +482,29 @@ ID-shaped (`EPIC-NNN.md`/`TSK-NNN.md`/`SUB-NNN.md`) — a stray `*.md` is
 reported, never repaired. While the configuration is invalid it writes
 nothing at all — so a mistyped `--backlog` cannot scatter tombstones into
 the wrong directory.
+
+**Too many warnings in `doctor`'s report?** `"problems": {"ignore":
+[...]}` in `.nanojira/config.json` lists warning-level codes (§ 7 of the
+spec has the full list) to stop seeing reported — in `doctor`, in
+`_problems`, and in `new`/`set`/`note`/`check`'s own text feedback —
+without touching the underlying condition itself (an ignored
+`unknown:status`, for example, still keeps its element out of
+`--ready`; only the reporting goes quiet). An **unrecognised** key or
+code anywhere in the configuration (`problems` included) is itself just
+another warning (`config:unknown_key`/`config:unknown_code`), never a
+hard failure — a typo stays visible without stopping work.
+
+**No rollout order needed for this one:** an `nj` older than 3.7 already
+silently ignores an unrecognised *top-level* config key (confirmed
+directly against 3.5.0 and 3.6.0), so adding `"problems"` or
+`"minVersion"` (below) today is safe even while some machines haven't
+upgraded yet — they simply won't act on either key until they do.
+
+**`"minVersion": "X.Y.Z"`** makes every command, including `doctor`,
+fail with `needs_newer_nj` (naming both the running and required
+versions) when this `nj` is older than that — `nj --version` and `nj
+<command> --help` still work regardless, since neither depends on the
+backlog's configuration the way every other command does.
 
 ## 11. Who's acting: `NJ_AUTHOR` and `--as`
 

@@ -2275,6 +2275,143 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      tools/release-local.sh; `current` → 3.6.0. Both teams are notified, and
      the answers are noted in their feedback backlogs.
 
+162. **Feedback is versioned in its own repository** (2026-10-07, user: "Das
+     gefällt mir"). `feedback/` is now its own git repository (`git init`
+     inside the folder, branch main, first commit 81e62b7). The nanojira
+     repo keeps ignoring it (06eadd7), so no feedback commit enters the
+     development history, and the teams' path is unchanged. The claims of
+     each feedback backlog stay ignored through that backlog's own
+     `.gitignore`. The NanoJira Lead commits new items and answer notes at
+     each triage. This corrects the Lead's earlier reply to team-a
+     ("we don't version it"). New since D161: team-b-tests TSK-011
+     (acceptance text without checkboxes can never be ticked, and doctor is
+     silent) and team-a TSK-006 (done allowed with empty acceptance).
+     Both are queued for v3.7 together with TSK-008..010 and the `rm --help`
+     gap.
+
+163. **v3.7: second feedback round** (2026-10-07; the user: "mach das so, wie
+     du es für richtig hältst"). Triage by the Lead:
+     - **A:** `nj rm --help` gets per-flag lines, like every other command
+       (rm has no flag-table entry because it is not MCP-exposed, so help
+       needs its own source for rm's flags). Found by the Verifier, D161.
+     - **B:** `set --add-tags=a,b` / `--remove-tags=c` (also in batch).
+       Adding a present tag or removing an absent one is a no-op. These
+       flags combined with `--tags=` are `invalid_value`. nj-mcp `set` gets
+       both. (team-b-tests TSK-008)
+     - **C:** STATUS.md merge noise is docs only. `layout.statusFile: false`
+       already switches the file off (§ 4/§ 5). GUIDE gets a section for
+       several agents in one tree, recommending it, plus how to get the same
+       overview from `nj`. (team-b-tests TSK-009)
+     - **D:** the override flag is docs only. The `--json` hint already
+       names `--allow-open-children`, but codes are the contract and prose
+       is not. So § 9's failure-code table gains a closed column "override
+       flag" for every refusal that has one (children_open →
+       --allow-open-children, the compare-before-write refusals → --force,
+       …), and AGENT-INSTRUCTIONS points to it. The JSON shape is unchanged.
+       (team-b-tests TSK-010)
+     - **E/F:** acceptance quality becomes visible, never blocking. Two new
+       warning codes, shown by `doctor` and in new/set output (text +
+       `_problems`). A task/subtask whose acceptance section has text but
+       no checkbox item cannot be ticked (`check` has nothing to tick).
+       A `done` task/subtask with an empty or absent acceptance section was
+       never defined as done. The Oracle names the codes in the closed
+       vocabulary. Nothing is rejected or rewritten: existing backlogs
+       must not start failing. (team-b-tests TSK-011, team-a
+       TSK-006)
+     Out of scope for v3.7: addressed notes + inbox (EPIC-013) and JSON
+     input (EPIC-014), both planned after v3.7, asking the other leads
+     first; distribution via a remote. Process as usual. Replay: new
+     classes allowed only for help text and the new warnings.
+
+164. **After v3.7: JSON input yes, inbox shelved.** Both outside leads
+     answered the needs check (2026-10-07):
+     - *Addressed notes + inbox (EPIC-013):* both said "rather no" or "don't
+       care". Hand-offs must wake the receiver, and only team messages
+       do that. An nj inbox nobody is woken by would be a second channel to
+       watch. Shelved (status blocked).
+     - *JSON input (EPIC-014):* both need it, daily. Their errors come from
+       shell quoting of multi-line acceptance, backslash titles and zsh
+       loops, not from nj. Both want one `new` call for a whole plan (task +
+       subtasks + review subtask). It is v3.8, next after v3.7. Design
+       constraint: elements in one array must be able to name a parent that
+       is created in the same call, so nesting (`children: [...]`) or local
+       references are required. The spec pins one of them, and also what
+       happens on a failure mid-plan.
+
+165. **Warnings can be switched off per backlog.** The Oracle's read-only
+     count for the D163 E/F codes: team-a would get 0 + 5 warnings,
+     but team-b-tests would get 10 `acceptance:no_checkbox` and 287
+     `done:no_acceptance`. Most of their done elements track completion via
+     tags and an external test case, with the acceptance section empty on
+     purpose. 287 warnings in `doctor` is noise that hides real findings.
+     Ruling: a new optional config key `problems.ignore`, a list of
+     **warning** codes. Codes listed there are suppressed everywhere:
+     doctor, `_problems`, write feedback and counts. Error codes and
+     `incomplete:*` cannot be listed (`invalid_config`), so the ready rule
+     and real defects stay visible. The default is empty, so both new codes
+     are on. The Lead tells team-b before the release and suggests
+     `"problems": {"ignore": ["done:no_acceptance"]}` if the empty
+     acceptance is deliberate for them. This also answers the v3.5 friction
+     "claims_unignored has no opt-out" (D157). The Oracle adds § 5 + § 7
+     wording and an AC. The Implementer builds it with E/F.
+
+166. **Config forward compatibility, from 3.7** (team-b-tests TSK-012,
+     2026-10-07). Today an older nj fails every command with
+     `invalid_config` on a key written for a newer one. That makes the
+     rollback and mixed-version machines a trap. Ruling, all part of 3.7:
+     1. An unknown top-level config key is a **warning**
+        (`config:unknown_key`, reported by doctor) instead of an error, so
+        typos stay visible but nothing stops working.
+     2. An unknown code in `problems.ignore` is a warning
+        (`config:unknown_code`) and is skipped. A *known* error or
+        `incomplete:*` code listed there stays `invalid_config`, because
+        that is misuse, not version skew. This amends D165.
+     3. An optional `"minVersion": "3.7.0"`. If the running nj is older, it
+        fails every command with a clear new code (`needs_newer_nj`, naming
+        both versions) instead of a bare invalid_config.
+     **Correction (same day):** the premise was wrong. The Lead claimed
+     that older nj rejects unknown top-level keys and did not check it. The
+     Oracle found, and the Lead confirmed live with 3.5.0 and 3.6.0, that
+     unknown TOP-LEVEL keys are silently ignored today. Only the nested
+     blocks (`layout`, `claims`) have closed key sets. So `problems` and
+     `minVersion` are harmless to 3.5/3.6, and rollback is safe. What 3.7
+     changes for top-level keys: silent becomes a visible warning (point 1),
+     and minVersion is honoured from 3.7 on. Unknown keys INSIDE a nested
+     block also become warnings, for the same reason.
+     The Oracle specs it with D165; the Implementer builds it with E/F.
+
+167. **The E/F warnings skip archived elements.** The Implementer found that
+     `done:no_acceptance` also fires on archived elements (ac-13's fixture
+     archives done items that have empty acceptance). An archived element is
+     history; nobody can act on a warning about its acceptance. Ruling: both
+     `acceptance:no_checkbox` and `done:no_acceptance` apply to live
+     elements only. The Oracle amends § 7, ac-13 and AC-49 (one leg for an
+     archived done element with empty acceptance: no warning). Also stale:
+     ac-17's PLACEMENT case "flat, then an unknown layout key" used an
+     unknown key as its stand-in for an invalid config, which is no longer
+     invalid after D166. It must use a genuinely invalid value instead.
+
+168. **v3.7 accepted: second feedback round.** Passed verification:
+     - A–D (rm --help, --add-tags/--remove-tags, statusFile docs,
+       override-flag table): v3-7-ab.md;
+     - E/F warnings, problems.ignore, config forward compatibility and the
+       archived exemption: v3-7-tsk052.md.
+     All 457 replay diffs vs oracle-frozen-12 fall into six accepted
+     classes: leaf rule 171, new warnings 217, config:unknown_key 40, set
+     hint 22, help 6, scratch call 1. The Lead re-ran AC-01/13/17/29/32/39/
+     40/46/48/49: all pass; build:check is byte-identical; `nj --version`
+     gives 3.7.0. Fixed along the way: `nj init` briefly wrote a `problems`
+     block. The replay caught it, no AC did, and fcbb3b0 now pins init's
+     config byte-exact. Also fixed: three stale failure-vocabulary lists in
+     test/edge, and the § 9 tags prose.
+     Known limit (Verifier): "ignored codes never affect readiness" holds
+     but cannot be proven by a test today, because both eligible
+     ready-blocking codes are confounded by the status check.
+     Dogfooding: the show-shape trap (`entries[0]` vs `entry`) bit an AC
+     author a second time, a candidate for later. Claims are held after the
+     spec phase, so the next phase must steal them.
+     TSK-049..052 and EPIC-015 are done; tag `v3.7`; `current` → 3.7.0.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

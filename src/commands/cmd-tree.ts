@@ -52,7 +52,7 @@ function cmdTree(flags: Flags) {
   }
   if (ordered.length === 0) { out('(empty backlog)'); return 0; }
   for (const { el, depth } of ordered) {
-    out(`${'  '.repeat(depth)}${el.id}  ${el.status.padEnd(8)} ${el.title}${el.archived ? ' (archived)' : ''}${problemSuffix(el)}`);
+    out(`${'  '.repeat(depth)}${el.id}  ${el.status.padEnd(8)} ${el.title}${el.archived ? ' (archived)' : ''}${problemSuffix(el, ctx.cfg)}`);
   }
   return 0;
 }

@@ -5,6 +5,88 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nj --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 3.7.0
+
+Fixes and discoverability, in response to a second round of feedback from
+the first two outside teams:
+
+- **`nj rm --help` now shows its own flag lines** (`--id`, `--file`,
+  `--cascade`), the same as every other command — it used to show only
+  the synopsis line. Closes the known gap noted in 3.6.0 below.
+
+- **`nj set --add-tags=<list>` / `--remove-tags=<list>`**: an incremental
+  alternative to `--tags=`, which always replaced the whole list.
+  `--remove-tags` takes effect first, then `--add-tags` appends anything
+  named there not already present; adding a tag already there, or
+  removing one that isn't, is a no-op, not an error. Combined with
+  `--tags=` in the same call is rejected — pick one or the other. Also
+  works in batch (`--id=A,B,C`) and over `nj-mcp`'s `set` tool.
+  (team-b-tests TSK-008)
+
+- **`layout.statusFile: false` for several agents in one working tree.**
+  `STATUS.md` is rewritten after every write, which collides across
+  agents committing from the same tree even when their real work doesn't
+  overlap. Setting `layout.statusFile: false` in `.nanojira/config.json`
+  turns it off — `doctor` stops checking it, and an existing file is left
+  alone. The same overview is still available without it: bare `nj`
+  (counts, top ready) and `nj list --json`. See `docs/GUIDE.md` § 8 for
+  the full write-up. (team-b-tests TSK-009)
+
+- **Failure codes that have an override flag now say so in the spec.**
+  `docs/SPECIFICATION.md` § 9's failure-code table gained a closed
+  "Override flag" column — `--allow-open-children`, `--force`,
+  `--cascade`, `--steal=<holder>` are the only four that exist; everything
+  else needs the underlying condition fixed, not a flag. No change to the
+  `--json` shape — the hint already carried this in prose; the table is
+  now a lookup instead of a re-read every time. (team-b-tests
+  TSK-010)
+
+- **Two new warnings about acceptance-criteria quality**, shown by
+  `doctor` and in `new`/`set`/`note`/`check`'s own text feedback — never
+  blocking, never rejecting a write, never changing `--ready`/`list`/any
+  count:
+  - a task/subtask's acceptance section has text but no `- [ ]` checkbox
+    line, so `nj check` has nothing to tick (team-b-tests TSK-011);
+  - a `done` task/subtask has an empty or absent acceptance section — it
+    was never defined what "done" means for it (team-a TSK-006).
+
+  Both are **live elements only** — an archived element never gets
+  either warning, since nobody can act on one about history.
+
+  **If either warning is noise for your backlog** — for example, if your
+  `done` elements track completion some other way (tags, an external
+  test case) and leaving acceptance criteria empty is deliberate — list
+  the code in a new, optional config block to stop seeing it reported,
+  everywhere it would otherwise appear:
+  ```json
+  "problems": {"ignore": ["done:no_acceptance"]}
+  ```
+  Any warning-severity code from `docs/SPECIFICATION.md` § 7 can be
+  listed this way; an error code or an `incomplete:*` code cannot
+  (rejected, so a real defect or the readiness rule itself can never be
+  silenced by configuration).
+
+- **Config forward compatibility.** Before 3.7, a config key written for
+  a newer `nj` made every command on an older one fail outright
+  (`invalid_config`) — a trap for rollback and mixed-version machines.
+  From 3.7: an unrecognised config key — top level, or inside `layout`/
+  `layout.folders`/`claims`/`problems` — is a warning (`doctor` reports
+  it), not a hard failure; every command still works. **No special
+  rollout order needed for the two new keys above:** an `nj` older than
+  3.7 already silently ignores an unrecognised *top-level* key (confirmed
+  directly against 3.5.0 and 3.6.0), so `"problems"` is safe to set today
+  even while some machines haven't upgraded yet — they simply won't act
+  on it until they do. An unrecognised key *inside* a nested block
+  (`layout`/`claims`) was a hard failure before 3.7 and is this same
+  warning from 3.7 on. (team-b-tests TSK-012)
+
+- **Optional `"minVersion": "X.Y.Z"`** in `.nanojira/config.json`: if the
+  running `nj` is older, every command fails with a clear `needs_newer_nj`
+  error naming both versions, instead of a confusing `invalid_config`. Set
+  it once your own team has standardised on 3.7 or later — an `nj` that
+  predates this feature doesn't know to honour it, the same "ignored
+  until the fleet catches up" story as `problems`, above.
+
 ## 3.6.0
 
 Fixes, in response to feedback from the first two outside teams running nj:

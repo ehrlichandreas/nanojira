@@ -232,12 +232,46 @@ function sectionHeadingIndex(lines: string[], names: string[]) {
   return -1;
 }
 
+// After optional leading whitespace, a list marker then `[ ]`/`[x]`/`[X]`
+// (§ 10a) — the one countable-checkbox shape, shared by `nj check`'s own
+// scan and `acceptance:no_checkbox`'s span check (DECISIONS 163 E) so the
+// two can never disagree on what counts as a checkbox.
+const CHECKBOX_RE = /^([ \t]*)(-|\*|\+|\d+\.|\d+\))\ \[( |x|X)\](.*)$/;
+
 // A section ends at the next `#`/`##` heading; `###`+ is content (decision 11).
 function sectionEnd(lines: string[], headingIdx: number) {
   for (let i = headingIdx + 1; i < lines.length; i++) {
     if (/^#{1,2}[ \t]/.test(lines[i])) return i;
   }
   return lines.length;
+}
+
+/**
+ * `acceptance:no_checkbox` (§ 7, DECISIONS 163 E): true when the role's own
+ * section span (heading to the next `#`/`##` heading or the end of the
+ * body — the same span `sectionHeadingIndex`/`sectionEnd` already define)
+ * contains at least one countable checkbox line. A fenced code block
+ * within the span is skipped exactly the way `nj check`'s own scan skips
+ * one (§ 10a) — a checkbox-shaped example line inside ``` ``` ``` never
+ * counts. False when the section has no heading at all (nothing to scan).
+ */
+function sectionHasCheckbox(body: string, names: string[]): boolean {
+  const lines = body.split('\n');
+  const idx = sectionHeadingIndex(lines, names);
+  if (idx === -1) return false;
+  const end = sectionEnd(lines, idx);
+  let fence: { ch: string; len: number } | null = null;
+  for (let i = idx + 1; i < end; i++) {
+    const line = lines[i];
+    const fm = /^[ \t]*(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (fm && fm[1][0] === fence.ch && fm[1].length >= fence.len) fence = null;
+      continue;
+    }
+    if (fm) { fence = { ch: fm[1][0], len: fm[1].length }; continue; }
+    if (CHECKBOX_RE.test(line)) return true;
+  }
+  return false;
 }
 
 function normalizeSectionContent(raw: string) {
@@ -356,5 +390,5 @@ function parseNotes(body: string): NoteLine[] {
   return notes;
 }
 
-export { parseFile, serialize, h1Of, syncH1, sectionPresent, normalizeTitle, normalizeSectionContent, applySections, parseNotes };
+export { parseFile, serialize, h1Of, syncH1, sectionPresent, sectionHasCheckbox, CHECKBOX_RE, normalizeTitle, normalizeSectionContent, applySections, parseNotes };
 export type { NoteLine };

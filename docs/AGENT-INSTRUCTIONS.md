@@ -30,6 +30,10 @@ and subtasks, one Markdown file per element, committed alongside the code.
   state, then `nj set --id=<id> --status=... [--title=... --priority=...
   --tags=... --assignee=... --depends-on=... --description=...
   --acceptance=...]` to change only the fields you intend to.
+- To change *just one* tag without re-listing every other one: `nj set
+  --id=<id> --add-tags=<a,b>` / `--remove-tags=<c,d>` instead of
+  `--tags=`, which replaces the whole list. Never combine `--tags=` with
+  either in the same call (rejected) — pick one or the other.
 - When you're done with a claimed element, mark it `nj set --id=<id>
   --status=done`; if you're stopping without finishing, give the claim up
   with `nj release --id=<id> --as=<your-name>` so someone else can claim
@@ -45,5 +49,10 @@ and subtasks, one Markdown file per element, committed alongside the code.
   field changes like `status` or `priority` — leave a note for those.
 - On failure, `{"ok": false, "error": "<code>", ...}` — branch on `error`,
   not on the hint text. Element-level issues arrive per entry in
-  `_problems` the same way.
+  `_problems` the same way. A `refused:*` code that has a flag to make
+  the **same** call succeed anyway (`--allow-open-children`, `--force`,
+  `--cascade`, `--steal=<holder>`) is named in
+  `docs/SPECIFICATION.md` § 9 "Failure codes — spec-named paths"'s own
+  "Override flag" column — branch on the code, not on the hint text, but
+  that table is the lookup for which flag to add, not the hint.
 ```

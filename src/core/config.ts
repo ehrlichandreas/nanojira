@@ -8,16 +8,30 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { flagString } from './args.ts';
-import { DEFAULT_CONFIG, FOLDER_ROLES, GROUPS, V3_DIR_REL, V3_CONFIG_REL, LEGACY_CONFIG_REL } from './constants.ts';
+import { DEFAULT_CONFIG, FOLDER_ROLES, GROUPS, SEVERITY, V3_DIR_REL, V3_CONFIG_REL, LEGACY_CONFIG_REL } from './constants.ts';
 import { fail } from './output.ts';
 import { sleepMs } from './store.ts';
+import { VERSION, parseVersionTuple, compareVersionTuples } from './version.ts';
 
 // ------------------------------------------------------------ configuration
 
-function validateConfig(obj: any) {
-  const errs = [];
+interface ConfigWarning { code: string; message: string }
+interface ValidationResult { errors: string[]; warnings: ConfigWarning[] }
+
+const TOP_LEVEL_KEYS = ['schema', 'statuses', 'sections', 'layout', 'claims', 'problems', 'minVersion'];
+
+function validateConfig(obj: any): ValidationResult {
+  const errs: string[] = [];
+  const warnings: ConfigWarning[] = [];
   if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
-    return ['configuration must be a JSON object'];
+    return { errors: ['configuration must be a JSON object'], warnings: [] };
+  }
+  // An unrecognised top-level key is a warning, not an error (DECISIONS
+  // 166 correcting 165/163 D's own premise): a 3.6-or-older nj silently
+  // ignored it anyway, so this is only ever a visibility change, never a
+  // behaviour change, for a binary new enough to apply this rule at all.
+  for (const k of Object.keys(obj)) {
+    if (!TOP_LEVEL_KEYS.includes(k)) warnings.push({ code: 'config:unknown_key', message: `unknown top-level key '${k}'` });
   }
   if (obj.schema !== undefined && obj.schema !== 1) errs.push(`unsupported schema ${JSON.stringify(obj.schema)} (expected 1)`);
   const st = obj.statuses;
@@ -38,18 +52,78 @@ function validateConfig(obj: any) {
       }
     }
   }
-  if (obj.layout !== undefined) errs.push(...validateLayout(obj.layout));
-  if (obj.claims !== undefined) errs.push(...validateClaims(obj.claims));
-  return errs;
+  if (obj.layout !== undefined) {
+    const r = validateLayout(obj.layout);
+    errs.push(...r.errors);
+    warnings.push(...r.warnings);
+  }
+  if (obj.claims !== undefined) {
+    const r = validateClaims(obj.claims);
+    errs.push(...r.errors);
+    warnings.push(...r.warnings);
+  }
+  if (obj.problems !== undefined) {
+    const r = validateProblems(obj.problems);
+    errs.push(...r.errors);
+    warnings.push(...r.warnings);
+  }
+  // minVersion's VALUE shape only, here -- the running-version COMPARISON
+  // (and its own needs_newer_nj short-circuit) happens earlier, in
+  // loadConfig, before this function is even called (§ 5 "minVersion",
+  // DECISIONS 166: "checked before any other configuration validation").
+  // Reached only when that comparison did not already short-circuit --
+  // i.e. minVersion is absent, malformed, or already satisfied.
+  if (obj.minVersion !== undefined && parseVersionTuple(typeof obj.minVersion === 'string' ? obj.minVersion : '') === null) {
+    errs.push(`minVersion must be exactly three dot-separated non-negative integers (got ${JSON.stringify(obj.minVersion)})`);
+  }
+  return { errors: errs, warnings };
 }
 
-// § 5: an optional top-level `claims` block, not written by `init`. Same
-// typo-safety as `layout` — an unknown key is invalid, not silently ignored.
-function validateClaims(c: any): string[] {
-  if (c === null || typeof c !== 'object' || Array.isArray(c)) return ['claims must be an object'];
-  const errs = [];
+// § 5 `problems.ignore` (DECISIONS 165/166): only a warning-severity code
+// (§ 7's own Doctor column) may be listed. A known error or `incomplete:*`
+// code is misuse, not version skew, and stays `invalid_config`; a code
+// outside § 7's closed vocabulary entirely is instead the warning
+// `config:unknown_code` and is simply skipped (166 amends 165's original
+// `invalid_config` for this one sub-case).
+function validateProblems(p: any): ValidationResult {
+  if (p === null || typeof p !== 'object' || Array.isArray(p)) return { errors: ['problems must be an object'], warnings: [] };
+  const errs: string[] = [];
+  const warnings: ConfigWarning[] = [];
+  for (const k of Object.keys(p)) {
+    if (k !== 'ignore') warnings.push({ code: 'config:unknown_key', message: `unknown key 'problems.${k}'` });
+  }
+  if (p.ignore !== undefined) {
+    if (!Array.isArray(p.ignore) || p.ignore.some((c: any) => typeof c !== 'string')) {
+      errs.push('problems.ignore must be an array of strings');
+    } else {
+      for (const code of p.ignore) {
+        const sev = SEVERITY[code];
+        if (sev === undefined) warnings.push({ code: 'config:unknown_code', message: `unknown code '${code}' in problems.ignore` });
+        else if (sev !== 'warning') errs.push(`problems.ignore: '${code}' is not a warning-severity code and cannot be ignored`);
+      }
+    }
+  }
+  return { errors: errs, warnings };
+}
+
+// Only a code that is BOTH recognised and warning-severity ever suppresses
+// anything -- an unknown one was already warned about and skipped above;
+// a known non-warning one would already have made the config invalid, so
+// readProblems is never reached in that case.
+function readProblems(p: any): { ignore: string[] } {
+  if (!p || !Array.isArray(p.ignore)) return { ignore: [] };
+  return { ignore: p.ignore.filter((c: string) => SEVERITY[c] === 'warning') };
+}
+
+// § 5: an optional top-level `claims` block, not written by `init`. An
+// unknown key inside it is now a warning (DECISIONS 166), the same
+// typo-safety `layout`/`layout.folders` have, just no longer fatal.
+function validateClaims(c: any): ValidationResult {
+  if (c === null || typeof c !== 'object' || Array.isArray(c)) return { errors: ['claims must be an object'], warnings: [] };
+  const errs: string[] = [];
+  const warnings: ConfigWarning[] = [];
   for (const k of Object.keys(c)) {
-    if (k !== 'staleAfterHours') errs.push(`unknown key 'claims.${k}'`);
+    if (k !== 'staleAfterHours') warnings.push({ code: 'config:unknown_key', message: `unknown key 'claims.${k}'` });
   }
   if (c.staleAfterHours !== undefined) {
     const v = c.staleAfterHours;
@@ -57,7 +131,7 @@ function validateClaims(c: any): string[] {
       errs.push(`claims.staleAfterHours must be a non-negative integer (got ${JSON.stringify(v)})`);
     }
   }
-  return errs;
+  return { errors: errs, warnings };
 }
 
 function readClaims(c: any): { staleAfterHours: number } {
@@ -65,23 +139,25 @@ function readClaims(c: any): { staleAfterHours: number } {
   return { staleAfterHours: c && c.staleAfterHours !== undefined ? c.staleAfterHours : d };
 }
 
-// § 5: every part of `layout` is optional, but what is there must be right —
-// an unknown key is a typo, and a typo must not silently fall back to a default.
-function validateLayout(lay: any): string[] {
-  if (lay === null || typeof lay !== 'object' || Array.isArray(lay)) return ['layout must be an object'];
-  const errs = [];
+// § 5: every part of `layout` is optional, but what is there must be right.
+// An unknown key inside it is now a warning (DECISIONS 166) rather than
+// fatal -- a typo stays visible without stopping work.
+function validateLayout(lay: any): ValidationResult {
+  if (lay === null || typeof lay !== 'object' || Array.isArray(lay)) return { errors: ['layout must be an object'], warnings: [] };
+  const errs: string[] = [];
+  const warnings: ConfigWarning[] = [];
   for (const k of Object.keys(lay)) {
-    if (!['group', 'folders', 'statusFile'].includes(k)) errs.push(`unknown key 'layout.${k}'`);
+    if (!['group', 'folders', 'statusFile'].includes(k)) warnings.push({ code: 'config:unknown_key', message: `unknown key 'layout.${k}'` });
   }
   if (lay.group !== undefined && !GROUPS.includes(lay.group)) {
     errs.push(`layout.group must be one of ${GROUPS.join(', ')} (got ${JSON.stringify(lay.group)})`);
   }
   if (lay.statusFile !== undefined && typeof lay.statusFile !== 'boolean') errs.push('layout.statusFile must be true or false');
   const f = lay.folders;
-  if (f === undefined) return errs;
-  if (f === null || typeof f !== 'object' || Array.isArray(f)) return errs.concat(['layout.folders must be an object']);
+  if (f === undefined) return { errors: errs, warnings };
+  if (f === null || typeof f !== 'object' || Array.isArray(f)) { errs.push('layout.folders must be an object'); return { errors: errs, warnings }; }
   for (const k of Object.keys(f)) {
-    if (!(FOLDER_ROLES as string[]).includes(k)) errs.push(`unknown key 'layout.folders.${k}'`);
+    if (!(FOLDER_ROLES as string[]).includes(k)) warnings.push({ code: 'config:unknown_key', message: `unknown key 'layout.folders.${k}'` });
   }
   // Compared case-insensitively: APFS and NTFS are, by default (DECISIONS 91).
   const names: string[] = [];
@@ -98,7 +174,7 @@ function validateLayout(lay: any): string[] {
     if (names.includes(name.toLowerCase())) errs.push(`layout.folders: '${name}' is used twice — folder names must be distinct`);
     names.push(name.toLowerCase());
   }
-  return errs;
+  return { errors: errs, warnings };
 }
 
 function readLayout(lay: any): Layout {
@@ -121,24 +197,39 @@ function loadConfig(backlog: string, legacy?: boolean) {
   try {
     raw = fs.readFileSync(file, 'utf8');
   } catch {
-    return { config: DEFAULT_CONFIG, errors: [`${rel} is missing`] };
+    return { config: DEFAULT_CONFIG, errors: [`${rel} is missing`], warnings: [], needsNewerNj: null };
   }
   let obj;
   try {
     obj = JSON.parse(raw);
   } catch (e: any) {
-    return { config: DEFAULT_CONFIG, errors: [`${rel} is not valid JSON: ${e.message}`] };
+    return { config: DEFAULT_CONFIG, errors: [`${rel} is not valid JSON: ${e.message}`], warnings: [], needsNewerNj: null };
   }
-  const errors = validateConfig(obj);
-  if (errors.length > 0) return { config: DEFAULT_CONFIG, errors };
+  // minVersion (§ 5, DECISIONS 166): checked before any other validation --
+  // a well-formed, unmet requirement short-circuits straight to
+  // needs_newer_nj, never a confusing report about fields this binary may
+  // not even recognise. A malformed minVersion, or one already satisfied,
+  // falls through to the normal validation below (where a malformed one is
+  // reported as any other bad value is, § 5 "minVersion").
+  if (obj !== null && typeof obj === 'object' && !Array.isArray(obj) && typeof obj.minVersion === 'string') {
+    const required = parseVersionTuple(obj.minVersion);
+    if (required !== null && compareVersionTuples(parseVersionTuple(VERSION) as [number, number, number], required) < 0) {
+      return { config: DEFAULT_CONFIG, errors: [], warnings: [], needsNewerNj: { running: VERSION, required: obj.minVersion } };
+    }
+  }
+  const { errors, warnings } = validateConfig(obj);
+  if (errors.length > 0) return { config: DEFAULT_CONFIG, errors, warnings, needsNewerNj: null };
   return {
     config: {
       schema: 1, statuses: obj.statuses.slice(),
       sections: { description: obj.sections.description.slice(), acceptance: obj.sections.acceptance.slice() },
       layout: readLayout(obj.layout),
       claims: readClaims(obj.claims),
+      problems: readProblems(obj.problems),
     },
     errors: [],
+    warnings,
+    needsNewerNj: null,
   };
 }
 

@@ -415,8 +415,6 @@ Rules:
 - While the configuration is invalid (`config:invalid`), no placement is
   judged: `type:folder` and `layout:misplaced` are not reported, because the
   layout they would be judged against is unknown (DECISIONS 102).
-- An unknown key inside `layout` or `layout.folders` is invalid — a typo must
-  not silently fall back to a default.
 - Changing `layout` is always allowed; it never invalidates the configuration.
   The elements then report their old places, and `nj doctor --fix` moves them
   (§ 4, § 14).
@@ -430,8 +428,61 @@ Rules:
   feature off" reading `layout.statusFile: false` already gets. A
   non-integer or negative value makes the configuration invalid
   (`config:invalid`, § 7; commands other than `doctor` fail with
-  `invalid_config`, § 9). An unknown key inside `claims` is invalid the same
-  way, the same typo-safety `layout`/`layout.folders` already have.
+  `invalid_config`, § 9).
+- **`problems.ignore`** (DECISIONS 165/166, § 7 "Acceptance quality warnings"
+  has the full mechanism): an optional top-level `"problems": {"ignore":
+  [...]}` block, not written by `init`. `ignore` is a list of problem codes
+  (§ 7) to suppress from every place a code is reported. Default, when the
+  key or the whole `problems` block is absent: the empty list — nothing is
+  suppressed, exactly today's behaviour. Only a code whose § 7 Doctor
+  severity is **warning** may be listed; a **known error**-severity code or
+  any `incomplete:*` code (severity `—`) is still `invalid_config`, naming
+  the offending code — that is misuse, not version skew, and it would mean
+  a real defect, or the ready rule itself, could be silenced by
+  configuration. A code that is **not in § 7's closed vocabulary at all**
+  (a typo, a retired code, or a code a *future* revision defines that this
+  build doesn't know yet) is instead the **warning** `config:unknown_code`
+  (DECISIONS 166, amending 165) and is simply **skipped** — it contributes
+  nothing to the ignore set, but every other, valid code listed alongside
+  it still applies.
+- **`minVersion`** (DECISIONS 166): an optional top-level `"minVersion":
+  "X.Y.Z"` — three dot-separated non-negative integers, nothing else. If
+  the running `nj`'s own version (the same value `--version` reports) is
+  older than `minVersion`, comparing `(major, minor, patch)` as integer
+  tuples component by component (`3.9.0` is older than `3.10.0` — numeric,
+  never a string compare), **every** command — including `doctor`, which
+  `invalid_config` otherwise exempts; there is nothing `doctor --fix` could
+  repair about the running binary's own version — fails with a new code,
+  `needs_newer_nj` — its hint (so it is visible under `--json` too, not
+  only in the stderr message) names both the running version and
+  `minVersion` — checked before any other configuration validation (so an old binary gets
+  this one, specific, actionable reason rather than a confusing report
+  about fields it may not recognise). `nj --version` and `nj <command>
+  --help` are unaffected: neither resolves a backlog/config at all
+  (`--version`) or ever fails on one (`--help`'s existing best-effort,
+  silent resolution, § 9) — both pre-date this check structurally, not as
+  a special case carved out for it. A `minVersion` that is not exactly
+  three dot-separated non-negative integers is `invalid_config` — a bad
+  *value* for a recognised key, the same category `layout.statusFile: not
+  a boolean` already is, not a version-skew question at all.
+- **Unknown keys are warnings, not errors** (DECISIONS 166, correcting
+  165/163 D's own premise): an unknown **top-level** key (anything other
+  than `schema`, `statuses`, `sections`, `layout`, `claims`, `problems`,
+  `minVersion`) — and, as of this same revision, an unknown key **inside**
+  `layout`, `layout.folders`, `claims` or `problems` too — no longer makes
+  the configuration invalid. Every command still succeeds; `doctor`
+  reports the warning `config:unknown_key`, naming the key, so a typo
+  stays visible without stopping work. **The
+  honest limit:** this only ever applies going forward, from the nj
+  revision that understands it (3.7). A 3.6-or-older `nj` cannot
+  retroactively learn the new, more lenient rule — it still fails
+  strictly (`invalid_config`) on an unknown key inside a nested block
+  (`layout`/`claims`), exactly as it always has. Only **top-level** keys
+  were ever silently tolerated by old binaries (confirmed live against
+  3.5.0 and 3.6.0: an unrecognised top-level key is accepted and ignored,
+  not rejected) — which is why adding `problems`/`minVersion` today is
+  safe on a machine that has not yet upgraded, while a *nested*-block
+  addition would not be.
 
 ---
 
@@ -578,7 +629,7 @@ case-insensitively against the configured names; a trailing `:` is tolerated.
 Epics are exempt from the acceptance requirement: an epic's acceptance is the
 union of its children's.
 
-### Problem codes — closed vocabulary
+### Problem codes — closed vocabulary (DECISIONS 163 E/F, 166)
 
 `_problems` (§ 9) carries codes from this closed table. **Adding a code is
 additive; renaming or redefining one is forbidden.** Each code maps to the
@@ -614,6 +665,8 @@ condition that produces it:
 | `title:h1_mismatch` | H1 ≠ `title` | warning | no |
 | `incomplete:description` | description section absent/empty | — | yes |
 | `incomplete:acceptance` | acceptance section absent/empty (task/subtask) | — | yes |
+| `acceptance:no_checkbox` | acceptance section has content but no countable checkbox line (task/subtask) — nothing for `check` to tick | warning | no |
+| `done:no_acceptance` | `status` is `done` and the acceptance section is absent/empty (task/subtask) | warning | no |
 | `active_refs_archived` | `depends_on` points into the archive (satisfied) | — | no |
 | `id:no_tombstone` | element file has no tombstone (hand-created, or partial tombstone loss) | warning | no |
 | `backlog:stray_tmp` | stray `.nj-tmp-*` file (crashed write), backlog-level | warning | — |
@@ -623,6 +676,8 @@ condition that produces it:
 | `backlog:unreadable_dir` | a directory below the backlog cannot be listed (permissions), backlog-level | error | — |
 | `backlog:status_stale` | `STATUS.md` differs from a fresh rendering or is missing (§ 4), backlog-level | warning | — |
 | `backlog:claims_unignored` | `.nanojira/claims/` exists and `.gitignore` has no line that is exactly `.nanojira/claims/`, backlog-level | warning | — |
+| `config:unknown_key` | an unrecognised top-level config key, or an unrecognised key inside `layout`/`layout.folders`/`claims`/`problems`, backlog-level (DECISIONS 166) | warning | — |
+| `config:unknown_code` | a code in `problems.ignore` outside § 7's closed vocabulary, backlog-level (DECISIONS 166) | warning | — |
 
 The two axes are independent: **Doctor** says whether a code is a doctor
 finding, **Blocks `--ready`** says whether it keeps an element out of the
@@ -636,9 +691,170 @@ invariant: for element-level codes, Doctor = `error` implies Blocks = `yes`
 — an element with an error finding is never Complete, hence never ready, and
 the columns must not disagree. A code can block `--ready` without being a
 finding (`incomplete:*`) and a warning finding need not block `--ready`
-(`id:no_tombstone`, `parent:orphaned`). `doctor --json` problem objects carry
+(`id:no_tombstone`, `parent:orphaned`, `acceptance:no_checkbox`,
+`done:no_acceptance`). `doctor --json` problem objects carry
 the field `severity` (the Doctor column value); `ok` is true exactly when no
 `error` finding exists.
+
+### Acceptance quality warnings (DECISIONS 163 E/F, 167)
+
+Found by an outside team (feedback/team-b-tests TSK-011: acceptance
+text without `- [ ]` lines is silently untickable, and `doctor` says
+nothing; feedback/team-a TSK-006: a `done` task/subtask with empty
+acceptance criteria was never defined as "done", and `doctor` says
+nothing about that either). Both become visible, **never blocking**:
+nothing new is rejected, and no existing backlog starts failing where it
+did not before — a backlog with many such elements today keeps working
+exactly as it does now, just with warnings added to `doctor`'s report.
+
+- **E, `acceptance:no_checkbox`** (task/subtask, **live** elements only —
+  see below): the acceptance section is present and has content
+  (`incomplete:acceptance` does not also fire — the two are mutually
+  exclusive, since this one requires content to exist at all), but
+  scanning *that section's own span* (from its heading to the next
+  `#`/`##` heading or the end of the body — `core/parse.ts`'s existing
+  `sectionHeadingIndex`/`sectionEnd`) for a countable checkbox line (`nj
+  check`'s own rule, § 10a: a list marker — `-`, `*`, `+`, or an ordered
+  `N.`/`N)` — then one space, then `[ ]`/`[x]`/`[X]`; a fenced code
+  block within the section, opened and closed the same way § 10a's own
+  scan already skips one, is never counted) finds **zero**. A checkbox
+  that exists elsewhere in the body (a different section) does not
+  satisfy this — the warning is about *this* section's own content, not
+  the file as a whole.
+- **F, `done:no_acceptance`** (task/subtask, **live** elements only — see
+  below): `status` is `done` and the acceptance section is absent or
+  empty — the same condition `incomplete:acceptance` already names (and
+  that code still fires too; the two axes are independent, same as every
+  other pair of codes that can co-occur). Only `done` triggers this one
+  — not blocking `--ready` to begin with, since `--ready` already
+  requires the first configured status, `done` can never reach it
+  regardless of this warning, so Blocks `--ready` = no is not a new
+  leniency, just consistent with what was already true.
+
+**Both apply to live elements only** (DECISIONS 167): an **archived**
+element never carries `acceptance:no_checkbox` or `done:no_acceptance`,
+whatever its acceptance section holds. An archived element is history —
+nobody can act on a warning about it, the same reason archived work is
+read-only everywhere else (§ 9, § 11). `archive` already requires every
+element in the subtree to be `done`, but never content-complete (§ 11),
+so archiving an incomplete element was always possible; this exemption
+just stops that archive from retroactively picking up a *new* warning
+in the process — neither code's own motivating report (team-b-
+tests TSK-011, team-a TSK-006) was ever about archived history,
+only live-backlog noise.
+
+Both are shown by `doctor` (warning severity, so `doctor`'s exit code is
+unaffected — 0 unless some other, unrelated error exists) and by `new`/
+`set`/`note`/`check`'s own text feedback, the same place `incomplete:*`
+already appears:
+
+```
+⚠ TSK-009 has acceptance criteria with no checkbox items — nothing for check to tick.
+⚠ TSK-010 is done with no acceptance criteria.
+```
+
+Counted, read-only, against the two outside teams' real backlogs before
+this lands (so the Lead can warn them what to expect): team-a's 54
+elements get 0 new E warnings and 5 new F warnings (`SUB-003`, `SUB-008`,
+`SUB-014`, `SUB-017`, `TSK-005`); team-b-app-test's 960
+elements get 10 new E warnings (`SUB-176`, `SUB-177`, `SUB-194`,
+`SUB-195`, `SUB-196`, `SUB-198`, `TSK-028`, `TSK-029`, `TSK-030`,
+`TSK-724`) and 287 new F warnings — most of that backlog's own `done`
+elements track completion through tags and an external test-case
+reference instead of a checklist, with `## Acceptance Criteria` left
+empty by design. None of this changes `--ready`, `list`, or any count:
+only `doctor`'s own report and `new`/`set`/`note`/`check`'s prose gain
+these two warnings.
+
+### Warnings can be switched off per backlog: `problems.ignore` (DECISIONS 165, amended 166)
+
+The read-only count above is exactly what motivated this: 287 warnings in
+one `doctor` run is noise that buries real findings, for a team whose
+`done` elements track completion through tags and an external test case
+on purpose, acceptance left empty by design. `problems.ignore` (§ 5) is a
+list of **warning**-severity codes (§ 7's own Doctor column) a backlog
+chooses to never see reported, at all, again — a config-level opt-out,
+not a one-off `--fix` or a flag on each call.
+
+**What "suppressed everywhere" means, precisely:** once a code is listed,
+it never appears in `doctor`'s findings (text or `--json`'s `problems`
+array), never in any element's `_problems` (reads and write results
+alike), never in `new`/`set`/`note`/`check`'s own text feedback, and
+`doctor`'s own warning tally no longer counts it. A backlog-level code
+(one with no single element behind it, e.g. `backlog:claims_unignored`)
+is suppressed from `doctor`'s findings the same way — it was never in any
+element's `_problems` to begin with, so the other three places are moot
+for it.
+
+**What it does *not* change: the readiness rule.** `--ready` (§ 9) keeps
+evaluating the exact same underlying condition every element always had,
+whether or not that condition's code is on the ignore list — ignoring
+`unknown:status` (a warning, and one that *does* block `--ready`, § 7)
+stops it being reported, but an element with a genuinely unrecognised
+status is still excluded from `--ready`, exactly as before. Suppressing
+the report is not excusing the defect; only `--json`/`doctor`'s *view* of
+it changes, never the ready computation itself, `list`, or any count
+driven by an error or `incomplete:*` code (neither of which can ever be
+listed to begin with).
+
+**Validity** (§ 5): only a code whose § 7 Doctor severity is **warning**
+may appear in `ignore`. Today's full closed list of warning-severity
+codes — the only ones ever eligible — is: `missing:status`,
+`missing:created`, `missing:updated`, `id:derived`, `type:derived`,
+`parent:orphaned`, `unknown:status`, `unknown:priority`,
+`done:open_children`, `title:h1_mismatch`, `id:no_tombstone`,
+`backlog:stray_tmp`, `claim:mismatch`, `claim:orphaned`, `claim:stale`,
+`backlog:claims_unignored`, `acceptance:no_checkbox`,
+`done:no_acceptance`, `config:unknown_key`, and `config:unknown_code`
+themselves (DECISIONS 166 — both are warnings, so both are eligible to
+be silenced the same way any other warning is; nothing about being part
+of this very mechanism exempts them). A **known error**-severity code, or any
+`incomplete:*` code (severity `—`, and the one axis this feature must
+never touch — § 7's own "never blocking" promise for E/F would mean
+nothing if the thing one rung up, `incomplete:acceptance`, could be
+silenced), is still `invalid_config`, naming the offending code — that
+is misuse, not version skew, so it stays a hard failure. A code **not in
+§ 7's closed vocabulary at all** (a typo, a retired code, or one a
+*future* revision defines that this build doesn't know yet) is instead
+the warning `config:unknown_code` (DECISIONS 166, amending the original
+165 ruling above, which had this as `invalid_config` too) — `doctor`
+reports it, naming the unrecognised code, and it is simply **skipped**:
+it suppresses nothing, but every other, valid code in the same list
+still does.
+
+This also answers a piece of v3.5 dogfooding friction (`backlog:claims_
+unignored` has no opt-out, even for a backlog deliberately tracking
+claims in git on purpose): it is a warning-severity code, so it is
+eligible for `problems.ignore` like any other.
+
+**Re-counted, read-only, with `done:no_acceptance` ignored** (so the Lead
+can share the effect before suggesting it): team-b-app-
+test's 287 `done:no_acceptance` warnings drop to 0; its 10
+`acceptance:no_checkbox` warnings are unaffected (not on their list) —
+confirming the feature removes exactly the noise it targets and nothing
+else. team-a's own 5 `done:no_acceptance` warnings would likewise
+drop to 0 if they chose to ignore it too (their own call, not suggested
+here).
+
+### Config forward compatibility (DECISIONS 166)
+
+Today, an older `nj` fails **every** command with `invalid_config` on a
+key written for a newer one — the correction this round itself is built
+on: the Lead assumed old `nj` already rejected an unknown top-level key
+outright and had not checked; the Oracle found, and the Lead confirmed
+live against 3.5.0 and 3.6.0, that it is **silently ignored** instead.
+From 3.7 this becomes a visible warning rather than silence, so a typo
+stays discoverable without anything stopping working — see § 5's own
+"Unknown keys are warnings, not errors" and `minVersion` rules for the
+exact behaviour and codes (`config:unknown_key`, `config:unknown_code`,
+`needs_newer_nj`), and the honest limit stated there: this relaxation is
+only ever as forward-reaching as the `nj` revision running it. A
+3.6-or-older `nj` reading a 3.7-written config still fails strictly on
+an unknown key inside a nested block — nothing retroactive changes that.
+`problems`/`minVersion` are new **top-level** keys, which is exactly the
+shape old binaries already tolerate silently, so adding either to a
+config read by a mixed-version fleet is safe; a hypothetical new
+*nested*-block key would not be, until every machine is on 3.7+.
 
 ### Canonical key order
 
@@ -762,7 +978,7 @@ tolerates being combined with anything; it recognises only itself and
 
 `nj help` lists `--version` in its command summary.
 
-### `--help` (per-command, DECISIONS 158 EV-2/EV-3)
+### `--help` (per-command, DECISIONS 158 EV-2/EV-3, 163 A)
 
 `nj <command> --help` prints **that command's own** synopsis and flags —
 not the general help every command used to fall back to. `nj help` and
@@ -785,6 +1001,16 @@ A command's own `--help` text has, in order:
    vocabulary** (`--type`, `--status`, `--priority`) names its allowed
    values on the same line; any other flag is marked free-form, nothing
    invented about it.
+
+`nj rm --help` gets these same per-flag lines (`--id`, `--file`,
+`--cascade`) too (DECISIONS 163 A) — it had none before this, not because
+anything about `rm` itself is different, but because `rm` is never
+exposed as an `nj-mcp` tool at all (§ 17: `rm` is omitted from the tool
+list unconditionally, not merely gated), so its flags had never been
+added to the shared table either. That gate on *exposure* is separate
+from this one on *documentation*: `rm`'s own table entry answers only
+`nj rm --help`'s question, same as any other command's, and changes
+nothing about which tools `nj-mcp` offers.
 
 **Allowed values shown:** `--type` is always `epic | task | subtask`;
 `--priority` is always `low | normal | high | urgent` — neither is
@@ -943,6 +1169,48 @@ model `assignee` has (§ 6).
 - List fields are set, not appended: `--tags=a,b` replaces the list.
   `--tags=` empties it. `--tags=` / `--depends-on=` reject items containing
   `,` or `]` with a clear error.
+- **`nj set --add-tags=<list>` / `--remove-tags=<list>`** (DECISIONS 163 B):
+  an incremental alternative to replacing the whole `tags` list, for
+  `set` only (`new` has no existing list to add to or remove from).
+  Each is comma-separated and validated **per item**, exactly like
+  `--tags` (an item containing `,` or `]` is `invalid_value`). Either or
+  both may be given in one call, and both may be combined with batch
+  writes (`--id=A,B,C`, § 9 "Batch writes") — each ID's own current
+  `tags` is read and changed independently, never a shared list across
+  IDs. **Combined with `--tags=` in the same call — in any combination,
+  regardless of whether that would otherwise be a no-op — is
+  `invalid_value`, nothing written**: replacing the whole list and
+  changing it incrementally are two different intentions, and mixing
+  them is never assumed to mean one or the other.
+
+  The resulting list, pinned: **remove, then add.** First, every tag
+  named in `--remove-tags` is removed from wherever it sits in the
+  current list (removing one that is not present is a no-op for that
+  tag, not an error — the end state, "this tag is absent," is already
+  true). Then, every tag named in `--add-tags`, in the order given, is
+  appended to what remains — but only if it is not already present
+  there (adding one already present is a no-op for that tag: it is not
+  duplicated, and does not move). A tag named in **both**
+  `--remove-tags` and `--add-tags` is a different case, already covered
+  by "remove, then add" above, not this no-op rule: it is removed from
+  its old position in the first phase, so by the time the second phase
+  checks whether it is "already present there", it is not — it is
+  re-added fresh, landing at the end with every other newly added tag,
+  not left in its original spot. A tag that appears more than once
+  within `--add-tags` itself is likewise only ever added once. The
+  existing tags that were not removed **keep their original relative
+  order**; every newly added tag lands after all of them, in
+  `--add-tags`'s own order. If the result is identical, element by
+  element and in the same order, to the tags the element already had
+  (every removal and addition turned out to be a no-op), `tags` is not
+  reported in `changed` — the same "no actual change, nothing to
+  report" rule `--tags=` itself already follows.
+- `nj-mcp`'s `set` tool schema carries `add-tags` and `remove-tags` as two
+  more input fields (§ 17), the same hyphenated-name convention
+  `case-sensitive`/`allow-open-children` already use for a flag that is
+  not itself an `Element` schema field (unlike `depends-on`, which is
+  normalised to the real field name `depends_on` because one already
+  exists).
 - `nj new` validates: `--parent` required for task/subtask and must exist with
   the correct type (task→epic, subtask→task); forbidden for epics. The parent
   must be **active** — an archived parent is refused, since a fresh child of
@@ -1277,7 +1545,7 @@ problem codes: those describe element state, these describe command outcomes.
 
 ```
 no_backlog            backlog_without_config   invalid_config
-io_error
+io_error               needs_newer_nj
 invalid_env           invalid_backlog_env      unknown_field
 invalid_backlog_flag  invalid_backlog_njrc     invalid_njrc
 legacy_layout
@@ -1286,7 +1554,7 @@ invalid_value         invalid_target           not_found
 duplicate_id          exists                   changed_in_parallel
 id_allocation_failed  internal_error           ambiguous_target
 none_ready
-refused:<reason>      reason ∈ unreadable | archived | children_open |
+refused:<reason>      reason ∈ unreadable | unreadable_dir | archived | children_open |
                                has_children | not_done | parent_archived |
                                misplaced | not_archived | claimed
 fault:<hook>          hook ∈ before-compare | after-tmp-write | before-rename
@@ -1295,69 +1563,84 @@ fault:<hook>          hook ∈ before-compare | after-tmp-write | before-rename
 `--json` is defined for the command set of this section. `nj help` is not one
 of them, so its output is prose regardless of flags.
 
-### Failure codes — spec-named paths
+### Failure codes — spec-named paths (DECISIONS 163 D)
 
 Where a passage of this specification names a failure condition, it also names
-its code. These mappings are normative:
+its code. These mappings are normative.
 
-| Condition | Code | Stated in |
-|---|---|---|
-| no backlog found by the location rules | `no_backlog` | § 4 |
-| `--backlog` names a place without a backlog | `invalid_backlog_flag` | § 4 |
-| `NJ_BACKLOG` names a place without a backlog | `invalid_backlog_env` | § 4 |
-| a `.njrc` names a place without a backlog | `invalid_backlog_njrc` | § 4 |
-| a reached `.njrc` violates its format | `invalid_njrc` | § 4 |
-| backlog found but `.nanojira/config.json` is missing | `backlog_without_config` | § 4 |
-| backlog in the v2 layout (any command except `doctor`) | `legacy_layout` | § 4 |
-| `.nanojira/config.json` violates § 5 | `invalid_config` | § 5 |
-| unknown field flag | `unknown_field` | § 9 |
-| a flag other than `--backlog`/`--json` precedes the command word | `unknown_field` | § 9 "Rules" |
-| `--version` combined with another flag or an explicit subcommand | `unknown_field` | § 9 |
-| unknown subcommand | `unknown_command` | § 9 |
-| a required flag or its value is missing | `missing_argument` / `missing_value` | § 9 |
-| a value fails validation (`--status`, `--priority`, `--type`) | `invalid_value` | § 9 |
-| `--parent` names an element of the **wrong type** | `invalid_target` | § 9 |
-| `--id` and `--file` given together | `invalid_target` | § 9 |
-| `--parent` on an `epic`, which may have none | `invalid_value` | § 9 |
-| `--parent`, `--depends-on` or `--file` names nothing | `not_found` | § 9 |
-| a `--description-file` / `--acceptance-file` path cannot be read | `not_found` | § 9 |
-| two files carry the same `id` | `duplicate_id` | § 9 |
-| `init` target already exists (even an empty directory) | `exists` | § 4 |
-| a filesystem call on a named target fails (`init` into a read-only or non-directory parent; a deleted working directory) | `io_error` | § 9 |
-| an `archive` target path is occupied | `exists` | § 11 |
-| the file changed between read and write | `changed_in_parallel` | § 12 |
-| an archived element is written or removed | `refused:archived` | § 9 |
-| an unreadable stub is written, or used as `--parent` | `refused:unreadable` | § 6, § 9 |
-| `done` on a parent whose children are open (without the flag) | `refused:children_open` | § 9 |
-| `rm` while child elements exist | `refused:has_children` | § 9 |
-| `archive` with an unfinished subtree | `refused:not_done` | § 11 |
-| an archived element as `--parent` | `refused:parent_archived` | § 9 |
-| `archive` under `hierarchy` on a subtree not lying in its own folder | `refused:misplaced` | § 11 |
-| `unarchive` on an element that is not archived | `refused:not_archived` | § 11a |
-| `unarchive` under an archived parent | `refused:parent_archived` | § 11a |
-| `unarchive` while an unreadable stub exists | `refused:unreadable` | § 11a, § 9 |
-| `unarchive` of a subtree not lying in its own folder, or with an unresolvable `parent` chain (`hierarchy`) | `refused:misplaced` | § 11a |
-| an `unarchive` target path is occupied | `exists` | § 11a |
-| an `NJ_FAULT` hook fires | `fault:<hook>` | § 12 |
-| `NJ_AUTHOR` is not a valid name, on a command that uses it | `invalid_env` | § 9 |
-| `--as` is not a valid name | `invalid_value` | § 9 |
-| `claim` or `release` without an acting name | `missing_argument` | § 9 |
-| `claim`, `release` or `claim --steal` where another name holds the claim | `refused:claimed` | § 12 Claims |
-| `claim` on an archived element | `refused:archived` | § 9 |
-| `claim` on an unreadable stub | `refused:unreadable` | § 12 Claims |
-| the claim decision loop exhausts its 100 rounds | `changed_in_parallel` | § 12 Claims |
-| `next` without an acting name | `missing_argument` | § 12b |
-| `next`'s candidate list is exhausted — none `--ready`, or every candidate lost its race | `none_ready` | § 12b |
-| `log --id` names a duplicate id, without `--file` | `duplicate_id` | § 12c |
-| `log --id` names nothing | `not_found` | § 12c |
-| `log` on an unreadable stub | `refused:unreadable` | § 12c |
-| `check` on an archived element | `refused:archived` | § 9 |
-| `check` on an unreadable stub | `refused:unreadable` | § 10a |
-| `check --text`/`--item` matches no countable checkbox, or `--item` is out of range | `not_found` | § 10a |
-| `check --text` matches two or more countable checkboxes | `ambiguous_target` | § 10a |
-| `find` with the literal empty string as `<text>` | `invalid_value` | § 9a |
-| `--id=A,B,C` together with `--file` | `invalid_target` | § 9 "Batch writes" |
-| `--id=A,A` — the same ID named twice in a batch, after trimming | `invalid_value` | § 9 "Batch writes" |
+**Override flag** (DECISIONS 163 D): a flag that, added to the **same**
+call, makes it succeed anyway — derived from each refusal's own code, not
+recalled from memory, found by grepping every `fail('refused:…', …)` and
+`compareGuard`/`guardedWrite` call site for a flag it checks before
+failing. `—` means no such flag exists: the condition must actually change
+(fix the config, finish the children, wait out the race) or a different
+command must run first (`nj doctor --fix`) — the hint text may still point
+there, but that is not the **same** call succeeding anyway, which is what
+this column is reserved for. This is docs only — the `--json` shape is
+unchanged; the hint already carried this information in prose, this column
+just makes it a lookup instead of a re-read of the hint every time:
+
+| Condition | Code | Stated in | Override flag |
+|---|---|---|---|
+| no backlog found by the location rules | `no_backlog` | § 4 | — |
+| `--backlog` names a place without a backlog | `invalid_backlog_flag` | § 4 | — |
+| `NJ_BACKLOG` names a place without a backlog | `invalid_backlog_env` | § 4 | — |
+| a `.njrc` names a place without a backlog | `invalid_backlog_njrc` | § 4 | — |
+| a reached `.njrc` violates its format | `invalid_njrc` | § 4 | — |
+| backlog found but `.nanojira/config.json` is missing | `backlog_without_config` | § 4 | — |
+| backlog in the v2 layout (any command except `doctor`) | `legacy_layout` | § 4 | — |
+| `.nanojira/config.json` violates § 5 | `invalid_config` | § 5 | — |
+| the running `nj` is older than `minVersion` | `needs_newer_nj` | § 5 "`minVersion`" | — (upgrade `nj`; nothing on the same call changes this) |
+| unknown field flag | `unknown_field` | § 9 | — |
+| a flag other than `--backlog`/`--json` precedes the command word | `unknown_field` | § 9 "Rules" | — |
+| `--version` combined with another flag or an explicit subcommand | `unknown_field` | § 9 | — |
+| unknown subcommand | `unknown_command` | § 9 | — |
+| a required flag or its value is missing | `missing_argument` / `missing_value` | § 9 | — |
+| a value fails validation (`--status`, `--priority`, `--type`) | `invalid_value` | § 9 | — |
+| `--parent` names an element of the **wrong type** | `invalid_target` | § 9 | — |
+| `--id` and `--file` given together | `invalid_target` | § 9 | — |
+| `--parent` on an `epic`, which may have none | `invalid_value` | § 9 | — |
+| `--parent`, `--depends-on` or `--file` names nothing | `not_found` | § 9 | — |
+| a `--description-file` / `--acceptance-file` path cannot be read | `not_found` | § 9 | — |
+| two files carry the same `id` | `duplicate_id` | § 9 | — (address one file directly with `--file=<path>` instead) |
+| `init` target already exists (even an empty directory) | `exists` | § 4 | — |
+| a filesystem call on a named target fails (`init` into a read-only or non-directory parent; a deleted working directory) | `io_error` | § 9 | — |
+| an `archive` target path is occupied | `exists` | § 11 | — |
+| `set`/`note`/`check`: the file changed between read and write | `changed_in_parallel` | § 12 | `--force` |
+| an archived element is written or removed | `refused:archived` | § 9 | — |
+| an unreadable stub is written, or used as `--parent` | `refused:unreadable` | § 6, § 9 | — |
+| `rm`, `archive` or `set --status=done` while an unreadable directory exists anywhere in the backlog | `refused:unreadable_dir` | § 9, DECISIONS 106 F4 | — (fix the directory's permissions, then retry) |
+| `done` on a parent whose children are open | `refused:children_open` | § 9 | `--allow-open-children` |
+| `rm` while child elements exist | `refused:has_children` | § 9 | `--cascade` |
+| `archive` with an unfinished subtree | `refused:not_done` | § 11 | — (`archive` takes no `--force`) |
+| an archived element as `--parent` | `refused:parent_archived` | § 9 | — |
+| `archive` under `hierarchy` on a subtree not lying in its own folder | `refused:misplaced` | § 11 | — (`nj doctor --fix`, a separate call) |
+| `unarchive` on an element that is not archived | `refused:not_archived` | § 11a | — |
+| `unarchive` under an archived parent | `refused:parent_archived` | § 11a | — |
+| `unarchive` while an unreadable stub exists | `refused:unreadable` | § 11a, § 9 | — |
+| `unarchive` of a subtree not lying in its own folder, or with an unresolvable `parent` chain (`hierarchy`) | `refused:misplaced` | § 11a | — (`nj doctor --fix`, a separate call) |
+| an `unarchive` target path is occupied | `exists` | § 11a | — |
+| an `NJ_FAULT` hook fires | `fault:<hook>` | § 12 | — (test-only, not a real refusal) |
+| `NJ_AUTHOR` is not a valid name, on a command that uses it | `invalid_env` | § 9 | — (use `--as` instead) |
+| `--as` is not a valid name | `invalid_value` | § 9 | — |
+| `claim` or `release` without an acting name | `missing_argument` | § 9 | — |
+| `claim` where another name holds the claim | `refused:claimed` | § 12 Claims | `--steal=<holder>` |
+| `release` where another name holds the claim | `refused:claimed` | § 12 Claims | — (only the holder may release it) |
+| `claim` on an archived element | `refused:archived` | § 9 | — |
+| `claim` on an unreadable stub | `refused:unreadable` | § 12 Claims | — |
+| the claim decision loop exhausts its 100 rounds | `changed_in_parallel` | § 12 Claims | — |
+| `next` without an acting name | `missing_argument` | § 12b | — |
+| `next`'s candidate list is exhausted — none `--ready`, or every candidate lost its race | `none_ready` | § 12b | — |
+| `log --id` names a duplicate id, without `--file` | `duplicate_id` | § 12c | — (address one file directly with `--file=<path>` instead) |
+| `log --id` names nothing | `not_found` | § 12c | — |
+| `log` on an unreadable stub | `refused:unreadable` | § 12c | — |
+| `check` on an archived element | `refused:archived` | § 9 | — |
+| `check` on an unreadable stub | `refused:unreadable` | § 10a | — |
+| `check --text`/`--item` matches no countable checkbox, or `--item` is out of range | `not_found` | § 10a | — |
+| `check --text` matches two or more countable checkboxes | `ambiguous_target` | § 10a | — (narrow `--text`, or use `--item=<n>` instead) |
+| `find` with the literal empty string as `<text>` | `invalid_value` | § 9a | — |
+| `--id=A,B,C` together with `--file` | `invalid_target` | § 9 "Batch writes" | — |
+| `--id=A,A` — the same ID named twice in a batch, after trimming | `invalid_value` | § 9 "Batch writes" | — |
 
 Codes of the closed set that no passage above names —
 `id_allocation_failed`, `internal_error` — are
@@ -3044,7 +3327,11 @@ reported, not guessed at.
     `--json` makes no difference to `--help`'s output, on any command.
     This already answers PA-2 too: `new`/`set`'s existing prose already
     names every open `incomplete:*` code after a write, unchanged by
-    this round (confirmed, not assumed).
+    this round (confirmed, not assumed). `nj rm --help` (DECISIONS 163 A)
+    gets the same per-flag lines (`--id`, `--file`, `--cascade`) — it had
+    none before, only because `rm` is never an `nj-mcp` tool and so had
+    never been added to the shared flag table; that table entry answers
+    only this question, and does not make `rm` an `nj-mcp` tool.
 47. **Did-you-mean.** `--priority=medium` is still `invalid_value`, its
     hint now `did you mean 'normal'? Known priorities: …` (the fixed
     synonym, checked first). A `--status`/`--type`/`--priority` value
@@ -3061,6 +3348,65 @@ reported, not guessed at.
     alias is ever accepted
     as the value itself: `nj set --priority=medium` still fails, exactly
     as before.
+48. **`nj set --add-tags` / `--remove-tags`.** An incremental alternative
+    to `--tags=`, for `set` only: `--remove-tags` takes effect first,
+    then `--add-tags` appends anything named there not already present,
+    in its own order, after whatever tags were not removed (their
+    relative order kept). Adding a present tag, or removing an absent
+    one, is a no-op for that tag, not an error. Combined with `--tags=`
+    in the same call is `invalid_value`, nothing written, in every
+    combination. Both work in batch (`--id=A,B,C`), each ID's own `tags`
+    read and changed independently. Each tag is validated the same as
+    `--tags`'s own items. `nj-mcp`'s `set` tool schema gains both fields.
+49. **Acceptance quality warnings.** Two new, never-blocking problem codes
+    (task/subtask, **live** elements only — DECISIONS 167): `acceptance:
+    no_checkbox` when the acceptance section has content but zero
+    countable checkbox lines within its own span; `done:no_acceptance`
+    when `status` is `done` and the acceptance section is absent/empty
+    (alongside `incomplete:acceptance`, which still fires too —
+    independent axes). An **archived** element never carries either
+    code, whatever its acceptance holds — an archived element is
+    history, and nobody can act on a warning about it. Both are
+    `doctor` warnings (exit code unaffected) and appear in
+    `new`/`set`/`note`/`check`'s own text feedback, the same place
+    `incomplete:*` already does. Neither changes `--ready`, `list`, or
+    any count — confirmed against the two outside teams' real backlogs
+    (read-only, re-confirmed with the archived exemption applied —
+    neither backlog actually has any archived elements today, so the
+    counts are unchanged): 0/5 new E/F warnings for team-a's 54
+    elements, 10/287 for team-b-app-test's 960, with no
+    existing behaviour changed for either.
+50. **`problems.ignore`.** An optional `"problems": {"ignore": [...]}`
+    config block lists warning-severity codes (§ 7) to suppress from
+    `doctor`, `_problems`, write feedback and `doctor`'s own warning
+    tally — everywhere a code is reported, but never the readiness
+    computation itself: an ignored `unknown:status` still keeps its
+    element out of `--ready`, only the reporting goes quiet. A known
+    error code, or an `incomplete:*` code, is `invalid_config`; a code
+    outside § 7's closed vocabulary is instead the warning
+    `config:unknown_code` and is skipped (DECISIONS 166 amends this one
+    sub-case). Default (key or block absent): empty, nothing suppressed.
+    Answers v3.5's own `backlog:claims_unignored` friction (a warning, so
+    eligible). Re-counted with `done:no_acceptance` ignored:
+    team-b-app-test's 287 drop to 0, its 10
+    `acceptance:no_checkbox` unaffected.
+51. **Config forward compatibility.** An unrecognised top-level config
+    key, or one inside `layout`/`layout.folders`/`claims`/`problems`, is
+    now the warning `config:unknown_key` (`doctor` reports it, naming the
+    key) instead of `invalid_config` — every command still succeeds. The
+    correction behind this: an older `nj` was assumed to reject an
+    unrecognised top-level key; confirmed live (3.5.0, 3.6.0) that it is
+    silently ignored instead, so `problems`/the new `minVersion` key are
+    both safe additions for a fleet not yet fully upgraded — a *nested*
+    unknown key stays a hard failure on any `nj` older than this
+    revision, since an already-shipped binary cannot retroactively learn
+    the new rule. `minVersion: "X.Y.Z"` (three dot-separated integers; a
+    different shape is `invalid_config`) makes every command, including
+    `doctor`, fail with `needs_newer_nj` (naming both versions) when the
+    running `nj` compares older, checked before any other validation;
+    `--version` and `--help` are unaffected, structurally, not as a
+    special case (neither resolves/depends on config the way every other
+    command does).
 
 ---
 
