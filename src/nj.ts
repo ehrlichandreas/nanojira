@@ -22,6 +22,7 @@ import { cmdSet } from './commands/cmd-set.ts';
 import { cmdShow } from './commands/cmd-show.ts';
 import { cmdStatus } from './commands/cmd-status.ts';
 import { cmdTree } from './commands/cmd-tree.ts';
+import { cmdUnarchive } from './commands/cmd-unarchive.ts';
 import { HELP } from './core/help.ts';
 import { Fail, fail, output, emitFailure } from './core/output.ts';
 
@@ -45,6 +46,7 @@ function main(argv: string[]) {
     case 'tree': return cmdTree(flags);
     case 'rm': return cmdRm(flags);
     case 'archive': return cmdArchive(flags);
+    case 'unarchive': return cmdUnarchive(flags);
     case 'doctor': return cmdDoctor(flags);
     default:
       fail('unknown_command', `unknown command '${cmd}'`, 'run `nj help` for the command list');

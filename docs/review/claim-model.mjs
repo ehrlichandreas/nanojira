@@ -26,6 +26,11 @@ const VARIANTS = {
   P0: { livePrune: true, postCheck: true, rollbackRestores: false, rollbackOnlyIfAppended: false, orphanDone: true, enoent: 'unspecified' },
   P1: { livePrune: false, postCheck: false, rollbackRestores: true, rollbackOnlyIfAppended: true, orphanDone: false, enoent: 'retry' },
   P2: { livePrune: false, postCheck: false, rollbackRestores: true, rollbackOnlyIfAppended: true, orphanDone: false, enoent: 'retry', stealFinal: true },
+  // P3 = P2 + idemReasserts (Verifier, claim-protocol.md § 5.6): the plain
+  // "already held" idempotent read (no --status) still re-asserts via one
+  // real CAS append instead of trusting the read. Closes S12's remaining
+  // I1-samename gap, which P1/P2 leave open.
+  P3: { livePrune: false, postCheck: false, rollbackRestores: true, rollbackOnlyIfAppended: true, orphanDone: false, enoent: 'retry', stealFinal: true, idemReasserts: true },
 };
 
 // Ops: claim {n, st (with --status), mf (mirror write may fail)}, steal {n, h, mf},
@@ -56,6 +61,15 @@ const SCENARIOS = [
     actors: [['A', [{ t: 'claim' }, { t: 'release' }]], ['B', [{ t: 'steal', h: 'A' }]], ['C', [{ t: 'claim' }]]] },
   { id: 'S12', what: 'two processes of the same name, one rolls back', crash: false,
     actors: [['A', [{ t: 'claim' }]], ['A', [{ t: 'claim', st: true, mf: true }]], ['B', [{ t: 'steal', h: 'A' }]]] },
+  // D115 (P-6): unarchive removes a leftover orphaned claim dir, the same
+  // wholesale removal archive/rm use, before the first move. C is the one
+  // kind of actor that can race either cleanup: it starts (passes the
+  // `gone` check) before D archives, then its retry loop never re-checks
+  // `gone` (the proposal's text checks `refused:archived` once, up front,
+  // not on every CAS retry round) and so can land a fresh entry during
+  // either D's or U's cleanup window.
+  { id: 'S13', what: 'unarchive removes a leftover claim dir before the first move, racing a straggler', crash: false, done: true,
+    actors: [['A', [{ t: 'claim' }]], ['D', [{ t: 'archive' }]], ['C', [{ t: 'claim' }]], ['U', [{ t: 'unarchive' }]]] },
 ];
 
 // ------------------------------------------------------------------ state
@@ -95,7 +109,7 @@ function steps(s, k, sc, V) {
   const L = (msg) => `${name}#${k}.${op.t}${op.h ? '=' + op.h : ''}: ${msg}`;
   const next = (msg, f) => { const n = clone(s); const r = f(n, n.A[k]); if (r !== false) res.push([L(msg), n]); };
   const finish = (n, b, r) => {
-    n.out.push({ by: k, name, op: a.i, t: op.t, h: op.h || null, res: r, eids: b.eids || [], pre: b.pre ?? null });
+    n.out.push({ by: k, name, op: a.i, t: op.t, h: op.h || null, res: r, eids: b.eids || [], pre: b.pre ?? null, leftover: b.leftover });
     const keep = { i: b.i + 1, pc: 'START', alive: true, bel: b.bel };
     n.A[k] = keep;
   };
@@ -116,7 +130,22 @@ function steps(s, k, sc, V) {
     b.pc = 'RD0'; b.relist = 0; void why;
   };
   const enoent = (n, b, where) => {
-    if (V.enoent === 'retry') { round(n, b, 'enoent'); return; }
+    if (V.enoent === 'retry') {
+      // A rollback retries its OWN append (the restore it already decided
+      // on) at a fresh generation — it must never fall back into RDC and
+      // re-decide the operation from scratch, the same way EEXIST's
+      // `if (b.rb) return finish(..., 'write_failed')` already refuses to
+      // treat a rollback's lost race as "try deciding again". A fresh
+      // claim/steal/release retry, which has no restore to protect, still
+      // goes through the normal re-decide path.
+      if (b.rb) {
+        b.round = (b.round || 0) + 1;
+        if (b.round >= ROUNDS) { finish(n, b, 'changed_in_parallel'); return; }
+        b.pc = 'RBRD0';
+        return;
+      }
+      round(n, b, 'enoent'); return;
+    }
     // proposal: unspecified. Treat as an error exit, and record it as such.
     if (b.tid != null && n.dir) n.dir.tmp = n.dir.tmp.filter((t) => t[0] !== b.tid);
     finish(n, b, `UNSPECIFIED:ENOENT@${where}`);
@@ -145,6 +174,14 @@ function steps(s, k, sc, V) {
           b.g = g; b.pc = 'RDC';
         });
         break;
+      // A rollback's own ENOENT retry: re-read just the generation, then
+      // retry the SAME append (b.nk/nn/nt, already decided) — never RDC.
+      case 'RBRD0': case 'RBRD1':
+        readdir('RBRD0', 'RBRD1', (n, b, gens) => {
+          b.g = gens.length ? Math.max(...gens) : 0;
+          b.pc = n.dir ? 'TMP' : 'MKDIR';
+        });
+        break;
       case 'RDC': // read the content of the highest entry seen
         next(`read entry ${a.g}`, (n, b) => {
           let c = null;
@@ -165,6 +202,7 @@ function steps(s, k, sc, V) {
             return finish(n, b, 'success');
           }
           if (op.t === 'claim' && held === name) {
+            if (V.idemReasserts) return append(n, b, 'claimed', name, null); // re-assert via CAS either way; b.idem stays unset, so b.bel below uses the fresh entry
             if (op.st) { b.idem = true; b.pc = 'MREAD'; return; }
             b.bel = { eid: b.base, name };
             return finish(n, b, 'success');
@@ -282,7 +320,15 @@ function steps(s, k, sc, V) {
       break;
     case 'orphans': case 'archive':
       if (a.pc === 'START') next(op.t === 'archive' ? 'archive: move element' : 'check orphaned', (n, b) => {
-        if (op.t === 'archive') { if (!n.elem.done) return finish(n, b, 'refused:open'); n.elem.gone = true; n.elem.ver++; }
+        if (op.t === 'archive') {
+          if (!n.elem.done) return finish(n, b, 'refused:open');
+          n.elem.gone = true; n.elem.ver++;
+          // Archiving ends every live claim relationship by design ("archive/
+          // rm remove its claim"); a believer's eid is about to be unlinked by
+          // this same op's cleanup below, so no actor can go on believing it
+          // holds a claim on an archived element.
+          for (const act of n.A) if (act.alive) act.bel = null;
+        }
         const orphan = n.elem.gone || (n.elem.done && V.orphanDone);
         if (!orphan || !n.dir) return finish(n, b, op.t === 'archive' ? 'success' : 'noop');
         b.pc = 'RD0';
@@ -290,6 +336,28 @@ function steps(s, k, sc, V) {
       else if (a.pc === 'RD0' || a.pc === 'RD1') readdir('RD0', 'RD1', (n, b, gens) => { b.list = [...new Set(gens)].sort((p, q) => p - q); b.pc = 'OU'; });
       else if (a.list.length) next(`unlink ${a.list[0]}`, (n, b) => { const g = b.list.shift(); if (n.dir) n.dir.ent = n.dir.ent.filter((e) => e[0] !== g); });
       else next('rmdir', (n, b) => { if (n.dir && !n.dir.ent.length && !n.dir.tmp.length) n.dir = null; finish(n, b, 'success'); });
+      break;
+    // D115 (P-6): nj unarchive removes a leftover orphaned claim dir
+    // wholesale, the same removal archive/rm use, while the element is
+    // still archived and before the first move. Only meaningful once `gone`
+    // (claim refuses on an archived element, so nothing can start fresh
+    // while this runs); the cleanup is identical to archive's/orphans',
+    // then the move completes (`gone` clears). `b.leftover` records whether
+    // the directory was still non-empty at that instant, for checkEnd.
+    case 'unarchive':
+      if (a.pc === 'START') next('unarchive: remove leftover claim dir', (n, b) => {
+        if (!n.elem.gone) return finish(n, b, 'noop'); // nothing archived to unarchive
+        if (!n.dir) { n.elem.gone = false; n.elem.ver++; return finish(n, b, 'success'); }
+        b.pc = 'RD0';
+      });
+      else if (a.pc === 'RD0' || a.pc === 'RD1') readdir('RD0', 'RD1', (n, b, gens) => { b.list = [...new Set(gens)].sort((p, q) => p - q); b.pc = 'OU'; });
+      else if (a.list.length) next(`unlink ${a.list[0]}`, (n, b) => { const g = b.list.shift(); if (n.dir) n.dir.ent = n.dir.ent.filter((e) => e[0] !== g); });
+      else next('rmdir + move', (n, b) => {
+        b.leftover = !!(n.dir && (n.dir.ent.length || n.dir.tmp.length));
+        if (n.dir && !n.dir.ent.length && !n.dir.tmp.length) n.dir = null;
+        n.elem.gone = false; n.elem.ver++; // the move completes regardless
+        finish(n, b, 'success');
+      });
       break;
   }
   return res;
@@ -370,6 +438,14 @@ function checkEnd(s, sc) {
   // info: claim:mismatch without any crash
   const m = maxEnt(s);
   if (m && !s.elem.gone && holderOf(s, m[1]) && holderOf(s, m[1]) !== s.elem.asg && !s.out.some((o) => o.res === 'crash')) v.push('mismatch-no-crash');
+  // info (D115 P-6): unarchive's own cleanup finished with the directory
+  // still non-empty — a straggler's append raced it, same as archive's own
+  // cleanup can leave `claim:orphaned` behind; not a safety violation (no
+  // belief is ever formed on it — claim refuses while gone, and beliefs are
+  // cleared when archive sets gone, above), but it means "always starts
+  // unclaimed" is, like archive's own cleanup, a best-effort wholesale
+  // removal, not an atomic guarantee.
+  for (const o of s.out) if (o.t === 'unarchive' && o.res === 'success' && o.leftover) v.push('unarchive-leftover');
   // info: phantom — an entry on the chain whose writer reported that it failed
   // (split by whether the entry was then taken over by a steal naming its writer)
   const cl = chainList(s);
@@ -428,7 +504,7 @@ const argv = process.argv.slice(2);
 const only = argv.filter((a) => /^S\d+$/.test(a));
 const onlyV = argv.filter((a) => /^P\d$/.test(a));
 const trace = argv.includes('--trace');
-const ORDER = ['I1', 'I1-samename', 'I3', 'I3x', 'I4', 'I5', 'I6', 'mismatch-no-crash', 'phantom', 'phantom-stolen'];
+const ORDER = ['I1', 'I1-samename', 'I3', 'I3x', 'I4', 'I5', 'I6', 'mismatch-no-crash', 'phantom', 'phantom-stolen', 'unarchive-leftover'];
 const pick = argv.filter((a) => ORDER.includes(a));
 let total = 0;
 for (const sc of SCENARIOS) {

@@ -248,6 +248,25 @@ for (const [label, value] of [
     T.eq('N7 ' + label + ': ' + code, r.json && r.json.error, code);
     T.check('N7 ' + label + ': nothing written', J(snapshot(x.dir)) === J(before), 'changed');
   }
+  /* `--id` and `--file` given together ranks with argument parsing, like
+   * "neither given" (DECISIONS 111): it beats an invalid NJ_AUTHOR, and a
+   * valid NJ_AUTHOR does not let the conflict through either. */
+  {
+    const fileArg = places(x.bl)['TSK-001'];
+    const before = snapshot(x.dir);
+    const r = runJ(['note', '--id=TSK-001', '--file=' + fileArg, TEXT], { cwd: x.dir, env: bad });
+    T.exit('N7 --id and --file together beats the invalid name: exit 1', r, 1);
+    T.eq('N7 --id and --file together beats the invalid name: invalid_target', r.json && r.json.error, 'invalid_target');
+    T.check('N7 --id and --file together beats the invalid name: nothing written', J(snapshot(x.dir)) === J(before), 'changed');
+  }
+  {
+    const fileArg = places(x.bl)['TSK-001'];
+    const before = snapshot(x.dir);
+    const r = runJ(['note', '--id=TSK-001', '--file=' + fileArg, TEXT], { cwd: x.dir, env: later({ NJ_AUTHOR: 'reviewer' }) });
+    T.exit('N7 --id and --file together under a valid NJ_AUTHOR: exit 1', r, 1);
+    T.eq('N7 --id and --file together under a valid NJ_AUTHOR: invalid_target', r.json && r.json.error, 'invalid_target');
+    T.check('N7 --id and --file together under a valid NJ_AUTHOR: nothing written', J(snapshot(x.dir)) === J(before), 'changed');
+  }
   /* … and it beats a refusal: an archived element */
   const y = backlog('ac25-prec-arch', 'alice');
   for (const a of [['set', '--id=TSK-001', '--status=done'], ['set', '--id=EPIC-001', '--status=done'], ['archive', '--id=EPIC-001']]) {

@@ -250,6 +250,68 @@ compared, gate exit 0**. run-all 65/65, AC-15 22 checks.
   frozen oracle is legal (re-running an old gate)" at the top of `gate.js` no
   longer holds as written.
 
+## Addendum — `8ed1c52`: `hardening-v3-1.js` verdict-only, `ac-15`'s gap documented
+
+Verified in a throwaway worktree at `8ed1c52`.
+
+**hardening-v3-1.js joining `VERDICT_ONLY_SUITES` cannot mask a real failure.**
+Mutated `dist/nj` globally: `io_error` → `io_errorX` (two occurrences). Run
+directly (`node test/edge/hardening-v3-1.js <mutant>`): **17 of 637 checks
+fail** — a genuine, meaningful regression, not a trivial mutant. Through
+`gate.js --nj=<mutant>`: **exit 8**, confirmed twice independently.
+
+**`ac-15`'s gap is correctly scoped, and (more importantly) is dead code when run through `gate.js`.** `EXPECTED_GAPS` is matched purely by suite
+name, consulted *only* inside the `/— CANNOT RUN/` branch — a genuine
+assertion failure from `ac-15` (not a "no runtime" skip) falls straight to
+`else { failed++; failedNames.push(s); }` regardless of whether the suite
+is listed, so it would still redden the gate. In practice `ac-15` has only
+one `console.log(... '— CANNOT RUN')` call in the whole file, so "matched
+by name only" carries no real risk here.
+
+More to the point: **`gate.js`'s own `tee()` already sets
+`NJ_NODE: process.env.NJ_NODE || NODE`** (`NODE = process.execPath`) for
+every child it spawns, including both the replay and the step's own
+`run-all.js`. Since `ac-15`'s `findRuntime()` honours `NJ_NODE` as an
+unconditional override the moment it's set (no path-pattern check, just
+`fs.existsSync`), `ac-15` running *through `gate.js`* always finds a valid
+Node and never hits "CANNOT RUN" at all — confirmed empirically: it shows
+plain `PASS ac-15-no-dependencies.js (22 checks)` in every `gate.js` run
+across this round and the V3-4 round, never once appearing under "expected
+gaps". The gap only bites `baseline.js`/`run-all.js` run **standalone**,
+without `NJ_NODE` set by the caller — which is how the Implementer's own
+environment evidently invokes it, and how several of my own manual checks
+this session did too.
+
+**So: yes, `baseline.js` should set `NJ_NODE` itself**, mirroring exactly
+what `gate.js` already does
+(`env.NJ_NODE = env.NJ_NODE || process.execPath` before spawning an oracle
+suite). That would make `ac-15` a real, always-passing check from
+`baseline.js` too, and the `expected-gaps.js` entry would stop being needed
+for this specific cause (worth keeping the entry itself as a documented
+fallback, in case `ac-15` ever fails to find a runtime for some other
+reason — the mechanism costs nothing when it never fires).
+
+**A separate, pre-existing instrument oddity, found while checking this — not caused by `8ed1c52`.** `gate.js`'s own `run-all.js` step (not the
+replay) never printed a final "passed/failed" summary in any of my runs
+this session, including a **clean, unmutated `a287d3a` run from the earlier
+V3-4 round** (`oracle: no summary, exit 1`). All three runs I have logs for
+(one clean, two with the `io_error` mutant) cut off `run-all.js`'s output
+at the **same logical point** — mid-check inside `ac-26-unarchive.js`
+(`"...## D` — plausibly a timing/worktree-environment issue specific to how
+`gate.js` spawns `run-all.js`, since the identical suite run **directly**
+(no `gate.js`) completes normally and correctly reports `hardening-v3-1.js`
+17/637. I did not have budget in this round to root-cause it further.
+
+**Does this mask anything here? No — this time.** `gate.js`'s exit code
+(8) is driven by the replay's own red verdict (all 61 frozen suites, by
+construction, per DECISIONS 107), which fires regardless of whether
+`run-all.js` finishes. But the precedence only works out *because* the
+replay happens to always be red for a V3-4-era step. For a future
+suite-adding step whose replay is clean, this same truncation would mean
+`gate.js` has to fall back to a `run-all.js` summary that never arrives —
+worth the Toolsmith's attention as a follow-up, separate from `8ed1c52`'s
+own scope, which is otherwise sound.
+
 ## What was not tested
 
 - **SIGKILL**: not handleable by design; it's covered only by the start-up

@@ -25,6 +25,11 @@ const { scenarios, Ctx } = require('./fixtures.js');
 const HERE = __dirname;
 const PROJECT = path.resolve(HERE, '..', '..');
 const SHIM = path.join(HERE, 'nj-shim');
+// Pinned for every child, the same as gate.js's tee(): a caller that forgot
+// NJ_NODE still gets this runtime, so a suite that does its own runtime
+// discovery (ac-15) is driven by the one actually running baseline.js, not
+// left to search fixed relative paths that may not exist on this machine.
+const NJ_NODE_FOR_CHILDREN = process.env.NJ_NODE || process.execPath;
 const BASELINE_DIR = path.join(HERE, 'baseline');
 // Gzipped: the raw NDJSON is ~29 MB because every call snapshots every
 // backlog file, and a 100-element AC-7 backlog is snapshotted hundreds of
@@ -337,7 +342,7 @@ function runOracle(recordPath) {
     if (VERDICT_ONLY_IN_USE.has(s)) {
       const direct = spawnSync(process.execPath, [path.join(root, s), NJ_ABS], {
         cwd: PROJECT,
-        env: Object.assign({}, process.env, { NJ: NJ_ABS }),
+        env: Object.assign({}, process.env, { NJ: NJ_ABS, NJ_NODE: NJ_NODE_FOR_CHILDREN }),
         encoding: 'utf8',
         timeout: 10 * 60 * 1000,
         maxBuffer: 64 * 1024 * 1024,
@@ -362,6 +367,7 @@ function runOracle(recordPath) {
         HARNESS_RECORD: recordPath,
         HARNESS_LABEL: 'oracle:' + s,
         NJ: SHIM,
+        NJ_NODE: NJ_NODE_FOR_CHILDREN,
       }),
       encoding: 'utf8',
       timeout: 10 * 60 * 1000,
@@ -379,7 +385,7 @@ function runOracle(recordPath) {
     if (status !== 0 && /SHIM NOT ENGAGED/.test(out)) {
       const direct = spawnSync(process.execPath, [path.join(root, s), NJ_ABS], {
         cwd: PROJECT,
-        env: Object.assign({}, process.env, { NJ: NJ_ABS }),
+        env: Object.assign({}, process.env, { NJ: NJ_ABS, NJ_NODE: NJ_NODE_FOR_CHILDREN }),
         encoding: 'utf8',
         timeout: 10 * 60 * 1000,
         maxBuffer: 64 * 1024 * 1024,
@@ -451,7 +457,7 @@ function runScratchScripts(recordPath) {
     if (DIRECT_ONLY_SCRIPTS.has(n)) {
       const direct = spawnSync(process.execPath, [p, NJ_ABS], {
         cwd: SCRIPTS,
-        env: Object.assign({}, process.env, { NJ: NJ_ABS }),
+        env: Object.assign({}, process.env, { NJ: NJ_ABS, NJ_NODE: NJ_NODE_FOR_CHILDREN }),
         encoding: 'utf8',
         timeout: 5 * 60 * 1000,
         maxBuffer: 64 * 1024 * 1024,
@@ -480,6 +486,7 @@ function runScratchScripts(recordPath) {
         HARNESS_RECORD: recordPath,
         HARNESS_LABEL: 'scratch:' + n,
         NJ: SHIM,
+        NJ_NODE: NJ_NODE_FOR_CHILDREN,
       }),
       encoding: 'utf8',
       timeout: 5 * 60 * 1000,

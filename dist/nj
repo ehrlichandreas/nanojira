@@ -1034,6 +1034,17 @@ function ownFolder(el) {
   const dir = path2.dirname(el.file);
   return path2.basename(dir) === el.id ? dir : null;
 }
+function removeEmptiedIdFolders(backlog, dirs) {
+  for (const start of dirs) {
+    for (let d = start; d !== backlog && d.startsWith(backlog + path2.sep) && ID_FOLDER.test(path2.basename(d)); d = path2.dirname(d)) {
+      try {
+        fs3.rmdirSync(d);
+      } catch {
+        break;
+      }
+    }
+  }
+}
 
 // src/core/store.ts
 var fs4 = __toESM(require("fs"), 1);
@@ -2236,17 +2247,6 @@ function chainProblem(el) {
   }
   return false;
 }
-function removeEmptiedIdFolders(backlog, dirs) {
-  for (const start of dirs) {
-    for (let d = start; d !== backlog && d.startsWith(backlog + path8.sep) && ID_FOLDER.test(path8.basename(d)); d = path8.dirname(d)) {
-      try {
-        fs9.rmdirSync(d);
-      } catch {
-        break;
-      }
-    }
-  }
-}
 function fixStep4(fc) {
   const ctx = fc.reload();
   const dir = ctx.idsDir;
@@ -2566,18 +2566,38 @@ function cmdNew(flags) {
 }
 
 // src/commands/cmd-note.ts
+function validAuthor(raw) {
+  const trimmed = raw.replace(/^[ \t]+/, "").replace(/[ \t]+$/, "");
+  if (trimmed === "" || /[\n\r]/.test(trimmed) || trimmed.includes(":")) return null;
+  return trimmed;
+}
+function requireTargetFlagSyntax(flags) {
+  const file = flagString(flags, "file");
+  const id = flagString(flags, "id");
+  if (file !== void 0 && id !== void 0) fail("invalid_target", "use either --id or --file, not both");
+  if (file === void 0 && id === void 0) fail("missing_argument", "--id is required");
+}
 function cmdNote(flags, positional) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "force", "id", "file"]), true);
   const json = flags.has("json");
   const ctx = context(flags);
+  requireTargetFlagSyntax(flags);
+  const text = positional.join(" ").trim();
+  if (text === "") fail("missing_argument", "nj note needs the note text as an argument", 'nj note --id=TSK-007 "\u2026"');
+  const authorEnv = process.env.NJ_AUTHOR;
+  let author = null;
+  if (authorEnv !== void 0 && authorEnv !== "") {
+    author = validAuthor(authorEnv);
+    if (author === null) {
+      fail("invalid_env", `invalid NJ_AUTHOR '${authorEnv}' (must be non-empty after trimming spaces/tabs, a single line, and contain no ':')`);
+    }
+  }
   const el = resolveTarget(ctx, flags, true);
   requireWritable(el);
   requireActive(el, "note");
-  const text = positional.join(" ").trim();
-  if (text === "") fail("missing_argument", "nj note needs the note text as an argument", 'nj note --id=TSK-007 "\u2026"');
   const ts = nowIso();
-  const author = el.assignee !== "" ? el.assignee : "?";
-  const line = `- ${ts} ${author}: ${text.replace(/[\r\n]+/g, " ")}`;
+  const signer = author !== null ? author : el.assignee !== "" ? el.assignee : "?";
+  const line = `- ${ts} ${signer}: ${text.replace(/[\r\n]+/g, " ")}`;
   let body = el.body;
   const lines = body.split("\n");
   let idx = -1;
@@ -2907,6 +2927,132 @@ function cmdTree(flags) {
   return 0;
 }
 
+// src/commands/cmd-unarchive.ts
+var path11 = __toESM(require("path"), 1);
+var STABLE_HINT2 = "retry once the backlog is stable \u2014 unarchive takes no --force";
+var FIX_HINT = "run `nj doctor --fix` to move the files into their places, then unarchive again";
+function orderedSubtree(ctx, el) {
+  const children = /* @__PURE__ */ new Map();
+  for (const e of ctx.elements) {
+    if (e.parent === null) continue;
+    const a = children.get(e.parent);
+    if (a) a.push(e);
+    else children.set(e.parent, [e]);
+  }
+  for (const a of children.values()) a.sort((x, y) => x.id < y.id ? -1 : x.id > y.id ? 1 : 0);
+  const out2 = [el];
+  const seen = /* @__PURE__ */ new Set([el.id]);
+  const walk = (cur) => {
+    for (const c of children.get(cur.id) || []) {
+      if (seen.has(c.id)) continue;
+      seen.add(c.id);
+      out2.push(c);
+      walk(c);
+    }
+  };
+  walk(el);
+  return out2;
+}
+function buildUnits(stillArchived, hierarchy) {
+  const units = [];
+  const covered = [];
+  for (const e of stillArchived) {
+    const own = hierarchy ? ownFolder(e) : null;
+    const src = own !== null ? own : e.file;
+    if (covered.some((d) => src === d || src.startsWith(d + path11.sep))) continue;
+    units.push({ e, src, dir: own !== null });
+    if (own !== null) covered.push(own);
+  }
+  return units;
+}
+function unitTarget(backlog, byId, layout, u) {
+  const dirRel = placeOf(u.e, byId, layout, false);
+  const dir = path11.join(backlog, dirRel);
+  return u.dir ? dir : path11.join(dir, path11.basename(u.e.file));
+}
+function cmdUnarchive(flags) {
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "id", "file"]), true);
+  const json = flags.has("json");
+  const ctx = context(flags);
+  requireNoStubs(ctx, "unarchive");
+  const el = resolveTarget(ctx, flags, true);
+  if (!el.archived) fail("refused:not_archived", `${el.id} is not archived \u2014 unarchive is refused`);
+  if (el.parent !== null) {
+    const parentEl = ctx.elements.find((e) => e.id === el.parent);
+    if (parentEl && parentEl.archived) {
+      fail("refused:parent_archived", `${el.id}'s parent '${el.parent}' is archived \u2014 unarchive it instead; its archived subtree comes with it`);
+    }
+  }
+  const full = orderedSubtree(ctx, el);
+  const stillArchived = full.filter((e) => e.archived);
+  for (const e of stillArchived) requireWritable(e);
+  const layout = ctx.cfg.layout;
+  const hierarchy = layout.group === "hierarchy";
+  const byId = /* @__PURE__ */ new Map();
+  for (const e of ctx.elements) if (!byId.has(e.id)) byId.set(e.id, e);
+  const refuse = (why) => fail("refused:misplaced", `${el.id} cannot be unarchived \u2014 ${why}; nothing was moved`, FIX_HINT);
+  if (hierarchy && placeOf(el, byId, layout, false) === null) {
+    refuse(`its parent chain cannot be resolved`);
+  }
+  const units = buildUnits(stillArchived, hierarchy);
+  if (hierarchy) {
+    for (const u of units) {
+      if (!u.dir) continue;
+      const prefix = u.src + path11.sep;
+      const foreign = ctx.elements.filter((x) => x.file.startsWith(prefix) && !full.includes(x));
+      if (foreign.length > 0) {
+        refuse(`${u.src} also holds files of other elements: ${foreign.map((f) => f.id).join(", ")}`);
+      }
+    }
+  }
+  const plans = units.map((u) => ({ u, plan: planMove(u.src, unitTarget(ctx.backlog, byId, layout, u)) }));
+  for (const { plan } of plans) {
+    if (plan.conflicts.length > 0) {
+      fail(
+        "exists",
+        `${plan.conflicts[0]} already exists \u2014 refusing to overwrite; nothing was moved`,
+        `move or delete it, then unarchive again`
+      );
+    }
+  }
+  const ts = nowIso();
+  for (const e of stillArchived) {
+    compareGuard(e, false, ctx.backlog, STABLE_HINT2);
+    atomicWrite(e.file, renderElement(e, /* @__PURE__ */ new Map([["archived", void 0], ["updated", ts]]), void 0));
+  }
+  const emptiedFrom = /* @__PURE__ */ new Set();
+  for (const { u, plan } of plans) {
+    runMove(plan);
+    emptiedFrom.add(path11.dirname(u.src));
+  }
+  removeEmptiedIdFolders(ctx.backlog, emptiedFrom);
+  const moved = stillArchived.map((e) => {
+    const own = units.find((u) => u.e.id === e.id);
+    if (own) {
+      const target2 = unitTarget(ctx.backlog, byId, layout, own);
+      return loadElement(own.dir ? path11.join(target2, path11.basename(e.file)) : target2, ctx.backlog, ctx.cfg);
+    }
+    const covering = units.find((u) => u.dir && e.file.startsWith(u.src + path11.sep));
+    const target = covering ? unitTarget(ctx.backlog, byId, layout, covering) : e.file;
+    const file = covering ? path11.join(target, path11.relative(covering.src, e.file)) : target;
+    return loadElement(file, ctx.backlog, ctx.cfg);
+  });
+  deriveGraph(ctx.elements.filter((e) => !stillArchived.includes(e)).concat(moved), ctx.idsDir, layout);
+  refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  if (json) {
+    out(JSON.stringify({
+      ok: true,
+      ids: moved.map((m) => m.id),
+      changed: ["unarchived"],
+      entries: moved.map(entryJson),
+      _problems: Array.from(new Set(moved.flatMap(elementProblems))).sort()
+    }, null, 2));
+  } else {
+    for (const m of moved) out(`${m.id} unarchived \u2192 ${m.file}`);
+  }
+  return 0;
+}
+
 // src/core/help.ts
 var HELP = `nj \u2014 NanoJira, a local file-based task tool for agents
 
@@ -2927,6 +3073,7 @@ Section writes replace the section; --<role>-file=- reads stdin.
   nj tree  [--id=EPIC-001] [--all]
   nj rm    --id=TSK-009 [--cascade]
   nj archive --id=EPIC-001
+  nj unarchive --id=EPIC-001
   nj doctor [--fix]
 
 Every command accepts --json. Write commands accept --file=<path> instead of
@@ -2965,6 +3112,8 @@ function main(argv) {
       return cmdRm(flags);
     case "archive":
       return cmdArchive(flags);
+    case "unarchive":
+      return cmdUnarchive(flags);
     case "doctor":
       return cmdDoctor(flags);
     default:

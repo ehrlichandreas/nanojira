@@ -164,7 +164,7 @@ A generated, read-only overview of the active backlog by status, so the state
 is readable without `nj` — in an editor or a forge's web view.
 
 - **Written** by `nj init` and after every successful write of `new`, `set`,
-  `note`, `rm`, `archive` and `doctor --fix`, from a full scan, atomically
+  `note`, `rm`, `archive`, `unarchive` and `doctor --fix`, from a full scan, atomically
   (§ 12). **Never read** by `nj`: it is derived, never the truth.
 - **Format** (normative, byte-exact; a golden fixture pins it):
 
@@ -642,6 +642,7 @@ nj list  [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
 nj tree  [--id=EPIC-001] [--all] [--json]
 nj rm    --id=TSK-009 [--cascade]
 nj archive --id=EPIC-001 (§ 11)
+nj unarchive --id=EPIC-001 (§ 11a)
 nj doctor [--fix] [--json]
 ```
 
@@ -751,9 +752,9 @@ known flags; `--backlog` without a value is `missing_value`.
   while a stub exists, even a `--id` that names nothing yields
   `refused:unreadable`, not `not_found`. Reads (`list`, `tree`, `show`,
   `doctor`) stay open so the stub remains findable.
-- Archived elements are **read-only** in round one: `set`, `note`, `rm` and
-  `archive` refuse them (until `nj unarchive` exists); reads and `--all`
-  keep working.
+- Archived elements are **read-only**: `set`, `note`, `rm` and `archive`
+  refuse them; `nj unarchive` (§ 11a) is the one write that accepts an
+  archived element. Reads and `--all` keep working.
 - `list` filters are validated: `--status` against the configured statuses,
   `--parent` against existence — a typo'd filter is an error (exit 1), never a
   silently empty result.
@@ -821,7 +822,7 @@ from the closed table (§ 7). Agents branch on codes, never on prose.
 |---|---|
 | `list`, `show` | `{backlog, counts, entries: [{…, _problems}]}` |
 | `new`, `set`, `note`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nj new`/`nj set`, `changed` also names the section roles written (`description`, `acceptance`) |
-| `archive`, `rm --cascade` | `{ok, ids: […], changed: ["archived" \| "deleted"], entries: […], _problems: […]}` — for `rm --cascade` the top-level `_problems` is `[]`: the elements are gone, so their problems are too. `archive` emits the union, because archived elements still exist and can still carry findings. **`rm --cascade` additionally carries `dependents: […]`**, the remaining elements whose `depends_on` names a removed one — archived elements included, since they carry `depends_on:dangling` too and the agent must know it; `archive` does **not** — a `depends_on` pointing into the archive is satisfied by definition (§ 11), so there is nothing to warn about and nothing an agent must act on. |
+| `archive`, `unarchive`, `rm --cascade` | `{ok, ids: […], changed: ["archived" \| "unarchived" \| "deleted"], entries: […], _problems: […]}` — for `rm --cascade` the top-level `_problems` is `[]`: the elements are gone, so their problems are too. `archive` and `unarchive` emit the union, because the elements still exist and can still carry findings. **`rm --cascade` additionally carries `dependents: […]`**, the remaining elements whose `depends_on` names a removed one — archived elements included, since they carry `depends_on:dangling` too and the agent must know it; `archive` and `unarchive` do **not** — a `depends_on` pointing into the archive is satisfied by definition (§ 11), so there is nothing to warn about and nothing an agent must act on. |
 | `tree` | `{backlog, counts, entries: […]}` — **flat**, each entry carries `parent`; depth-first order conveys the tree |
 | `doctor` | `{backlog, ok, problems: [{code, severity, element?, file?, line?, message}]}` — `severity` ∈ `error`\|`warning` (the Doctor column value; `—` codes never appear as findings); element-level findings carry `element`, backlog-level ones do not |
 | bare `nj` | `{backlog, counts, ready: [entries ≤ 5], incomplete: [entries ≤ 5]}` |
@@ -854,7 +855,7 @@ duplicate_id          exists                   changed_in_parallel
 id_allocation_failed  internal_error
 refused:<reason>      reason ∈ unreadable | archived | children_open |
                                has_children | not_done | parent_archived |
-                               misplaced
+                               misplaced | not_archived
 fault:<hook>          hook ∈ before-compare | after-tmp-write | before-rename
 ```
 
@@ -897,9 +898,15 @@ its code. These mappings are normative:
 | `archive` with an unfinished subtree | `refused:not_done` | § 11 |
 | an archived element as `--parent` | `refused:parent_archived` | § 9 |
 | `archive` under `hierarchy` on a subtree not lying in its own folder | `refused:misplaced` | § 11 |
+| `unarchive` on an element that is not archived | `refused:not_archived` | § 11a |
+| `unarchive` under an archived parent | `refused:parent_archived` | § 11a |
+| `unarchive` while an unreadable stub exists | `refused:unreadable` | § 11a, § 9 |
+| `unarchive` of a subtree not lying in its own folder, or with an unresolvable `parent` chain (`hierarchy`) | `refused:misplaced` | § 11a |
+| an `unarchive` target path is occupied | `exists` | § 11a |
 | an `NJ_FAULT` hook fires | `fault:<hook>` | § 12 |
+| `NJ_AUTHOR` is not a valid name, on a command that uses it | `invalid_env` | § 10 |
 
-Codes of the closed set that no passage above names — `invalid_env`,
+Codes of the closed set that no passage above names —
 `id_allocation_failed`, `internal_error` — are
 **reserved**: the implementation may emit them from its own error paths, but
 only from the set. A later revision may pin them.
@@ -935,15 +942,40 @@ signed line to the body:
 - 2026-09-21T18:02:44Z coder-agent: Parser splits at the first colon
 ```
 
+**`NJ_AUTHOR`.** `NJ_AUTHOR=<name>` overrides who signs a note. An empty
+`NJ_AUTHOR` counts as **unset** — the same rule as an empty `NJ_BACKLOG`
+(DECISIONS 89). A name is valid when, after dropping leading and trailing
+whitespace, it is non-empty, is a single line, and contains no `:`; only
+spaces and tabs are trimmed, any `\n` or `\r` left (trailing included) makes
+it multi-line, and Unicode spaces are literal, not trimmed. The colon is
+excluded because a note line is `- <timestamp> <author>: <text>`: a name
+with a colon would make the author/text boundary unreadable for humans and
+for any tool that parses notes. The trimmed value is used. `NJ_AUTHOR` is a
+label, not an identity: there is no registry, no authentication, and two
+agents that choose the same name are the same author — the same trust model
+`assignee` has today (§ 6).
+
 Rules:
 
 - `## Notes` is created at the end of the body if absent (a sanctioned
   exception to the byte-for-byte rule, alongside the H1). It is separated
   from the preceding body by exactly one blank line; if the body already ends
   in a blank line, none is added.
-- Line format: `- <ISO-8601 UTC> <author>: <text>`. `<author>` is the
-  element's `assignee` if set, else `?`. Consecutive notes are consecutive
-  lines directly below the heading — no blank lines between them.
+- Line format: `- <ISO-8601 UTC> <author>: <text>`. `<author>` is
+  `NJ_AUTHOR`, trimmed, if it is set and valid; else the element's
+  `assignee` if set; else `?`. Consecutive notes are consecutive lines
+  directly below the heading — no blank lines between them.
+- An invalid `NJ_AUTHOR` makes `nj note` exit 1 with `invalid_env` and write
+  nothing. Other writes (`new`, `set`, …) do not use `NJ_AUTHOR` and ignore
+  it; reads never fail on it. Precedence: argument parsing (`unknown_field`,
+  `missing_argument`, `missing_value`, and `invalid_target` for `--id` and
+  `--file` given together — both given ranks with argument parsing, like
+  neither given) is checked first, then `NJ_AUTHOR` (`invalid_env`), then
+  target resolution (`not_found`, `duplicate_id`), then refusals (e.g.
+  `refused:archived`). The wrong-type-`--parent` reading of `invalid_target`
+  does not apply here: `nj note` takes no `--parent`.
+- `NJ_AUTHOR` changes only the note line. It never sets or changes
+  `assignee`.
 - A note **does not** satisfy the `## Description` requirement. Its write
   result reports `changed: ["body"]`.
 - `updated` is refreshed; the atomic write and compare-before-write rules
@@ -994,10 +1026,91 @@ the archive folder (`layout.folders.archive`, default `archive/`):
   invariant "archived ⇒ done" carries `depends_on` satisfaction into the
   archive), and `archive:split` — a child outside the archive while its
   parent is inside (error, produced by manual file moves).
-- Un-archiving (`nj unarchive`) is round two.
+- Un-archiving is `nj unarchive` (§ 11a).
 
 git remains the fine-grained history; the archive is the coarse shelf for
 finished work, keeping the working set small.
+
+---
+
+## 11a. `nj unarchive`
+
+`nj unarchive --id=EPIC-001` (or `--file=<path>`, § 9) moves the archived
+element and its **archived subtree** — every descendant of it that lies below
+the archive folder — back to their active places. It is in every respect the
+inverse of `nj archive`. No `--force` (§ 12: `--force` has one meaning, and
+bulk moves do not take it).
+
+- **Gathering:** the subtree is found from the archive by the element's
+  `id`/`parent` chain, wherever its files lie there — not assumed to mirror
+  the archive's folder shape.
+- **Placement** follows the configured layout (§ 4) at the time of the
+  command, not the layout at archive time; the archive's shape only decides
+  whether one folder `rename` is possible:
+  - groups `type` and `flat`: each file moves to its active place — the
+    folder of its type (`type`), or the backlog's top level (`flat`);
+  - group `hierarchy`: when the archived folder already mirrors the target
+    shape, the subtree's folder moves back as a whole, one `rename`, to the
+    same relative place outside the archive folder (`archive/EPIC-001/
+    TSK-003/` → `EPIC-001/TSK-003/`); otherwise files move one by one. Where
+    the target folder already exists — the parent's folder, always present
+    because the parent is active — it is merged into by the rules of § 11
+    (DECISIONS 90, 94): one `rename` per entry, descending into existing
+    folders, emptied source folders removed with `rmdir`, never a recursive
+    delete.
+  - Ancestor folders left empty in the archive by the move are removed with
+    `rmdir` (names of ID shape only, as `doctor --fix` step 3 does).
+- A descendant of the element that already lies outside the archive
+  (`archive:split`) is **not a refusal in any group**: it is left untouched,
+  since it already sits at its active place. Unarchiving the parent heals the
+  split; under `hierarchy` the parent's folder merges into the existing
+  active one, by the same rule as above (DECISIONS 90, 94).
+- **Frontmatter:** the `archived` key is removed from every moved element and
+  `updated` is refreshed. Nothing else changes — `status` stays what it was
+  (`done`, by § 11's precondition). Reopening is a separate, explicit
+  `nj set --status=…`.
+- **Order and atomicity**, as `archive` (DECISIONS 91 B16): every file's
+  frontmatter is rewritten in place first, through the guarded write of § 12
+  (compare before write, no `--force`; `NJ_FAULT=before-compare` fires once
+  per file write, in top-down order), then the moves happen. A crash between
+  the two leaves files below the archive folder without `archived:` —
+  archived by location (§ 4, DECISIONS 92 Q2), no finding; a second
+  `nj unarchive` completes it. `NJ_FAULT=before-rename` fires before the
+  first `rename`.
+- **All move targets are verified before the first write.** A target is
+  occupied only where a file already exists at a file's target path, or a
+  file meets a folder (§ 11's rule); then `exists`, and nothing is written or
+  moved.
+
+**Refusals** — checked in this order, each refuses and writes nothing:
+
+1. Any `file:unreadable` stub exists anywhere in the backlog:
+   `refused:unreadable` — § 9's rule for `rm` and `archive`, for the same
+   reason (the subtree cannot be determined), evaluated before the target is
+   resolved.
+2. The named element is not archived (it lies outside the archive folder):
+   `refused:not_archived`.
+3. The element has a `parent` that is itself archived: `refused:parent_archived`.
+   The result would be an active child under an archived parent —
+   `archive:split`. Unarchive the parent instead; its archived subtree comes
+   with it.
+4. **Under `hierarchy` only** — placement under `type`/`flat` does not depend
+   on the `parent` chain: the element or a still-archived member of its
+   subtree does not lie in the element's archived folder, or a foreign
+   element file does (moving the folder would carry it along), or the
+   element's `parent` chain does not resolve (`parent:dangling`, `parent:cycle`,
+   or an ancestor with either — the active place cannot be computed,
+   DECISIONS 91 B15): `refused:misplaced`, pointing at `nj doctor --fix`.
+5. A move target is occupied (above): `exists`.
+
+Descendants of the element that are *not* archived are untouched; they
+already lie at their active places.
+
+**Output.** Same shape as `archive` (§ 9 table): `{ok, ids: […], changed:
+["unarchived"], entries: […], _problems: […]}` — `ids` top-down in pre-order
+(depth-first, as `tree` prints: EPIC-001, TSK-001, SUB-001, TSK-002), siblings
+by `id` ascending; `entries` the moved elements in their new state. Human
+output mirrors `archive`'s. `STATUS.md` is regenerated (§ 4).
 
 ---
 
@@ -1023,20 +1136,22 @@ children-first and each folder once empty — never a recursive delete of
 whatever else a folder holds. Moving a subtree (`archive`, `doctor --fix`) is
 **one `rename` of its top folder**, atomic within one filesystem.
 
-**Compare before writing.** On `nj set`, `nj note` and `nj archive`: read the
-file, remember the content, re-read immediately before writing and compare
-**byte for byte**. A difference aborts with "changed in parallel, please run
-again". The comparison runs over the full content, not over `updated` —
-second-level timestamps would be too coarse for two writes within the same
-second. `archive` routes its comparison through the same guarded path as the
-other two, so `NJ_FAULT=before-compare` covers it.
+**Compare before writing.** On `nj set`, `nj note`, `nj archive` and
+`nj unarchive`: read the file, remember the content, re-read immediately
+before writing and compare **byte for byte**. A difference aborts with
+"changed in parallel, please run again". The comparison runs over the full
+content, not over `updated` — second-level timestamps would be too coarse for
+two writes within the same second. `archive` and `unarchive` route their
+comparison through the same guarded path as the other two, so
+`NJ_FAULT=before-compare` covers them.
 
 `--force` overrides a parallel change on **`set` and `note` only**.
-**`archive` has no override**, and that is deliberate: § 11's "no `--force`"
-governs, a bulk move must never silently overwrite a parallel edit, and
-`--force` must not acquire a second meaning — the same reason the parent rule
-got its own flag (`--allow-open-children`). A parallel change during `archive`
-aborts the run; the caller retries once the backlog is stable.
+**`archive` and `unarchive` have no override**, and that is deliberate: § 11's
+and § 11a's "no `--force`" governs, a bulk move must never silently overwrite
+a parallel edit, and `--force` must not acquire a second meaning — the same
+reason the parent rule got its own flag (`--allow-open-children`). A parallel
+change during `archive` or `unarchive` aborts the run; the caller retries once
+the backlog is stable.
 
 **Fault injection (verification hook, not a feature).** `NJ_FAULT` accepts three
 distinct injection points, each exiting with code 1 and leaving the target
@@ -1049,7 +1164,7 @@ file untouched:
   poll for `<backlog>/.nj-fault-go` (timeout 10 s, then exit 1). The test
   changes the target file, then creates the marker: expect exit 1 with
   "changed in parallel", or exit 0 with `--force` where the command takes it
-  (`set`, `note` — not `archive`)
+  (`set`, `note` — not `archive` or `unarchive`)
 
 It exists so that criterion AC-9 is testable. The abandoned temp file is
 reported by `nj doctor` (`backlog:stray_tmp`) and removed by `doctor --fix`.
@@ -1069,11 +1184,13 @@ serializer defects (wrong format, missing `Z`).
 - Windows is not a target platform. `rename` over an existing file behaves
   differently there.
 - Same element in the same millisecond: a residual window, overridable with
-  `--force` on `set` and `note` — `archive` has no override (§ 12).
+  `--force` on `set` and `note` — `archive` and `unarchive` have no override
+  (§ 12).
 - Under `hierarchy`, an archive that merges into an existing archive folder
-  (§ 11) takes several `rename`s. A crash between them leaves part of the
-  subtree live under an archived parent: `archive:split`, reported by
-  `doctor` — the same state a manual move produces.
+  (§ 11), or an unarchive that merges into an existing active folder (§ 11a),
+  takes several `rename`s. A crash between them leaves part of the subtree in
+  the archive and part outside it: `archive:split`, reported by `doctor` —
+  the same state a manual move produces, in either direction.
 - Tombstones and the directory entry are not `fsync`'d: they survive a
   process crash, but a machine crash within the write window may lose one —
   the allocator's file-scan start value and `doctor --fix` restore the
@@ -1353,6 +1470,29 @@ reported, not guessed at.
     unchanged content, every element file is byte-identical, `doctor` is
     clean, and the next `nj new` allocates above every existing number. With
     both v2 and v3 places present, `--fix` moves nothing and reports it.
+25. **Note author.** With `NJ_AUTHOR` set, `nj note` signs with it — whether
+    or not the element has an `assignee` — and the note line is otherwise
+    byte-identical to § 10's; the value is trimmed. Unset or empty, the
+    signer is the `assignee`, else `?`, exactly as before. A value that is
+    whitespace-only, multi-line or contains `:` exits 1 with `invalid_env`
+    and leaves the file byte-identical, while `list`/`show`/`set` under the
+    same environment behave as without it. `NJ_AUTHOR` never changes
+    `assignee`.
+
+26. **Unarchive.** For each group (`type`, `hierarchy`, `flat`) and for
+    renamed folders: `archive` followed by `unarchive` of the same element
+    returns every file of the subtree to the path it had before the archive,
+    byte-identical except for `updated`; the `archived` key is gone; `list`
+    shows the elements again without `--all`; `STATUS.md` lists them; a
+    following `doctor` is clean. Under `hierarchy`, unarchiving an epic whose
+    child task was archived separately earlier brings both back (merge), and
+    unarchiving a task under an active epic moves only the task's folder.
+    Changing `group` between `archive` and `unarchive` places the files by
+    the new layout. `refused:not_archived`, `refused:parent_archived`,
+    `refused:unreadable`, `refused:misplaced` and `exists` each exit 1 and
+    change no byte of the backlog. With `NJ_FAULT=before-compare` a parallel
+    edit aborts with `changed_in_parallel`; with `NJ_FAULT=before-rename`
+    nothing has moved and every file is its previous revision.
 
 ---
 
@@ -1362,9 +1502,7 @@ Terminal board (`nj board`), Obsidian Dataview snippet, import/export of
 foreign backlogs, full-text search over the body, attachments, the search
 index's implementation (§ 13), batch writes (`--id=A,B,C`), `nj claim`
 (exclusive claiming; `assignee` is advisory in round one), `nj check`
-(checkbox ticking in the body), `nj unarchive`, an MCP wrapper, Windows,
-`NJ_AUTHOR` override for `nj note` signing (notes currently sign with the
-element's `assignee`).
+(checkbox ticking in the body), an MCP wrapper, Windows.
 
 A language migration (Go as the candidate; Rust considered and set aside) is
 deliberately deferred: round one ships on Node to gather real experience. The
