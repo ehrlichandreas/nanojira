@@ -54,16 +54,19 @@ allowed; only its *position* matters.
 | Platforms | `darwin-arm64`, `linux-x64` (the portable tool tree's platforms) |
 | Entry point | one executable script, `dist/nj` (shebang `#!/usr/bin/env node`; where `PATH` may lack Node ≥ 24, invoke as `<runtime-node> dist/nj`) |
 
-What ships is `dist/nj`, a single file. It is built by `node tools/build.js`
+What ships is `dist/nj`, a single file. It is built by `npm run build`
 from the sources — the entry `nj` and the modules in `lib/` — and it is
 committed: a fresh build must be byte-identical to the committed file
-(`node tools/build.js --check`), so a stale bundle fails at once. Whoever
+(`npm run build:check`), so a stale bundle fails at once. Whoever
 changes `nj` or `lib/` rebuilds and commits `dist/nj` in the same commit. The
 oracle and the recorded corpus run against `dist/nj`, and against the sources,
-which behave identically. `package.json` carries metadata, `bin`, the `build`
-and `test` scripts, and may carry `devDependencies` for build-time tooling
-(round one: none — TypeScript and esbuild are planned, after this revision);
-it carries no runtime `dependencies` and no `type` field.
+which behave identically. The root `package.json` carries metadata, `bin`, the `build`
+and `test` scripts, and `devDependencies` for build-time tooling (TypeScript,
+esbuild); it carries no runtime `dependencies` and no `type` field — a root
+`"type": "module"` would make Node load the entry `nj` and every oracle suite
+as ES modules and break them all. The sources in `lib/` are TypeScript ES
+modules; `lib/package.json` declares `"type": "module"` for that directory
+only, and is not part of `dist/nj`.
 
 "Dependencies: none" names what `nj` depends on to run — not on Jira, not on
 any other external service, and not on a package fetched at runtime. It was

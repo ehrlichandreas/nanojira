@@ -1,14 +1,14 @@
 'use strict';
 /* Edge — NC10 gap: typo'd variants of `--tag`/`--assignee`.
  *
- * § 9 (Z. 436-439): "Unknown field flags are rejected — nothing is written —
+ * § 9 (Z. 459-462): "Unknown field flags are rejected — nothing is written —
  * and the known fields are listed. A control flag that the addressed command
  * does not take is rejected the same way, as `unknown_field` (e.g. `nj
  * archive --force`, § 12)." The `archive --force` example shows the rule is
  * not scoped to write-only flags: it fires for ANY flag the command does not
  * recognise, control or schema.
  *
- * § 9 (Z. 526-527), on `list` specifically: "a typo'd filter is an error
+ * § 9 (Z. 548-550), on `list` specifically: "a typo'd filter is an error
  * (exit 1), never a silently empty result."
  *
  * `nj list`'s synopsis (§ 9) names `--tag` (singular) as the filter; `--tags`

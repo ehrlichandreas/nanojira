@@ -502,7 +502,7 @@ leave the abort leg untestable.
 
 ## 27. What does `changed` name, and in which order?
 
-**Ruled.** § 9 (Z. 965) says only "`changed` lists exactly the fields that
+**Ruled.** § 9 (Z. 988) says only "`changed` lists exactly the fields that
 changed", which leaves open whether mandatory fields count as "changed" on a
 first write, and says nothing about order.
 
@@ -518,10 +518,10 @@ named by no one. The exclusion is part of the ruling, not a detail.
 then section roles in the canonical role order (`description`, then
 `acceptance`).
 
-**Reasoning (spec-internal):** § 9 (Z. 591) requires `changed` to *additionally*
+**Reasoning (spec-internal):** § 9 (Z. 614) requires `changed` to *additionally*
 name the section roles written for `new`/`set` — it is therefore designed as a
 complete account of what was written, not as a list of the flags given. § 9
-(Z. 391) sets "one vocabulary in three places", so the JSON write result follows
+(Z. 414) sets "one vocabulary in three places", so the JSON write result follows
 the order the spec already fixes for the file.
 
 **Not a valid justification for this, and rejected during review:** `DECISIONS.md`
@@ -707,12 +707,12 @@ shape), `nj` `indexById`.
 
 **Unpinned, all three.** § 9 shows what a deliberate ordering rule looks like in
 this spec: *"Sort order of `list`, `tree` and bare `nj` is deterministic:
-priority … then `id` ascending. **Never filesystem order.**"* (Z. 528–530) —
+priority … then `id` ascending. **Never filesystem order.**"* (Z. 551–553) —
 normative, and explicit about what it rules out. Nothing of that kind exists for
 the three below. Where the authors meant an order, they said so.
 
 **37. `doctor`'s `problems[]`.** The only anchor is § 14's terminal example
-(Z. 857–863), which happens to show two `ERROR` lines before a `WARNING` line.
+(Z. 884–886), which happens to show two `ERROR` lines before a `WARNING` line.
 That is an illustration under the section heading, not a rule — the numbered
 `--fix` step list in the same section shows what § 14 looks like when it is
 being normative.
@@ -867,7 +867,7 @@ The fixture closes the corpus half; the spec half is open.
 *Affects:* TSK-016's fixture (AC-2). AC-3, the mutant as counter-proof, is
 measured, not outstanding:
 
-**AC-3, measured.** A mutant of `lib/parse.js`'s `sectionPresent()` flipping
+**AC-3, measured.** A mutant of `lib/parse.ts`'s `sectionPresent()` flipping
 the reading to the counter-reading above (only the FIRST matching heading
 decides completeness, mirroring the write side's own "first match wins")
 was run against both nets separately.

@@ -2,14 +2,16 @@
 
 // Configuration and backlog discovery.
 
-const fs = require('fs');
-const path = require('path');
-const { DEFAULT_CONFIG } = require('./constants.js');
-const { fail } = require('./output.js');
+import type { Config } from './types.ts';
+
+import * as fs from 'fs';
+import * as path from 'path';
+import { DEFAULT_CONFIG } from './constants.ts';
+import { fail } from './output.ts';
 
 // ------------------------------------------------------------ configuration
 
-function validateConfig(obj) {
+function validateConfig(obj: any) {
   const errs = [];
   if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
     return ['configuration must be a JSON object'];
@@ -36,7 +38,7 @@ function validateConfig(obj) {
   return errs;
 }
 
-function loadConfig(backlog) {
+function loadConfig(backlog: string) {
   const file = path.join(backlog, '.nanojira.json');
   let raw;
   try {
@@ -47,7 +49,7 @@ function loadConfig(backlog) {
   let obj;
   try {
     obj = JSON.parse(raw);
-  } catch (e) {
+  } catch (e: any) {
     return { config: DEFAULT_CONFIG, errors: [`.nanojira.json is not valid JSON: ${e.message}`] };
   }
   const errors = validateConfig(obj);
@@ -60,7 +62,7 @@ function loadConfig(backlog) {
 
 // ----------------------------------------------------------------- discover
 
-function findBacklog(lenient) {
+function findBacklog(lenient: boolean): string {
   const env = process.env.NJ_BACKLOG;
   if (env !== undefined && env !== '') {
     const dir = path.resolve(env);
@@ -71,7 +73,7 @@ function findBacklog(lenient) {
     return dir;
   }
   let dir = process.cwd();
-  let headless = null;
+  let headless: string | null = null;
   for (;;) {
     const candidate = path.join(dir, 'backlog');
     if (fs.existsSync(path.join(candidate, '.nanojira.json'))) return candidate;
@@ -87,18 +89,18 @@ function findBacklog(lenient) {
     fail('backlog_without_config', `${headless} exists but has no .nanojira.json`,
       'run `nj doctor` — it tolerates the missing file and reports config:invalid');
   }
-  fail('no_backlog', 'no backlog found (looked for backlog/.nanojira.json upward from the working directory)',
+  return fail('no_backlog', 'no backlog found (looked for backlog/.nanojira.json upward from the working directory)',
     'run `nj init` to create one, or set NJ_BACKLOG');
 }
 
-function isDir(p) {
+function isDir(p: string) {
   try { return fs.statSync(p).isDirectory(); } catch { return false; }
 }
 
-function listMd(dir) {
+function listMd(dir: string) {
   let names;
   try { names = fs.readdirSync(dir); } catch { return []; }
-  return names.filter((n) => n.endsWith('.md')).sort().map((n) => path.join(dir, n));
+  return names.filter((n: string) => n.endsWith('.md')).sort().map((n: string) => path.join(dir, n));
 }
 
-module.exports = { loadConfig, findBacklog, listMd };
+export { loadConfig, findBacklog, listMd };

@@ -2,18 +2,22 @@
 
 // Loading elements and deriving the graph.
 
-const fs = require('fs');
-const path = require('path');
-const { listMd } = require('./config.js');
-const { PREFIX_TYPE, TYPE_DIR, TYPES, PARENT_TYPE, PRIORITIES } = require('./constants.js');
-const { parseFile, h1Of, sectionPresent, normalizeTitle } = require('./parse.js');
-const { mtimeIso, readTombstones } = require('./store.js');
+import type { Element, ParsedFile, Config, Context, Skeleton, WithId, WithType, WithTitle, WithStatus, WithParent, WithOptionals, WithTimestamps, WithArchiveState, NonEmptyString } from './types.ts';
+
+import * as fs from 'fs';
+import * as path from 'path';
+import { listMd } from './config.ts';
+import { PREFIX_TYPE, TYPE_DIR, TYPES, PARENT_TYPE, PRIORITIES } from './constants.ts';
+import { parseFile, h1Of, sectionPresent, normalizeTitle } from './parse.ts';
+import { mtimeIso, readTombstones } from './store.ts';
 
 // ------------------------------------------------------------- element load
 
-// A file we cannot read at all yields a stub: it stays visible and is marked,
-// but no content-derived code is invented for it (§ 7, `file:unreadable`).
-function unreadableElement(file, folder, cfg, err) {
+/**
+ * A file we cannot read at all yields a stub: it stays visible and is marked,
+ * but no content-derived code is invented for it (§ 7, `file:unreadable`).
+ */
+function unreadableElement(file: string, folder: string, cfg: Config, err: any): Element {
   const base = path.basename(file, '.md');
   const pm = /^(EPIC|TSK|SUB)-/.exec(base);
   const ts = mtimeIso(file);
@@ -31,11 +35,15 @@ function unreadableElement(file, folder, cfg, err) {
   };
 }
 
-// Nine derivers, run in the fixed order below. UNLIKE deriveGraph's mark
-// passes (§ derivations, "no pass may read another pass's `problems` set"),
-// these are NOT free to reorder: each writes an `el.*` field that a LATER one
-// reads, and misordering them is NOT caught by a crash — it silently produces
-// a different result.
+// Nine derivers, run in the fixed order below and now enforced by the type
+// checker, not just asserted by a cast: each takes exactly the stage the
+// PREVIOUS ones have built (Skeleton -> WithId -> WithType -> ... ->
+// WithArchiveState) and returns the next stage. Swap two derivers in
+// loadElement below and the earlier one's return type no longer satisfies
+// the later one's parameter type -- a compile error, not a silently-accepted
+// cast to the full `Element` shape regardless of how little of it exists yet
+// (Verifier II's finding on the JSDoc version: the cast was right at the
+// LAST call and wrong at the first, and nothing said so).
 //
 //   deriveId      -> el.id       -> deriveType         (prefix comes from the id)
 //   deriveType    -> el.type     -> deriveParent        (epic rule vs. orphaned)
@@ -44,18 +52,26 @@ function unreadableElement(file, folder, cfg, err) {
 //   deriveTitle   -> el.title    -> deriveBody          (H1 comparison)
 //   skeleton      -> el.archived -> deriveType, deriveArchiveState
 //
-// Example of the silent failure: run deriveParent before deriveType and
-// `el.type` is `undefined`, not yet `null` or a type string, when
-// deriveParent reads it. The task/subtask case does NOT diverge — `undefined
-// !== null` is as true as `'task' !== null`, so `parent:orphaned` still fires
-// correctly on a missing parent. What silently disappears is the EPIC case:
-// `el.type === 'epic'` is false while `el.type` is still `undefined`, so an
-// epic that DOES carry a `parent:` line no longer gets `parent:hierarchy` —
-// not a crash, just a missing warning on a file that should have one. Only
-// deriveOptionals and deriveTimestamps are free: they read `fields`/`file`
-// only, and nothing inside loadElement reads what they write.
+// Example of the silent failure this catches: run deriveParent before
+// deriveType and `el.type` is `undefined`, not yet `null` or a type string,
+// when deriveParent reads it. The task/subtask case does NOT diverge --
+// `undefined !== null` is as true as `'task' !== null`, so `parent:orphaned`
+// still fires correctly on a missing parent. What silently disappears is the
+// EPIC case: `el.type === 'epic'` is false while `el.type` is still
+// `undefined`, so an epic that DOES carry a `parent:` line no longer gets
+// `parent:hierarchy` -- not a crash, just a missing warning on a file that
+// should have one. Only deriveOptionals and deriveTimestamps are free: they
+// read `fields`/`file` only, and nothing inside loadElement reads what they
+// write.
+//
+// Each deriver returns a NEW object (`{ ...el, theFieldItAdds }`) rather than
+// mutating and casting; `problems` is a `Set`, copied by reference like every
+// other field, so `.add()` calls still accumulate across all nine stages
+// exactly as before -- only the OUTER object per stage is a fresh reference,
+// which nothing downstream depends on (loadElement returns whatever the last
+// deriver produced; nothing keeps a handle on an intermediate stage).
 
-function deriveId(el, p, base) {
+function deriveId(el: Skeleton, p: ParsedFile, base: string): WithId {
   let id = p.fields.get('id');
   if (typeof id !== 'string' || id.trim() === '') {
     id = base;
@@ -64,7 +80,7 @@ function deriveId(el, p, base) {
     id = id.trim();
     if (id !== base) el.problems.add('id:mismatch');
   }
-  el.id = id;
+  return { ...el, id };
 }
 
 // The folder-lookup fallback that used to sit here is GONE, deliberately, not
@@ -72,43 +88,48 @@ function deriveId(el, p, base) {
 // looking it up BY FOLDER (`TYPE_DIR[folder]`) is always `undefined` for every
 // real folder, and the reverse search over `TYPE_DIR`'s values never matches
 // 'archive' either — both branches always produced `null`. This is not a bug
-// to fix: § 7 (SPECIFICATION.md:325) defines `type:derived` as "derived from
-// ID prefix", not from the folder, and § 14 (SPECIFICATION.md:908) states the
+// to fix: § 7 (SPECIFICATION.md:328) defines `type:derived` as "derived from
+// ID prefix", not from the folder, and § 14 (SPECIFICATION.md:911) states the
 // precedence outright — "frontmatter > prefix > folder precedence; the folder
 // loses". Reinstating a folder-based type would violate the spec, not repair
 // it; if this needs to come back, it needs a decision, not a refactor.
-function deriveType(el, p, folder) {
+function deriveType(el: WithId, p: ParsedFile, folder: string): WithType {
   const pm = /^(EPIC|TSK|SUB)-/.exec(el.id);
   const prefixType = pm ? PREFIX_TYPE[pm[1]] : null;
 
+  let type: string | null;
   const rawType = p.fields.get('type');
   if (typeof rawType === 'string' && TYPES.includes(rawType.trim())) {
-    el.type = rawType.trim();
+    type = rawType.trim();
   } else if (prefixType) {
-    el.type = prefixType;
+    type = prefixType;
     if (p.parsed) el.problems.add('type:derived');
   } else {
-    el.type = null;
+    type = null;
   }
-  if (el.type === null) el.problems.add('type:folder');
-  else if (!el.archived && TYPE_DIR[el.type] !== folder) el.problems.add('type:folder');
+  if (type === null) el.problems.add('type:folder');
+  else if (!el.archived && TYPE_DIR[type] !== folder) el.problems.add('type:folder');
+  return { ...el, type };
 }
 
-function deriveTitle(el, p) {
+function deriveTitle(el: WithType, p: ParsedFile): WithTitle {
   const title = p.fields.get('title');
-  el.title = typeof title === 'string' ? normalizeTitle(title) : '';
-  if (el.title === '') el.problems.add('missing:title');
+  const t = typeof title === 'string' ? normalizeTitle(title) : '';
+  if (t === '') el.problems.add('missing:title');
+  return { ...el, title: t };
 }
 
-function deriveStatus(el, p, cfg) {
-  const status = p.fields.get('status');
-  if (typeof status !== 'string' || status.trim() === '') {
-    el.status = cfg.statuses[0];
+function deriveStatus(el: WithTitle, p: ParsedFile, cfg: Config): WithStatus {
+  let status: string;
+  const raw = p.fields.get('status');
+  if (typeof raw !== 'string' || raw.trim() === '') {
+    status = cfg.statuses[0];
     if (p.parsed) el.problems.add('missing:status');
   } else {
-    el.status = status.trim();
-    if (!cfg.statuses.includes(el.status)) el.problems.add('unknown:status');
+    status = raw.trim();
+    if (!cfg.statuses.includes(status)) el.problems.add('unknown:status');
   }
+  return { ...el, status };
 }
 
 // MUST run on every path, unconditionally — no `p.parsed` guard, no early
@@ -116,61 +137,83 @@ function deriveStatus(el, p, cfg) {
 // is what makes `=== null` (rather than a falsy test) correct everywhere else
 // a `parent` is read. Four callers sit on it, all comparing `=== null`:
 // `childMap` and `markParentEdges`/`markParentCycles` below, and the root
-// filter in `cmdTree` (`lib/cmd-tree.js`). Route this behind a condition that
+// filter in `cmdTree` (`lib/cmd-tree.ts`). Route this behind a condition that
 // not every element reaches, and an element with a blank `parent:` line gets
 // `''` instead of `null` — `childMap` then groups it under the key `''`
 // instead of treating it as a root, silently, and nothing here would notice.
-function deriveParent(el, p) {
-  const parent = p.fields.get('parent');
-  el.parent = typeof parent === 'string' && parent.trim() !== '' ? parent.trim() : null;
+// `NonEmptyString` makes that a compile error now, not just a documented
+// risk: `el.parent = ''` anywhere outside this cast is rejected by tsc (see
+// constants.ts). This is the ONE place the brand is established.
+function deriveParent(el: WithStatus, p: ParsedFile): WithParent {
+  const raw = p.fields.get('parent');
+  const parent = (typeof raw === 'string' && raw.trim() !== '' ? raw.trim() : null) as NonEmptyString | null;
   if (el.type === 'epic') {
-    if (el.parent !== null) el.problems.add('parent:hierarchy');
-  } else if (el.type !== null && el.parent === null) {
+    if (parent !== null) el.problems.add('parent:hierarchy');
+  } else if (el.type !== null && parent === null) {
     el.problems.add('parent:orphaned');
   }
+  return { ...el, parent };
 }
 
-function deriveOptionals(el, p) {
+function deriveOptionals(el: WithParent, p: ParsedFile): WithOptionals {
+  let priority: string;
   const pri = p.fields.get('priority');
   if (typeof pri !== 'string' || pri.trim() === '') {
-    el.priority = 'normal';
+    priority = 'normal';
   } else {
-    el.priority = pri.trim();
+    priority = pri.trim();
     // The value stays in the file untouched; only the sort weight falls back (§ 7).
-    if (!PRIORITIES.includes(el.priority)) el.problems.add('unknown:priority');
+    if (!PRIORITIES.includes(priority)) el.problems.add('unknown:priority');
   }
 
   // Deliberately NOT normalised to `null` like `parent` above — a missing
-  // `assignee` stays `''`. `cmdSet` (lib/cmd-set.js) compares
+  // `assignee` stays `''`. `cmdSet` (lib/cmd-set.ts) compares
   // `assignee !== el.assignee` and turns a `''` into an `undefined` override,
   // which is how `nj set --assignee=` deletes the field. Unifying this with
   // `parent`'s `null` convention would silently change that delete behaviour.
   const asg = p.fields.get('assignee');
-  el.assignee = typeof asg === 'string' ? asg : '';
+  const assignee = typeof asg === 'string' ? asg : '';
 
-  el.tags = Array.isArray(p.fields.get('tags')) ? p.fields.get('tags') : [];
-  el.depends_on = Array.isArray(p.fields.get('depends_on')) ? p.fields.get('depends_on') : [];
+  const tags = Array.isArray(p.fields.get('tags')) ? p.fields.get('tags') as string[] : [];
+  const depends_on = Array.isArray(p.fields.get('depends_on')) ? p.fields.get('depends_on') as string[] : [];
+  return { ...el, priority, assignee, tags, depends_on };
 }
 
-function deriveTimestamps(el, p, file) {
-  for (const [field, code] of [['created', 'missing:created'], ['updated', 'missing:updated']]) {
-    const v = p.fields.get(field);
-    if (typeof v !== 'string' || v.trim() === '') {
-      el[field] = mtimeIso(file);
-      if (p.parsed) el.problems.add(code);
-    } else {
-      el[field] = v.trim();
-    }
+// Unrolled rather than looped over ['created', 'updated'] -- a loop can only
+// widen the return type to "some Record", the same genericity the staged
+// design exists to avoid; two nearly-identical blocks keep each field's type
+// exact.
+function deriveTimestamps(el: WithOptionals, p: ParsedFile, file: string): WithTimestamps {
+  let created: string;
+  const rawCreated = p.fields.get('created');
+  if (typeof rawCreated !== 'string' || rawCreated.trim() === '') {
+    created = mtimeIso(file);
+    if (p.parsed) el.problems.add('missing:created');
+  } else {
+    created = rawCreated.trim();
   }
+
+  let updated: string;
+  const rawUpdated = p.fields.get('updated');
+  if (typeof rawUpdated !== 'string' || rawUpdated.trim() === '') {
+    updated = mtimeIso(file);
+    if (p.parsed) el.problems.add('missing:updated');
+  } else {
+    updated = rawUpdated.trim();
+  }
+
+  return { ...el, created, updated };
 }
 
-function deriveArchiveState(el, p) {
+function deriveArchiveState(el: WithTimestamps, p: ParsedFile): WithArchiveState {
   const arch = p.fields.get('archived');
-  el.archivedAt = typeof arch === 'string' && arch.trim() !== '' ? arch.trim() : null;
+  const archivedAt = typeof arch === 'string' && arch.trim() !== '' ? arch.trim() : null;
   if (el.archived && el.status !== 'done') el.problems.add('archive:not_done');
+  return { ...el, archivedAt };
 }
 
-function deriveBody(el, p, cfg) {
+/** Adds no field of its own -- deriveBody only reads and marks problems. */
+function deriveBody(el: WithArchiveState, p: ParsedFile, cfg: Config): WithArchiveState {
   const h1 = h1Of(p.body);
   if (h1 !== null && el.title !== '' && h1 !== el.title) el.problems.add('title:h1_mismatch');
 
@@ -181,41 +224,42 @@ function deriveBody(el, p, cfg) {
       if (!sectionPresent(p.body, cfg.sections.acceptance)) el.problems.add('incomplete:acceptance');
     }
   }
+  return el;
 }
 
-function loadElement(file, folder, cfg) {
+function loadElement(file: string, folder: string, cfg: Config): Element {
   let raw;
   try {
     raw = fs.readFileSync(file, 'utf8');
-  } catch (err) {
+  } catch (err: any) {
     return unreadableElement(file, folder, cfg, err);
   }
   const p = parseFile(raw);
-  const problems = new Set();
+  const problems: Set<string> = new Set();
   for (const d of p.problems) problems.add(d.code);
 
   const base = path.basename(file, '.md');
-  const el = {
+  const skeleton: Skeleton = {
     file, folder, raw, body: p.body, fields: p.fields, order: p.order,
     parsed: p.parsed, readable: true, detail: p.problems, problems,
     archived: folder === 'archive',
   };
 
-  deriveId(el, p, base);
-  deriveType(el, p, folder);
-  deriveTitle(el, p);
-  deriveStatus(el, p, cfg);
-  deriveParent(el, p);
-  deriveOptionals(el, p);
-  deriveTimestamps(el, p, file);
-  deriveArchiveState(el, p);
-  deriveBody(el, p, cfg);
+  const withId = deriveId(skeleton, p, base);
+  const withType = deriveType(withId, p, folder);
+  const withTitle = deriveTitle(withType, p);
+  const withStatus = deriveStatus(withTitle, p, cfg);
+  const withParent = deriveParent(withStatus, p);
+  const withOptionals = deriveOptionals(withParent, p);
+  const withTimestamps = deriveTimestamps(withOptionals, p, file);
+  const withArchiveState = deriveArchiveState(withTimestamps, p);
+  const final = deriveBody(withArchiveState, p, cfg);
 
-  return el;
+  return final;
 }
 
-function loadBacklog(backlog, cfg) {
-  const elements = [];
+function loadBacklog(backlog: string, cfg: Config): Element[] {
+  const elements: Element[] = [];
   for (const folder of ['epics', 'tasks', 'subtasks', 'archive']) {
     for (const file of listMd(path.join(backlog, folder))) {
       elements.push(loadElement(file, folder, cfg));
@@ -231,9 +275,9 @@ function loadBacklog(backlog, cfg) {
  * see is observable. `counts` is kept separately because the map alone can no
  * longer tell whether an id appeared twice.
  */
-function indexById(elements) {
-  const byId = new Map();
-  const counts = new Map();
+function indexById(elements: Element[]) {
+  const byId: Map<string, Element> = new Map();
+  const counts: Map<string, number> = new Map();
   for (const el of elements) {
     counts.set(el.id, (counts.get(el.id) || 0) + 1);
     if (!byId.has(el.id)) byId.set(el.id, el);
@@ -268,8 +312,8 @@ function indexById(elements) {
  * at 10 000 elements against ~222 ms with the map (§ 13). Insertion order is
  * the scan order, so the unsorted callers keep their output byte for byte.
  */
-function childMap(elements) {
-  const m = new Map();
+function childMap(elements: Element[]) {
+  const m: Map<string, Element[]> = new Map();
   for (const e of elements) {
     if (e.parent === null) continue;
     const a = m.get(e.parent);
@@ -280,13 +324,13 @@ function childMap(elements) {
 
 // A parent cycle (including a self-parent) must not recurse forever (§ 7,
 // `parent:cycle`); the visited set also stops an element being listed twice.
-function descendants(ctx, el) {
+function descendants(ctx: Context, el: Element) {
   // Memo safe only while no verb moves parentage -- see childMap, DECISIONS 81.
   if (!ctx.kids) ctx.kids = childMap(ctx.elements);
-  const out = [];
+  const out: Element[] = [];
   const seen = new Set([el.id]);
-  const walk = (cur) => {
-    for (const c of ctx.kids.get(cur.id) || []) {
+  const walk = (cur: Element) => {
+    for (const c of (ctx.kids as Map<string, Element[]>).get(cur.id) || []) {
       if (seen.has(c.id)) continue;
       seen.add(c.id);
       out.push(c);
@@ -297,13 +341,13 @@ function descendants(ctx, el) {
   return out;
 }
 
-function markDuplicateIds(elements, counts) {
+function markDuplicateIds(elements: Element[], counts: Map<string, number>) {
   for (const el of elements) {
-    if (counts.get(el.id) > 1) el.problems.add('duplicate_id');
+    if ((counts.get(el.id) as number) > 1) el.problems.add('duplicate_id');
   }
 }
 
-function markParentEdges(elements, byId) {
+function markParentEdges(elements: Element[], byId: Map<string, Element>) {
   for (const el of elements) {
     if (el.parent === null) continue;
     const p = byId.get(el.parent);
@@ -316,7 +360,7 @@ function markParentEdges(elements, byId) {
 }
 
 /** Walks upward per element; the seen set is what stops a self-parent (§ 7). */
-function markParentCycles(elements, byId) {
+function markParentCycles(elements: Element[], byId: Map<string, Element>) {
   for (const el of elements) {
     const seen = new Set([el.id]);
     let cur = el;
@@ -331,7 +375,7 @@ function markParentCycles(elements, byId) {
   }
 }
 
-function markDependsOnEdges(elements, byId) {
+function markDependsOnEdges(elements: Element[], byId: Map<string, Element>) {
   for (const el of elements) {
     for (const dep of el.depends_on) {
       const t = byId.get(dep);
@@ -349,9 +393,9 @@ function markDependsOnEdges(elements, byId) {
  * Keeping it costs a re-walk per element; removing it would change WHICH
  * elements carry the code.
  */
-function markDependsOnCycles(elements, byId) {
-  const state = new Map();
-  const hasCycle = (id) => {
+function markDependsOnCycles(elements: Element[], byId: Map<string, Element>) {
+  const state: Map<string, string> = new Map();
+  const hasCycle = (id: string): boolean => {
     const st = state.get(id);
     if (st === 'done') return false;
     if (st === 'open') return true;
@@ -371,7 +415,7 @@ function markDependsOnCycles(elements, byId) {
 }
 
 /** Archived children count as done — § 11's "archived ⇒ done" (decision 23). */
-function markOpenChildren(elements, children) {
+function markOpenChildren(elements: Element[], children: Map<string, Element[]>) {
   for (const el of elements) {
     if (el.status !== 'done') continue;
     const kids = children.get(el.id) || [];
@@ -379,7 +423,7 @@ function markOpenChildren(elements, children) {
   }
 }
 
-function markMissingTombstones(elements, backlog) {
+function markMissingTombstones(elements: Element[], backlog: string) {
   const ids = readTombstones(backlog);
   for (const el of elements) {
     if (!ids.has(el.id)) el.problems.add('id:no_tombstone');
@@ -395,7 +439,7 @@ function markMissingTombstones(elements, backlog) {
  * oracle suite stayed green (pinned in the corpus, scenario
  * `attach-second-derive`).
  */
-function attachGraph(elements, byId, children) {
+function attachGraph(elements: Element[], byId: Map<string, Element>, children: Map<string, Element[]>) {
   for (const el of elements) {
     el.byId = byId;
     el.children = children.get(el.id) || [];
@@ -403,7 +447,8 @@ function attachGraph(elements, byId, children) {
 }
 
 /**
- * Eight passes over the element list. They are listed here in the order they
+ * Ten steps over the element list: two index builds (indexById, childMap) and
+ * eight passes. They are listed here in the order they
  * must run: the index builds sit exactly where they sat before, because the
  * children index is built after the cycle pass and hoisting it would reorder
  * execution for no gain.
@@ -414,7 +459,7 @@ function attachGraph(elements, byId, children) {
  * unobservable. The first pass that reads what another wrote makes the order
  * load-bearing, and nothing here would notice the breach.
  */
-function deriveGraph(elements, backlog) {
+function deriveGraph(elements: Element[], backlog: string) {
   const { byId, counts } = indexById(elements);
   markDuplicateIds(elements, counts);
   markParentEdges(elements, byId);
@@ -428,4 +473,4 @@ function deriveGraph(elements, backlog) {
   return byId;
 }
 
-module.exports = { loadElement, childMap, deriveGraph, descendants, loadBacklog };
+export { loadElement, childMap, deriveGraph, descendants, loadBacklog };

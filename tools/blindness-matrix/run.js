@@ -5,7 +5,7 @@
 //   node run.js <repo> [--nj=<path>] [--compare=<before.json>] [mutant …]
 //
 // --nj       entry point of the mutation base (default <repo>/nj). The code
-//            under test is that file PLUS every lib/*.js beside it — the same
+//            under test is that file PLUS every lib/*.ts beside it — the same
 //            set tools/refactor-harness/baseline.js hashes as codeSha. A base
 //            without lib/ (c1-baseline) is simply nj alone.
 //            Before/after runs must share the base.
@@ -15,7 +15,7 @@
 //
 // Each mutant is a DIRECTORY copy (entry + lib/), because since the module
 // split a lone mutated nj dies on its first require(). A needle is looked up
-// in the entry and in every lib/*.js and mutated where it is found; a needle
+// in the entry and in every lib/*.ts and mutated where it is found; a needle
 // that matches in more than one file is an error, not a hit — the mutant would
 // otherwise silently change two places, or the wrong one.
 const fs = require('fs');
@@ -38,14 +38,18 @@ const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
  * is always written as `nj`, modules as `lib/<name>.js` — the layout the
  * entry's `require('./lib/…')` expects. */
 const LIB_DIR = path.join(path.dirname(NJ_PATH), 'lib');
+// TSK-023: lib/*.js became lib/*.ts. The write step below already uses each
+// file's OWN name (`rel`, taken from this list) as the mutant's output path,
+// so widening the filter is the only change needed -- a mutant copy still
+// lands as `lib/args.ts`, matching what a .ts entry's require() expects.
 const LIB_FILES = fs.existsSync(LIB_DIR)
-  ? fs.readdirSync(LIB_DIR).filter(n => n.endsWith('.js')).sort() : [];
+  ? fs.readdirSync(LIB_DIR).filter(n => n.endsWith('.js') || n.endsWith('.ts')).sort() : [];
 const SOURCES = Object.assign({ nj: fs.readFileSync(NJ_PATH, 'utf8') },
   ...LIB_FILES.map(n => ({ ['lib/' + n]: fs.readFileSync(path.join(LIB_DIR, n), 'utf8') })));
 
 /* Byte-for-byte the identity baseline.js codeSha() computes: one line per
  * file, entry first under its own basename, then lib/ sorted. Hashing nj
- * alone would name a 56-line entry point and miss every change in lib/. */
+ * alone would name a 64-line entry point and miss every change in lib/. */
 function codeSha() {
   const lines = [`${sha256(fs.readFileSync(NJ_PATH))}  ${path.basename(NJ_PATH)}\n`]
     .concat(LIB_FILES.map(n => `${sha256(fs.readFileSync(path.join(LIB_DIR, n)))}  lib/${n}\n`));
@@ -71,7 +75,16 @@ function testDigest(testRoot) {
   return sha256(files.map(f => `${sha256(fs.readFileSync(f.abs))}  test/${f.rel}\n`).join(''));
 }
 
-const HIT = "const __hit = (t) => { if (process.env.NJ_HITLOG) require('fs').appendFileSync(process.env.NJ_HITLOG, t + '\\n'); };\n";
+// S4: lib/*.ts are real ES modules now (import/export throughout) -- `require`
+// is not a global there, so the injected helper needs `import` instead, under
+// a name (`__fs`) no source file already binds. `nj` itself stays CommonJS
+// (the entry point, unconverted), where `import` would be a syntax error and
+// `require` is exactly right -- hence one snippet per target, not a constant.
+function hitSnippet(target) {
+  return target === 'nj'
+    ? "const __hit = (t) => { if (process.env.NJ_HITLOG) require('fs').appendFileSync(process.env.NJ_HITLOG, t + '\\n'); };\n"
+    : "import * as __fs from 'fs';\nconst __hit = (t) => { if (process.env.NJ_HITLOG) __fs.appendFileSync(process.env.NJ_HITLOG, t + '\\n'); };\n";
+}
 const SUM = "out(`${backlogLabel(ctx.backlog)}: ${ctx.elements.length} entries, ${errors.length} error${errors.length === 1 ? '' : 's'}, ${warnings.length} warning${warnings.length === 1 ? '' : 's'}`);";
 const SUMFIX = "out(`${backlogLabel(ctx.backlog)}: ${ctx.elements.length} entries, ${errors.length} error${errors.length === 1 ? '' : 's'}, ${warnings.length} warning${warnings.length === 1 ? '' : 's'} remaining`);";
 const DOCTOR_HEAD = "const ctx = context({ lenient: true, tolerateConfig: true });\n  const findings = collectFindings(ctx);";
@@ -92,7 +105,7 @@ const MUTANTS = {
   'write-toplevel-problems': ['_problems: entry._problems }', "_problems: (entry._problems.length && __hit('write-toplevel-problems'), []) }", 1],
   'write-feedback-warn': ['out(headline);\n  for (const code of elementProblems(el)) {', "out(headline);\n  for (const code of elementProblems(el)) { __hit('write-feedback-warn'); continue;", 1],
   'list-prose-marker': ['${arch}${problemSuffix(el)}`', "${arch}${(problemSuffix(el) && __hit('list-prose-marker'), '')}`", 1],
-  'rm-dependents': ['dependents: dependents.map((d) => d.id) }', "dependents: (dependents.length && __hit('rm-dependents'), []) }", 2],
+  'rm-dependents': ['dependents: dependents.map((d: Element) => d.id) }', "dependents: (dependents.length && __hit('rm-dependents'), []) }", 2],
   'archive-entries': ['entries: moved.map(entryJson),', "entries: (__hit('archive-entries'), []),", 1],
   'fix-notes': ['fixed: actions, notes, problems: findings', "fixed: actions, notes: (notes.length && __hit('fix-notes'), []), problems: findings", 1],
   'fix-fixed': ['fixed: actions, notes, problems: findings', "fixed: (actions.length && __hit('fix-fixed'), []), notes, problems: findings", 1],
@@ -134,7 +147,7 @@ function build(name) {
   fs.mkdirSync(path.join(dir, 'lib'), { recursive: true });
   for (const [rel, src] of Object.entries(SOURCES)) {
     const out = rel === target
-      ? src.split(needle).join(repl).replace(anchor, anchor + HIT)   // __hit() lives in the mutated file
+      ? src.split(needle).join(repl).replace(anchor, anchor + hitSnippet(target))   // __hit() lives in the mutated file
       : src;
     fs.writeFileSync(path.join(dir, rel), out);
   }

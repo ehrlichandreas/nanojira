@@ -39,6 +39,18 @@ function arg(name, dflt) {
   return hit === undefined ? dflt : hit.slice(name.length + 3);
 }
 
+// A full record/verify run takes minutes and prints NOTHING until it is
+// done -- collect() only returns after every fixture, oracle suite and
+// scratch script has run. A short timeout on a silent process is then
+// indistinguishable from a genuine hang; both look like nothing happening.
+// Emitted to STDERR (stdout carries only the final report a caller might
+// capture) with a running elapsed time, one line per corpus part started.
+const HEARTBEAT_START = Date.now();
+function heartbeat(what) {
+  const s = ((Date.now() - HEARTBEAT_START) / 1000).toFixed(0).padStart(4);
+  process.stderr.write(`[+${s}s] ${what}\n`);
+}
+
 const mode = process.argv[2];
 if (mode !== 'record' && mode !== 'verify') {
   process.stderr.write('usage: baseline.js <record|verify> --nj=<path to nj> [--scratch=<dir>] [--scripts=<dir>]\n');
@@ -136,7 +148,11 @@ function codeSha() {
   const root = path.dirname(NJ_ABS);
   const lib = path.join(root, 'lib');
   let mods = [];
-  try { mods = fs.readdirSync(lib).filter((n) => n.endsWith('.js')).sort(); } catch { /* no lib/: nj alone */ }
+  // TSK-023: lib/*.js became lib/*.ts. Proven first against a probe .ts file
+  // that the old .js-only filter silently drops it (0 modules found instead
+  // of the real count), which would print "current code sha256 (nj + lib/,
+  // 1 files)" -- looking exactly like nj-alone instead of the true 22.
+  try { mods = fs.readdirSync(lib).filter((n) => n.endsWith('.js') || n.endsWith('.ts')).sort(); } catch { /* no lib/: nj alone */ }
   const lines = [`${R.sha256(fs.readFileSync(NJ_ABS))}  ${path.basename(NJ_ABS)}\n`]
     .concat(mods.map((n) => `${R.sha256(fs.readFileSync(path.join(lib, n)))}  lib/${n}\n`));
   return { sha: R.sha256(lines.join('')), files: 1 + mods.length };
@@ -154,6 +170,7 @@ function runFixtures(recordPath) {
   const c = new Ctx(SCRATCH, SHIM, process.execPath, recordPath);
   const threw = [];
   for (const s of scenarios) {
+    heartbeat(`fixture ${s.name}`);
     try {
       s.fn(c);
     } catch (e) {
@@ -198,6 +215,7 @@ function runOracle(recordPath) {
   let passed = 0, failed = 0, cr = 0;
   const failedNames = [];
   for (const s of suites) {
+    heartbeat(`oracle ${s}`);
     const r = spawnSync(process.execPath, [path.join(root, s), SHIM], {
       cwd: PROJECT,
       env: Object.assign({}, process.env, {
@@ -273,6 +291,7 @@ function runScratchScripts(recordPath) {
   const before = countLines(recordPath);
   let contributed = 0;
   for (const n of files) {
+    heartbeat(`scratch ${n}`);
     const p = path.join(SCRIPTS, n);
 
     if (DIRECT_ONLY_SCRIPTS.has(n)) {

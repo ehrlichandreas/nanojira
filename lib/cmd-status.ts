@@ -2,12 +2,14 @@
 
 // `nj` without a command: the status overview.
 
-const { checkFlags } = require('./args.js');
-const { context } = require('./context.js');
-const { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } = require('./derive.js');
-const { out } = require('./output.js');
+import type { Flags } from './types.ts';
 
-function cmdStatus(flags) {
+import { checkFlags } from './args.ts';
+import { context } from './context.ts';
+import { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } from './derive.ts';
+import { out } from './output.ts';
+
+function cmdStatus(flags: Flags) {
   checkFlags(flags, [], new Set(['json']), false);
   const ctx = context();
   const scope = ctx.elements.filter((e) => !e.archived);
@@ -32,7 +34,7 @@ function cmdStatus(flags) {
     out('');
     out('Complete first:');
     for (const e of incomplete) {
-      out(`  ${e.id}  ${e.title}      ${elementProblems(e).filter((c) => c.startsWith('incomplete:')).join(' ')}`);
+      out(`  ${e.id}  ${e.title}      ${elementProblems(e).filter((c: string) => c.startsWith('incomplete:')).join(' ')}`);
     }
   }
   if (counts.errors > 0) {
@@ -42,4 +44,4 @@ function cmdStatus(flags) {
   return 0;
 }
 
-module.exports = { cmdStatus };
+export { cmdStatus };

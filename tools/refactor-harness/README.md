@@ -66,7 +66,7 @@ geprüft hat, darf nie wie ein bestandener aussehen.**
 |---|---|
 | `nj-shim` | steht überall dort, wo ein nj-Pfad erwartet wird; leitet weiter und zeichnet auf |
 | `lib/record.js` | Normalisierung, Backlog-Snapshot, mtime-Pinning |
-| `fixtures.js` | 22 Szenarien: alle Kommandos, alle erreichbaren Fehlercodes, die Liste aus review-verifier.md §3 |
+| `fixtures.js` | 29 Szenarien: alle Kommandos, alle erreichbaren Fehlercodes, die Liste aus review-verifier.md §3 |
 | `baseline.js` | Treiber: Korpus fahren, aufzeichnen, vergleichen |
 | `scratch/` | die Ad-hoc-Sonden des Verifiers, aus `/tmp` gerettet — dort waren sie nach einem Neustart weg und `record` brach mit Code 4 ab |
 

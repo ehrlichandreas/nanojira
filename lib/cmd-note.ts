@@ -2,13 +2,15 @@
 
 // `nj note`.
 
-const { checkFlags } = require('./args.js');
-const { context, resolveTarget, requireWritable, requireActive } = require('./context.js');
-const { loadElement, deriveGraph } = require('./load.js');
-const { fail, writeFeedback, emitWriteResult } = require('./output.js');
-const { nowIso, guardedWrite, renderElement } = require('./store.js');
+import type { Flags, Element } from './types.ts';
 
-function cmdNote(flags, positional) {
+import { checkFlags } from './args.ts';
+import { context, resolveTarget, requireWritable, requireActive } from './context.ts';
+import { loadElement, deriveGraph } from './load.ts';
+import { fail, writeFeedback, emitWriteResult } from './output.ts';
+import { nowIso, guardedWrite, renderElement } from './store.ts';
+
+function cmdNote(flags: Flags, positional: string[]) {
   checkFlags(flags, [], new Set(['json', 'force', 'id', 'file']), true);
   const json = flags.has('json');
   const ctx = context();
@@ -51,10 +53,10 @@ function cmdNote(flags, positional) {
   guardedWrite(el, renderElement(el, overrides, body), flags.has('force'), ctx.backlog);
 
   const fresh = loadElement(el.file, el.folder, ctx.cfg);
-  deriveGraph(ctx.elements.map((e) => (e.file === el.file ? fresh : e)), ctx.backlog);
+  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.backlog);
   if (json) emitWriteResult(true, fresh, ['body']);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} note added`);
   return 0;
 }
 
-module.exports = { cmdNote };
+export { cmdNote };
