@@ -1,0 +1,493 @@
+'use strict';
+/* `doctor --fix` — the exit code, pinned (§ 14).
+ *
+ * WHY THIS FILE EXISTS.
+ *
+ * § 14 decides the rule without leaving a gap:
+ *
+ *   "`doctor --fix` reports the **actions it took** plus the findings that
+ *    **remain** ... while its **exit code reflects the state *after*** them:
+ *    0 when no error remains, 2 when one does. A warning that survives does
+ *    not raise the exit code. An agent that uses `--fix` as a gate therefore
+ *    needs no second `doctor` run."
+ *
+ * The suite nonetheless tolerated **both** values at every `--fix` call —
+ * `T.exit(desc, r, [0, 2])` at seven sites (`ac/ac-02` ×2, `ac/ac-18`,
+ * `edge/empty-value-rule`, `edge/fix-duplicate-mtimes`, `edge/fix-mtime-
+ * snapshot`, `edge/write-encoding`), with `edge/tombstone-partial-loss` not
+ * pinning it at all. `AMBIGUITIES.md` 5 records why (the implementation was
+ * still moving) and calls tightening it a follow-up. This is that follow-up,
+ * done in new files so the seven carriers stay untouched.
+ *
+ * An either/or there is not a small looseness. `--fix` is the one command an
+ * agent is invited to use as a **gate**: exit 0 means "proceed". Accepting
+ * either value means the gate is never tested at all — a `--fix` that
+ * returned 2 on a fully repaired backlog (blocking a correct agent) and one
+ * that returned 0 on a surviving `duplicate_id` (waving a broken one
+ * through) are both green under `[0, 2]`, and they are opposite bugs.
+ *
+ * HOW EACH EXPECTATION IS DERIVED — from § 14's repair list, never from `nj`.
+ *
+ * § 14 enumerates what `--fix` repairs (steps 1–8) and, separately, what it
+ * must **never** do: "guess status values, resolve duplicate IDs, invent
+ * parents, rewrite the body, or overwrite an existing value — even an
+ * invalid one". So for each fixture the question has one answer: does an
+ * **error**-severity finding (§ 7's Doctor column) survive the eight steps?
+ *   - repaired by a step               → no error remains → **0**
+ *   - on the "never" list, or no step  → the error remains → **2**
+ *   - only warnings remain             → **0**, explicitly
+ *
+ * Three invariants are asserted at every scenario, because each catches a
+ * different way the rule can break:
+ *   (a) the exit code itself;
+ *   (b) `--fix`'s own `--json` `ok` field agrees with it — § 9: "`ok` is true
+ *       exactly when no `error` finding exists";
+ *   (c) a plain `doctor` run *afterwards* returns the same code — which is
+ *       precisely § 14's "needs no second doctor run", made mechanical.
+ */
+const fs = require('fs');
+const path = require('path');
+const H = require('../lib/harness.js');
+const T = H.T;
+
+const NOW = H.FIXED_NOW;
+const FIXENV = { NJ_NOW: H.LATER_NOW };
+
+const epicBody = t => '# ' + t + '\n\n## Description\nD\n';
+const taskBody = t => '# ' + t + '\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n';
+
+/** The healthy epic every fixture is built around, so a task has a parent. */
+const EPIC = {
+  'epics/EPIC-001.md': H.element({
+    id: 'EPIC-001', type: 'epic', title: 'E', status: 'todo',
+    created: NOW, updated: NOW,
+  }, epicBody('E')),
+};
+
+const idsOf = d => H.lsOrEmpty(path.join(d, 'backlog', '.ids'));
+
+/**
+ * Drive one fixture through `doctor` → `doctor --fix` → `doctor`.
+ *
+ * `preExit` and `fixExit` are single values on purpose: § 14 decides both,
+ * so an array here would be the very tolerance this file removes.
+ */
+function scenario(name, opts) {
+  const d = opts.fixture();
+
+  /* The state *before* the repairs, so a fixture that never carried the
+   * problem cannot pass by accident. */
+  const pre = H.runJson(['doctor'], { cwd: d });
+  T.exit(name + ' — doctor before --fix exits ' + opts.preExit, pre, opts.preExit);
+  if (opts.preCode) {
+    T.check(name + ' — the fixture really carries ' + opts.preCode,
+      !!pre.json && Array.isArray(pre.json.problems) &&
+      pre.json.problems.some(p => p && p.code === opts.preCode),
+      JSON.stringify(pre.json && pre.json.problems));
+  }
+
+  const fix = H.runJson(['doctor', '--fix'], { cwd: d, env: FIXENV });
+
+  /* (a) § 14's rule itself. */
+  T.exit(name + ' — doctor --fix exits ' + opts.fixExit, fix, opts.fixExit);
+
+  /* The shape is asserted, never assumed. An earlier revision guarded the two
+   * invariants below with `if (fix.json && typeof fix.json.ok === 'boolean')`
+   * and `if (Array.isArray(fix.json.problems))` — so an implementation that
+   * simply omitted either field made both invariants DISAPPEAR and the file
+   * still reported PASS, with 101 checks instead of 118. Fewer checks looked
+   * exactly like a green run. That is the failure mode this whole file exists
+   * to remove, so the guards are gone: § 9 pins doctor's JSON as
+   * `{backlog, ok, problems: [...]}`, which makes a missing field a contract
+   * breach to be reported, not a variant to be politely skipped.
+   *
+   * Every assertion below is null-safe rather than conditional, so the check
+   * COUNT is a constant of this file — it cannot shrink under a mutation. */
+  const okIsBool = !!fix.json && typeof fix.json.ok === 'boolean';
+  T.check(name + ' — --fix --json carries a boolean ok (§ 9 doctor shape)',
+    okIsBool, JSON.stringify(fix.json && fix.json.ok));
+
+  /* (b) § 9: doctor's `ok` "is true exactly when no `error` finding exists",
+   * and § 14 makes `--fix`'s report describe the state after the repairs. So
+   * `ok` and the exit code are two views of one fact and must agree. */
+  T.check(name + ' — --fix ok agrees with the exit code',
+    okIsBool && fix.json.ok === (opts.fixExit === 0),
+    'ok=' + JSON.stringify(fix.json && fix.json.ok) + ' exit=' + fix.status);
+
+  const hasProblems = !!fix.json && Array.isArray(fix.json.problems);
+  T.check(name + ' — --fix --json carries a problems array (§ 9 doctor shape)',
+    hasProblems, JSON.stringify(fix.json && fix.json.problems));
+
+  /* § 14: `problems[]` reflects the state *after* the repairs, so an
+   * error-severity entry must appear exactly when the exit is 2. */
+  const errs = hasProblems
+    ? fix.json.problems.filter(p => p && p.severity === 'error') : null;
+  T.check(name + ' — a surviving error appears in problems[] iff exit 2',
+    hasProblems && (errs.length > 0) === (opts.fixExit === 2),
+    'exit ' + opts.fixExit + ', surviving errors: ' +
+    (errs === null ? '(no problems array)' : JSON.stringify(errs.map(p => p.code))));
+
+  /* (c) "An agent that uses `--fix` as a gate therefore needs no second
+   * `doctor` run." The second run is made here only to prove the first
+   * answer was already correct. */
+  const post = H.runJson(['doctor'], { cwd: d });
+  T.exit(name + ' — doctor after --fix exits ' + opts.fixExit, post, opts.fixExit);
+
+  if (opts.after) opts.after(d, fix, post);
+  return d;
+}
+
+/* ================================================================== */
+/* Exit 0 — every error was repaired, or only warnings were ever there */
+/* ================================================================== */
+
+/* The control. A clean backlog must not be dirtied by --fix; if this one ever
+ * exits 2, every "repaired" verdict below is meaningless. */
+scenario('clean backlog', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-clean', files: EPIC, tombstones: ['EPIC-001'],
+  }),
+  preExit: 0, fixExit: 0,
+});
+
+/* § 14 step 1: "write the `id` from the file name ... when missing".
+ * `id:derived` is a WARNING, so the pre-exit is already 0 — this case pins
+ * the other half of the rule: repairing a warning must not *raise* the exit. */
+scenario('id missing (warning, step 1)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-idderived',
+    files: {
+      'epics/EPIC-001.md': H.element({
+        type: 'epic', title: 'E', status: 'todo', created: NOW, updated: NOW,
+      }, epicBody('E')),
+    },
+    tombstones: ['EPIC-001'],
+  }),
+  preExit: 0, fixExit: 0, preCode: 'id:derived',
+  after: d => T.contains('the id was written from the file name',
+    H.readInBacklog(d, 'epics/EPIC-001.md'), 'id: EPIC-001'),
+});
+
+/* § 14 step 2: "rename the file to match the `id` ... and the target is
+ * free". `id:mismatch` is an ERROR (§ 7), so this is the decisive shape:
+ * 2 before, 0 after. */
+scenario('id mismatch, target free (error, step 2)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-mismatch',
+    files: Object.assign({}, EPIC, {
+      'tasks/TSK-001.md': H.element({
+        id: 'TSK-002', type: 'task', parent: 'EPIC-001', title: 'T',
+        status: 'todo', created: NOW, updated: NOW,
+      }, taskBody('T')),
+    }),
+    tombstones: ['EPIC-001'],
+  }),
+  preExit: 2, fixExit: 0, preCode: 'id:mismatch',
+  after: d => {
+    T.check('the file was renamed to match the id',
+      H.existsInBacklog(d, 'tasks/TSK-002.md') && !H.existsInBacklog(d, 'tasks/TSK-001.md'),
+      JSON.stringify(H.listFiles(d, 'tasks')));
+  },
+});
+
+/* § 14 step 3: "move a file into the correct type folder — only when `id`
+ * prefix and `type` agree". `type:folder` is an ERROR. */
+scenario('wrong type folder (error, step 3)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-folder',
+    files: Object.assign({}, EPIC, {
+      'subtasks/TSK-003.md': H.element({
+        id: 'TSK-003', type: 'task', parent: 'EPIC-001', title: 'T',
+        status: 'todo', created: NOW, updated: NOW,
+      }, taskBody('T')),
+    }),
+    tombstones: ['EPIC-001', 'TSK-003'],
+  }),
+  preExit: 2, fixExit: 0, preCode: 'type:folder',
+  after: d => T.check('the file was moved into tasks/',
+    H.existsInBacklog(d, 'tasks/TSK-003.md') && !H.existsInBacklog(d, 'subtasks/TSK-003.md'),
+    'tasks=' + JSON.stringify(H.listFiles(d, 'tasks')) +
+    ' subtasks=' + JSON.stringify(H.listFiles(d, 'subtasks'))),
+});
+
+/* § 14 step 4 on the ERROR half: `backlog:ids_missing`. AC-18 drives the same
+ * loss but tolerates `[0, 2]` on the `--fix` call; here the code is the
+ * assertion. */
+scenario('.ids/ lost entirely (error, step 4)', {
+  fixture: () => {
+    const d = H.mkBacklog({
+      label: 'exitfix-idsmissing', files: EPIC, tombstones: ['EPIC-001'],
+    });
+    fs.rmSync(path.join(d, 'backlog', '.ids'), { recursive: true, force: true });
+    return d;
+  },
+  preExit: 2, fixExit: 0, preCode: 'backlog:ids_missing',
+  after: d => T.eq('the tombstone was restored',
+    JSON.stringify(idsOf(d)), JSON.stringify(['EPIC-001'])),
+});
+
+/* § 14 step 4 on the WARNING half: `id:no_tombstone`. */
+scenario('one tombstone missing (warning, step 4)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-notombstone',
+    files: Object.assign({}, EPIC, {
+      'tasks/TSK-001.md': H.element({
+        id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'T',
+        status: 'todo', created: NOW, updated: NOW,
+      }, taskBody('T')),
+    }),
+    tombstones: ['EPIC-001'],
+  }),
+  preExit: 0, fixExit: 0, preCode: 'id:no_tombstone',
+  after: d => T.eq('the missing tombstone was created',
+    JSON.stringify(idsOf(d)), JSON.stringify(['EPIC-001', 'TSK-001'])),
+});
+
+/* § 14 step 5: status/created/updated filled in — all three WARNINGS. */
+scenario('status and timestamps missing (warnings, step 5)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-step5',
+    files: {
+      'epics/EPIC-001.md': H.element({ id: 'EPIC-001', type: 'epic', title: 'E' },
+        epicBody('E')),
+    },
+    tombstones: ['EPIC-001'],
+  }),
+  preExit: 0, fixExit: 0, preCode: 'missing:status',
+  after: d => {
+    const body = H.readInBacklog(d, 'epics/EPIC-001.md');
+    T.contains('status was filled from statuses[0]', body, 'status: todo');
+    T.contains('updated was filled with now', body, 'updated: ' + H.LATER_NOW);
+  },
+});
+
+/* § 14 step 6: "pull the H1 up from `title`". `title:h1_mismatch` is a
+ * WARNING. */
+scenario('H1 drift (warning, step 6)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-h1',
+    files: {
+      'epics/EPIC-001.md': H.element({
+        id: 'EPIC-001', type: 'epic', title: 'Real Title', status: 'todo',
+        created: NOW, updated: NOW,
+      }, '# Stale Heading\n\n## Description\nD\n'),
+    },
+    tombstones: ['EPIC-001'],
+  }),
+  preExit: 0, fixExit: 0, preCode: 'title:h1_mismatch',
+  after: d => T.contains('the H1 was pulled up from title',
+    H.readInBacklog(d, 'epics/EPIC-001.md'), '# Real Title'),
+});
+
+/* § 14 step 7: "remove stray `.nj-tmp-*` files". `backlog:stray_tmp` is a
+ * WARNING. */
+scenario('stray temp file (warning, step 7)', {
+  fixture: () => {
+    const d = H.mkBacklog({
+      label: 'exitfix-stray', files: EPIC, tombstones: ['EPIC-001'],
+    });
+    H.writeRaw(d, 'tasks/.nj-tmp-4242-deadbeef', 'half a file\n');
+    return d;
+  },
+  preExit: 0, fixExit: 0, preCode: 'backlog:stray_tmp',
+  after: d => T.eq('the stray temp file is gone',
+    JSON.stringify(H.listFiles(d, 'tasks')), '[]'),
+});
+
+/* THE case § 14's last sentence is about: "A warning that survives does not
+ * raise the exit code."
+ *
+ * `unknown:status` is a WARNING that `--fix` must not touch — § 14's "never"
+ * list opens with "guess status values" and closes with "overwrite an
+ * existing value — even an invalid one; invalid existing values are
+ * reported, not repaired". So the finding is still there afterwards and the
+ * exit is still 0. An implementation that summed severities instead of
+ * counting errors would return 2 here, and `[0, 2]` would not notice. */
+scenario('unknown status survives --fix (warning stays, exit stays 0)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-unknownstatus',
+    files: {
+      'epics/EPIC-001.md': H.element({
+        id: 'EPIC-001', type: 'epic', title: 'E', status: 'blocked-on-review',
+        created: NOW, updated: NOW,
+      }, epicBody('E')),
+    },
+    tombstones: ['EPIC-001'],
+  }),
+  preExit: 0, fixExit: 0, preCode: 'unknown:status',
+  after: (d, fix, post) => {
+    T.contains('the invalid status was NOT overwritten',
+      H.readInBacklog(d, 'epics/EPIC-001.md'), 'status: blocked-on-review');
+    T.check('the warning is still reported after --fix',
+      !!post.json && Array.isArray(post.json.problems) &&
+      post.json.problems.some(p => p && p.code === 'unknown:status' && p.severity === 'warning'),
+      JSON.stringify(post.json && post.json.problems));
+  },
+});
+
+/* ================================================================== */
+/* Exit 2 — an error finding survives, because § 14 forbids the repair */
+/* ================================================================== */
+
+/* § 14's "never" list: "resolve duplicate IDs". `duplicate_id` is an ERROR. */
+scenario('duplicate id survives (error, exit 2)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-dupe',
+    files: Object.assign({}, EPIC, {
+      'tasks/TSK-001.md': H.element({
+        id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'One',
+        status: 'todo', created: NOW, updated: NOW,
+      }, taskBody('One')),
+      'tasks/TSK-002.md': H.element({
+        id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'Two',
+        status: 'todo', created: NOW, updated: NOW,
+      }, taskBody('Two')),
+    }),
+    tombstones: ['EPIC-001', 'TSK-001', 'TSK-002'],
+  }),
+  preExit: 2, fixExit: 2, preCode: 'duplicate_id',
+  after: d => T.eq('both files are still there — the duplicate was not resolved',
+    JSON.stringify(H.listFiles(d, 'tasks')),
+    JSON.stringify(['TSK-001.md', 'TSK-002.md'])),
+});
+
+/* § 14's "never" list: "invent parents". `parent:dangling` is an ERROR. */
+scenario('dangling parent survives (error, exit 2)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-dangling',
+    files: Object.assign({}, EPIC, {
+      'tasks/TSK-001.md': H.element({
+        id: 'TSK-001', type: 'task', parent: 'EPIC-404', title: 'T',
+        status: 'todo', created: NOW, updated: NOW,
+      }, taskBody('T')),
+    }),
+    tombstones: ['EPIC-001', 'TSK-001'],
+  }),
+  preExit: 2, fixExit: 2, preCode: 'parent:dangling',
+  after: d => T.contains('the parent was not invented',
+    H.readInBacklog(d, 'tasks/TSK-001.md'), 'parent: EPIC-404'),
+});
+
+/* `depends_on:dangling` is an ERROR and is not among the eight steps. */
+scenario('dangling depends_on survives (error, exit 2)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-dep',
+    files: Object.assign({}, EPIC, {
+      'tasks/TSK-001.md': H.element({
+        id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'T',
+        status: 'todo', depends_on: '[TSK-404]', created: NOW, updated: NOW,
+      }, taskBody('T')),
+    }),
+    tombstones: ['EPIC-001', 'TSK-001'],
+  }),
+  preExit: 2, fixExit: 2, preCode: 'depends_on:dangling',
+});
+
+/* `archive:not_done` is an ERROR (§ 11's "archived ⇒ done" invariant) and is
+ * not among the eight steps — § 14 must not silently flip a status to make
+ * the archive consistent. */
+scenario('archive:not_done survives (error, exit 2)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-archnotdone',
+    files: {
+      'archive/EPIC-001.md': H.element({
+        id: 'EPIC-001', type: 'epic', title: 'E', status: 'todo',
+        created: NOW, updated: NOW, archived: NOW,
+      }, epicBody('E')),
+    },
+    tombstones: ['EPIC-001'],
+  }),
+  preExit: 2, fixExit: 2, preCode: 'archive:not_done',
+  after: d => T.contains('the status was not flipped to done',
+    H.readInBacklog(d, 'archive/EPIC-001.md'), 'status: todo'),
+});
+
+/* § 5 / § 14: `config:invalid` is a backlog-level ERROR and is not one of the
+ * eight repair steps — `doctor` is the only command that runs at all here,
+ * and it must still report 2 after `--fix`. */
+scenario('invalid config survives (error, exit 2)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-badconfig', files: EPIC, tombstones: ['EPIC-001'],
+    /* `done` is not the last entry — § 5's positions are load-bearing. */
+    config: JSON.stringify({ schema: 1, statuses: ['todo', 'done', 'doing'] }) + '\n',
+  }),
+  preExit: 2, fixExit: 2, preCode: 'config:invalid',
+});
+
+/* § 14 step 2 is conditional: the rename happens "when frontmatter and file
+ * name disagree **and the target is free**". Here it is not, so the step
+ * cannot run.
+ *
+ * The exit is over-determined and deliberately not claimed otherwise: two
+ * files carry `TSK-002`, so `duplicate_id` is an ERROR here on its own and
+ * would force exit 2 even if step 2 had never been conditional. That is
+ * unavoidable — occupying a rename target with a valid element necessarily
+ * duplicates its id. The exit code therefore proves little on its own; the
+ * `after` assertions below carry the actual content of this case, by showing
+ * the step *declined* rather than overwrote. */
+scenario('id mismatch, target occupied (step 2 declines, exit 2)', {
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-occupied',
+    files: Object.assign({}, EPIC, {
+      'tasks/TSK-001.md': H.element({
+        id: 'TSK-002', type: 'task', parent: 'EPIC-001', title: 'Claimant',
+        status: 'todo', created: NOW, updated: NOW,
+      }, taskBody('Claimant')),
+      'tasks/TSK-002.md': H.element({
+        id: 'TSK-002', type: 'task', parent: 'EPIC-001', title: 'Occupant',
+        status: 'todo', created: NOW, updated: NOW,
+      }, taskBody('Occupant')),
+    }),
+    tombstones: ['EPIC-001', 'TSK-002'],
+  }),
+  preExit: 2, fixExit: 2,
+  after: d => {
+    /* The isolating assertion: the rename did NOT happen. Without it the
+     * scenario would also pass if `--fix` had overwritten the occupant —
+     * which would destroy an element file to satisfy a rename. */
+    T.eq('neither file was renamed away',
+      JSON.stringify(H.listFiles(d, 'tasks')),
+      JSON.stringify(['TSK-001.md', 'TSK-002.md']));
+    T.contains('the occupant is untouched',
+      H.readInBacklog(d, 'tasks/TSK-002.md'), 'title: Occupant');
+  },
+});
+
+/* ================================================================== */
+/* Step order — § 14's own justification, made observable              */
+/* ================================================================== */
+
+/* § 14: "the tombstone backfill claims the **frontmatter** `id`, so it must
+ * run after the rename, or it would claim the wrong number while the right
+ * one stays unprotected."
+ *
+ * `tasks/TSK-005.md` carrying `id: TSK-009`, with no tombstones at all. Both
+ * findings are ERRORs (`id:mismatch`, `backlog:ids_missing`) and both are
+ * repairable, so the exit is 0 — but the *evidence* is which tombstone
+ * exists afterwards. Step 4 before step 2 would leave `.ids/TSK-005`: the
+ * wrong number claimed, TSK-009 free for reuse, and § 8's never-reuse
+ * guarantee quietly void. The exit code alone cannot see that, which is why
+ * it is asserted separately. */
+scenario('tombstone backfill runs after the rename (step 4 after step 2)', {
+  /* mkBacklog creates `.ids/` empty when no tombstones are given — which is
+   * itself `backlog:ids_missing`, the second (repairable) error here. */
+  fixture: () => H.mkBacklog({
+    label: 'exitfix-order',
+    files: Object.assign({}, EPIC, {
+      'tasks/TSK-005.md': H.element({
+        id: 'TSK-009', type: 'task', parent: 'EPIC-001', title: 'T',
+        status: 'todo', created: NOW, updated: NOW,
+      }, taskBody('T')),
+    }),
+  }),
+  preExit: 2, fixExit: 0, preCode: 'id:mismatch',
+  after: d => {
+    T.check('the file carries its frontmatter id',
+      H.existsInBacklog(d, 'tasks/TSK-009.md') && !H.existsInBacklog(d, 'tasks/TSK-005.md'),
+      JSON.stringify(H.listFiles(d, 'tasks')));
+    T.eq('the tombstone claims the frontmatter id, not the old file name',
+      JSON.stringify(idsOf(d)), JSON.stringify(['EPIC-001', 'TSK-009']));
+  },
+});
+
+T.finish();

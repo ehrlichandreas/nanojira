@@ -139,11 +139,14 @@ const EPIC = H.element({
   const file = inBacklog(d, 'tasks', 'TSK-001.md');
   const before = bytesOrNull(file);
 
-  // AMBIGUOUS: § 9 pins exit 2 for `nj doctor` with an error finding, but not
-  // whether `--fix` samples the findings before or after the repairs
-  // (AMBIGUITIES.md #5); as at every other --fix call in the suite, both codes
-  // are accepted and the assertion that matters is on the bytes.
-  T.exit('doctor --fix', H.runNj(['doctor', '--fix'], { cwd: d, env: { NJ_NOW: H.LATER_NOW } }), [0, 2]);
+  // § 14: "0 when no error remains, 2 when one does." This fixture's findings
+  // are all warning-level per § 7's table: TSK-001 is missing `type`
+  // (`type:derived`, consistent with the `tasks/` folder and `TSK-` prefix, so
+  // no `type:folder` error), missing `status`/`created`/`updated`
+  // (`missing:status`/`missing:created`/`missing:updated`), and its H1
+  // disagrees with `title` (`title:h1_mismatch`, warning). No error-level code
+  // applies anywhere in this fixture, so the exit code is pinned at exactly 0.
+  T.exit('doctor --fix', H.runNj(['doctor', '--fix'], { cwd: d, env: { NJ_NOW: H.LATER_NOW } }), 0);
 
   const after = bytesOrNull(file);
   T.check('the fix really rewrote the file',

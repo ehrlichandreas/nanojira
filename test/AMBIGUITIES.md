@@ -112,12 +112,14 @@ them: `0` when no `error` finding remains, `2` when one does; a surviving
 **warning** alone stays `0`. § 9's "exit 2 is `nj doctor` only" therefore
 describes the post-repair state, not a pre-repair snapshot.
 
-**How the oracle handles it:** the exit code is currently *tolerated* rather
-than pinned — `T.exit(desc, r, [0, 2])` at every `--fix` call — because the
-implementation's post-`--fix` code was still moving when the tests were
-written. The real assertion is made on the resulting files. **The exact codes
-are not yet pinned in the tests; tightening the tolerance to § 14's rule is a
-follow-up task.**
+**How the oracle handles it — RESOLVED.** The exit code used to be *tolerated*
+rather than pinned (`T.exit(desc, r, [0, 2])` at every `--fix` call), because
+the implementation's post-`--fix` code was still moving when the tests were
+written. That is no longer the case. `edge/exit-doctor-fix.js` pins one value
+per fixture across 16 scenarios, derived from § 14 alone, and all seven
+tolerating call sites have since been tightened to a single § 14-derived value.
+The tolerance is now impossible rather than merely discouraged: `T.exit` throws
+when handed an array (see item 23).
 
 **Affects (tolerance carriers):** `ac/ac-02-golden-files.js`,
 `ac/ac-18-tombstone-integrity.js`, `edge/empty-value-rule.js`,
@@ -415,6 +417,222 @@ applies the LF rule to the whole file.
 
 ---
 
+## 25. Which element(s) carry `depends_on:cycle`?
+
+**Unpinned.** § 7 defines the code over a whole-graph predicate ("the
+`depends_on` graph contains a cycle"), not a per-element condition, so it does
+not by itself say which element(s) a finding attaches to. Three readings are
+live: **(a) member** — only elements literally on a cycle; **(b) reaches** —
+(a) plus any element whose `depends_on` chain leads into a cycle without being
+part of it; **(c) every element** — the graph predicate applied
+backlog-globally, with no per-element distinction at all.
+
+Structurally the same open question as item 17 (`parent:hierarchy`, which side
+carries the code), where the oracle already chose to assert only "the code
+appears" rather than pin a side. Pinning here while loosening there would be
+inconsistent with the project's own practice.
+
+**Observed (not authoritative — not a basis for the oracle's assertions):** the
+current `nj` implements **(b)**. An element that merely depends on a cycle
+member carries the code too, although it is not itself part of any cycle.
+
+**How the oracle handles it:** `edge/state-cycle-all-members.js` asserts only
+what holds under all three readings — every actual cycle member carries the
+code, and a dependency-free control does not — and carries a "reacher" fixture
+element with **no assertion on it**, ready for whichever of (a)/(b) is ruled.
+
+**Affects:** `edge/state-cycle-all-members.js`.
+
+## 26. "bounded at 100 retries" — counts probes, or retries after a first attempt?
+
+**Ruled, but NOT compelled by the text.** § 8 says the allocator probes upward
+"bounded at 100 retries, then exit 1 with the stderr line `nj: id allocation
+failed after 100 retries (<TYPE>)`". Read literally, "retry" can exclude the
+first attempt (1 + 100 = 101 probes) or include it (100 probes in total).
+
+**Decision (Lead).** At most **100 exclusive probes in total**.
+
+**Honest provenance of this ruling — read this before citing it.** It was first
+justified as a necessary consequence of the mandated error line: a program that
+prints "failed after 100 retries" after 101 probes would contradict its own
+output. **That argument does not hold**, and a verifier said so: if the first
+attempt is "the attempt" and the following 100 are the "retries", the sentence
+stays literally true at 101 probes. § 8 does not decide between the two, and
+`DECISIONS.md` 30 only governs the case of `<TYPE>`.
+
+So this is a **choice**, recorded as one. It is not derived, and it must not be
+cited as something the spec says. It stands because it is coherent, because the
+oracle implements it consistently, and because leaving the bound unpinned would
+leave the abort leg untestable.
+
+**Affects:** `fault/det-id-retry.js` (99 collisions → success at start+100;
+100 collisions → abort), `stress/concurrency.js` (unchanged).
+
+## 27. What does `changed` name, and in which order?
+
+**Ruled.** § 9 (Z. 965) says only "`changed` lists exactly the fields that
+changed", which leaves open whether mandatory fields count as "changed" on a
+first write, and says nothing about order.
+
+**Decision (Lead), membership:** on `nj new`, `changed` names **all written
+frontmatter fields except `created`/`updated`**, not just the optional flags
+that were passed.
+
+*Corrected once.* The first wording was "all written fields", which a verifier
+showed to be literally wrong: `created` and `updated` are always written and
+named by no one. The exclusion is part of the ruling, not a detail.
+
+**Decision (Lead), order:** § 7 canonical key order for frontmatter fields,
+then section roles in the canonical role order (`description`, then
+`acceptance`).
+
+**Reasoning (spec-internal):** § 9 (Z. 591) requires `changed` to *additionally*
+name the section roles written for `new`/`set` — it is therefore designed as a
+complete account of what was written, not as a list of the flags given. § 9
+(Z. 391) sets "one vocabulary in three places", so the JSON write result follows
+the order the spec already fixes for the file.
+
+**Not a valid justification for this, and rejected during review:** `DECISIONS.md`
+19. It states the same thing, but it is an implementer document and therefore
+carries `nj`'s provenance, not the spec's.
+
+**Affects:** `edge/encoding-changed-order.js`.
+
+## 28. The JSON entry object carries more shape than § 9 documents
+
+**Unpinned, and wider than an ordering question.** § 9 fixes the top-level key
+order of each shape verbatim, but not the key order *inside* an entry object.
+Cross-verified measurement of the actual sequence:
+
+    id, type, [parent], title, status, priority, [assignee], tags,
+    depends_on, created, updated, [archived], file, _problems
+
+`priority`, `tags` and `depends_on` appear **always**, materialised with their
+defaults; `assignee`, `parent` and `archived` only when set; `file` always.
+
+§ 9 does not cover this: its example shows no `priority`/`tags`/`depends_on`
+and no `file`, and the table abbreviates to `{…, _problems}`. Only `file` is
+covered, by `DECISIONS.md` 39. § 6's "defaults are never materialised" governs
+**files, not JSON**, so it does not settle it either.
+
+**Why this matters more than it looks:** undocumented shape is shape a refactor
+can change silently. Nothing in the spec would be violated, and nothing would
+go red. This is a candidate for a § 9 sentence, not just an oracle reading.
+
+**Reading used by the oracle:** § 7 canonical order, `_problems` last — every
+JSON example in § 9 shows `_problems` last, which is a textual pattern rather
+than a guess.
+
+**Affects:** `edge/encoding-json-key-order.js`.
+
+## 29. `doctor --fix`'s `fixed[]` report order
+
+**Unpinned.** § 14 pins the order in which the repair steps **run** (the
+numbered list 1–8), but not the order in which `--json`'s `fixed[]` array
+**reports** them.
+
+**Reading used by the oracle:** the same order as execution — "reports the
+actions it took" reads most naturally as "in the order it took them".
+
+**Affects:** `edge/encoding-json-key-order.js`.
+
+## 30. Which `## Notes` does "before `## Notes`" mean when there are two?
+
+**Unpinned.** § 9 says a written `acceptance` section goes "before `## Notes`
+when present" — in the **singular**. § 9's "if several headings match one role,
+the first match wins" governs *role* headings (`description`, `acceptance`), so
+it does not literally settle a body that carries two `## Notes` headings.
+
+**Not pinned by the oracle, deliberately.** A mutant that inserts before the
+*last* `## Notes` instead of the first passes the whole suite today. That is a
+real blind spot, and it is recorded rather than closed, for the same reason the
+five precedence pins were loosened (items 31–35): the oracle pins what the
+spec decides. What `nj` does beyond that is caught by the S0 corpus, which
+compares recorded bytes across refactor steps — so a silent change here goes
+red there without the oracle having to elevate an undecided reading into a
+contract.
+
+**Cheap fix if the spec owner rules:** § 9 gains the word "first" ("before the
+first `## Notes`"), and a double-`## Notes` fixture becomes assertable.
+
+**Affects:** `ac/ac-20-section-writes.js` (not asserted),
+`edge/state-note-appears-once.js` (not asserted).
+
+**And `nj` does not agree with itself here.** The two code paths that look for
+the heading choose opposite ends: `sectionHeadingIndex` returns on its **first**
+match, while the note-appending path assigns in a loop with no `break` and so
+keeps the **last**. Given two hand-placed `## Notes` headings, `nj note` appends
+under the second while `set --acceptance` writes before the first. The header of
+`edge/state-note-appears-once.js` claims the two paths share one notion of "the
+one `## Notes` heading" — they do not.
+
+This is not reachable through the CLI, whose uniqueness invariant holds for
+files it creates, but § 7 makes the body the user's property and a hand edit
+reaches it. Whichever way the spec rules, one of the two paths becomes a bug —
+worth knowing before a refactor touches either.
+
+### Fixture-design note, recorded so the recipe is not miscopied
+
+The § 9 clause "acceptance is inserted before `## Notes` when present" is only
+observable when a body puts a foreign section **between** `## Description` and
+`## Notes`. Verified across six body forms:
+
+| Body form | Separates "before Notes" from "after Description"? |
+|---|---|
+| Description → Notes | **no — blind** (rule and fallback hit the same index) |
+| Description → Other → Notes | **yes** |
+| Description → Notes → Other | **no — blind** (a trailing section does not help) |
+| Notes only, no Description | yes |
+| Notes before Description | yes |
+| two `## Notes` | only for the "which Notes" question (item 30) |
+
+The third row is the trap: putting the unknown section at the *end* looks like
+the same fixture and tests nothing. The blind form existed twice in the oracle
+(`ac/ac-20-section-writes.js` and `edge/state-note-appears-once.js`); both were
+corrected by inserting the foreign section in the middle, and both now fail
+against the mutant that disables the Notes branch.
+
+## 31–35. Five error-precedence collisions — RULED UNPINNED
+
+Five places where two or more conditions hold at once and § 9/§ 11 name a code
+for each but never order them. All five are **ruled unpinned**: the oracle
+asserts the envelope (exit 1, `error` is a string, and the whole backlog stays
+byte-identical) and does not pin which code wins.
+
+**The shared reasoning, stated once.** The oracle pins what the spec decides.
+What `nj` does *beyond* that is covered by the S0 corpus — ~2900 recorded
+invocations compared byte-for-byte at every refactor step — so a silent change
+in which error wins goes red there, without the oracle having to elevate an
+undecided reading into a contract. Pinning them would make a legitimate
+reordering of internal checks produce red tests on correct behaviour from S1
+onward, and false alarms of that kind are how a team learns to click past red
+lines. Consistent with item 17 (`parent:hierarchy`), where the oracle already
+loosens rather than pins.
+
+In every case the **single-fault neighbours stay pinned** — they are what makes
+the loosened case legible as a collision in the first place.
+
+| # | Collision | Codes in play | Oracle |
+|---|---|---|---|
+| 31 | `nj archive --force` on an unfinished subtree | `unknown_field` / `refused:not_done` | `exit-precedence.js` §4 (`af1`); control without `--force` stays pinned |
+| 32 | `nj archive --force` on a non-existent id | `unknown_field` / `not_found` | §4 (`af3`) |
+| 33 | `--id` and `--file` together, both naming nothing | `invalid_target` / `not_found` | §5 (`if2`); the two-valid-references case stays pinned |
+| 34 | Both value forms for one role, with an unreadable path | `invalid_value` / `not_found` | §6 (`r1`); unreadable path alone stays `not_found` |
+| 35 | Unfinished subtree archived onto an occupied target | `refused:not_done` / `exists` / `duplicate_id` | §7; what §11 *does* decide is asserted — the command fails and moves **nothing** ("a partially executed archive is forbidden"), carried by a whole-backlog checksum |
+
+**A rejected argument, recorded so it is not re-derived.** For item 34 it was
+argued that "with nothing written" makes the form error a pre-execution check
+and therefore orders it first. It does not: § 9 gives the unreadable-path case
+`not_found` while that path, too, writes nothing. "Nothing written" separates
+neither check from the other and orders nothing. The retraction is also carried
+in the test source at the site.
+
+**An observation that cuts against a general rule.** § 9 orders exactly one
+comparable case explicitly — the stub guard is "evaluated **before the target is
+resolved**: even a `--id` that names nothing yields `refused:unreadable`, not
+`not_found`". That the spec becomes explicit there and stays silent here argues
+against, not for, a general "arguments before resolution" principle.
+
 ## Not an ambiguity, recorded because it looks like one
 
 - **`archive:not_done` severity.** § 11's prose used to say "warning" while the
@@ -424,3 +642,9 @@ applies the LF rule to the whole file.
 - **`incomplete:*` as a doctor finding.** v2 settled it: Doctor column `—`,
   never a finding, `Blocks --ready` still `yes`. The oracle asserts both halves
   separately, which is the point of AC-19.
+- **`show --json`'s shape.** § 9's JSON-shapes table says `| list, show |
+  {backlog, counts, entries: [{…, _problems}]} |` — `show` shares `list`'s read
+  shape, a single-element `entries` array, and has **no** singular `entry` field
+  (that belongs to the write commands). Recorded because it is an inviting
+  misreading: two separate test files assumed `entry` and produced `undefined`
+  rather than a clear failure, which cost a round of diagnosis.

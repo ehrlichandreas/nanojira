@@ -80,16 +80,32 @@ function mkTask(label, body) {
 /* ---- 2. insertion: three positions, each pinned by § 9 / DECISIONS.md ------ */
 
 {
-  /* acceptance is inserted before an existing ## Notes; Description and
-   * Notes stay byte-for-byte untouched. */
+  /* acceptance is inserted before an existing ## Notes; Description, the
+   * unknown ## Other section, and Notes stay byte-for-byte untouched.
+   *
+   * The ## Other section is deliberate, not decorative: with Notes sitting
+   * directly after Description, § 9's "before ## Notes" and its fallback
+   * "else after description" land on the SAME index, so a fixture without a
+   * section in between cannot tell the two rules apart — an implementation
+   * that dropped the Notes branch entirely would still pass. Putting ## Other
+   * between them forces the two readings apart:
+   *   before Notes (§ 9, correct): Description, Other, Acceptance, Notes
+   *   after description (wrong fallback only): Description, Acceptance, Other, Notes
+   */
   const d = mkTask('ac20-ins-notes',
     '# Backend API Endpoints\n\n## Description\nCreate the endpoint.\n\n' +
+    '## Other\nUnrelated content, untouched.\n\n' +
     '## Notes\n- ' + C + ' coder-agent: existing note\n');
   const r = H.runNj(['set', '--id=TSK-001', '--acceptance=- [ ] It works'],
     { cwd: d, env: { NJ_NOW: LATER } });
   T.exit('set --acceptance inserts before an existing ## Notes', r, 0);
-  T.goldenEq('acceptance before Notes, Description/Notes untouched == golden',
+  T.goldenEq('acceptance before Notes (not merely after description), Description/Other/Notes untouched == golden',
     taskPath(d), 'set-section-insert-with-notes.md');
+
+  const bytes = fs.readFileSync(taskPath(d), 'utf8');
+  const order = ['## Description', '## Other', '## Acceptance Criteria', '## Notes'].map(h => bytes.indexOf(h));
+  T.check('the four headings appear in that exact order (rules out the after-description fallback)',
+    order.every((pos, i) => pos !== -1 && (i === 0 || pos > order[i - 1])), J(order));
 }
 
 {

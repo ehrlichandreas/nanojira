@@ -51,7 +51,12 @@ T.check('the fixture really holds a duplicate id',
   JSON.stringify((before.json && before.json.problems) || []));
 
 const fix = H.runNj(['doctor', '--fix'], { cwd: d, env: { NJ_NOW: H.LATER_NOW } });
-T.exit('doctor --fix runs', fix, [0, 2]);
+// § 14: "0 when no error remains, 2 when one does" — and separately, "Never
+// automatically … resolve duplicate IDs". `duplicate_id` (§ 7: error) is the
+// fixture's whole point and is explicitly on the never-automatically list, so
+// it is guaranteed to still be present after the repair — the exit code is
+// pinned at exactly 2, not tolerated as [0, 2].
+T.exit('doctor --fix runs', fix, 2);
 
 /* --fix must not have resolved the duplicate: § 14 "Never ... resolve
  * duplicate IDs". A rename would give one of them a different id. */
