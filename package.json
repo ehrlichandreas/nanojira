@@ -8,8 +8,9 @@
   "scripts": {
     "build": "node tools/bundle.js",
     "build:check": "node tools/bundle.js --check",
-    "typecheck": "node tools/prep-typecheck.js && tsc --noEmit",
-    "test": "node tools/bundle.js --check && node test/run-all.js dist/nj"
+    "typecheck": "tsc --noEmit",
+    "test": "node tools/bundle.js --check && node test/run-all.js dist/nj",
+    "perf": "node tools/bundle.js --check && node tools/perf.js"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

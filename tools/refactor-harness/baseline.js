@@ -139,23 +139,41 @@ function njSha() {
   return R.sha256(fs.readFileSync(NJ_ABS));
 }
 
-// The code under test is nj PLUS the modules it loads from lib/. Hashing nj
-// alone would print the same number after a change that lives entirely in
-// lib/ -- an identity that does not cover what it names. Only the `current`
-// side of verify is multi-file; the header's njSha256 is the single-file
-// baseline every record runs against, and stays as it is.
+// The code under test is nj PLUS the modules it loads. Hashing nj alone
+// would print the same number after a change that lives entirely in a
+// module -- an identity that does not cover what it names. Only the
+// `current` side of verify is multi-file; the header's njSha256 is the
+// single-file baseline every record runs against, and stays as it is.
+//
+// Layout moved from flat lib/*.ts (pre-restructure) to src/commands/*.ts +
+// src/core/*.ts. Both are probed: an nj path with a sibling lib/ (an old
+// baseline, e.g. c1/c2-baseline) still hashes under the old label; a modern
+// source nj (src/nj.ts) hashes commands/ and core/ under their own labels.
+// A dist/nj (bundled, no siblings) falls back to nj alone, as before.
 function codeSha() {
   const root = path.dirname(NJ_ABS);
-  const lib = path.join(root, 'lib');
-  let mods = [];
-  // TSK-023: lib/*.js became lib/*.ts. Proven first against a probe .ts file
-  // that the old .js-only filter silently drops it (0 modules found instead
-  // of the real count), which would print "current code sha256 (nj + lib/,
-  // 1 files)" -- looking exactly like nj-alone instead of the true 22.
-  try { mods = fs.readdirSync(lib).filter((n) => n.endsWith('.js') || n.endsWith('.ts')).sort(); } catch { /* no lib/: nj alone */ }
-  const lines = [`${R.sha256(fs.readFileSync(NJ_ABS))}  ${path.basename(NJ_ABS)}\n`]
-    .concat(mods.map((n) => `${R.sha256(fs.readFileSync(path.join(lib, n)))}  lib/${n}\n`));
-  return { sha: R.sha256(lines.join('')), files: 1 + mods.length };
+  const readMods = (dir) => {
+    try { return fs.readdirSync(dir).filter((n) => n.endsWith('.js') || n.endsWith('.ts')).sort(); } catch { return null; }
+  };
+  const lib = readMods(path.join(root, 'lib'));
+  const lines = [`${R.sha256(fs.readFileSync(NJ_ABS))}  ${path.basename(NJ_ABS)}\n`];
+  let files = 1;
+  let label = path.basename(NJ_ABS);
+  if (lib) {
+    lines.push(...lib.map((n) => `${R.sha256(fs.readFileSync(path.join(root, 'lib', n)))}  lib/${n}\n`));
+    files += lib.length;
+    label += ' + lib/';
+  } else {
+    const subs = [];
+    for (const sub of ['commands', 'core']) {
+      const mods = readMods(path.join(root, sub)) || [];
+      lines.push(...mods.map((n) => `${R.sha256(fs.readFileSync(path.join(root, sub, n)))}  ${sub}/${n}\n`));
+      files += mods.length;
+      if (mods.length) subs.push(sub + '/');
+    }
+    if (subs.length) label += ' + ' + subs.join(' + ');
+  }
+  return { sha: R.sha256(lines.join('')), files, label };
 }
 
 // ------------------------------------------------------------- corpus parts
@@ -606,7 +624,7 @@ reportParts(total);
 const excluded = markNondeterministic(oldRecs).filter(Boolean).length;
 process.stdout.write(`\nbaseline: ${oldRecs.length} calls, nj sha256 ${header.njSha256}\n`);
 const code = codeSha();
-process.stdout.write(`current : ${newRecs.length} calls, current code sha256 (nj + lib/, ${code.files} files) ${code.sha}\n`);
+process.stdout.write(`current : ${newRecs.length} calls, current code sha256 (${code.label}, ${code.files} files) ${code.sha}\n`);
 process.stdout.write(`compared: ${oldRecs.length - excluded} calls (${excluded} excluded as nondeterministic by design — AC-7 concurrency)\n`);
 
 // The oracle part of the corpus is only comparable while test/ holds the same

@@ -2,17 +2,17 @@
 
 // `nj new`.
 
-import type { Flags, Context, Element } from './types.ts';
+import type { Flags, Context, Element } from '../core/types.ts';
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { checkFlags, flagString, parseListFlag, readSectionFlags } from './args.ts';
-import { TYPE_DIR, TYPES, PARENT_TYPE, PRIORITIES, FIELD_ORDER, SECTION_ROLES, NEW_FIELDS } from './constants.ts';
-import { context } from './context.ts';
-import { loadElement, deriveGraph } from './load.ts';
-import { fail, writeFeedback, emitWriteResult } from './output.ts';
-import { serialize, normalizeTitle, applySections } from './parse.ts';
-import { nowIso, allocateId, atomicWrite } from './store.ts';
+import { checkFlags, flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
+import { TYPE_DIR, TYPES, PARENT_TYPE, PRIORITIES, FIELD_ORDER, SECTION_ROLES, NEW_FIELDS } from '../core/constants.ts';
+import { context } from '../core/context.ts';
+import { loadElement, deriveGraph } from '../core/load.ts';
+import { fail, writeFeedback, emitWriteResult } from '../core/output.ts';
+import { serialize, normalizeTitle, applySections } from '../core/parse.ts';
+import { nowIso, allocateId, atomicWrite } from '../core/store.ts';
 
 interface NewFlags {
   type: string;

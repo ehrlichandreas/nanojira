@@ -10,6 +10,5 @@
     "erasableSyntaxOnly": true,
     "allowImportingTsExtensions": true
   },
-  "files": [".nj.tsc-shadow.js"],
-  "include": ["lib/**/*.ts"]
+  "include": ["src/**/*.ts"]
 }

@@ -2,15 +2,15 @@
 
 // `nj set`.
 
-import type { Flags, Element, Context } from './types.ts';
+import type { Flags, Element, Context } from '../core/types.ts';
 
-import { checkFlags, flagString, parseListFlag, readSectionFlags } from './args.ts';
-import { PRIORITIES, SETTABLE_FIELDS } from './constants.ts';
-import { context, resolveTarget, requireWritable, requireActive } from './context.ts';
-import { loadElement, deriveGraph } from './load.ts';
-import { fail, writeFeedback, emitWriteResult } from './output.ts';
-import { syncH1, normalizeTitle, applySections } from './parse.ts';
-import { nowIso, guardedWrite, renderElement } from './store.ts';
+import { checkFlags, flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
+import { PRIORITIES, SETTABLE_FIELDS } from '../core/constants.ts';
+import { context, resolveTarget, requireWritable, requireActive } from '../core/context.ts';
+import { loadElement, deriveGraph } from '../core/load.ts';
+import { fail, writeFeedback, emitWriteResult } from '../core/output.ts';
+import { syncH1, normalizeTitle, applySections } from '../core/parse.ts';
+import { nowIso, guardedWrite, renderElement } from '../core/store.ts';
 
 type SectionRole = 'description' | 'acceptance';
 // The two field namespaces `nj set` can touch: real Element properties, and

@@ -1,0 +1,122 @@
+== platform
+Linux 6.8.0-117-generic x86_64
+v24.21.0 linux-x64
+== fs /work: overlayfs  /tmp: overlayfs
+overlay / overlay rw,relatime,lowerdir=/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/4/fs:/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/1/fs,upperdir=/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/5/fs,workdir=/var/lib/containerd/io.containerd.snapshotter.v1.overlayfs/snapshots/5/work,nouserxattr 0 0
+== sha dist/nj
+d649de32c7aa556deb2b5c05c2ace7535f7b258b237c5685f63d313f17448a0b  dist/nj
+== oracle
+PASS ac-01-basic-run.js (74 checks)
+PASS ac-02-golden-files.js (35 checks)
+PASS ac-03-fault-tolerance.js (271 checks)
+PASS ac-04-incompleteness.js (30 checks)
+PASS ac-05-empty-sections.js (23 checks)
+PASS ac-06-rejection.js (31 checks)
+  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its probe).
+PASS concurrency.js (12 checks)
+PASS ac-08-id-immortality.js (25 checks)
+PASS ac-09-atomicity.js (24 checks)
+PASS ac-10-dependencies.js (32 checks)
+PASS ac-11-archive-rules.js (38 checks)
+PASS ac-12-discovery.js (20 checks)
+PASS ac-13-json-contract.js (202 checks)
+PASS ac-14-determinism.js (23 checks)
+FAIL ac-15-no-dependencies.js — 15 of 21 checks failed
+  ✗ the runtime Node ships at runtime/linux-x64/bin/node
+    /home/dev/workspace/portable/runtime/linux-x64/bin/node
+  ✗ the lone copy inits a backlog with no node_modules beside it
+    expected exit 0, got null
+  ✗ the lone copy creates an epic
+    expected exit 0, got null
+  ✗ the lone copy reads its own backlog, NODE_PATH emptied
+    expected exit 0, got null
+  ✗ the read works with nothing beside the file but the backlog it created
+    null
+  ✗ nj init under the runtime Node
+    CANNOT RUN: spawn failed: spawnSync /home/dev/workspace/portable/runtime/linux-x64/bin/node ENOENT
+     (the implementation does not exist yet — the oracle is built first)
+  ✗ nj new under the runtime Node
+    CANNOT RUN: spawn failed: spawnSync /home/dev/workspace/portable/runtime/linux-x64/bin/node ENOENT
+     (the implementation does not exist yet — the oracle is built first)
+  ✗ nj new (task) under the runtime Node
+    CANNOT RUN: spawn failed: spawnSync /home/dev/workspace/portable/runtime/linux-x64/bin/node ENOENT
+     (the implementation does not exist yet — the oracle is built first)
+  ✗ nj list --json under the runtime Node
+    CANNOT RUN: spawn failed: spawnSync /home/dev/workspace/portable/runtime/linux-x64/bin/node ENOENT
+     (the implementation does not exist yet — the oracle is built first)
+  ✗ the read works without any external module
+    Unexpected end of JSON input
+  ✗ nj list --json with NODE_PATH emptied
+    CANNOT RUN: spawn failed: spawnSync /home/dev/workspace/portable/runtime/linux-x64/bin/node ENOENT
+     (the implementation does not exist yet — the oracle is built first)
+  ✗ nj list --json with NODE_PATH unset from the environment
+    CANNOT RUN: spawn failed: spawnSync /home/dev/workspace/portable/runtime/linux-x64/bin/node ENOENT
+     (the implementation does not exist yet — the oracle is built first)
+  ✗ nj set under the runtime Node
+    CANNOT RUN: spawn failed: spawnSync /home/dev/workspace/portable/runtime/linux-x64/bin/node ENOENT
+     (the implementation does not exist yet — the oracle is built first)
+  ✗ nj doctor --json under the runtime Node, exit 0 for a fresh backlog (AC-19)
+    CANNOT RUN: spawn failed: spawnSync /home/dev/workspace/portable/runtime/linux-x64/bin/node ENOENT
+     (the implementation does not exist yet — the oracle is built first)
+  ✗ doctor reports no problem for freshly created elements
+    Unexpected end of JSON input
+PASS ac-16-language.js (49 checks)
+PASS ac-17-configuration.js (135 checks)
+PASS ac-18-tombstone-integrity.js (21 checks)
+PASS ac-19-doctor-axis.js (27 checks)
+PASS ac-20-section-writes.js (70 checks)
+PASS det-fence-heading.js (7 checks)
+PASS det-id-retry.js (29 checks)
+PASS fault-hook-json.js (5 checks)
+PASS nj-fault-before-compare.js (10 checks)
+PASS nj-fault-points.js (16 checks)
+PASS nj-now-invalid.js (22 checks)
+PASS acceptance-section-shapes.js (8 checks)
+PASS archive-ac20-heading-match.js (29 checks)
+PASS archive-ac20-write-paths.js (33 checks)
+PASS archive-collision.js (32 checks)
+PASS archive-hint-dependents.js (11 checks)
+PASS archive-rm-byte-identity.js (59 checks)
+PASS cycle-parent-archived.js (5 checks)
+PASS cycle-parent-shapes.js (14 checks)
+PASS discovery-message.js (16 checks)
+PASS doctor-fix-surface.js (32 checks)
+PASS done-open-children.js (15 checks)
+PASS duplicate-id-write-refusal.js (12 checks)
+PASS empty-value-rule.js (21 checks)
+PASS encoding-changed-order.js (8 checks)
+PASS encoding-empty-tag-assignee.js (19 checks)
+PASS encoding-json-key-order.js (19 checks)
+PASS encoding-unicode-boundary.js (12 checks)
+PASS exit-doctor-fix.js (307 checks)
+PASS exit-fault-vocabulary.js (125 checks)
+PASS exit-precedence.js (76 checks)
+PASS failure-vocabulary.js (127 checks)
+PASS fix-duplicate-mtimes.js (11 checks)
+PASS fix-mtime-snapshot.js (26 checks)
+PASS frontmatter-grammar.js (14 checks)
+PASS norm-tag-assignee-typos.js (15 checks)
+PASS norm-title-nfc-nfd.js (14 checks)
+PASS order-doctor-problems-severity.js (3 checks)
+PASS parent-refusals.js (23 checks)
+PASS rm-and-archive-refusals.js (30 checks)
+PASS rm-dependents.js (29 checks)
+PASS state-cycle-all-members.js (13 checks)
+PASS state-done-on-done.js (11 checks)
+PASS state-note-appears-once.js (27 checks)
+PASS state-tombstone-burn.js (15 checks)
+PASS stdout-epipe.js (7 checks)
+PASS tombstone-partial-loss.js (11 checks)
+PASS unreadable-stub-refusals.js (33 checks)
+PASS write-encoding.js (41 checks)
+
+================================================================
+passed      63 / 64
+failed       1 / 64
+cannot run   0 / 64
+
+failed:
+  ac/ac-15-no-dependencies.js
+
+Fill AC-MATRIX.md from this run; record `not covered` wherever a
+conditional leg did not execute.

@@ -5,7 +5,7 @@ const { spawnSync } = require('child_process');
 // corpus part they feed vanished on reboot and `record` aborted with code 4.
 // os.tmpdir() always exists; HARNESS_SCRATCH_BASE overrides it.
 const SCRATCH_BASE = process.env.HARNESS_SCRATCH_BASE || require('os').tmpdir();
-const NJ = process.argv[2] || '/home/dev/workspace/portable/projects/nanojira/nj';
+const NJ = process.argv[2] || path.join(__dirname, '..', '..', '..', 'src', 'nj.ts');
 const NOW = '2026-09-21T18:00:00Z', LATER = '2026-09-21T19:30:00Z';
 const CFG = JSON.stringify({ schema: 1, statuses: ['todo','doing','blocked','review','done'], sections: { description: ['Description'], acceptance: ['Acceptance Criteria'] } }, null, 2) + '\n';
 let n = 0, bad = 0;

@@ -6,13 +6,6 @@ var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
 var __getOwnPropNames = Object.getOwnPropertyNames;
 var __getProtoOf = Object.getPrototypeOf;
 var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __esm = (fn, res) => function __init() {
-  return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-};
-var __export = (target, all) => {
-  for (var name in all)
-    __defProp(target, name, { get: all[name], enumerable: true });
-};
 var __copyProps = (to, from, except, desc) => {
   if (from && typeof from === "object" || typeof from === "function") {
     for (let key of __getOwnPropNames(from))
@@ -29,100 +22,96 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
   isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
   mod
 ));
-var __toCommonJS = (mod) => __copyProps(__defProp({}, "__esModule", { value: true }), mod);
 
-// lib/constants.ts
-var TYPE_PREFIX, PREFIX_TYPE, TYPE_DIR, TYPES, PARENT_TYPE, PRIORITIES, PRIORITY_WEIGHT, FIELD_ORDER, LIST_FIELDS, SECTION_ROLES, SECTION_FLAGS, SETTABLE_FIELDS, NEW_FIELDS, DEFAULT_CONFIG, SEVERITY, BLOCKS_READY, BACKLOG_LEVEL;
-var init_constants = __esm({
-  "lib/constants.ts"() {
-    "use strict";
-    TYPE_PREFIX = { epic: "EPIC", task: "TSK", subtask: "SUB" };
-    PREFIX_TYPE = { EPIC: "epic", TSK: "task", SUB: "subtask" };
-    TYPE_DIR = { epic: "epics", task: "tasks", subtask: "subtasks" };
-    TYPES = ["epic", "task", "subtask"];
-    PARENT_TYPE = { task: "epic", subtask: "task" };
-    PRIORITIES = ["low", "normal", "high", "urgent"];
-    PRIORITY_WEIGHT = { urgent: 4, high: 3, normal: 2, low: 1 };
-    FIELD_ORDER = [
-      "id",
-      "type",
-      "parent",
-      "title",
-      "status",
-      "priority",
-      "assignee",
-      "tags",
-      "depends_on",
-      "created",
-      "updated",
-      "archived"
-    ];
-    LIST_FIELDS = /* @__PURE__ */ new Set(["tags", "depends_on"]);
-    SECTION_ROLES = ["description", "acceptance"];
-    SECTION_FLAGS = ["description", "description-file", "acceptance", "acceptance-file"];
-    SETTABLE_FIELDS = ["title", "status", "priority", "assignee", "tags", "depends_on"].concat(SECTION_FLAGS);
-    NEW_FIELDS = ["type", "parent", "title", "status", "priority", "assignee", "tags", "depends_on"].concat(SECTION_FLAGS);
-    DEFAULT_CONFIG = {
-      schema: 1,
-      statuses: ["todo", "doing", "blocked", "review", "done"],
-      sections: { description: ["Description"], acceptance: ["Acceptance Criteria"] }
-    };
-    SEVERITY = {
-      "frontmatter:unreadable": "error",
-      "file:unreadable": "error",
-      "duplicate_id": "error",
-      "missing:title": "error",
-      "missing:status": "warning",
-      "missing:created": "warning",
-      "missing:updated": "warning",
-      "id:derived": "warning",
-      "id:mismatch": "error",
-      "type:derived": "warning",
-      "type:folder": "error",
-      "parent:orphaned": "warning",
-      "parent:dangling": "error",
-      "parent:cycle": "error",
-      "parent:hierarchy": "error",
-      "depends_on:dangling": "error",
-      "depends_on:cycle": "error",
-      "unknown:status": "warning",
-      "unknown:priority": "warning",
-      "done:open_children": "warning",
-      "archive:not_done": "error",
-      "archive:split": "error",
-      "title:h1_mismatch": "warning",
-      "incomplete:description": null,
-      "incomplete:acceptance": null,
-      "active_refs_archived": null,
-      "id:no_tombstone": "warning",
-      "backlog:stray_tmp": "warning",
-      "backlog:ids_missing": "error",
-      "config:invalid": "error"
-    };
-    BLOCKS_READY = /* @__PURE__ */ new Set([
-      "frontmatter:unreadable",
-      "file:unreadable",
-      "duplicate_id",
-      "missing:title",
-      "id:mismatch",
-      "type:folder",
-      "parent:dangling",
-      "parent:cycle",
-      "parent:hierarchy",
-      "depends_on:dangling",
-      "depends_on:cycle",
-      "unknown:status",
-      "done:open_children",
-      "archive:not_done",
-      "archive:split",
-      "incomplete:description",
-      "incomplete:acceptance"
-    ]);
-    BACKLOG_LEVEL = /* @__PURE__ */ new Set(["backlog:stray_tmp", "backlog:ids_missing", "config:invalid"]);
-  }
-});
+// src/core/args.ts
+var fs = __toESM(require("fs"), 1);
 
-// lib/derive.ts
+// src/core/constants.ts
+var TYPE_PREFIX = { epic: "EPIC", task: "TSK", subtask: "SUB" };
+var PREFIX_TYPE = { EPIC: "epic", TSK: "task", SUB: "subtask" };
+var TYPE_DIR = { epic: "epics", task: "tasks", subtask: "subtasks" };
+var TYPES = ["epic", "task", "subtask"];
+var PARENT_TYPE = { task: "epic", subtask: "task" };
+var PRIORITIES = ["low", "normal", "high", "urgent"];
+var PRIORITY_WEIGHT = { urgent: 4, high: 3, normal: 2, low: 1 };
+var FIELD_ORDER = [
+  "id",
+  "type",
+  "parent",
+  "title",
+  "status",
+  "priority",
+  "assignee",
+  "tags",
+  "depends_on",
+  "created",
+  "updated",
+  "archived"
+];
+var LIST_FIELDS = /* @__PURE__ */ new Set(["tags", "depends_on"]);
+var SECTION_ROLES = ["description", "acceptance"];
+var SECTION_FLAGS = ["description", "description-file", "acceptance", "acceptance-file"];
+var SETTABLE_FIELDS = ["title", "status", "priority", "assignee", "tags", "depends_on"].concat(SECTION_FLAGS);
+var NEW_FIELDS = ["type", "parent", "title", "status", "priority", "assignee", "tags", "depends_on"].concat(SECTION_FLAGS);
+var DEFAULT_CONFIG = {
+  schema: 1,
+  statuses: ["todo", "doing", "blocked", "review", "done"],
+  sections: { description: ["Description"], acceptance: ["Acceptance Criteria"] }
+};
+var SEVERITY = {
+  "frontmatter:unreadable": "error",
+  "file:unreadable": "error",
+  "duplicate_id": "error",
+  "missing:title": "error",
+  "missing:status": "warning",
+  "missing:created": "warning",
+  "missing:updated": "warning",
+  "id:derived": "warning",
+  "id:mismatch": "error",
+  "type:derived": "warning",
+  "type:folder": "error",
+  "parent:orphaned": "warning",
+  "parent:dangling": "error",
+  "parent:cycle": "error",
+  "parent:hierarchy": "error",
+  "depends_on:dangling": "error",
+  "depends_on:cycle": "error",
+  "unknown:status": "warning",
+  "unknown:priority": "warning",
+  "done:open_children": "warning",
+  "archive:not_done": "error",
+  "archive:split": "error",
+  "title:h1_mismatch": "warning",
+  "incomplete:description": null,
+  "incomplete:acceptance": null,
+  "active_refs_archived": null,
+  "id:no_tombstone": "warning",
+  "backlog:stray_tmp": "warning",
+  "backlog:ids_missing": "error",
+  "config:invalid": "error"
+};
+var BLOCKS_READY = /* @__PURE__ */ new Set([
+  "frontmatter:unreadable",
+  "file:unreadable",
+  "duplicate_id",
+  "missing:title",
+  "id:mismatch",
+  "type:folder",
+  "parent:dangling",
+  "parent:cycle",
+  "parent:hierarchy",
+  "depends_on:dangling",
+  "depends_on:cycle",
+  "unknown:status",
+  "done:open_children",
+  "archive:not_done",
+  "archive:split",
+  "incomplete:description",
+  "incomplete:acceptance"
+]);
+var BACKLOG_LEVEL = /* @__PURE__ */ new Set(["backlog:stray_tmp", "backlog:ids_missing", "config:invalid"]);
+
+// src/core/derive.ts
 function elementProblems(el) {
   return Array.from(el.problems).filter((c) => !BACKLOG_LEVEL.has(c)).sort();
 }
@@ -187,35 +176,30 @@ function countsOf(scope) {
     incomplete: scope.filter(isIncomplete).length
   };
 }
-var init_derive = __esm({
-  "lib/derive.ts"() {
-    "use strict";
-    init_constants();
-  }
-});
 
-// lib/output.ts
-var output_exports = {};
-__export(output_exports, {
-  Fail: () => Fail,
-  emitFailure: () => emitFailure,
-  emitWriteResult: () => emitWriteResult,
-  fail: () => fail,
-  hardExit: () => hardExit,
-  out: () => out,
-  output: () => output,
-  printEntryLine: () => printEntryLine,
-  problemSuffix: () => problemSuffix,
-  writeFeedback: () => writeFeedback
-});
+// src/core/output.ts
+var Fail = class extends Error {
+  hint;
+  code;
+  constructor(message, hint, code) {
+    super(message);
+    this.hint = hint;
+    this.code = code || "failed";
+  }
+};
 function fail(code, message, hint) {
   throw new Fail(message, hint, code);
 }
+var output = { json: false };
 function hardExit(code, message) {
   process.stderr.write(message + "\n");
   if (output.json) process.stdout.write(JSON.stringify({ ok: false, error: code }, null, 2) + "\n");
   process.exit(1);
 }
+process.stdout.on("error", (err) => {
+  if (err.code === "EPIPE") process.exit(0);
+  throw err;
+});
 function out(s) {
   process.stdout.write(s + "\n");
 }
@@ -253,29 +237,8 @@ function emitFailure(code, message, hint) {
   }
   process.exitCode = 1;
 }
-var Fail, output;
-var init_output = __esm({
-  "lib/output.ts"() {
-    "use strict";
-    init_derive();
-    Fail = class extends Error {
-      hint;
-      code;
-      constructor(message, hint, code) {
-        super(message);
-        this.hint = hint;
-        this.code = code || "failed";
-      }
-    };
-    output = { json: false };
-    process.stdout.on("error", (err) => {
-      if (err.code === "EPIPE") process.exit(0);
-      throw err;
-    });
-  }
-});
 
-// lib/parse.ts
+// src/core/parse.ts
 function readQuoted(raw, i) {
   let out2 = "";
   i++;
@@ -540,22 +503,8 @@ function applySections(body, wanted, cfg) {
   }
   return { body: result, changed };
 }
-var init_parse = __esm({
-  "lib/parse.ts"() {
-    "use strict";
-    init_constants();
-  }
-});
 
-// lib/args.ts
-var args_exports = {};
-__export(args_exports, {
-  checkFlags: () => checkFlags,
-  flagString: () => flagString,
-  parseArgs: () => parseArgs,
-  parseListFlag: () => parseListFlag,
-  readSectionFlags: () => readSectionFlags
-});
+// src/core/args.ts
 function parseArgs(argv) {
   const flags = /* @__PURE__ */ new Map();
   const positional = [];
@@ -654,18 +603,18 @@ function readSectionFlags(flags) {
   }
   return wanted;
 }
-var fs;
-var init_args = __esm({
-  "lib/args.ts"() {
-    "use strict";
-    fs = __toESM(require("fs"), 1);
-    init_constants();
-    init_output();
-    init_parse();
-  }
-});
 
-// lib/config.ts
+// src/commands/cmd-archive.ts
+var fs6 = __toESM(require("fs"), 1);
+var path5 = __toESM(require("path"), 1);
+
+// src/core/context.ts
+var fs5 = __toESM(require("fs"), 1);
+var path4 = __toESM(require("path"), 1);
+
+// src/core/config.ts
+var fs2 = __toESM(require("fs"), 1);
+var path = __toESM(require("path"), 1);
 function validateConfig(obj) {
   const errs = [];
   if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
@@ -763,18 +712,14 @@ function listMd(dir) {
   }
   return names.filter((n) => n.endsWith(".md")).sort().map((n) => path.join(dir, n));
 }
-var fs2, path;
-var init_config = __esm({
-  "lib/config.ts"() {
-    "use strict";
-    fs2 = __toESM(require("fs"), 1);
-    path = __toESM(require("path"), 1);
-    init_constants();
-    init_output();
-  }
-});
 
-// lib/store.ts
+// src/core/load.ts
+var fs4 = __toESM(require("fs"), 1);
+var path3 = __toESM(require("path"), 1);
+
+// src/core/store.ts
+var fs3 = __toESM(require("fs"), 1);
+var path2 = __toESM(require("path"), 1);
 function nowIso() {
   const pinned = process.env.NJ_NOW;
   if (pinned !== void 0 && pinned !== "") {
@@ -900,19 +845,8 @@ function renderElement(el, fieldOverrides, bodyOverride) {
   for (const k of fields.keys()) if (!order.includes(k)) order.push(k);
   return serialize(fields, order, bodyOverride === void 0 ? el.body : bodyOverride);
 }
-var fs3, path2;
-var init_store = __esm({
-  "lib/store.ts"() {
-    "use strict";
-    fs3 = __toESM(require("fs"), 1);
-    path2 = __toESM(require("path"), 1);
-    init_constants();
-    init_output();
-    init_parse();
-  }
-});
 
-// lib/load.ts
+// src/core/load.ts
 function unreadableElement(file, folder, cfg, err) {
   const base = path3.basename(file, ".md");
   const pm = /^(EPIC|TSK|SUB)-/.exec(base);
@@ -1233,20 +1167,8 @@ function deriveGraph(elements, backlog) {
   attachGraph(elements, byId, children);
   return byId;
 }
-var fs4, path3;
-var init_load = __esm({
-  "lib/load.ts"() {
-    "use strict";
-    fs4 = __toESM(require("fs"), 1);
-    path3 = __toESM(require("path"), 1);
-    init_config();
-    init_constants();
-    init_parse();
-    init_store();
-  }
-});
 
-// lib/context.ts
+// src/core/context.ts
 function context(opts) {
   const backlog = findBacklog(Boolean(opts && opts.lenient));
   const { config, errors } = loadConfig(backlog);
@@ -1334,25 +1256,8 @@ function requireActive(el, verb) {
     );
   }
 }
-var fs5, path4;
-var init_context = __esm({
-  "lib/context.ts"() {
-    "use strict";
-    fs5 = __toESM(require("fs"), 1);
-    path4 = __toESM(require("path"), 1);
-    init_args();
-    init_config();
-    init_derive();
-    init_load();
-    init_output();
-  }
-});
 
-// lib/cmd-archive.ts
-var cmd_archive_exports = {};
-__export(cmd_archive_exports, {
-  cmdArchive: () => cmdArchive
-});
+// src/commands/cmd-archive.ts
 function cmdArchive(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "id", "file"]), true);
   const json = flags.has("json");
@@ -1408,26 +1313,10 @@ ${names}`,
   }
   return 0;
 }
-var fs6, path5;
-var init_cmd_archive = __esm({
-  "lib/cmd-archive.ts"() {
-    "use strict";
-    fs6 = __toESM(require("fs"), 1);
-    path5 = __toESM(require("path"), 1);
-    init_args();
-    init_context();
-    init_derive();
-    init_load();
-    init_output();
-    init_store();
-  }
-});
 
-// lib/cmd-doctor.ts
-var cmd_doctor_exports = {};
-__export(cmd_doctor_exports, {
-  cmdDoctor: () => cmdDoctor
-});
+// src/commands/cmd-doctor.ts
+var fs7 = __toESM(require("fs"), 1);
+var path6 = __toESM(require("path"), 1);
 function collectFindings(ctx) {
   const findings = [];
   for (const e of ctx.configErrors) {
@@ -1741,27 +1630,10 @@ function doctorFix(json) {
   }
   return errors.length > 0 ? 2 : 0;
 }
-var fs7, path6;
-var init_cmd_doctor = __esm({
-  "lib/cmd-doctor.ts"() {
-    "use strict";
-    fs7 = __toESM(require("fs"), 1);
-    path6 = __toESM(require("path"), 1);
-    init_args();
-    init_constants();
-    init_context();
-    init_derive();
-    init_output();
-    init_parse();
-    init_store();
-  }
-});
 
-// lib/cmd-init.ts
-var cmd_init_exports = {};
-__export(cmd_init_exports, {
-  cmdInit: () => cmdInit
-});
+// src/commands/cmd-init.ts
+var fs8 = __toESM(require("fs"), 1);
+var path7 = __toESM(require("path"), 1);
 function cmdInit(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json"]), false);
   const json = flags.has("json");
@@ -1782,16 +1654,7 @@ function cmdInit(flags) {
   }
   return 0;
 }
-var fs8, path7, README;
-var init_cmd_init = __esm({
-  "lib/cmd-init.ts"() {
-    "use strict";
-    fs8 = __toESM(require("fs"), 1);
-    path7 = __toESM(require("path"), 1);
-    init_args();
-    init_constants();
-    init_output();
-    README = `# Backlog
+var README = `# Backlog
 
 This folder is a NanoJira backlog. One Markdown file per element, grouped by
 type: epics/, tasks/, subtasks/. Archived work lives in archive/.
@@ -1816,14 +1679,8 @@ The only uncommitted artifact is \`.nanojira-index.json\` (a cache).
 Useful commands: \`nj\`, \`nj list --ready\`, \`nj show --id=\u2026\`,
 \`nj new --type=task --parent=EPIC-001 --title="\u2026"\`, \`nj doctor\`.
 `;
-  }
-});
 
-// lib/cmd-list.ts
-var cmd_list_exports = {};
-__export(cmd_list_exports, {
-  cmdList: () => cmdList
-});
+// src/commands/cmd-list.ts
 function applyFilters(elements, flags, cfg) {
   const all = flags.has("all");
   let list = elements.filter((e) => all || !e.archived);
@@ -1887,22 +1744,10 @@ function cmdList(flags) {
   for (const e of filtered) printEntryLine(e, ctx.cfg);
   return 0;
 }
-var init_cmd_list = __esm({
-  "lib/cmd-list.ts"() {
-    "use strict";
-    init_args();
-    init_constants();
-    init_context();
-    init_derive();
-    init_output();
-  }
-});
 
-// lib/cmd-new.ts
-var cmd_new_exports = {};
-__export(cmd_new_exports, {
-  cmdNew: () => cmdNew
-});
+// src/commands/cmd-new.ts
+var fs9 = __toESM(require("fs"), 1);
+var path8 = __toESM(require("path"), 1);
 function validateNewFlags(ctx, flags) {
   const type = flagString(flags, "type");
   if (type === void 0) return fail("missing_argument", "--type is required", `Known types: ${TYPES.join(", ")}`);
@@ -1991,27 +1836,8 @@ function cmdNew(flags) {
   else writeFeedback(el, ctx.cfg, `${id} created \u2192 ${file}`);
   return 0;
 }
-var fs9, path8;
-var init_cmd_new = __esm({
-  "lib/cmd-new.ts"() {
-    "use strict";
-    fs9 = __toESM(require("fs"), 1);
-    path8 = __toESM(require("path"), 1);
-    init_args();
-    init_constants();
-    init_context();
-    init_load();
-    init_output();
-    init_parse();
-    init_store();
-  }
-});
 
-// lib/cmd-note.ts
-var cmd_note_exports = {};
-__export(cmd_note_exports, {
-  cmdNote: () => cmdNote
-});
+// src/commands/cmd-note.ts
 function cmdNote(flags, positional) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "force", "id", "file"]), true);
   const json = flags.has("json");
@@ -2059,22 +1885,9 @@ ${line}
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} note added`);
   return 0;
 }
-var init_cmd_note = __esm({
-  "lib/cmd-note.ts"() {
-    "use strict";
-    init_args();
-    init_context();
-    init_load();
-    init_output();
-    init_store();
-  }
-});
 
-// lib/cmd-rm.ts
-var cmd_rm_exports = {};
-__export(cmd_rm_exports, {
-  cmdRm: () => cmdRm
-});
+// src/commands/cmd-rm.ts
+var fs10 = __toESM(require("fs"), 1);
 function cmdRm(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "cascade", "id", "file"]), true);
   const json = flags.has("json");
@@ -2121,24 +1934,8 @@ ${archivedVictims.map((v) => "  " + v.id).join("\n")}`,
   }
   return 0;
 }
-var fs10;
-var init_cmd_rm = __esm({
-  "lib/cmd-rm.ts"() {
-    "use strict";
-    fs10 = __toESM(require("fs"), 1);
-    init_args();
-    init_context();
-    init_derive();
-    init_load();
-    init_output();
-  }
-});
 
-// lib/cmd-set.ts
-var cmd_set_exports = {};
-__export(cmd_set_exports, {
-  cmdSet: () => cmdSet
-});
+// src/commands/cmd-set.ts
 function cmdSet(flags) {
   checkFlags(flags, SETTABLE_FIELDS, /* @__PURE__ */ new Set(["json", "force", "allow-open-children", "id", "file"]), true);
   const json = flags.has("json");
@@ -2242,24 +2039,8 @@ function describeField(el, field) {
   const v = el[field];
   return Array.isArray(v) ? v.length ? v.join(",") : "(empty)" : typeof v === "string" && v === "" ? "(empty)" : String(v);
 }
-var init_cmd_set = __esm({
-  "lib/cmd-set.ts"() {
-    "use strict";
-    init_args();
-    init_constants();
-    init_context();
-    init_load();
-    init_output();
-    init_parse();
-    init_store();
-  }
-});
 
-// lib/cmd-show.ts
-var cmd_show_exports = {};
-__export(cmd_show_exports, {
-  cmdShow: () => cmdShow
-});
+// src/commands/cmd-show.ts
 function cmdShow(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "id", "file"]), false);
   const ctx = context();
@@ -2300,21 +2081,8 @@ function showOne(el) {
   process.stdout.write(el.body.replace(/^\n/, ""));
   if (el.body !== "" && !el.body.endsWith("\n")) out("");
 }
-var init_cmd_show = __esm({
-  "lib/cmd-show.ts"() {
-    "use strict";
-    init_args();
-    init_context();
-    init_derive();
-    init_output();
-  }
-});
 
-// lib/cmd-status.ts
-var cmd_status_exports = {};
-__export(cmd_status_exports, {
-  cmdStatus: () => cmdStatus
-});
+// src/commands/cmd-status.ts
 function cmdStatus(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json"]), false);
   const ctx = context();
@@ -2350,21 +2118,8 @@ function cmdStatus(flags) {
   }
   return 0;
 }
-var init_cmd_status = __esm({
-  "lib/cmd-status.ts"() {
-    "use strict";
-    init_args();
-    init_context();
-    init_derive();
-    init_output();
-  }
-});
 
-// lib/cmd-tree.ts
-var cmd_tree_exports = {};
-__export(cmd_tree_exports, {
-  cmdTree: () => cmdTree
-});
+// src/commands/cmd-tree.ts
 function cmdTree(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "all", "id"]), false);
   const ctx = context();
@@ -2408,27 +2163,9 @@ function cmdTree(flags) {
   }
   return 0;
 }
-var init_cmd_tree = __esm({
-  "lib/cmd-tree.ts"() {
-    "use strict";
-    init_args();
-    init_context();
-    init_derive();
-    init_load();
-    init_output();
-  }
-});
 
-// lib/help.ts
-var help_exports = {};
-__export(help_exports, {
-  HELP: () => HELP
-});
-var HELP;
-var init_help = __esm({
-  "lib/help.ts"() {
-    "use strict";
-    HELP = `nj \u2014 NanoJira, a local file-based task tool for agents
+// src/core/help.ts
+var HELP = `nj \u2014 NanoJira, a local file-based task tool for agents
 
   nj                                     short status: counts, top ready, problems
   nj init                                create the backlog layout
@@ -2453,65 +2190,49 @@ Every command accepts --json. Write commands accept --file=<path> instead of
 
 Exit codes: 0 success \xB7 1 command failed \xB7 2 doctor found at least one error.
 `;
-  }
-});
 
-// nj
-var { parseArgs: parseArgs2 } = (init_args(), __toCommonJS(args_exports));
-var { cmdArchive: cmdArchive2 } = (init_cmd_archive(), __toCommonJS(cmd_archive_exports));
-var { cmdDoctor: cmdDoctor2 } = (init_cmd_doctor(), __toCommonJS(cmd_doctor_exports));
-var { cmdInit: cmdInit2 } = (init_cmd_init(), __toCommonJS(cmd_init_exports));
-var { cmdList: cmdList2 } = (init_cmd_list(), __toCommonJS(cmd_list_exports));
-var { cmdNew: cmdNew2 } = (init_cmd_new(), __toCommonJS(cmd_new_exports));
-var { cmdNote: cmdNote2 } = (init_cmd_note(), __toCommonJS(cmd_note_exports));
-var { cmdRm: cmdRm2 } = (init_cmd_rm(), __toCommonJS(cmd_rm_exports));
-var { cmdSet: cmdSet2 } = (init_cmd_set(), __toCommonJS(cmd_set_exports));
-var { cmdShow: cmdShow2 } = (init_cmd_show(), __toCommonJS(cmd_show_exports));
-var { cmdStatus: cmdStatus2 } = (init_cmd_status(), __toCommonJS(cmd_status_exports));
-var { cmdTree: cmdTree2 } = (init_cmd_tree(), __toCommonJS(cmd_tree_exports));
-var { HELP: HELP2 } = (init_help(), __toCommonJS(help_exports));
-var { Fail: Fail2, fail: fail2, output: output2, emitFailure: emitFailure2 } = (init_output(), __toCommonJS(output_exports));
+// src/nj.ts
 function main(argv) {
   const cmd = argv[0] !== void 0 && !argv[0].startsWith("--") ? argv[0] : null;
-  const { flags, positional } = parseArgs2(cmd === null ? argv : argv.slice(1));
-  output2.json = flags.has("json");
+  const { flags, positional } = parseArgs(cmd === null ? argv : argv.slice(1));
+  output.json = flags.has("json");
   if (cmd === "help" || flags.has("help")) {
-    process.stdout.write(HELP2);
+    process.stdout.write(HELP);
     return 0;
   }
   switch (cmd) {
     case null:
-      return cmdStatus2(flags);
+      return cmdStatus(flags);
     case "init":
-      return cmdInit2(flags);
+      return cmdInit(flags);
     case "new":
-      return cmdNew2(flags);
+      return cmdNew(flags);
     case "set":
-      return cmdSet2(flags);
+      return cmdSet(flags);
     case "note":
-      return cmdNote2(flags, positional);
+      return cmdNote(flags, positional);
     case "show":
-      return cmdShow2(flags);
+      return cmdShow(flags);
     case "list":
-      return cmdList2(flags);
+      return cmdList(flags);
     case "tree":
-      return cmdTree2(flags);
+      return cmdTree(flags);
     case "rm":
-      return cmdRm2(flags);
+      return cmdRm(flags);
     case "archive":
-      return cmdArchive2(flags);
+      return cmdArchive(flags);
     case "doctor":
-      return cmdDoctor2(flags);
+      return cmdDoctor(flags);
     default:
-      fail2("unknown_command", `unknown command '${cmd}'`, "run `nj help` for the command list");
+      fail("unknown_command", `unknown command '${cmd}'`, "run `nj help` for the command list");
   }
 }
 try {
   process.exitCode = main(process.argv.slice(2));
 } catch (e) {
-  if (e instanceof Fail2) {
-    emitFailure2(e.code, e.message, e.hint);
+  if (e instanceof Fail) {
+    emitFailure(e.code, e.message, e.hint);
   } else {
-    emitFailure2("internal_error", e && e.stack ? e.stack : String(e));
+    emitFailure("internal_error", e && e.stack ? e.stack : String(e));
   }
 }

@@ -3,8 +3,8 @@
 A local, file-based task tool for agents. No database, no server, no
 dependencies. Epics → Tasks → Subtasks, one Markdown file per element.
 
-Status: **synthesis of the brainstorming phase, pending user approval.**
-Implementation has not started.
+Status: **approved by the user, 2026-09-23.** Synthesis of the brainstorming
+phase; changes since are recorded in `docs/DECISIONS.md`.
 
 ---
 
@@ -55,18 +55,19 @@ allowed; only its *position* matters.
 | Entry point | one executable script, `dist/nj` (shebang `#!/usr/bin/env node`; where `PATH` may lack Node ≥ 24, invoke as `<runtime-node> dist/nj`) |
 
 What ships is `dist/nj`, a single file. It is built by `npm run build`
-from the sources — the entry `nj` and the modules in `lib/` — and it is
-committed: a fresh build must be byte-identical to the committed file
-(`npm run build:check`), so a stale bundle fails at once. Whoever
-changes `nj` or `lib/` rebuilds and commits `dist/nj` in the same commit. The
-oracle and the recorded corpus run against `dist/nj`, and against the sources,
-which behave identically. The root `package.json` carries metadata, `bin`, the `build`
-and `test` scripts, and `devDependencies` for build-time tooling (TypeScript,
-esbuild); it carries no runtime `dependencies` and no `type` field — a root
-`"type": "module"` would make Node load the entry `nj` and every oracle suite
-as ES modules and break them all. The sources in `lib/` are TypeScript ES
-modules; `lib/package.json` declares `"type": "module"` for that directory
-only, and is not part of `dist/nj`.
+from the sources — the entry `src/nj.ts` and the modules in `src/commands/`
+and `src/core/` — and it is committed: a fresh build must be byte-identical
+to the committed file (`npm run build:check`), so a stale bundle fails at
+once. Whoever changes anything under `src/` rebuilds and commits `dist/nj` in
+the same commit. The oracle and the recorded corpus run against `dist/nj`,
+and against the sources, which behave identically. The root `package.json`
+carries metadata, `bin`, the `build` and `test` scripts, and
+`devDependencies` for build-time tooling (TypeScript, esbuild); it carries no
+runtime `dependencies` and no `type` field — a root `"type": "module"` would
+make Node load every oracle suite as an ES module and break it. Everything
+under `src/`, entry included, is a real TypeScript ES module
+(`import`/`export`); a single `src/package.json` declares `"type": "module"`
+for that whole subtree and is not part of `dist/nj`.
 
 "Dependencies: none" names what `nj` depends on to run — not on Jira, not on
 any other external service, and not on a package fetched at runtime. It was
@@ -843,15 +844,19 @@ end-to-end wall clock including ~21 ms process startup, median of 5):
 | 100 | ~24 ms | ~24 ms |
 | 1 000 | 40–50 ms | 50 ms |
 | 5 000 | 115–140 ms | 289 ms |
-| 10 000 | 200–227 ms (`list --json` 272 ms) | **971 ms** |
+| 10 000 | 200–227 ms (`list --json` 272 ms) | 971 ms (pre-fix, see below) |
 
 Marginal cost is ≈20 ms per 1 000 elements for the scan path, so the
 comfort bar (median ≤ 250 ms, worst ≤ 500 ms) is crossed at roughly
-12 000–15 000 elements. Traversal, however, is **O(n²)**: `tree` recomputes
-the child list per node, and `descendants()` — used by `rm --cascade` and
-`archive` — shares the pattern. With a prebuilt children map `tree` falls to
-~222 ms at 10 000, in line with `list`. **Fix the traversal, do not build the
-index for it.**
+12 000–15 000 elements. Traversal **was** O(n²): `tree` recomputed the child
+list per node, and `descendants()` — used by `rm --cascade` and `archive` —
+shared the pattern. That was fixed with a prebuilt children map
+(`childMap`, DECISIONS 81) instead of building the index for it, and `tree`
+is now in line with the scan path, not a separate case: `npm run perf`
+(TSK-003), 10 000 elements, quiet machine — `list` 188/211 ms, `list --json`
+188/192 ms, `tree` 192/194 ms, `doctor` 195/204 ms (median/max), all inside
+the comfort bar above. The 12 000–15 000 trigger below now applies to `tree`
+as well.
 
 The index is therefore still deferred, with a measured trigger: implement it
 when backlogs approach ~12 000–15 000 elements, or ~9 000 if `list --json` is

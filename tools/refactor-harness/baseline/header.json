@@ -3,7 +3,7 @@
   "njPath": "../../../../../../../tmp/c2-dist-nj",
   "node": "v26.7.0",
   "platform": "darwin-arm64",
-  "recordedAt": "2026-09-23T09:27:22.228Z",
+  "recordedAt": "2026-09-23T21:30:08.450Z",
   "calls": 3454,
   "parts": [
     {
@@ -88,7 +88,7 @@
     "edge/unreadable-stub-refusals.js",
     "edge/write-encoding.js"
   ],
-  "testDigest": "58c2f01934ea37f9ca39dd3243cc9cd0a2070395b74459f217823687c92f93d0",
+  "testDigest": "4ede76894036562dd65ef99789f4a86a18f2864a66dd93d4be382a6d4b44490d",
   "testDigestScope": [
     "test/ac/",
     "test/edge/",
@@ -105,5 +105,5 @@
     "verify.js (white-box probe: reads nj's source, verdict taken directly, calls not in the corpus)"
   ],
   "note": "Comparison key excludes per-file raw sha; nsha (normalised content) is normative.",
-  "corpusSha256": "c62f1305cfdc056dea3085a10c78e11fa539f0518a562355a37c08f1bc961a11"
+  "corpusSha256": "0cd4bfc0474d42fd0b63a4a644424875e7e3424b6fd21f9af49b2bb13e82c1e0"
 }

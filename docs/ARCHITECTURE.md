@@ -7,45 +7,50 @@ not recalled from memory or from the task history that produced this code.
 ## 1. Build
 
 ```
-nj  (entry, CommonJS, unconverted)
- └─ require()s lib/*.ts  (22 modules, native TypeScript, ES modules)
+src/nj.ts  (entry, ES module)
+ └─ import()s src/commands/*.ts + src/core/*.ts  (22 modules, native TypeScript, ES modules)
                               │
                               │  esbuild --bundle --format=cjs
                               ▼
                          dist/nj  (one file, checked into git, what ships)
 ```
 
-`nj` stays plain CommonJS on purpose — it is the one file a user or `#!`
-invokes directly, and Node's native `.ts` execution needs no build step for
-it. Every `lib/*.ts` file is a real ES module (`import`/`export`) with a
-sibling `lib/package.json` (`{"type":"module"}`) so Node knows that without
-guessing; `nj` reaches them via `require('./lib/x.ts')`, which works because
-Node can `require()` an ES module synchronously from a CommonJS caller —
-confirmed here under Node 24.21, the portable runtime this project ships
-with. `lib/types.ts` is the one exception: it holds only `export
-interface`/`export type` declarations and is never
-`require()`d by anything — only ever reached through `import type`, which
-erases completely under `erasableSyntaxOnly`. That is not incidental: esbuild
-classifies any file with its own `export` as an ES module regardless of
-whether the export is type-only, and a file that is both ES-module-shaped
-*and* does `module.exports = {…}` at runtime gets a broken bundle (found
-live during the `import`/`export` conversion — `dist/nj` crashed with
-`NEW_FIELDS` undefined while `tsc` reported zero errors). Keeping every real
-declaration in `types.ts` sidesteps the whole class of bug.
+`src/nj.ts` is a real ES module like every other file under `src/`, which a
+single `src/package.json` (`{"type": "module"}`) marks for the whole
+subtree — one file, not one per module directory: a directory-scoped
+`package.json` would leave the entry's import boundary untyped (`import`
+inside a CommonJS-resolved `.ts` file elaborates to `any`; a probe proved it
+directly — a wrong-arity call across that boundary passed `tsc` with zero
+errors) and Node would additionally warn `MODULE_TYPELESS_PACKAGE_JSON` on
+every direct run. `node src/nj.ts` runs with neither warning, and the same
+probe (a wrong-arity `cmdList` call in `src/nj.ts`) is now a `tsc` error
+(TS2554), confirming the entry boundary is type-checked again. Node's native
+`.ts` execution needs no build step for any of this. `core/types.ts` is the
+one exception among the modules: it holds only `export
+interface`/`export type` declarations and is never imported for value use —
+only ever reached through `import type`, which erases completely under
+`erasableSyntaxOnly`. That is not incidental: esbuild classifies any file
+with its own `export` as an ES module regardless of whether the export is
+type-only, and a file that is both ES-module-shaped *and* does
+`module.exports = {…}` at runtime gets a broken bundle (found live during the
+`import`/`export` conversion — `dist/nj` crashed with `NEW_FIELDS` undefined
+while `tsc` reported zero errors). Keeping every real declaration in
+`types.ts` sidesteps the whole class of bug.
 
-Every `lib/*.ts` module otherwise only *defines* — functions, constants,
-nothing runs until a command calls into it — except `output.ts` (TSK-018,
-`5ea3701`): requiring it registers a `process.stdout.on('error', …)` handler
-immediately, since it is the one module every command's output already flows
-through and the handler has to be in place before the first line is printed
-(§ 4's EPIPE decision).
+Every module otherwise only *defines* — functions, constants, nothing runs
+until a command calls into it — except `core/output.ts` (TSK-018, `5ea3701`):
+importing it registers a `process.stdout.on('error', …)` handler immediately,
+since it is the one module every command's output already flows through and
+the handler has to be in place before the first line is printed (§ 4's EPIPE
+decision).
 
 | Command | What it checks |
 |---|---|
-| `npm run typecheck` (`tools/prep-typecheck.js && tsc --noEmit`) | `strict: true` + `erasableSyntaxOnly` over all of `lib/*.ts` plus a throwaway shadow copy of `nj` (tsc cannot resolve an extensionless file directly) |
-| `npm run build` (`node tools/bundle.js`) | writes `dist/nj` from `nj` + `lib/`; refuses to bundle a source file missing its own `'use strict'` |
+| `npm run typecheck` (`tsc --noEmit`) | `strict: true` + `erasableSyntaxOnly` over all of `src/**/*.ts`, `src/nj.ts` included directly (it carries a real `.ts` extension, so tsc needs no shadow copy) |
+| `npm run build` (`node tools/bundle.js`) | writes `dist/nj` from `src/nj.ts` + `src/commands/` + `src/core/`; refuses to bundle a source file missing its own `'use strict'` |
 | `npm run build:check` (`node tools/bundle.js --check`) | rebuilds in memory, exits 1 unless byte-identical to the committed `dist/nj` — catches a stale bundle |
 | `npm test` (`build:check && node test/run-all.js dist/nj`) | the oracle (§ 5) against the shipped bundle |
+| `npm run perf` (`build:check && node tools/perf.js`) | TSK-003: builds a 10 000-element backlog under `/tmp` and measures `dist/nj list`/`list --json`/`tree`/`doctor` against SPECIFICATION.md:849's comfort bar (median ≤ 250 ms, worst ≤ 500 ms); aborts instead of measuring if another `node` process is running, so machine load is never reported as an `nj` regression |
 
 `tools/refactor-harness/baseline.js` (record/verify) and
 `tools/blindness-matrix/run.js` are not wired into `npm test` — they are run
@@ -59,18 +64,18 @@ would actually reach for, not every name; "imported by" is exact.
 
 | Module | Purpose | Key exports | Imported by |
 |---|---|---|---|
-| `types.ts` | Every shared interface/type (`Element`, `Context`, `Flags`, the nine-stage `Skeleton→…→Element` chain, `NonEmptyString`) — never `require()`d, only `import type` | `Element`, `Context`, `Flags`, `Config`, `Finding`, `EntryJson`, staged-builder types | all 21 other modules (type-only) |
-| `constants.ts` | Field tables, status/priority vocab, the closed `SEVERITY` map | `TYPE_DIR`, `PARENT_TYPE`, `SEVERITY`, `DEFAULT_CONFIG`, `SETTABLE_FIELDS`, `NEW_FIELDS` | 11 modules: `args`, `config`, `derive`, `load`, `parse`, `store`, 5×`cmd-*` |
-| `help.ts` | The `nj help` text, nothing else | `HELP` | `nj` |
-| `derive.ts` | Read-only views over a loaded `Element`: sort order, readiness, JSON entry shape | `elementProblems`, `isReady`, `compareElements`, `entryJson`, `countsOf` | `context`, `output`, 7×`cmd-*` |
-| `parse.ts` | Frontmatter grammar and body-section editing, no `Element` knowledge | `parseFile`, `serialize`, `syncH1`, `applySections` | `args`, `load`, `store`, 3×`cmd-*` |
-| `output.ts` | The `Fail` error type, `--json` state, all printing — and the one `lib/*.ts` module with a real load-time side effect (below) | `fail`, `hardExit`, `out`, `writeFeedback`, `emitWriteResult`, `emitFailure` | 16 modules: `args`, `config`, `context`, `nj`, `store`, every `cmd-*` |
-| `args.ts` | CLI flag parsing and validation, no filesystem access | `parseArgs`, `checkFlags`, `flagString`, `readSectionFlags` | `context`, `nj`, every `cmd-*` |
-| `config.ts` | `.nanojira.json` load/validate, backlog discovery | `loadConfig`, `findBacklog`, `listMd` | `context`, `load` |
-| `store.ts` | Clock, tombstones, atomic file writes, the write-time compare guard | `nowIso`, `atomicWrite`, `compareGuard`, `guardedWrite`, `renderElement` | `load`, 5×`cmd-*` |
-| `load.ts` | `loadElement` (nine derivers), `deriveGraph` (ten passes), `loadBacklog` | `loadElement`, `deriveGraph`, `childMap`, `descendants`, `loadBacklog` | `context`, 6×`cmd-*` |
-| `context.ts` | Per-command setup: backlog+config+elements, target resolution, the four `require*` guards | `context`, `resolveTarget`, `requireWritable`, `requireNoStubs`, `requireActive` | all 10 `cmd-*` modules |
-| `cmd-init.ts` … `cmd-tree.ts` (11 modules) | One per verb (`init new set note show list tree rm archive doctor status`) | one `cmdX` function each | `nj` only |
+| `core/types.ts` | Every shared interface/type (`Element`, `Context`, `Flags`, the nine-stage `Skeleton→…→Element` chain, `NonEmptyString`) — never `require()`d, only `import type` | `Element`, `Context`, `Flags`, `Config`, `Finding`, `EntryJson`, staged-builder types | all 21 other modules (type-only) |
+| `core/constants.ts` | Field tables, status/priority vocab, the closed `SEVERITY` map | `TYPE_DIR`, `PARENT_TYPE`, `SEVERITY`, `DEFAULT_CONFIG`, `SETTABLE_FIELDS`, `NEW_FIELDS` | 11 modules: `args`, `config`, `derive`, `load`, `parse`, `store`, 5×`cmd-*` |
+| `core/help.ts` | The `nj help` text, nothing else | `HELP` | `nj` |
+| `core/derive.ts` | Read-only views over a loaded `Element`: sort order, readiness, JSON entry shape | `elementProblems`, `isReady`, `compareElements`, `entryJson`, `countsOf` | `context`, `output`, 7×`cmd-*` |
+| `core/parse.ts` | Frontmatter grammar and body-section editing, no `Element` knowledge | `parseFile`, `serialize`, `syncH1`, `applySections` | `args`, `load`, `store`, 3×`cmd-*` |
+| `core/output.ts` | The `Fail` error type, `--json` state, all printing — and the one module with a real load-time side effect (below) | `fail`, `hardExit`, `out`, `writeFeedback`, `emitWriteResult`, `emitFailure` | 16 modules: `args`, `config`, `context`, `nj`, `store`, every `cmd-*` |
+| `core/args.ts` | CLI flag parsing and validation, no filesystem access | `parseArgs`, `checkFlags`, `flagString`, `readSectionFlags` | `context`, `nj`, every `cmd-*` |
+| `core/config.ts` | `.nanojira.json` load/validate, backlog discovery | `loadConfig`, `findBacklog`, `listMd` | `context`, `load` |
+| `core/store.ts` | Clock, tombstones, atomic file writes, the write-time compare guard | `nowIso`, `atomicWrite`, `compareGuard`, `guardedWrite`, `renderElement` | `load`, 5×`cmd-*` |
+| `core/load.ts` | `loadElement` (nine derivers), `deriveGraph` (ten passes), `loadBacklog` | `loadElement`, `deriveGraph`, `childMap`, `descendants`, `loadBacklog` | `context`, 6×`cmd-*` |
+| `core/context.ts` | Per-command setup: backlog+config+elements, target resolution, the four `require*` guards | `context`, `resolveTarget`, `requireWritable`, `requireNoStubs`, `requireActive` | all 10 `cmd-*` modules |
+| `commands/cmd-init.ts` … `commands/cmd-tree.ts` (11 modules) | One per verb (`init new set note show list tree rm archive doctor status`) | one `cmdX` function each | `nj` only |
 
 Nothing above `context.ts`/`args.ts`/`output.ts` is imported by anything
 below it — a `cmd-*` module may use CLI helpers and printing, but no CLI

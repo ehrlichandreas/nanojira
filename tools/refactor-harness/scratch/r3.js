@@ -8,7 +8,7 @@ const SCRATCH_BASE = process.env.HARNESS_SCRATCH_BASE || require('os').tmpdir();
 // argv[2] zuerst: ohne das laeuft die Sonde am Shim vorbei, traegt nichts
 // zum Korpus bei -- und prueft obendrein ein anderes nj als das, das
 // gerade unter Test steht.
-const NJ = process.argv[2] || '/home/dev/workspace/portable/projects/nanojira/nj';
+const NJ = process.argv[2] || path.join(__dirname, '..', '..', '..', 'src', 'nj.ts');
 const NOW = '2026-09-21T18:00:00Z', LATER = '2026-09-21T19:30:00Z';
 const CFG = JSON.stringify({ schema: 1, statuses: ['todo','doing','blocked','review','done'], sections: { description: ['Description'], acceptance: ['Acceptance Criteria'] } }, null, 2) + '\n';
 let n = 0, bad = 0;

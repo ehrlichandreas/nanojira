@@ -2,12 +2,12 @@
 
 // `nj show`.
 
-import type { Flags, Element } from './types.ts';
+import type { Flags, Element } from '../core/types.ts';
 
-import { checkFlags } from './args.ts';
-import { context, resolveTarget } from './context.ts';
-import { elementProblems, compareElements, entryJson, countsOf } from './derive.ts';
-import { out } from './output.ts';
+import { checkFlags } from '../core/args.ts';
+import { context, resolveTarget } from '../core/context.ts';
+import { elementProblems, compareElements, entryJson, countsOf } from '../core/derive.ts';
+import { out } from '../core/output.ts';
 
 function cmdShow(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'id', 'file']), false);

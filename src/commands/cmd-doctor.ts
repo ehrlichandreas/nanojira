@@ -2,17 +2,17 @@
 
 // `nj doctor` and `nj doctor --fix`.
 
-import type { Flags, Element, Context, Finding } from './types.ts';
+import type { Flags, Element, Context, Finding } from '../core/types.ts';
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { checkFlags } from './args.ts';
-import { PREFIX_TYPE, TYPE_DIR, PARENT_TYPE, SEVERITY } from './constants.ts';
-import { context } from './context.ts';
-import { elementProblems, compareElements } from './derive.ts';
-import { out } from './output.ts';
-import { syncH1 } from './parse.ts';
-import { nowIso, mtimeIso, readTombstones, atomicWrite, renderElement } from './store.ts';
+import { checkFlags } from '../core/args.ts';
+import { PREFIX_TYPE, TYPE_DIR, PARENT_TYPE, SEVERITY } from '../core/constants.ts';
+import { context } from '../core/context.ts';
+import { elementProblems, compareElements } from '../core/derive.ts';
+import { out } from '../core/output.ts';
+import { syncH1 } from '../core/parse.ts';
+import { nowIso, mtimeIso, readTombstones, atomicWrite, renderElement } from '../core/store.ts';
 
 // ------------------------------------------------------------------- doctor
 

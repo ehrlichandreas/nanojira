@@ -2,13 +2,13 @@
 
 // `nj tree`.
 
-import type { Flags, Element } from './types.ts';
+import type { Flags, Element } from '../core/types.ts';
 
-import { checkFlags, flagString } from './args.ts';
-import { context } from './context.ts';
-import { compareElements, entryJson, countsOf } from './derive.ts';
-import { childMap } from './load.ts';
-import { fail, out, problemSuffix } from './output.ts';
+import { checkFlags, flagString } from '../core/args.ts';
+import { context } from '../core/context.ts';
+import { compareElements, entryJson, countsOf } from '../core/derive.ts';
+import { childMap } from '../core/load.ts';
+import { fail, out, problemSuffix } from '../core/output.ts';
 
 function cmdTree(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'all', 'id']), false);

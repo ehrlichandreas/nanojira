@@ -2,13 +2,13 @@
 
 // `nj init`.
 
-import type { Flags } from './types.ts';
+import type { Flags } from '../core/types.ts';
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { checkFlags } from './args.ts';
-import { DEFAULT_CONFIG } from './constants.ts';
-import { fail, out } from './output.ts';
+import { checkFlags } from '../core/args.ts';
+import { DEFAULT_CONFIG } from '../core/constants.ts';
+import { fail, out } from '../core/output.ts';
 
 function cmdInit(flags: Flags) {
   checkFlags(flags, [], new Set(['json']), false);

@@ -1,19 +1,19 @@
 #!/usr/bin/env node
 'use strict';
 
-// Builds dist/nj, the one executable file that ships (§ 3), from nj and lib/,
-// using esbuild (DECISIONS 83: build-time tooling may choose its own
-// libraries; run time still has no dependency and no `node_modules`).
-// esbuild is a devDependency, required only here -- never by anything under
-// nj or lib/, so it is not part of what ships.
+// Builds dist/nj, the one executable file that ships (§ 3), from src/nj.ts
+// and src/commands/ + src/core/, using esbuild (DECISIONS 83: build-time
+// tooling may choose its own libraries; run time still has no dependency and
+// no `node_modules`). esbuild is a devDependency, required only here --
+// never by anything under src/, so it is not part of what ships.
 //
 //   node tools/bundle.js           write dist/nj
 //   node tools/bundle.js --check   build in memory; exit 1 unless dist/nj is
 //                                  byte-identical (a stale bundle is caught)
 //
-// esbuild bundles `nj` -- the entry point, unmodified, extensionless, with
-// its shebang -- and everything it `require`s under lib/, into one CommonJS
-// file. `platform: 'node'` externalises Node built-ins (`fs`, `path`, …)
+// esbuild bundles `src/nj.ts` -- the entry point, unmodified, with its
+// shebang -- and everything it `require`s under src/commands/ and src/core/,
+// into one CommonJS file. `platform: 'node'` externalises Node built-ins (`fs`, `path`, …)
 // instead of trying to bundle them. Output is deterministic: no absolute
 // paths, no timestamps (checked below, and by `--check` itself, which is
 // exactly a determinism check run against the committed file).
@@ -23,7 +23,7 @@ const path = require('path');
 const esbuild = require('esbuild');
 
 const ROOT = path.resolve(__dirname, '..');
-const ENTRY = path.join(ROOT, 'nj');
+const ENTRY = path.join(ROOT, 'src', 'nj.ts');
 const OUT = path.join(ROOT, 'dist', 'nj');
 
 // esbuild only emits a file-wide 'use strict' when the ENTRY has one, and

@@ -14,10 +14,10 @@ und trotzdem Bytes, `_problems`-Reihenfolge oder die Reihenfolge der
 NODE=…/runtime/darwin-arm64/bin/node
 
 # einmalig, auf der eingefrorenen Revision
-$NODE tools/refactor-harness/baseline.js record --nj="$PWD/nj"
+$NODE tools/refactor-harness/baseline.js record --nj="$PWD/src/nj.ts"
 
 # nach jedem Refactor-Schritt
-$NODE tools/refactor-harness/baseline.js verify --nj="$PWD/nj"
+$NODE tools/refactor-harness/baseline.js verify --nj="$PWD/src/nj.ts"
 ```
 
 Der nj-Pfad ist **immer** explizit. Kein Default, kein PATH-Lookup, keine
@@ -232,11 +232,30 @@ nicht die Ausnahme.
 **Load Average taugt als Ruhenachweis nicht.** Gemessen: 2,86, während
 gleichzeitig **null** node-Prozesse liefen. Ein Minutenmittel klingt ab und
 besteht deshalb aus Geschichte, nicht aus laufender Arbeit — wer darauf wartet,
-wartet auf die Vergangenheit. Der belastbare Test zählt Prozesse:
+wartet auf die Vergangenheit.
+
+**Prozessnamen taugen als Ruhenachweis auch nicht — in beide Richtungen
+falsch.** `pgrep -f 'bin/node' | wc -l` stand hier zuerst, hat sich aber als
+falsch erwiesen: ein normal gestartetes `node -e '...'` im Hintergrund
+enthält den vollen Pfad nicht und rutscht durch (Verifier II belegt: `npm run
+perf` lief mit Exit 0, obwohl ein solcher Hintergrundprozess aktiv war).
+Umgekehrt laufen auf dieser Maschine dauerhaft untätige node-Prozesse (MCP-
+Server) — ein reiner Namenstreffer würde jede Messung blockieren, obwohl
+nichts Last erzeugt. Was zählt, ist **Last, nicht Name oder Anwesenheit**:
 
 ```sh
-pgrep -f 'bin/node' | wc -l      # 0 = ruhig; alles andere ist Last
+ps -A -o pid=,ppid=,pcpu=,comm=      # eigene Kindprozesse ausschliessen (ppid)
 ```
+
+`tools/perf.js` prüft genau das: ein fremder Prozess über 50 % oder die Summe
+aller fremden Prozesse über 200 % bricht mit Exit 3 ab und nennt den
+Prozess. Die Zahlen sind auf dieser Maschine gemessen, nicht geschätzt: fünf
+Stichproben im Leerlauf summierten sich auf 70–114 % (WindowServer, ein
+Bildschirm-Sharing-Helfer, ein Terminal, der Agent selbst — bei 10 echten
+Kernen kommt das schnell zusammen), kein einzelner Prozess lag über ~23 %;
+eine `node -e 'while(1){}'`-Schleife zeigte 100,0 %, ein untätiges
+`setTimeout` 0,0 %. Die Schranken liegen mit Abstand über dem gemessenen
+Leerlauf und mit Abstand unter einem ausgelasteten Kern.
 
 **Und ein einzelner Messsatz reicht auch auf einer ruhigen Maschine nicht.**
 Ein erster Satz lag einmal bei `tree` 282 ms und damit über der Schranke; ein
