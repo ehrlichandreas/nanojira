@@ -3023,6 +3023,51 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      The history is then squashed per D190; docs/history-squash-20261009.map
      is in this commit.
 
+192. **History cleaned before going public** (2026-10-10, user request).
+     Before the first push to the public GitHub repo, every blob of all 26
+     commits went through an ordered list of literal replacements:
+     - local paths, a work address, names of other teams and their repos,
+       machine names and tool/vendor names became neutral placeholders;
+     - the fixture assignee was renamed to `coder-agent`.
+     The list itself stays outside the repo on purpose. The c7 refactor
+     baseline was re-recorded on the cleaned tree, because file hashes in
+     the corpus change with the renamed fixture. The gate result stayed
+     identical (1057 calls, the 8 known suites). The c1–c6 corpora were
+     only text-replaced, so their per-file `nsha` values are stale; only c7
+     is used for replay.
+     - The owner's identity (name, public email, signing key) stays real,
+       at the user's choice.
+     - LICENSE (MIT) has been in every commit since the first one.
+     - Hashes changed again. Tag names stay the stable reference.
+
+193. **v3.12.2: test-harness cleanup, LICENSE in the export, releases via
+     git-history-tools** (2026-10-10).
+     - e54884c: test/lib/harness.js removes its fixtures on exit and on
+       SIGHUP/SIGINT/SIGTERM, not only from T.finish(). Before, a crash or
+       a kill left fixture dirs behind (20 found). The Verifier gave PASS:
+       mutation, signal legs, and a run-all of 100/102 with the 2 known
+       env cannot-runs.
+     - The export also copies LICENSE, because consumers vendor the
+       exported folder and need the licence text with it.
+     - Tooling patch: no change to nj behaviour. Version 3.12.2.
+     - From now on the release squash is done with
+       ehrlichandreas/git-history-tools (`ght-squash tail --tag`), which
+       replaces the Lead's private scripts. The date rule (1-based, root =
+       1970-01-02) and the pinned signature time are unchanged.
+
+194. **v3.12.2 accepted** (2026-10-10). The Verifier gives PASS in
+     docs/verification/v3-12-2.md.
+     - The bump changes version strings only.
+     - The export writes LICENSE as a regular 0644 file, byte-identical to
+       the repo's. A mutation that drops the copy turns AC-56 red.
+     - Gate on 881ee05: replay 1057 calls with the 8 known suites; oracle
+       phase 100/102 with the 2 known env cannot-runs.
+     The Lead ran a leak scan with the D192 term list, kept outside the
+     repo. Its only hit was a pattern list in the verification note, which
+     is now worded abstractly. All other hits are known placeholders,
+     synthetic test data or registry URLs.
+     The release is squashed with `ght-squash tail --tag=v3.12.2`.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

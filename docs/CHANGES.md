@@ -5,6 +5,18 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nj --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 3.12.2
+
+Tooling patch only — no command, flag or output behaviour changed.
+
+- The test harness now removes its fixtures on a crash or a kill, not
+  only at the end of a normal run — fixtures are also cleaned up on
+  process exit and on SIGHUP/SIGINT/SIGTERM.
+
+- **The exported skill folder now includes `LICENSE`.** Consumers vendor
+  the exported folder as-is, so the licence text (MIT) now travels with
+  it; previously only `SKILL.md`, `bin/` and `dist/` were copied.
+
 ## 3.12.1
 
 Tooling patch only — no command, flag or output behaviour changed.
