@@ -2,14 +2,14 @@
 
 // `nj rm`.
 
-import type { Flags, Element, EntryJson } from './types.ts';
+import type { Flags, Element, EntryJson } from '../core/types.ts';
 
 import * as fs from 'fs';
-import { checkFlags } from './args.ts';
-import { context, resolveTarget, requireNoStubs, requireActive } from './context.ts';
-import { compareElements, entryJson } from './derive.ts';
-import { descendants } from './load.ts';
-import { fail, out } from './output.ts';
+import { checkFlags } from '../core/args.ts';
+import { context, resolveTarget, requireNoStubs, requireActive } from '../core/context.ts';
+import { compareElements, entryJson } from '../core/derive.ts';
+import { descendants } from '../core/load.ts';
+import { fail, out } from '../core/output.ts';
 
 function cmdRm(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'cascade', 'id', 'file']), true);

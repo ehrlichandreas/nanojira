@@ -4,20 +4,21 @@
 //
 //   node run.js <repo> [--nj=<path>] [--compare=<before.json>] [mutant …]
 //
-// --nj       entry point of the mutation base (default <repo>/nj). The code
-//            under test is that file PLUS every lib/*.ts beside it — the same
-//            set tools/refactor-harness/baseline.js hashes as codeSha. A base
-//            without lib/ (c1-baseline) is simply nj alone.
+// --nj       entry point of the mutation base (default <repo>/src/nj.ts). The
+//            code under test is that file PLUS every module beside it in
+//            commands/ and core/ — the same set tools/refactor-harness/
+//            baseline.js hashes as codeSha. A base without those directories
+//            (c1-baseline, or a legacy flat lib/) is simply nj alone or nj + lib/.
 //            Before/after runs must share the base.
 // --compare  a previous result file; aborts when its code identity differs,
 //            then prints per-mutant regressions (blind gained, covering lost).
 // Result file: /tmp/blind/matrix-<testDigest8>-<codeSha8>.json, header inside.
 //
-// Each mutant is a DIRECTORY copy (entry + lib/), because since the module
-// split a lone mutated nj dies on its first require(). A needle is looked up
-// in the entry and in every lib/*.ts and mutated where it is found; a needle
-// that matches in more than one file is an error, not a hit — the mutant would
-// otherwise silently change two places, or the wrong one.
+// Each mutant is a DIRECTORY copy (entry + commands/ + core/), because since
+// the module split a lone mutated nj dies on its first require(). A needle is
+// looked up in the entry and in every module and mutated where it is found; a
+// needle that matches in more than one file is an error, not a hit — the
+// mutant would otherwise silently change two places, or the wrong one.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -29,30 +30,35 @@ const REPO = args.find(a => !a.startsWith('--'));
 const ONLY = args.filter(a => !a.startsWith('--')).slice(1);
 const NODE = process.execPath;
 const ROOT = '/tmp/blind';
-const NJ_PATH = path.resolve(opt('nj') || path.join(REPO, 'nj'));
+const NJ_PATH = path.resolve(opt('nj') || path.join(REPO, 'src', 'nj.ts'));
 const COMPARE = opt('compare');
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
 
 /* The code under test, keyed by its path inside a mutant directory: the entry
- * is always written as `nj`, modules as `lib/<name>.js` — the layout the
- * entry's `require('./lib/…')` expects. */
+ * is always written as `nj`, modules as `commands/<name>.ts`/`core/<name>.ts`
+ * — the layout the entry's `require('./commands/…')`/`require('./core/…')`
+ * expects. A legacy flat lib/ beside NJ_PATH (an old baseline) is still read
+ * under its own `lib/<name>` label, for result files recorded before the
+ * restructure. */
+const listMods = (dir) => fs.existsSync(dir)
+  ? fs.readdirSync(dir).filter(n => n.endsWith('.js') || n.endsWith('.ts')).sort() : [];
 const LIB_DIR = path.join(path.dirname(NJ_PATH), 'lib');
-// TSK-023: lib/*.js became lib/*.ts. The write step below already uses each
-// file's OWN name (`rel`, taken from this list) as the mutant's output path,
-// so widening the filter is the only change needed -- a mutant copy still
-// lands as `lib/args.ts`, matching what a .ts entry's require() expects.
-const LIB_FILES = fs.existsSync(LIB_DIR)
-  ? fs.readdirSync(LIB_DIR).filter(n => n.endsWith('.js') || n.endsWith('.ts')).sort() : [];
+const LIB_FILES = listMods(LIB_DIR);
+const SUBDIRS = LIB_FILES.length ? [] : ['commands', 'core'];
+const SUB_FILES = Object.assign({}, ...SUBDIRS.map(sub => ({ [sub]: listMods(path.join(path.dirname(NJ_PATH), sub)) })));
 const SOURCES = Object.assign({ nj: fs.readFileSync(NJ_PATH, 'utf8') },
-  ...LIB_FILES.map(n => ({ ['lib/' + n]: fs.readFileSync(path.join(LIB_DIR, n), 'utf8') })));
+  ...LIB_FILES.map(n => ({ ['lib/' + n]: fs.readFileSync(path.join(LIB_DIR, n), 'utf8') })),
+  ...SUBDIRS.flatMap(sub => SUB_FILES[sub].map(n => ({ [sub + '/' + n]: fs.readFileSync(path.join(path.dirname(NJ_PATH), sub, n), 'utf8') }))));
 
 /* Byte-for-byte the identity baseline.js codeSha() computes: one line per
- * file, entry first under its own basename, then lib/ sorted. Hashing nj
- * alone would name a 64-line entry point and miss every change in lib/. */
+ * file, entry first under its own basename, then each module dir sorted.
+ * Hashing nj alone would name a 64-line entry point and miss every change
+ * in its modules. */
 function codeSha() {
   const lines = [`${sha256(fs.readFileSync(NJ_PATH))}  ${path.basename(NJ_PATH)}\n`]
-    .concat(LIB_FILES.map(n => `${sha256(fs.readFileSync(path.join(LIB_DIR, n)))}  lib/${n}\n`));
+    .concat(LIB_FILES.map(n => `${sha256(fs.readFileSync(path.join(LIB_DIR, n)))}  lib/${n}\n`))
+    .concat(SUBDIRS.flatMap(sub => SUB_FILES[sub].map(n => `${sha256(fs.readFileSync(path.join(path.dirname(NJ_PATH), sub, n)))}  ${sub}/${n}\n`)));
   return sha256(lines.join(''));
 }
 
@@ -144,14 +150,19 @@ function build(name) {
    * could still hold modules this base does not have. */
   const dir = path.join(ROOT, 'mut', name);
   fs.rmSync(dir, { recursive: true, force: true });
-  fs.mkdirSync(path.join(dir, 'lib'), { recursive: true });
+  for (const sub of LIB_FILES.length ? ['lib'] : SUBDIRS) fs.mkdirSync(path.join(dir, sub), { recursive: true });
+  // The entry keeps NJ_PATH's own extension (`.ts` for src/nj.ts, none for a
+  // pre-restructure `nj`): src/nj.ts now carries real TypeScript syntax
+  // (parameter types), which Node's native type-stripping only applies by
+  // extension -- an extensionless copy of TS-typed source is a syntax error.
+  const entryExt = path.extname(NJ_PATH);
   for (const [rel, src] of Object.entries(SOURCES)) {
     const out = rel === target
       ? src.split(needle).join(repl).replace(anchor, anchor + hitSnippet(target))   // __hit() lives in the mutated file
       : src;
-    fs.writeFileSync(path.join(dir, rel), out);
+    fs.writeFileSync(path.join(dir, rel === 'nj' ? 'nj' + entryExt : rel), out);
   }
-  return { nj: path.join(dir, 'nj'), file: target };
+  return { nj: path.join(dir, 'nj' + entryExt), file: target };
 }
 
 function suites() {

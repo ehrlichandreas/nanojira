@@ -14,13 +14,14 @@ beschrieben waren dort nur sechs davon. Deshalb steht sie jetzt hier.
 | NC5 | `archive` nennt keine `dependents` — nie mit Nicht-Leer-Fall geprüft | geschlossen | `test/edge/archive-hint-dependents.js`: `_problems`-Union real befüllt, kein `dependents`-Schlüssel. |
 | NC6 | `rm`/`archive`-Byte-Identität nur per Codelesen | geschlossen | `test/edge/archive-rm-byte-identity.js` (ganzer `backlog/`-Baum vor/nach), dazu der Korpus-Replay. |
 | NC7 | — | nicht rekonstruierbar | Wie NC1. |
-| NC8 | Nur `darwin-arm64` ausgeführt | offen, getrackt | Von darwin-arm64 aus nicht schließbar. SUB-001 „linux-x64 Lauf nachholen". |
+| NC8 | Nur `darwin-arm64` ausgeführt | geschlossen | SUB-001 nachgeholt: linux-x64-Lauf (debian:stable-slim, Kernel 6.8.0-117, overlayfs/ext4, Node v24.21.0 aus `runtime/`) 63/64, mit korrektem Runtime-Pfad 64/64, alle 63 unbeteiligten Suiten zahlgleich zu darwin-arm64. Belege `tools/refactor-harness/scoping/artifacts/linux-x64/`, Urteil in `backlog/subtasks/SUB-001.md` Notes. |
 | NC9 | — | nicht rekonstruierbar | Wie NC1. |
 | NC10a | `--tag`/`--assignee`: Flag-Tippfehler unvalidiert | geschlossen | `test/edge/norm-tag-assignee-typos.js` (§ 9: unbekannte Flags → `unknown_field`). |
 | NC10b | `--tag`/`--assignee`: Unicode-Werte byte-exakt | geschlossen | `test/ac/ac-16-language.js` (`Jörg`, `hören,日本語,🎉`, Datei und JSON). |
+| NC11 | `test/ac/ac-15-no-dependencies.js:33` hartkodiert `PORTABLE` auf den macOS-Pfad — Orakel selbst nicht plattformportabel | offen, getrackt | Erst beim linux-x64-Lauf (SUB-001) aufgefallen: `RUNTIME_NODE` existiert unter dem hartkodierten Pfad im Container nicht, jeder darauf aufbauende `spawn` bricht mit `ENOENT` ab (15 von 21 Checks der Suite). Bestätigt als Testdefekt, nicht als `nj`-Verhalten: mit dem Runtime-Verzeichnis unter dem hartkodierten Pfad gemountet lief dieselbe Suite grün. Fix (nicht selbst umgesetzt, da `test/`-Änderung eine Neuaufzeichnung erzwingt): `PORTABLE` aus `__dirname` ableiten, `test/ac` vier Ebenen hoch zu `workspace/portable` — analog zu `PROJECT`, das zwei Ebenen hoch zum Projekt auflöst. |
 
-**Stand:** 5 geschlossen (NC3–6, NC10 in beiden Lesarten),
-1 offen und getrackt (NC8), 4 nicht rekonstruierbar (NC1/2/7/9).
+**Stand:** 6 geschlossen (NC3–6, NC8, NC10 in beiden Lesarten),
+1 offen und getrackt (NC11), 4 nicht rekonstruierbar (NC1/2/7/9).
 
 ## Weitere bekannte Grenzen, nicht Teil von NC1–10
 

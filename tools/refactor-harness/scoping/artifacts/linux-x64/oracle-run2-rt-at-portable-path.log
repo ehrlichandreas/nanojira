@@ -1,0 +1,11 @@
+
+================================================================
+passed      64 / 64
+failed       0 / 64
+cannot run   0 / 64
+
+Fill AC-MATRIX.md from this run; record `not covered` wherever a
+conditional leg did not execute.
+15:const NJ = process.env.NJ || process.argv[2] || null;
+
+[exited with code 0]

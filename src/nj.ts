@@ -2,34 +2,32 @@
 'use strict';
 
 // NanoJira — local, file-based task tool for agents.
-// Round one, per SPECIFICATION.md v2. Node built-ins only.
+// Round one, per docs/SPECIFICATION.md v2. Node built-ins only.
 
-// Node's native .ts execution needs the .ts extension on every require() path
-// below. The targets are real ES modules (export/import throughout, S4) and
-// Node's require(esm) support (stable since Node 22) loads them synchronously
-// from this plain CommonJS entry point; tsc resolves the same require() calls
-// against their real exports, so a wrong name or a wrong call shape here is a
+// Node's native .ts execution needs the .ts extension on every import path
+// below. The targets are real ES modules (export/import throughout, S4);
+// this entry is one too now, so tsc resolves the same import calls against
+// their real exports, so a wrong name or a wrong call shape here is a
 // compile error like anywhere else -- no cast needed, unlike the JSDoc-era
 // module.exports boundary this replaced.
-const { parseArgs } = require('./lib/args.ts');
-const { cmdArchive } = require('./lib/cmd-archive.ts');
-const { cmdDoctor } = require('./lib/cmd-doctor.ts');
-const { cmdInit } = require('./lib/cmd-init.ts');
-const { cmdList } = require('./lib/cmd-list.ts');
-const { cmdNew } = require('./lib/cmd-new.ts');
-const { cmdNote } = require('./lib/cmd-note.ts');
-const { cmdRm } = require('./lib/cmd-rm.ts');
-const { cmdSet } = require('./lib/cmd-set.ts');
-const { cmdShow } = require('./lib/cmd-show.ts');
-const { cmdStatus } = require('./lib/cmd-status.ts');
-const { cmdTree } = require('./lib/cmd-tree.ts');
-const { HELP } = require('./lib/help.ts');
-const { Fail, fail, output, emitFailure } = require('./lib/output.ts');
+import { parseArgs } from './core/args.ts';
+import { cmdArchive } from './commands/cmd-archive.ts';
+import { cmdDoctor } from './commands/cmd-doctor.ts';
+import { cmdInit } from './commands/cmd-init.ts';
+import { cmdList } from './commands/cmd-list.ts';
+import { cmdNew } from './commands/cmd-new.ts';
+import { cmdNote } from './commands/cmd-note.ts';
+import { cmdRm } from './commands/cmd-rm.ts';
+import { cmdSet } from './commands/cmd-set.ts';
+import { cmdShow } from './commands/cmd-show.ts';
+import { cmdStatus } from './commands/cmd-status.ts';
+import { cmdTree } from './commands/cmd-tree.ts';
+import { HELP } from './core/help.ts';
+import { Fail, fail, output, emitFailure } from './core/output.ts';
 
 // --------------------------------------------------------------------- main
 
-/** @param {string[]} argv */
-function main(argv) {
+function main(argv: string[]) {
   const cmd = argv[0] !== undefined && !argv[0].startsWith('--') ? argv[0] : null;
   const { flags, positional } = parseArgs(cmd === null ? argv : argv.slice(1));
   output.json = flags.has('json');
@@ -55,7 +53,7 @@ function main(argv) {
 
 try {
   process.exitCode = main(process.argv.slice(2));
-} catch (/** @type {any} */ e) {
+} catch (e: any) {
   if (e instanceof Fail) {
     emitFailure(e.code, e.message, e.hint);
   } else {

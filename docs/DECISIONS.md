@@ -732,6 +732,16 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     would accept or print differently. That is a behaviour change, not a
     simplification.
 
+    **Addendum, 2026-09-23 — confirmed by the user: nj's own code stays ours,
+    completely.** Asked whether parts should move to libraries, the lead checked
+    the best candidate, `node:util.parseArgs` for `src/core/args.ts`: the
+    replaceable loop is 15 lines, the other ~90 are spec-pinned validation and
+    messages (`unknown_field`, `missing_value`, "Nothing written.") no library
+    provides, and `util.parseArgs` reads `--` differently (everything after it is
+    positional; ours skips it and keeps parsing flags). No gain, a behaviour risk.
+    The user decided: no runtime libraries in `nj`. Build tooling (TypeScript,
+    esbuild) is unaffected.
+
 84. **Endgate passed — the refactor is complete, measured against where it
     started.** Independent run by the verifier on HEAD `2ca5c9f`, reference
     point `oracle-frozen-5` (corpus 3452 calls recorded against baseline

@@ -88,8 +88,8 @@ function deriveId(el: Skeleton, p: ParsedFile, base: string): WithId {
 // looking it up BY FOLDER (`TYPE_DIR[folder]`) is always `undefined` for every
 // real folder, and the reverse search over `TYPE_DIR`'s values never matches
 // 'archive' either — both branches always produced `null`. This is not a bug
-// to fix: § 7 (SPECIFICATION.md:328) defines `type:derived` as "derived from
-// ID prefix", not from the folder, and § 14 (SPECIFICATION.md:911) states the
+// to fix: § 7 (docs/SPECIFICATION.md:329) defines `type:derived` as "derived from
+// ID prefix", not from the folder, and § 14 (docs/SPECIFICATION.md:916) states the
 // precedence outright — "frontmatter > prefix > folder precedence; the folder
 // loses". Reinstating a folder-based type would violate the spec, not repair
 // it; if this needs to come back, it needs a decision, not a refactor.
@@ -137,7 +137,7 @@ function deriveStatus(el: WithTitle, p: ParsedFile, cfg: Config): WithStatus {
 // is what makes `=== null` (rather than a falsy test) correct everywhere else
 // a `parent` is read. Four callers sit on it, all comparing `=== null`:
 // `childMap` and `markParentEdges`/`markParentCycles` below, and the root
-// filter in `cmdTree` (`lib/cmd-tree.ts`). Route this behind a condition that
+// filter in `cmdTree` (`commands/cmd-tree.ts`). Route this behind a condition that
 // not every element reaches, and an element with a blank `parent:` line gets
 // `''` instead of `null` — `childMap` then groups it under the key `''`
 // instead of treating it as a root, silently, and nothing here would notice.
@@ -167,7 +167,7 @@ function deriveOptionals(el: WithParent, p: ParsedFile): WithOptionals {
   }
 
   // Deliberately NOT normalised to `null` like `parent` above — a missing
-  // `assignee` stays `''`. `cmdSet` (lib/cmd-set.ts) compares
+  // `assignee` stays `''`. `cmdSet` (commands/cmd-set.ts) compares
   // `assignee !== el.assignee` and turns a `''` into an `undefined` override,
   // which is how `nj set --assignee=` deletes the field. Unifying this with
   // `parent`'s `null` convention would silently change that delete behaviour.

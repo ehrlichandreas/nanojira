@@ -7,18 +7,20 @@ directory. It is the only thing that measures whether the oracle would
 ## What it does
 
 For each named mutant it copies the code under test — `nj` **plus every
-`lib/*.ts` beside it** — into its own directory, applies **one** textual
-change to a single behaviour, injects a `__hit()` probe into the file it
-changed, and runs every suite under `test/ac`, `test/fault` and `test/edge`
-against the copy. The repo's own code is never touched.
+module beside it in `commands/` and `core/`** — into its own directory,
+applies **one** textual change to a single behaviour, injects a `__hit()`
+probe into the file it changed, and runs every suite under `test/ac`,
+`test/fault` and `test/edge` against the copy. The repo's own code is never
+touched.
 
 Since the module split (`ceb5dac`) `nj` is a 64-line entry point and the code
 lives in 22 modules, so a mutant has to be a directory: a lone mutated `nj`
-dies on its first `require('./lib/…')`. The needle is looked up in `nj` and in
-every module, and mutated where it is found. **A needle that matches in more
-than one file is an error, not a hit** — it would change two places, or the
-wrong one. A base without `lib/` (such as `c1-baseline`) is just `nj` alone,
-so pre-split bases still work unchanged.
+dies on its first `require('./commands/…')`/`require('./core/…')`. The needle
+is looked up in `nj` and in every module, and mutated where it is found. **A
+needle that matches in more than one file is an error, not a hit** — it would
+change two places, or the wrong one. A base without `commands/`/`core/`
+(such as `c1-baseline`, or a legacy flat `lib/`) is just `nj` alone or `nj` +
+`lib/`, so pre-restructure bases still work unchanged.
 
 Each (mutant, suite) pair lands in one of three states:
 
@@ -43,14 +45,15 @@ $NODE tools/blindness-matrix/run.js $REPO --nj=/tmp/base-nj
 $NODE tools/blindness-matrix/run.js $REPO --nj=/tmp/base-nj --compare=/tmp/blind/matrix-<digest8>-<code8>.json
 ```
 
-`--nj=` names the **entry point**; `lib/` next to it belongs to the base. To
-pin a split base, extract both — `git archive <ref> nj lib | tar -x -C /tmp/base`
-and pass `--nj=/tmp/base/nj` — never `git checkout <ref> -- …`, which writes
+`--nj=` names the **entry point** (default `<repo>/src/nj.ts`); `commands/`
+and `core/` next to it belong to the base. To pin a base, extract all three —
+`git archive <ref> src | tar -x -C /tmp/base` and pass
+`--nj=/tmp/base/src/nj.ts` — never `git checkout <ref> -- …`, which writes
 the shared index.
 
 The result file names what it measured: `/tmp/blind/matrix-<testDigest8>-<codeSha8>.json`,
 with the full `testDigest` (same scope and folding as the refactor harness),
-`codeSha256` over `nj` + `lib/` (byte-identical to `codeSha()` in
+`codeSha256` over `nj` + `commands/` + `core/` (byte-identical to `codeSha()` in
 `tools/refactor-harness/baseline.js`), the entry-only `njSha256`, node version
 and date in a `header`. Two runs are comparable only when their code identity
 agrees — `--compare` refuses otherwise, with its own message, because the

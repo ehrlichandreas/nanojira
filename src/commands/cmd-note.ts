@@ -2,13 +2,13 @@
 
 // `nj note`.
 
-import type { Flags, Element } from './types.ts';
+import type { Flags, Element } from '../core/types.ts';
 
-import { checkFlags } from './args.ts';
-import { context, resolveTarget, requireWritable, requireActive } from './context.ts';
-import { loadElement, deriveGraph } from './load.ts';
-import { fail, writeFeedback, emitWriteResult } from './output.ts';
-import { nowIso, guardedWrite, renderElement } from './store.ts';
+import { checkFlags } from '../core/args.ts';
+import { context, resolveTarget, requireWritable, requireActive } from '../core/context.ts';
+import { loadElement, deriveGraph } from '../core/load.ts';
+import { fail, writeFeedback, emitWriteResult } from '../core/output.ts';
+import { nowIso, guardedWrite, renderElement } from '../core/store.ts';
 
 function cmdNote(flags: Flags, positional: string[]) {
   checkFlags(flags, [], new Set(['json', 'force', 'id', 'file']), true);

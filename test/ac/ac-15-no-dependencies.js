@@ -30,13 +30,14 @@
  * can be loaded, which is what NODE_PATH below pins, and which the lone-copy
  * check below pins for `dist/nj` specifically.
  */
-const PORTABLE = '/home/dev/workspace/portable';
+const path = require('path');
+// test/ac -> four levels up: ac, test, nanojira, projects -> workspace/portable
+const PORTABLE = path.resolve(__dirname, '..', '..', '..', '..');
 const PLATFORM = process.platform === 'darwin' ? 'darwin-arm64' : 'linux-x64';
 const RUNTIME_NODE = PORTABLE + '/runtime/' + PLATFORM + '/bin/node';
 if (!process.env.NJ_NODE) process.env.NJ_NODE = RUNTIME_NODE;
 
 const fs = require('fs');
-const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
 const H = require('../lib/harness.js');
 const T = H.T;

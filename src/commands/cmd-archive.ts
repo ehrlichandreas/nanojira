@@ -2,16 +2,16 @@
 
 // `nj archive`.
 
-import type { Flags, Element } from './types.ts';
+import type { Flags, Element } from '../core/types.ts';
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { checkFlags } from './args.ts';
-import { context, resolveTarget, requireWritable, requireNoStubs, requireActive } from './context.ts';
-import { elementProblems, entryJson } from './derive.ts';
-import { loadElement, deriveGraph, descendants } from './load.ts';
-import { fail, out } from './output.ts';
-import { nowIso, atomicWrite, compareGuard, renderElement } from './store.ts';
+import { checkFlags } from '../core/args.ts';
+import { context, resolveTarget, requireWritable, requireNoStubs, requireActive } from '../core/context.ts';
+import { elementProblems, entryJson } from '../core/derive.ts';
+import { loadElement, deriveGraph, descendants } from '../core/load.ts';
+import { fail, out } from '../core/output.ts';
+import { nowIso, atomicWrite, compareGuard, renderElement } from '../core/store.ts';
 
 function cmdArchive(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'id', 'file']), true);

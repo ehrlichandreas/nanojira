@@ -2,12 +2,12 @@
 
 // `nj` without a command: the status overview.
 
-import type { Flags } from './types.ts';
+import type { Flags } from '../core/types.ts';
 
-import { checkFlags } from './args.ts';
-import { context } from './context.ts';
-import { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } from './derive.ts';
-import { out } from './output.ts';
+import { checkFlags } from '../core/args.ts';
+import { context } from '../core/context.ts';
+import { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } from '../core/derive.ts';
+import { out } from '../core/output.ts';
 
 function cmdStatus(flags: Flags) {
   checkFlags(flags, [], new Set(['json']), false);

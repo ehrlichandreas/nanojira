@@ -8,7 +8,7 @@ const SCRATCH_BASE = process.env.HARNESS_SCRATCH_BASE || require('os').tmpdir();
 // argv[2] zuerst: ohne das laeuft die Sonde am Shim vorbei, traegt nichts
 // zum Korpus bei -- und prueft obendrein ein anderes nj als das, das
 // gerade unter Test steht.
-const NJ = process.argv[2] || '/home/dev/workspace/portable/projects/nanojira/nj';
+const NJ = process.argv[2] || path.join(__dirname, '..', '..', '..', 'src', 'nj.ts');
 const NODE = process.execPath;
 const NOW = '2026-09-21T18:00:00Z', LATER = '2026-09-21T19:30:00Z';
 const CFG = JSON.stringify({ schema: 1, statuses: ['todo','doing','blocked','review','done'], sections: { description: ['Description'], acceptance: ['Acceptance Criteria'] } }, null, 2) + '\n';
@@ -247,18 +247,21 @@ console.log('\n[SPEC] pinned changes');
   // 30 codes
   // A static property of the SOURCE, not of whichever artifact is under
   // behavioural test right now -- `NJ` may point at `nj`, at `dist/nj` (no
-  // sibling lib/ at all, and esbuild rewrites `const` to `var` in its CJS
-  // wrapper, so a regex anchored on the source's own declaration keyword
-  // stops matching the bundle), or some future build. Read the SOURCE
-  // (nj + lib/*.{js,ts} next to THIS script, not next to NJ) unconditionally.
-  // TSK-023: lib/*.ts declares SEVERITY with a type annotation
+  // sibling commands/ or core/ at all, and esbuild rewrites `const` to `var`
+  // in its CJS wrapper, so a regex anchored on the source's own declaration
+  // keyword stops matching the bundle), or some future build. Read the SOURCE
+  // (src/nj.ts + src/commands/*.{js,ts} + src/core/*.{js,ts} next to THIS
+  // script's repo root, not next to NJ) unconditionally.
+  // TSK-023: lib/*.ts (now core/*.ts) declares SEVERITY with a type annotation
   // (`const SEVERITY: Record<...> = {`), which the old anchor -- expecting
   // `const SEVERITY = {` verbatim -- does not match. Proven broken first,
   // against a probe .ts file with a typed declaration, before this fix.
-  const srcRoot = path.join(__dirname, '..', '..', '..');
-  const libDir = path.join(srcRoot, 'lib');
-  const libSrc = fs.readdirSync(libDir).filter((f) => f.endsWith('.js') || f.endsWith('.ts')).sort().map((f) => fs.readFileSync(path.join(libDir, f), 'utf8'));
-  const src = [fs.readFileSync(path.join(srcRoot, 'nj'), 'utf8')].concat(libSrc).join('\n'); const tbl = /(?:const|let|var) SEVERITY(?:\s*:[^=]+)? = \{([\s\S]*?)\n\};/.exec(src)[1]; const codes = tbl.match(/'([^']+)':/g).map(s => s.slice(1, -2));
+  const srcRoot = path.join(__dirname, '..', '..', '..', 'src');
+  const modSrc = ['commands', 'core'].flatMap((sub) => {
+    const dir = path.join(srcRoot, sub);
+    return fs.readdirSync(dir).filter((f) => f.endsWith('.js') || f.endsWith('.ts')).sort().map((f) => fs.readFileSync(path.join(dir, f), 'utf8'));
+  });
+  const src = [fs.readFileSync(path.join(srcRoot, 'nj.ts'), 'utf8')].concat(modSrc).join('\n'); const tbl = /(?:const|let|var) SEVERITY(?:\s*:[^=]+)? = \{([\s\S]*?)\n\};/.exec(src)[1]; const codes = tbl.match(/'([^']+)':/g).map(s => s.slice(1, -2));
   ok('SEVERITY has 30 distinct codes incl. file:unreadable + unknown:priority', new Set(codes).size === 30 && codes.includes('file:unreadable') && codes.includes('unknown:priority'), codes.length + ' ' + codes.join(','));
   // help --json
   const hj = run(['help','--json'], d); console.log('    note: `nj help --json` → exit ' + hj.status + ', stdout JSON? ' + (hj.json !== null));

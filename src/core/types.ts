@@ -15,7 +15,7 @@
 // never happens, so every consumer destructuring a value out of `require()`
 // silently gets `undefined` in the bundled dist/nj (found live: `NEW_FIELDS`
 // was `undefined` in dist/nj, `Cannot read properties of undefined (reading
-// 'includes')` in checkFlags, even though `node lib/constants.ts` alone was
+// 'includes')` in checkFlags, even though `node core/constants.ts` alone was
 // fine and `tsc` reported zero errors — the bug is bundler-only, and this
 // file's separation from constants.ts/derive.ts is the fix: neither of those
 // two files may have an `export` of their own again).

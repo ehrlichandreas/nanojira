@@ -2,13 +2,13 @@
 
 // `nj list`.
 
-import type { Flags, Element, Config } from './types.ts';
+import type { Flags, Element, Config } from '../core/types.ts';
 
-import { checkFlags, flagString } from './args.ts';
-import { TYPES } from './constants.ts';
-import { context } from './context.ts';
-import { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } from './derive.ts';
-import { fail, out, printEntryLine } from './output.ts';
+import { checkFlags, flagString } from '../core/args.ts';
+import { TYPES } from '../core/constants.ts';
+import { context } from '../core/context.ts';
+import { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } from '../core/derive.ts';
+import { fail, out, printEntryLine } from '../core/output.ts';
 
 function applyFilters(elements: Element[], flags: Flags, cfg: Config) {
   const all = flags.has('all');
