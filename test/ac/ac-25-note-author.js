@@ -1,10 +1,11 @@
 'use strict';
-/* AC-25 — Note author (`NJ_AUTHOR`), proposal v3.1 § 0 and § A.
+/* AC-25 — Note author (`NJ_AUTHOR`, `--as`), docs/SPECIFICATION.md § 9 "The
+ * acting name" and § 10 (v3.1 proposal § 0/§ A, promoted: DECISIONS 110/112,
+ * then generalized to cover `--as` by § C's promotion, DECISIONS 117/b7ffad6
+ * — `nj note --as` is no longer `unknown_field`, N6 below).
  *
  * Source: docs/proposals/v3.1.md (5d1c83d) with the lead's rulings on it
- * (A-1: a whitespace-only NJ_AUTHOR is invalid). It is not yet folded into
- * docs/SPECIFICATION.md; § numbers below are the proposal's own (§ 0, § A)
- * or the spec's (§ 9, § 10).
+ * (A-1: a whitespace-only NJ_AUTHOR is invalid).
  *
  * AC-25: "With `NJ_AUTHOR` set, `nj note` signs with it — whether or not the
  * element has an `assignee` — and the note line is otherwise byte-identical
@@ -14,8 +15,9 @@
  * byte-identical, while `list`/`show`/`set` under the same environment
  * behave as without it. `NJ_AUTHOR` never changes `assignee`."
  *
- * § 0: the acting name is `--as` (claim/release only) > NJ_AUTHOR > none;
- * an empty NJ_AUTHOR is unset; a name is valid when, trimmed, it is
+ * § 9 "The acting name": `--as` (on the commands that have one, including
+ * `nj note` as of § C's promotion) outranks `NJ_AUTHOR`, outranks none; an
+ * empty `NJ_AUTHOR` or `--as` is unset; a name is valid when, trimmed, it is
  * non-empty, a single line and has no `:`; the trimmed value is used; reads
  * never fail on it.
  *
@@ -282,15 +284,42 @@ for (const [label, value] of [
 }
 
 /* ===================================================================== */
-/* N6 — --as exists only on claim / release (§ 0)                         */
+/* N6 — `--as` on `nj note` (§ 9 "The acting name", promoted with C,      */
+/* DECISIONS 110/117/b7ffad6): signs like NJ_AUTHOR, and outranks it      */
 /* ===================================================================== */
 {
-  const x = backlog('ac25-as', 'alice');
+  const a = backlog('ac25-asA', 'alice');
+  const b = backlog('ac25-asB', 'alice');
+  const ra = runJ(['note', '--id=TSK-001', '--as=reviewer', TEXT], { cwd: a.dir, env: later() });
+  const rb = runJ(['note', '--id=TSK-001', TEXT], { cwd: b.dir, env: later() });
+  T.exit('N6 note --as=reviewer: exit 0', ra, 0);
+  const control = bytes(taskFile(b));
+  T.check('N6 fixture — the v3 control signs with alice', rb.status === 0 && !!control && control.includes(noteLine('alice') + '\n'), J(control));
+  const want = control === null ? null : control.replace(noteLine('alice') + '\n', noteLine('reviewer') + '\n');
+  T.eq('N6 note --as=reviewer: signed "reviewer", file otherwise byte-identical to the v3 note', bytes(taskFile(a)), want);
+  T.check('N6 note --as never changes assignee: assignee is still alice', /^assignee: alice$/m.test(bytes(taskFile(a)) || ''), J(bytes(taskFile(a))));
+}
+{
+  const a = backlog('ac25-asOutranksA', 'alice');
+  const b = backlog('ac25-asOutranksB', 'alice');
+  const ra = runJ(['note', '--id=TSK-001', '--as=reviewer', TEXT], { cwd: a.dir, env: later({ NJ_AUTHOR: 'other' }) });
+  const rb = runJ(['note', '--id=TSK-001', TEXT], { cwd: b.dir, env: later() });
+  T.exit('N6 note --as=reviewer with NJ_AUTHOR=other set too: exit 0', ra, 0);
+  const control = bytes(taskFile(b));
+  const want = control === null ? null : control.replace(noteLine('alice') + '\n', noteLine('reviewer') + '\n');
+  T.eq('N6 --as outranks NJ_AUTHOR: signed "reviewer", not "other"', bytes(taskFile(a)), want);
+}
+/* An empty --as is NOT unset the way an empty NJ_AUTHOR is (§ 9, DECISIONS
+ * 119): "empty counts as unset" is stated for the environment variable only;
+ * a name "from either source" must be non-empty. An explicit flag with no
+ * name is a caller's mistake, same as whitespace-only/multi-line/colon. */
+for (const bad of ['', '  ', 'a\nb', 'a:b']) {
+  const x = backlog('ac25-asInvalid', 'alice');
   const before = snapshot(x.dir);
-  const r = runJ(['note', '--id=TSK-001', '--as=reviewer', TEXT], { cwd: x.dir, env: later() });
-  T.exit('N6 note --as: exit 1 — note has no --as', r, 1);
-  T.eq('N6 note --as: unknown_field (§ 9)', r.json && r.json.error, 'unknown_field');
-  T.check('N6 note --as: nothing written', J(snapshot(x.dir)) === J(before), 'changed');
+  const r = runJ(['note', '--id=TSK-001', '--as=' + bad, TEXT], { cwd: x.dir, env: later() });
+  T.exit('N6 note --as=' + J(bad) + ': exit 1 — invalid_value, not invalid_env', r, 1);
+  T.eq('N6 note --as=' + J(bad) + ': invalid_value', r.json && r.json.error, 'invalid_value');
+  T.check('N6 note --as=' + J(bad) + ': nothing written', J(snapshot(x.dir)) === J(before), 'changed');
 }
 
 T.finish();

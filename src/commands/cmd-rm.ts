@@ -6,6 +6,7 @@ import type { Flags, Element, EntryJson } from '../core/types.ts';
 
 import * as fs from 'fs';
 import { checkFlags } from '../core/args.ts';
+import { removeClaimDirWholesale } from '../core/claims.ts';
 import { context, resolveTarget, requireNoStubs, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
 import { compareElements, entryJson } from '../core/derive.ts';
 import { ownFolder } from '../core/layout.ts';
@@ -46,7 +47,7 @@ function cmdRm(flags: Flags) {
     .filter((e: Element) => !victimIds.has(e.id) && e.depends_on.some((d: string) => victimIds.has(d)))
     .sort(compareElements);
 
-  const entries: EntryJson[] = victims.map(entryJson);
+  const entries: EntryJson[] = victims.map((v) => entryJson(v, ctx.backlog));
   // Children first, so an interrupted cascade never leaves an orphan behind.
   // Under `hierarchy` an epic's or task's own folder goes too, but only once
   // it is empty — never a recursive delete of whatever else it holds (§ 12).
@@ -54,6 +55,7 @@ function cmdRm(flags: Flags) {
     fs.unlinkSync(v.file);
     const own = ctx.cfg.layout.group === 'hierarchy' ? ownFolder(v) : null;
     if (own !== null) removeIfEmpty(own);
+    removeClaimDirWholesale(ctx.backlog, v.id);
   }
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
 

@@ -9,7 +9,10 @@
  *   1. `status` equals `statuses[0]`,
  *   2. every `depends_on` target is `done` and carries no `done:open_children`,
  *   3. no problem code with Blocks = yes is present,
- *   4. the element is complete (§ 7).
+ *   4. the element is complete (§ 7),
+ *   5. the element is unclaimed, or claimed by the acting name (§ 12
+ *      "Claims", condition 5 of C's promotion) — untested here: this file's
+ *      fixtures never claim anything, so condition 5 is trivially satisfied.
  * § 11: a `depends_on` pointing into the archive is satisfied by definition and
  * surfaces as `active_refs_archived` — informational, never blocking.
  */

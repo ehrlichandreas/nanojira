@@ -87,6 +87,9 @@ const SEVERITY: Record<string, string | null> = {
   'backlog:ids_missing': 'error',
   'backlog:unreadable_dir': 'error',
   'config:invalid': 'error',
+  'claim:mismatch': 'warning',
+  'claim:orphaned': 'warning',
+  'backlog:claims_unignored': 'warning',
 };
 
 const BLOCKS_READY = new Set([

@@ -72,10 +72,10 @@ function entriesOf(r) { return (r.json && Array.isArray(r.json.entries)) ? r.jso
 
   const gi = readText(bl(d, '.gitignore'));
   const giLines = gi.split('\n').map(s => s.trim()).filter(s => s.length > 0);
-  // AMBIGUOUS: § 4 pins the two patterns, not their order or the trailing
-  // newline. Asserted as: exactly these two lines, nothing else.
-  T.eq('gitignore ignores exactly the two patterns',
-    giLines.slice().sort().join('|'), '.nanojira/index.json|.nj-tmp-*');
+  // AMBIGUOUS: § 4 pins the three patterns, not their order or the trailing
+  // newline. Asserted as: exactly these three lines, nothing else.
+  T.eq('gitignore ignores exactly the three patterns (§ 4, § 12a: claims added with C)',
+    giLines.slice().sort().join('|'), '.nanojira/claims/|.nanojira/index.json|.nj-tmp-*');
   /* § 4: "`.nanojira/ids/` is never ignored, by design" — neither by name nor
    * by ignoring the whole `.nanojira/` folder. */
   T.check('.nanojira/ids/ is never ignored', !gi.split('\n').some(l =>

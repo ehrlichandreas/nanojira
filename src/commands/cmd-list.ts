@@ -4,11 +4,22 @@
 
 import type { Flags, Element, Config } from '../core/types.ts';
 
+import { actingNameForRead } from '../core/actor.ts';
 import { checkFlags, flagString } from '../core/args.ts';
+import { readClaim } from '../core/claims.ts';
 import { TYPES } from '../core/constants.ts';
 import { context } from '../core/context.ts';
 import { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } from '../core/derive.ts';
 import { fail, out, printEntryLine } from '../core/output.ts';
+
+// --ready condition 5 (§ 9, § 12 "Claims"): unclaimed, or claimed by the
+// acting name. `list` has no `--as`; an invalid or absent `NJ_AUTHOR` is no
+// name (reads never fail on it) -- an element claimed by someone else is
+// then excluded the same as if the caller claimed nothing.
+function availableToActor(backlog: string, id: string, name: string | null): boolean {
+  const claim = readClaim(backlog, id);
+  return claim === null || claim.by === name;
+}
 
 function applyFilters(elements: Element[], flags: Flags, cfg: Config) {
   const all = flags.has('all');
@@ -47,10 +58,11 @@ function cmdList(flags: Flags) {
   const filtered = applyFilters(ctx.elements, flags, ctx.cfg);
 
   if (flags.has('ready')) {
-    const ready = filtered.filter((e) => isReady(e, ctx.cfg));
+    const actor = actingNameForRead();
+    const ready = filtered.filter((e) => isReady(e, ctx.cfg) && availableToActor(ctx.backlog, e.id, actor));
     const blocked = filtered.filter((e) => !isReady(e, ctx.cfg) && e.status === ctx.cfg.statuses[0] && isIncomplete(e));
     if (flags.has('json')) {
-      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map(entryJson) }, null, 2));
+      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map((e) => entryJson(e, ctx.backlog)) }, null, 2));
       return 0;
     }
     out('Ready to work:');
@@ -67,7 +79,7 @@ function cmdList(flags: Flags) {
   }
 
   if (flags.has('json')) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: filtered.map(entryJson) }, null, 2));
+    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: filtered.map((e) => entryJson(e, ctx.backlog)) }, null, 2));
     return 0;
   }
   if (filtered.length === 0) { out('(no matching elements)'); return 0; }

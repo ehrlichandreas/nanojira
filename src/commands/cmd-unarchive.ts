@@ -6,6 +6,7 @@ import type { Flags, Element, Context } from '../core/types.ts';
 
 import * as path from 'path';
 import { checkFlags } from '../core/args.ts';
+import { removeClaimDirWholesale } from '../core/claims.ts';
 import { context, resolveTarget, requireWritable, requireNoStubs } from '../core/context.ts';
 import { elementProblems, entryJson } from '../core/derive.ts';
 import { ownFolder, placeOf, removeEmptiedIdFolders } from '../core/layout.ts';
@@ -121,6 +122,13 @@ function cmdUnarchive(flags: Flags) {
     }
   }
 
+  // A leftover orphaned claim directory (a straggler's append during a
+  // partially-cleaned archive) is removed wholesale, the same as
+  // `archive`/`rm`, now that unarchive has decided to proceed — after every
+  // refusal above, while the element is still archived, before the first
+  // write (§ 12a, DECISIONS 115 P-6).
+  for (const e of stillArchived) removeClaimDirWholesale(ctx.backlog, e.id);
+
   const ts = nowIso();
   for (const e of stillArchived) {
     compareGuard(e, false, ctx.backlog, STABLE_HINT);
@@ -154,7 +162,7 @@ function cmdUnarchive(flags: Flags) {
   if (json) {
     out(JSON.stringify({
       ok: true, ids: moved.map((m) => m.id), changed: ['unarchived'],
-      entries: moved.map(entryJson),
+      entries: moved.map((m) => entryJson(m, ctx.backlog)),
       _problems: Array.from(new Set(moved.flatMap(elementProblems))).sort(),
     }, null, 2));
   } else {

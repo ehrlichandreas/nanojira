@@ -7,6 +7,7 @@ import type { Flags, Element, Context, Finding } from '../core/types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { checkFlags } from '../core/args.ts';
+import { allClaimDirs, claimsRootDir, highestEntry, removeClaimDirWholesale } from '../core/claims.ts';
 import {
   PREFIX_TYPE, PARENT_TYPE, SEVERITY,
   V3_DIR_REL, V3_CONFIG_REL, V3_IDS_REL, V3_INDEX_REL, LEGACY_CONFIG_REL, LEGACY_IDS_REL, LEGACY_INDEX_REL,
@@ -64,8 +65,13 @@ function collectFindings(ctx: Context): Finding[] {
   }
 
   const scan = ctx.scan;
-  for (const file of strayTmpFiles(scan.dirs)) {
+  for (const file of strayTmpFiles(scan.dirs.concat(claimsScanDirs(ctx.backlog)))) {
     findings.push({ code: 'backlog:stray_tmp', severity: 'warning', file, message: 'stray temp file from an interrupted write' });
+  }
+  findings.push(...collectClaimFindings(ctx));
+  if (claimsNeedGitignoreLine(ctx.backlog)) {
+    findings.push({ code: 'backlog:claims_unignored', severity: 'warning', file: path.join(ctx.backlog, '.gitignore'),
+      message: ".nanojira/claims/ exists but .gitignore has no line that is exactly '.nanojira/claims/'" });
   }
   // A folder the scan cannot list may hold element files nobody sees (DECISIONS 93 F9).
   for (const { dir, reason } of scan.unreadable) {
@@ -99,6 +105,58 @@ function strayTmpFiles(dirs: string[]): string[] {
     for (const n of names.sort()) if (n.startsWith('.nj-tmp-')) found.push(path.join(dir, n));
   }
   return found;
+}
+
+// `.nanojira/claims/<id>/` is never walked by scanBacklog (every dot-directory
+// is out of bounds, § 4 DECISIONS 91 B11), so a stray temp file inside one
+// needs its own list of directories to check (§ 12 "Claims").
+function claimsScanDirs(backlog: string): string[] {
+  return [claimsRootDir(backlog), ...allClaimDirs(backlog).map((c) => c.dir)];
+}
+
+// claim:mismatch (an element claimed N whose assignee is not N) and
+// claim:orphaned (a claim directory for an element that is archived or does
+// not exist — backlog-level in the latter case) — § 7, § 12a.
+function collectClaimFindings(ctx: Context): Finding[] {
+  const findings: Finding[] = [];
+  for (const { id, dir } of allClaimDirs(ctx.backlog)) {
+    const el = ctx.elements.find((e) => e.id === id);
+    const h = highestEntry(dir);
+    if (!el) {
+      findings.push({ code: 'claim:orphaned', severity: 'warning', file: dir, message: `claim directory for '${id}', which does not exist` });
+      continue;
+    }
+    if (el.archived) {
+      findings.push({ code: 'claim:orphaned', severity: 'warning', element: el.id, file: dir, message: `${el.id} is archived but still carries a claim directory` });
+    }
+    if (h && h.kind === 'claimed' && h.name !== el.assignee) {
+      findings.push({ code: 'claim:mismatch', severity: 'warning', element: el.id, file: el.file,
+        message: `claimed by '${h.name}' but assignee is '${el.assignee || '(empty)'}'` });
+    }
+  }
+  return findings;
+}
+
+const CLAIMS_GITIGNORE_LINE = '.nanojira/claims/';
+
+function gitignoreHasClaimsLine(backlog: string): boolean {
+  let content: string;
+  try { content = fs.readFileSync(path.join(backlog, '.gitignore'), 'utf8'); } catch { return false; }
+  return content.split('\n').some((l) => l.replace(/\r$/, '') === CLAIMS_GITIGNORE_LINE);
+}
+
+function claimsNeedGitignoreLine(backlog: string): boolean {
+  return fs.existsSync(claimsRootDir(backlog)) && !gitignoreHasClaimsLine(backlog);
+}
+
+// "the last line's ending, or LF if the file is empty or its last line has
+// none" (§ 12a) — an append has no matched line to copy from, unlike step
+// 0's gitignore replace, which can reuse the one line it overwrites.
+function appendGitignoreLine(content: string, line: string): string {
+  if (content === '') return line + '\n';
+  if (content.endsWith('\r\n')) return content + line + '\r\n';
+  if (content.endsWith('\n')) return content + line + '\n';
+  return content + '\n' + line + '\n';
 }
 
 function backlogLabel(backlog: string) {
@@ -529,12 +587,39 @@ function fixStep6(fc: FixCtx<6>): FixCtx<7> {
   return { ...fc, stage: 7 };
 }
 
-// 7. remove stray temp files
+// 7. remove stray temp files (now covers .nanojira/claims/ too, § 12 "Claims")
 function fixStep7(fc: FixCtx<7>): FixCtx<8> {
   const ctx = fc.reload();
-  for (const file of strayTmpFiles(ctx.scan.dirs)) {
+  for (const file of strayTmpFiles(ctx.scan.dirs.concat(claimsScanDirs(ctx.backlog)))) {
     fs.unlinkSync(file);
     fc.actions.push(`removed stray temp file ${path.relative(ctx.backlog, file)}`);
+  }
+  return { ...fc, stage: 8 };
+}
+
+// 7a. remove the claim directories of orphaned claims (archived or does not
+// exist — never merely `done`); never touches a live claim's entries; never
+// resolves claim:mismatch (§ 7, § 12a). Then appends the `.nanojira/claims/`
+// line to .gitignore if the directory exists and the line is missing.
+function fixStep7a(fc: FixCtx<8>): FixCtx<8> {
+  const ctx = fc.reload();
+  for (const { id, dir } of allClaimDirs(ctx.backlog)) {
+    const el = ctx.elements.find((e) => e.id === id);
+    if (el && !el.archived) continue; // live: never touched
+    removeClaimDirWholesale(ctx.backlog, id);
+    if (!fs.existsSync(dir)) fc.actions.push(`removed the orphaned claim directory for ${id}`);
+  }
+  if (claimsNeedGitignoreLine(ctx.backlog)) {
+    const p = path.join(ctx.backlog, '.gitignore');
+    let content: string;
+    try {
+      content = fs.readFileSync(p, 'utf8');
+    } catch {
+      fc.notes.push('.gitignore does not exist — not created (the claims/ line was not added)');
+      return { ...fc, stage: 8 };
+    }
+    atomicWrite(p, appendGitignoreLine(content, CLAIMS_GITIGNORE_LINE));
+    fc.actions.push(`.gitignore: appended '${CLAIMS_GITIGNORE_LINE}'`);
   }
   return { ...fc, stage: 8 };
 }
@@ -601,7 +686,8 @@ function doctorFix(flags: Flags, json: boolean) {
   const fc6 = fixStep5(fc5);
   const fc7 = fixStep6(fc6);
   const fc8 = fixStep7(fc7);
-  const fc9 = fixStep8(fc8);
+  const fc8a = fixStep7a(fc8);
+  const fc9 = fixStep8(fc8a);
   const { actions, notes, ctx, findings } = fixStep9(fc9);
   return fixReport(json, actions, notes, ctx, findings);
 }

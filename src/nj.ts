@@ -12,11 +12,13 @@
 // module.exports boundary this replaced.
 import { parseArgs } from './core/args.ts';
 import { cmdArchive } from './commands/cmd-archive.ts';
+import { cmdClaim } from './commands/cmd-claim.ts';
 import { cmdDoctor } from './commands/cmd-doctor.ts';
 import { cmdInit } from './commands/cmd-init.ts';
 import { cmdList } from './commands/cmd-list.ts';
 import { cmdNew } from './commands/cmd-new.ts';
 import { cmdNote } from './commands/cmd-note.ts';
+import { cmdRelease } from './commands/cmd-release.ts';
 import { cmdRm } from './commands/cmd-rm.ts';
 import { cmdSet } from './commands/cmd-set.ts';
 import { cmdShow } from './commands/cmd-show.ts';
@@ -47,6 +49,8 @@ function main(argv: string[]) {
     case 'rm': return cmdRm(flags);
     case 'archive': return cmdArchive(flags);
     case 'unarchive': return cmdUnarchive(flags);
+    case 'claim': return cmdClaim(flags);
+    case 'release': return cmdRelease(flags);
     case 'doctor': return cmdDoctor(flags);
     default:
       fail('unknown_command', `unknown command '${cmd}'`, 'run `nj help` for the command list');

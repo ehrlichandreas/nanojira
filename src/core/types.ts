@@ -166,4 +166,5 @@ export interface EntryJson {
   archived?: string;
   file: string;
   _problems: string[];
+  _claim: { by: string; since: string } | null;
 }

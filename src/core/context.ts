@@ -39,6 +39,22 @@ function context(flags: Flags, opts?: { lenient?: boolean; tolerateConfig?: bool
   return { backlog, cfg: config, configErrors: errors, elements, scan, loadedAt, legacy, idsDir };
 }
 
+// resolveTarget (below) bundles the --id/--file argument-syntax checks
+// (missing_value via flagString, missing_argument when neither is given,
+// invalid_target when both are given) together with the actual lookup
+// (not_found, duplicate_id). Commands whose own precedence rule puts
+// something else (an acting name's invalid_env/invalid_value, § 9/§ 10/
+// § 12a) between argument parsing and target resolution run this syntax
+// half early, on its own, then still call resolveTarget for the lookup --
+// which harmlessly re-derives the same flags (DECISIONS 111, D104 ambiguity
+// 77). Shared by `nj note`, `nj claim` and `nj release`.
+function requireTargetFlagSyntax(flags: Flags) {
+  const file = flagString(flags, 'file');
+  const id = flagString(flags, 'id');
+  if (file !== undefined && id !== undefined) fail('invalid_target', 'use either --id or --file, not both');
+  if (file === undefined && id === undefined) fail('missing_argument', '--id is required');
+}
+
 function resolveTarget(ctx: Context, flags: Flags, forWrite?: boolean): Element {
   const file = flagString(flags, 'file');
   const id = flagString(flags, 'id');
@@ -124,4 +140,4 @@ function requireActive(el: Element, verb: string) {
   }
 }
 
-export { context, resolveTarget, requireWritable, requireNoStubs, requireNoUnreadableDirs, requireActive };
+export { context, requireTargetFlagSyntax, resolveTarget, requireWritable, requireNoStubs, requireNoUnreadableDirs, requireActive };

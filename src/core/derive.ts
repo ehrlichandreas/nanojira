@@ -4,6 +4,7 @@
 
 import type { Element, Config, EntryJson } from './types.ts';
 
+import { readClaim } from './claims.ts';
 import { PRIORITY_WEIGHT, SEVERITY, BLOCKS_READY, BACKLOG_LEVEL } from './constants.ts';
 
 // -------------------------------------------------------------- derivations
@@ -63,7 +64,7 @@ function compareElements(a: Element, b: Element) {
  * grows; the `EntryJson` cast on return says what every caller can rely on
  * once the function has run to completion.
  */
-function entryJson(el: Element): EntryJson {
+function entryJson(el: Element, backlog: string): EntryJson {
   const e: Partial<EntryJson> = { id: el.id, type: el.type };
   if (el.parent !== null) e.parent = el.parent;
   e.title = el.title;
@@ -77,6 +78,7 @@ function entryJson(el: Element): EntryJson {
   if (el.archivedAt !== null) e.archived = el.archivedAt;
   e.file = el.file;
   e._problems = elementProblems(el);
+  e._claim = readClaim(backlog, el.id);
   return e as EntryJson;
 }
 

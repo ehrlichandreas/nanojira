@@ -29,7 +29,7 @@ function cmdInit(flags: Flags) {
     // The full block, so the defaults are visible where they are changed
     // (§ 5, DECISIONS 92 Q1) — at the v3 place, nothing at the top level.
     fs.writeFileSync(path.join(backlog, '.nanojira', 'config.json'), JSON.stringify(DEFAULT_CONFIG, null, 2) + '\n', 'utf8');
-    fs.writeFileSync(path.join(backlog, '.gitignore'), '.nanojira/index.json\n.nj-tmp-*\n', 'utf8');
+    fs.writeFileSync(path.join(backlog, '.gitignore'), '.nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n', 'utf8');
     fs.writeFileSync(path.join(backlog, 'README.md'), V3_README, 'utf8');
   } catch (e: any) {
     fail('io_error', `cannot create the backlog at ${backlog}: ${oneLine(e)}`);

@@ -348,9 +348,9 @@ neither its presence nor its absence, so the test does not depend on the answer.
 
 ## 20. The exact bytes of the generated `.gitignore`
 
-**Unpinned.** § 4 pins the two *patterns* (`.nanojira-index.json` and
-`.nj-tmp-*`) but not their order, nor the trailing newline, nor whether a header
-comment is written.
+**Unpinned.** § 4/§ 12a pin the three *patterns* (`.nanojira/index.json`,
+`.nj-tmp-*` and, since v3.1 § C, `.nanojira/claims/`) but not their order, nor
+the trailing newline, nor whether a header comment is written.
 
 **How the oracle handles it:** the patterns are compared as the set of
 non-empty lines, which is the part § 4 actually fixes.
@@ -1380,6 +1380,27 @@ or breadth-first `[EPIC-001, TSK-001, TSK-002, SUB-001]`. *Asserted:*
 parent before child, TSK-001 before TSK-002. The per-file `before-compare`
 leg (78) edits TSK-002, which comes after EPIC-001 and TSK-001 in either
 order. **Not tested:** the position of SUB-001.
+
+**84. A third kind of file in a claims directory.** § 12 "Claims" defines an
+entry as "a file named by its generation, a positive decimal integer", and
+separately names the `.nj-tmp-<pid>-<rand>` temp pattern (§ 12, "Atomic
+writes"). Neither passage says what a file matching *neither* pattern — a
+stray hand-created file, say — means for reading the claim state: ignored
+like a temp file, or something `doctor` should flag with its own code (there
+is none in § 7)? *Asserted (`ac-27-claim.js` C10):* only that such a file
+must not crash a read of the claim state. **Not tested:** whether `doctor`
+should report it, and under what code.
+
+**85. The straggler-race outcome during `nj unarchive`'s claim-dir removal is
+not forceable.** § 11a's claims paragraph (DECISIONS 115, P-6) describes a
+claim's own in-flight `link()` landing in the window between the removal's
+`readdir` and its `unlink`s, leaving the directory non-empty
+(`claim:orphaned` or `claim:mismatch`, per which write raced which). Unlike
+`NJ_FAULT=before-compare`'s go-marker, there is no hook that stalls
+`unarchive`'s claim-dir removal at that exact point from outside the
+process. `ac-27-claim.js` C8 tests the forceable common case (the removal
+runs uncontested); the race itself is **not covered**, the same honest gap
+`stress/concurrency.js` records for AC-7's 100-retry abort.
 
 ## Not an ambiguity, recorded because it looks like one
 

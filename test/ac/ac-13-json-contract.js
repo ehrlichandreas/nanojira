@@ -26,7 +26,7 @@ function J(x) { return JSON.stringify(x === undefined ? null : x); }
 const NOW = H.FIXED_NOW;
 
 /* The closed vocabulary of § 7. The v2 table had 29 rows and 30 distinct codes
- * (spec v3 adds four more, listed last below):
+ * (spec v3 adds four more, spec v3.1/C three more, listed last below):
  * one row, `missing:created` / `missing:updated`, names two. Counting rows
  * gives 29, and counting only separator-bearing names gives 28 — both are
  * traps (AMBIGUITIES.md #22). Adding a code is additive; renaming or
@@ -67,6 +67,10 @@ const TABLE = [
   'backlog:unreadable_dir',
   'backlog:legacy_layout',
   'backlog:status_stale',
+  /* spec v3.1 § C, promoted b7ffad6: claims */
+  'claim:mismatch',
+  'claim:orphaned',
+  'backlog:claims_unignored',
 ];
 
 /* Codes whose Doctor column is "—": workflow state that never becomes a doctor

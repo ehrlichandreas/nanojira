@@ -78,7 +78,7 @@ test ever fails with an unrelated `ENOENT` about a file that was never created.
 | `lib/harness.js` | The shared contract: process runner, fixture builders, assertions |
 | `golden/` | Byte-exact expected file content, one fixture per write path |
 | `golden/MANIFEST.sha256` | Frozen hashes — see "Freezing" below |
-| `ac/ac-NN-*.js` | One executable test per acceptance criterion, AC-1 … AC-26 (AC-21–26 are derived from spec v3/v3.1, written ahead of each step) |
+| `ac/ac-NN-*.js` | One executable test per acceptance criterion, AC-1 … AC-27 (AC-21–27 are derived from spec v3/v3.1, written ahead of each step) |
 | `proposed/` | Empty for now: proposal-v3.1 suites written ahead of spec acceptance live here until promoted into `ac/`; excluded from `run-all.js` discovery. Holds the still-unpromoted § C (`nj claim`) suite once it exists |
 | `fault/` | `NJ_FAULT` and `NJ_NOW` verification hooks (§ 12) |
 | `stress/` | The 20-wide concurrency run that AC-7 needs |

@@ -557,7 +557,7 @@ function statusSection(bl, status) {
     'invalid_backlog_env', 'unknown_field', 'invalid_backlog_flag', 'invalid_backlog_njrc', 'invalid_njrc', 'legacy_layout',
     'unknown_command', 'missing_argument', 'missing_value', 'invalid_value', 'invalid_target', 'not_found', 'duplicate_id',
     'exists', 'changed_in_parallel', 'id_allocation_failed', 'internal_error']);
-  const REFUSED = ['unreadable', 'archived', 'children_open', 'has_children', 'not_done', 'parent_archived', 'misplaced'];
+  const REFUSED = ['unreadable', 'archived', 'children_open', 'has_children', 'not_done', 'parent_archived', 'misplaced', 'not_archived', 'claimed'];
   const FAULT = ['before-compare', 'after-tmp-write', 'before-rename'];
   const inSet = c => CLOSED.has(c) || (/^refused:/.test(c) && REFUSED.includes(c.slice(8))) || (/^fault:/.test(c) && FAULT.includes(c.slice(6)));
   /* a few v3 paths on top of those above */

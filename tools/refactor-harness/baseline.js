@@ -579,6 +579,11 @@ function readRecords(p) {
 const CONCURRENT_SUITES = new Set([
   'oracle:ac/ac-07-concurrency.js',
   'oracle:edge/tombstone-partial-loss.js',
+  // C5 (§ 12a): real spawned parallel processes racing for a claim/steal/
+  // release — which one wins, and so the exact bytes of the claim sequence
+  // and the mirror write, is nondeterministic by design, the same reason
+  // AC-7 is here.
+  'oracle:ac/ac-27-claim.js',
 ]);
 
 function isConcurrentProbe(rec) {
@@ -598,27 +603,42 @@ function markNondeterministic(recs) {
   return flags;
 }
 
+// Returns the shown diffs (capped at `limit`, for the per-call listing) PLUS
+// the true total and a tally by command (argv[0]) — the loop itself never
+// stops early, so a run with far more differing calls than `limit` is never
+// silently undercounted at the one place (`shown.length`) callers used to
+// read as "how many" (DECISIONS 121: the cap hid 2,934 real diffs behind a
+// report that only ever said 40).
 function diff(oldRecs, newRecs, limit) {
-  const out = [];
+  const shown = [];
+  const byCommand = new Map();
+  let total = 0;
   const skipA = markNondeterministic(oldRecs);
   const skipB = markNondeterministic(newRecs);
   const n = Math.max(oldRecs.length, newRecs.length);
-  for (let i = 0; i < n && out.length < limit; i++) {
+  for (let i = 0; i < n; i++) {
     const a = oldRecs[i], b = newRecs[i];
-    if (!a) { out.push({ i, kind: 'extra', label: b.label, argv: b.argv }); continue; }
-    if (!b) { out.push({ i, kind: 'missing', label: a.label, argv: a.argv }); continue; }
-    if (skipA[i] || skipB[i]) continue;
-    if (key(a) === key(b)) continue;
-    const fields = [];
-    for (const f of ['label', 'argv', 'cwd', 'env', 'exit', 'stdout', 'stderr']) {
-      if (JSON.stringify(a[f]) !== JSON.stringify(b[f])) fields.push(f);
+    let d;
+    if (!a) { d = { i, kind: 'extra', label: b.label, argv: b.argv }; }
+    else if (!b) { d = { i, kind: 'missing', label: a.label, argv: a.argv }; }
+    else {
+      if (skipA[i] || skipB[i]) continue;
+      if (key(a) === key(b)) continue;
+      const fields = [];
+      for (const f of ['label', 'argv', 'cwd', 'env', 'exit', 'stdout', 'stderr']) {
+        if (JSON.stringify(a[f]) !== JSON.stringify(b[f])) fields.push(f);
+      }
+      const ka = a.after ? JSON.stringify(stripSha(a.after)) : null;
+      const kb = b.after ? JSON.stringify(stripSha(b.after)) : null;
+      if (ka !== kb) fields.push('after');
+      d = { i, kind: 'changed', label: a.label, argv: a.argv, fields, a, b };
     }
-    const ka = a.after ? JSON.stringify(stripSha(a.after)) : null;
-    const kb = b.after ? JSON.stringify(stripSha(b.after)) : null;
-    if (ka !== kb) fields.push('after');
-    out.push({ i, kind: 'changed', label: a.label, argv: a.argv, fields, a, b });
+    total++;
+    const cmd = (d.argv && d.argv[0]) || '(bare)';
+    byCommand.set(cmd, (byCommand.get(cmd) || 0) + 1);
+    if (shown.length < limit) shown.push(d);
   }
-  return out;
+  return { shown, total, byCommand };
 }
 
 function clip(s) {
@@ -805,7 +825,7 @@ const tmp = path.join(os.tmpdir(), `nj-s0-verify-${process.pid}.ndjson`);
 const total = collect(tmp);
 const oldRecs = readRecords(CORPUS);
 const newRecs = readRecords(tmp);
-const diffs = diff(oldRecs, newRecs, 40);
+const { shown: diffs, total: diffTotal, byCommand: diffByCommand } = diff(oldRecs, newRecs, 40);
 
 reportParts(total);
 const excluded = markNondeterministic(oldRecs).filter(Boolean).length;
@@ -825,12 +845,17 @@ if (!process.env.HARNESS_KEEP) {
 // (DECISIONS 88) is gated on exit 1 plus reading the list, and a failing
 // suite in that same run would otherwise pass unseen. A gap still stops the
 // diff from being shown, as before: diffs from an incomplete run are noise.
-const unchanged = diffs.length === 0 && oldRecs.length === newRecs.length;
+const unchanged = diffTotal === 0 && oldRecs.length === newRecs.length;
 if (redVerdicts.length) reportRed();
 if (cannotRun.length === 0) {
   if (unchanged) process.stdout.write('\nBEHAVIOUR UNCHANGED — the recorded surface is identical.\n');
   else {
-    process.stdout.write(`\nBEHAVIOUR CHANGED — ${diffs.length} differing call(s)${diffs.length === 40 ? ' (truncated)' : ''}:\n`);
+    // Always the true total and a per-command tally, even when the per-call
+    // listing below is capped — a run with far more diffs than the cap must
+    // never look like "only 40" (DECISIONS 121).
+    const tally = [...diffByCommand.entries()].sort((a, b) => b[1] - a[1]).map(([cmd, n]) => `${cmd} ${n}`).join(', ');
+    process.stdout.write(`\nBEHAVIOUR CHANGED — ${diffTotal} differing call(s): ${tally}\n`);
+    if (diffs.length < diffTotal) process.stdout.write(`(truncated: showing ${diffs.length} of ${diffTotal})\n`);
     for (const d of diffs) showDiff(d);
     process.stdout.write('\nA differing call is a stop, not something to adjust the baseline for.\n');
   }

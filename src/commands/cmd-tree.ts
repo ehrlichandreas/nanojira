@@ -46,7 +46,7 @@ function cmdTree(flags: Flags) {
   }
 
   if (flags.has('json')) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope), entries: ordered.map((o) => entryJson(o.el)) }, null, 2));
+    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope), entries: ordered.map((o) => entryJson(o.el, ctx.backlog)) }, null, 2));
     return 0;
   }
   if (ordered.length === 0) { out('(empty backlog)'); return 0; }
