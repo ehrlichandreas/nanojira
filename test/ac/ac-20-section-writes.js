@@ -13,14 +13,14 @@
  * § 9's "Section writes" bullet pins the byte-level rules (heading = first
  * configured name for the role, replace-not-append, LF/no-BOM/trailing-
  * newline-stripped normalisation, insertion order, the EOF-merge rule for a
- * section that ends the file). `DECISIONS.md` #68-74, logged while this path
- * was implemented, resolve the parts § 9's prose leaves to a single reading:
- * first matching heading wins (#68), content + one trailing blank line is
- * one rule for both mid-body and EOF (#69), no-H1 insertion lands after the
- * body's existing leading blank line (#70), section flags are validated
- * before the first read/tombstone allocation (#71), an unreadable
- * `--<role>-file` is `not_found` (#72), `changed` lists a supplied role for
- * `new` always and for `set` only when the bytes differed (#73).
+ * section that ends the file). Every byte-level reading below is a quotation
+ * from that bullet (§ 9 lines 468–500): first matching heading wins (l. 491),
+ * content + one blank line as one rule for mid-body and EOF (l. 481–484,
+ * 493–497), no-H1 insertion after any leading blank lines (l. 486–487), an
+ * unreadable `--<role>-file` is `not_found` (l. 492), a rejected invocation
+ * writes nothing — tombstones included (l. 477–478, § 15.20 l. 991–992), and
+ * `changed` lists exactly what changed (§ 15.13 l. 965, § 9 l. 489).
+ * `DECISIONS.md` is NOT a source for any expectation in this file.
  */
 const H = require('../lib/harness.js');
 const T = H.T;
@@ -109,9 +109,9 @@ function mkTask(label, body) {
 }
 
 {
-  /* DECISIONS.md #70: with no H1 at all, description lands at the actual
-   * start of the body — after the file's existing leading blank line, not
-   * glued onto the closing frontmatter '---'. */
+  /* § 9 l. 486–487: "`description` after the H1 block (or at the start of the
+   * body when there is no H1, after any leading blank lines)" — not glued onto
+   * the closing frontmatter '---'. */
   const d = mkTask('ac20-ins-noh1', '## Acceptance Criteria\n- [ ] x\n');
   const r = H.runNj(['set', '--id=TSK-001', '--description=Filled in.'],
     { cwd: d, env: { NJ_NOW: LATER } });
@@ -147,8 +147,8 @@ function mkTask(label, body) {
 }
 
 {
-  /* DECISIONS.md #68: two headings matching the same role — the first is
-   * replaced, the second is left byte-for-byte alone. */
+  /* § 9 l. 491: "If several headings match one role, the **first** match
+   * wins." The second is left byte-for-byte alone (l. 488–489). */
   const d = mkTask('ac20-dup-heading',
     '# Backend API Endpoints\n\n## Description\nSomething.\n\n' +
     '## Acceptance Criteria\n- [ ] first heading content\n\n' +
@@ -159,8 +159,11 @@ function mkTask(label, body) {
   T.goldenEq('first heading replaced, second untouched == golden',
     taskPath(d), 'set-section-duplicate-heading.md');
 
-  /* the untouched second heading still matches the role and still counts for
-   * completeness (DECISIONS.md #68, "keeps counting" — § 7's read-side rule). */
+  /* § 7 l. 280–283: a section is present when its heading has at least one
+   * non-empty line below it — the FIRST heading, just replaced, now has one.
+   * This fixture says nothing about whether the untouched second heading
+   * would count on its own (first empty, second filled): that case is pinned
+   * by no passage and by no fixture — see AMBIGUITIES.md / TSK-016. */
   const list = H.runJson(['list'], { cwd: d });
   const e = (list.json && list.json.entries || []).find(x => x.id === 'TSK-001');
   T.check('the element is complete (both headings still read as acceptance)',
@@ -262,7 +265,8 @@ function mkTask(label, body) {
 }
 
 {
-  /* DECISIONS.md #72: an unreadable --<role>-file is not_found, matching --file. */
+  /* § 9 l. 492: "A `--<role>-file` path that cannot be read is `not_found`,
+   * matching `--file`." */
   const d = mkTask('ac20-file-missing',
     '# Endpoint\n\n## Description\n\n## Acceptance Criteria\n- [ ] x\n');
   const before = H.sha256(fs.readFileSync(taskPath(d)));
@@ -294,8 +298,10 @@ function mkTask(label, body) {
 }
 
 {
-  /* DECISIONS.md #71: section flags are validated before nj new allocates an
-   * ID, so a rejected invocation burns no tombstone. */
+  /* § 9 l. 477–478 and § 15.20 l. 991–992: a rejected invocation is "rejected
+   * … with nothing written" — read here as including the tombstone in .ids/,
+   * which is a written file. The spec states no validate-before-allocate
+   * order in so many words; the corpus records the .ids/ listing per call. */
   const d = H.freshDir('ac20-mutex-new');
   T.exit('nj init', H.runNj(['init'], { cwd: d }), 0);
   T.exit('new epic', H.runNj(['new', '--type=epic', '--title=Auth'], { cwd: d }), 0);
@@ -311,7 +317,11 @@ function mkTask(label, body) {
   T.eq('it claims TSK-001 — the rejected attempt burned no tombstone', ok.json && ok.json.id, 'TSK-001');
 }
 
-/* ---- 6. `changed`: DECISIONS.md #73 — set reports it only when bytes differ - */
+/* ---- 6. `changed`: § 15.13 l. 965 "lists exactly the fields that changed",
+ * § 9 l. 489 "changed names the role" — set reports a role only when bytes
+ * differ. Whether a no-op set also leaves `updated` untouched is NOT decided
+ * by the spec (AMBIGUITIES.md 13); that half is held byte-exact by the S0
+ * corpus (scratch:r6.js) and is deliberately not asserted here. ------------ */
 
 {
   const d = mkTask('ac20-changed',
@@ -321,7 +331,6 @@ function mkTask(label, body) {
     { cwd: d, env: { NJ_NOW: LATER } });
   T.exit('set --description=<identical text>', r1, 0);
   T.eq('changed is empty for a no-op section write', r1.json && r1.json.changed, []);
-  T.contains('updated was not bumped by the no-op', fs.readFileSync(taskPath(d), 'utf8'), 'updated: ' + C);
 
   const r2 = H.runJson(['set', '--id=TSK-001', '--description=Different text.'],
     { cwd: d, env: { NJ_NOW: LATER } });

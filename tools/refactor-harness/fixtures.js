@@ -569,9 +569,26 @@ S('attach-second-derive', (c) => {
   // the freshly reloaded element, and that IS observable: it drives the ⚠ lines
   // of the prose feedback and `_problems` in the JSON result.
   //
-  // A pass-based rewrite that computes a pass without writing it back, or that
-  // attaches before the marks have run, lands exactly here. Before this
-  // scenario the path was covered only indirectly.
+  // Two failure forms land here, both measured by mutant in a97de5f:
+  //   - a pass computes but does not write back into the element
+  //     (markOpenChildren): oracle 53/56 red, replay red -- both nets catch it,
+  //     this scenario only adds depth;
+  //   - the second deriveGraph call works on copies instead of the real
+  //     objects: oracle 56/56 GREEN, replay red over 40+ calls including this
+  //     scenario -- the form only the corpus sees.
+  // Before this scenario the path was covered only indirectly.
+  //
+  // A third form, "attaches before the marks have run", is NOT a failure today,
+  // and this scenario demonstrably does not catch it. Mutant on nj 5f25efc4
+  // with childMap + attachGraph moved ahead of all mark passes: this scenario
+  // 0/94 calls differ, full fixture corpus 0/1878, oracle 62/62 (2418 checks).
+  // Control mutant (the copies form above) on the same rig: 88/94 differ.
+  // It is excluded by a CONDITION, not a fact: the DECISIONS 77 rule (no pass
+  // reads another pass's `problems`) plus two more -- the mark passes write no
+  // element field other than `problems`, and none reads `el.byId`/`el.children`
+  // (childMap reads only `e.parent`, which no pass writes). Break any of these
+  // and the attach position becomes load-bearing, and this scenario will not
+  // tell you.
   const d = c.dir('attach');
   c.backlog(d, [
     { id: 'EPIC-001', type: 'epic', title: 'Parent', status: 'todo', created: TS, updated: TS },
@@ -696,6 +713,190 @@ S('archived-child-not-done', (c) => {
   // Ohne die Ausnahme wuerde dieser Aufruf verweigert statt durchzugehen.
   c.both('archkid-set-done-again', ['set', '--id=EPIC-001', '--status=done'], { cwd: d });
   c.both('archkid-set-doing', ['set', '--id=EPIC-001', '--status=doing'], { cwd: d });
+});
+
+S('id-derived', (c) => {
+  // Ableiter 1 der S3-Karte: `id` fehlt, also gewinnt der Dateiname. Bisher
+  // trugen VIER aufgezeichnete Aufrufe diesen Code -- zu duenn fuer eine
+  // Stelle, an der S3 schneidet.
+  //
+  // Zwei Dinge haengen hier, und beide brechen STILL, nicht mit einem Absturz:
+  //
+  // 1. Die Kette `id -> type`. Der Typ kommt aus dem PRAEFIX der id, und die
+  //    id kann aus dem Dateinamen stammen. Ein Schnitt, der deriveType vor
+  //    deriveId zieht, liest ein `undefined`, findet kein Praefix und faellt
+  //    weiter -- ohne Fehler, mit anderem Ergebnis. `EPIC-900.md` unter
+  //    `tasks/` macht den Unterschied sichtbar: ueber das Praefix wird es ein
+  //    `epic` (und traegt deshalb type:derived und type:folder), ohne Praefix
+  //    bliebe der Typ `null` und type:derived verschwaende.
+  // 2. Der `p.parsed`-Waechter. Ohne lesbares Frontmatter wird die id genauso
+  //    aus dem Dateinamen abgeleitet, aber id:derived wird NICHT gemeldet.
+  //    Wer die Ableitung und ihre Meldung trennt, verliert genau diese
+  //    Unterscheidung -- und beide Faelle liefern dieselbe id.
+  const d = c.dir('id-derived');
+  c.backlog(d, [
+    { id: 'EPIC-001', type: 'epic', title: 'Parent', status: 'todo', created: TS, updated: TS },
+    // Reiner Fall: Frontmatter lesbar, `id` fehlt, `type` steht da.
+    {
+      id: 'TSK-900', folder: 'tasks', file: 'TSK-900',
+      raw: ['---', 'type: task', 'parent: EPIC-001', 'title: Ohne id-Feld', 'status: todo',
+            'created: ' + TS, 'updated: ' + TS, '---', '', '# Ohne id-Feld', '',
+            '## Description', 'd', '', '## Acceptance Criteria', '- [ ] a', ''].join('\n'),
+    },
+    // Der Unterscheider fuer die Reihenfolge: weder `id` noch `type`. Die id
+    // kommt aus dem Dateinamen, der Typ aus ihrem Praefix -- und der Praefix
+    // widerspricht dem Ordner, was den Unterschied beobachtbar macht.
+    {
+      id: 'EPIC-900', folder: 'tasks', file: 'EPIC-900',
+      raw: ['---', 'title: Praefix gegen Ordner', 'status: todo',
+            'created: ' + TS, 'updated: ' + TS, '---', '', '# Praefix gegen Ordner', '',
+            '## Description', 'd', ''].join('\n'),
+    },
+    // Ableitung ohne Meldung: kein Frontmatter, also greift der p.parsed-Waechter.
+    {
+      id: 'TSK-901', folder: 'tasks', file: 'TSK-901',
+      raw: ['# Kein Frontmatter', '', 'Nur Prosa, kein Trennstrich.', ''].join('\n'),
+    },
+  ]);
+  c.both('idder-doctor', ['doctor'], { cwd: d });
+  c.both('idder-list-all', ['list', '--all'], { cwd: d });
+  c.both('idder-tree-all', ['tree', '--all'], { cwd: d });
+  // Einzeln gezeigt, damit der Vergleich die Codes pro Element trennt und
+  // nicht nur die Summenzeile von doctor.
+  c.both('idder-show-plain', ['show', '--id=TSK-900'], { cwd: d });
+  c.both('idder-show-prefix-vs-folder', ['show', '--id=EPIC-900'], { cwd: d });
+  c.both('idder-show-unparsed', ['show', '--id=TSK-901'], { cwd: d });
+});
+
+S('type-folder', (c) => {
+  // Ableiter 2 der S3-Karte. Ebenfalls vier aufgezeichnete Aufrufe bisher.
+  //
+  // `type:folder` entsteht auf ZWEI verschiedenen Wegen, die der Code in einer
+  // Zeile zusammenzieht: der Typ ist gar nicht bestimmbar (`null`), oder er ist
+  // bestimmt und passt nicht zum Ordner. Beide werden hier einzeln gezeigt.
+  //
+  // Dazu ein Befund beim Lesen, der in S3 gefaehrlich wird: der Ordner-Zweig
+  // der Typableitung ist UNERREICHBAR. `TYPE_DIR` ist nach Typ verschluesselt
+  // (`epic -> epics`), abgefragt wird es aber mit dem Ordner (`TYPE_DIR['tasks']`)
+  // und ist deshalb immer `undefined`; der Zweig darunter sucht im Archiv nach
+  // einem Typ, dessen Ordner `archive` heisst, und findet keinen. `type:derived`
+  // kommt daher ausschliesslich aus dem Praefix, nie aus dem Ordner. Diese
+  // Fixture haelt das fest: faende ein Aufraeumen in S3 den vermeintlich
+  // gemeinten Weg, wuerden `lose-notiz` und `lose-archiv-notiz` einen Typ
+  // bekommen, statt `null` zu bleiben -- und das Orakel saehe es nicht.
+  const d = c.dir('type-folder');
+  c.backlog(d, [
+    { id: 'EPIC-001', type: 'epic', title: 'Parent', status: 'todo', created: TS, updated: TS },
+    // (a) Typ gueltig, aber im falschen Ordner: der zweite Weg.
+    {
+      id: 'TSK-800', folder: 'tasks', file: 'TSK-800',
+      raw: ['---', 'id: TSK-800', 'type: epic', 'title: Epic im tasks-Ordner', 'status: todo',
+            'created: ' + TS, 'updated: ' + TS, '---', '', '# Epic im tasks-Ordner', '',
+            '## Description', 'd', ''].join('\n'),
+    },
+    // (b) Typ nicht bestimmbar: kein type-Feld, kein Praefix im Namen.
+    {
+      id: 'lose-notiz', folder: 'tasks', file: 'lose-notiz',
+      raw: ['---', 'id: lose-notiz', 'title: Weder Feld noch Praefix', 'status: todo',
+            'created: ' + TS, 'updated: ' + TS, '---', '', '# Weder Feld noch Praefix', '',
+            '## Description', 'd', ''].join('\n'),
+    },
+    // (c) Dasselbe im Archiv -- der Zweig, dessen Suche nie faendig wird.
+    {
+      id: 'lose-archiv-notiz', folder: 'archive', file: 'lose-archiv-notiz',
+      raw: ['---', 'id: lose-archiv-notiz', 'title: Im Archiv ohne Typ', 'status: done',
+            'created: ' + TS, 'updated: ' + TS, 'archived: ' + TS, '---', '',
+            '# Im Archiv ohne Typ', '', '## Description', 'd', ''].join('\n'),
+    },
+    // (d) Gegenprobe: archiviert und im falschen Ordner, aber MIT Typ. Die
+    //     Ordnerpruefung ist fuer Archiviertes ausgenommen, also kein Code.
+    {
+      id: 'TSK-801', folder: 'archive', file: 'TSK-801',
+      raw: ['---', 'id: TSK-801', 'type: task', 'parent: EPIC-001', 'title: Archiviert mit Typ',
+            'status: done', 'created: ' + TS, 'updated: ' + TS, 'archived: ' + TS, '---', '',
+            '# Archiviert mit Typ', '', '## Description', 'd', '',
+            '## Acceptance Criteria', '- [ ] a', ''].join('\n'),
+    },
+  ]);
+  c.both('typefold-doctor', ['doctor'], { cwd: d });
+  c.both('typefold-list-all', ['list', '--all'], { cwd: d });
+  c.both('typefold-tree-all', ['tree', '--all'], { cwd: d });
+  c.both('typefold-show-wrong-folder', ['show', '--id=TSK-800'], { cwd: d });
+  c.both('typefold-show-null-type', ['show', '--id=lose-notiz'], { cwd: d });
+  c.both('typefold-show-null-type-archived', ['show', '--id=lose-archiv-notiz'], { cwd: d });
+  c.both('typefold-show-exempt', ['show', '--id=TSK-801'], { cwd: d });
+});
+
+S('double-heading', (c) => {
+  // TSK-016: zwei Ueberschriften derselben Rolle, die ERSTE leer, die ZWEITE
+  // mit Inhalt. Bisher die einzige gefundene Luecke, die BEIDE Netze zugleich
+  // hat -- das Orakel sieht sie nicht, weil Paragraf 7 den Fall nicht
+  // entscheidet, und der Replay sah sie nicht, weil kein aufgezeichneter
+  // Aufruf sie ausloeste.
+  //
+  // Gemessen, nicht abgeleitet: die beiden Seiten von nj sind sich UNEINIG,
+  // welche Ueberschrift zaehlt.
+  //   Vollstaendigkeitspruefung: laeuft ueber ALLE Ueberschriften der Rolle
+  //     und ist zufrieden, sobald IRGENDEINE Inhalt traegt -- das Element
+  //     gilt als vollstaendig, obwohl die erste leer ist.
+  //   Schreibweg: nimmt die ERSTE und laesst die zweite stehen -- nach einem
+  //     `set --description` hat die Datei zwei gefuellte Abschnitte.
+  // Diese Fixture entscheidet nichts davon; sie haelt fest, was heute
+  // geschieht, damit ein Schnitt es nicht unbemerkt umdreht. Die Lesart
+  // gehoert nach AMBIGUITIES.md, nicht hierher.
+  const d = c.dir('double-heading');
+  c.backlog(d, [
+    { id: 'EPIC-001', type: 'epic', title: 'Parent', status: 'todo', created: TS, updated: TS },
+    // Erste leer, zweite gefuellt -- in beiden Rollen.
+    {
+      id: 'TSK-001', folder: 'tasks', file: 'TSK-001',
+      raw: ['---', 'id: TSK-001', 'type: task', 'parent: EPIC-001', 'title: Erste leer zweite voll',
+            'status: todo', 'created: ' + TS, 'updated: ' + TS, '---', '',
+            '# Erste leer zweite voll', '',
+            '## Description', '',
+            '## Description', 'Der Inhalt steht in der zweiten.', '',
+            '## Acceptance Criteria', '',
+            '## Acceptance Criteria', '- [ ] auch hier die zweite', ''].join('\n'),
+    },
+    // Gegenprobe: dieselbe Verdopplung, aber die erste traegt den Inhalt.
+    // Beide Elemente gelten als vollstaendig -- der Unterschied liegt allein
+    // darin, WO der Schreibweg landet.
+    {
+      id: 'TSK-002', folder: 'tasks', file: 'TSK-002',
+      raw: ['---', 'id: TSK-002', 'type: task', 'parent: EPIC-001', 'title: Erste voll zweite leer',
+            'status: todo', 'created: ' + TS, 'updated: ' + TS, '---', '',
+            '# Erste voll zweite leer', '',
+            '## Description', 'Der Inhalt steht in der ersten.', '',
+            '## Description', '',
+            '## Acceptance Criteria', '- [ ] erste traegt', '',
+            '## Acceptance Criteria', ''].join('\n'),
+    },
+  ]);
+  // Erst der Lesebefund -- und der Zeuge dafuer ist NICHT `doctor`.
+  // `incomplete:description` hat in der Severity-Tabelle den Wert `null`, faellt
+  // also aus dem doctor-Bericht heraus; sichtbar wird es allein als Warnzeile in
+  // der Rueckmeldung NACH einem Schreibvorgang. Ein `set --status` ruehrt keinen
+  // Abschnitt an und zwingt die Vollstaendigkeitspruefung trotzdem, sich zu
+  // aeussern: bleibt die Zeile aus, gilt "erste leer, zweite voll" als
+  // vollstaendig. Genau das ist die offene Lesart aus TSK-016.
+  c.both('dblhead-doctor', ['doctor'], { cwd: d });
+  c.both('dblhead-show-empty-first', ['show', '--id=TSK-001'], { cwd: d });
+  c.both('dblhead-show-full-first', ['show', '--id=TSK-002'], { cwd: d });
+  c.both('dblhead-status-empty-first', ['set', '--id=TSK-001', '--status=doing'], { cwd: d });
+  // Dann der Schreibbefund: in WELCHE der beiden Ueberschriften wird
+  // geschrieben? Die Probe nach der Mutation friert die Datei mit ein.
+  c.both('dblhead-set-desc-empty-first', ['set', '--id=TSK-001', '--description=Neu geschrieben'], { cwd: d });
+  c.both('dblhead-set-acc-empty-first', ['set', '--id=TSK-001', '--acceptance=- [ ] neu geschrieben'], { cwd: d });
+  c.both('dblhead-show-after-write', ['show', '--id=TSK-001'], { cwd: d });
+  // Und das Leeren: raeumt es die erste Ueberschrift, waehrend die zweite
+  // das Element weiter als vollstaendig ausweist?
+  c.both('dblhead-clear-desc-full-first', ['set', '--id=TSK-002', '--description='], { cwd: d });
+  c.both('dblhead-show-after-clear', ['show', '--id=TSK-002'], { cwd: d });
+  // Gegenprobe zum Zeugen oben: jetzt sind BEIDE Ueberschriften leer, also muss
+  // die Warnzeile kommen. Ohne diesen Aufruf hielte die Fixture nur fest, dass
+  // nichts gemeldet wird -- und das tut sie auch dann, wenn die Pruefung
+  // versehentlich gar nichts mehr meldet.
+  c.both('dblhead-status-after-clear', ['set', '--id=TSK-002', '--status=doing'], { cwd: d });
 });
 
 module.exports = { scenarios, Ctx };

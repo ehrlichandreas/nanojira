@@ -23,9 +23,11 @@ spec and the implementation agree with the reading taken here (§ 6, § 10,
 
 ---
 
-## 1. Which optional fields does `nj new` write?
+## 1. Which optional fields does `nj new` write? — RULED
 
-**Unpinned.** § 7 says "Empty optional fields are omitted". § 6 lists `priority`
+**Ruled — see the table above (§ 6, "defaults are never materialised").**
+
+**Was unpinned.** § 7 says "Empty optional fields are omitted". § 6 lists `priority`
 with default `normal` and says "Missing optional fields are not worth a warning
 — that is the normal case". Whether `nj new` writes `priority: normal`
 explicitly, or omits it and lets the default apply on read, is not stated.
@@ -40,13 +42,16 @@ supplied them (or when a write explicitly set them). `nj new --type=epic
 optional fields are the normal case"; the opposite reading follows the letter of
 § 7's "empty" and would write `priority: normal` always.
 
-**Affects:** `golden/new-*.md`, `golden/set-*.md`, `ac-02`, `ac-13`, and the
+**Affects:** `golden/new-*.md`, `golden/set-*.md`, `ac-02` (the file side; the
+JSON side always materialises `priority` — see item 28), and the
 AC-20 goldens (`golden/new-task-sections.md`, `golden/set-section-*.md`) —
 none of them write `priority` either.
 
-## 2. Exact scaffold bytes
+## 2. Exact scaffold bytes — RULED
 
-**Unpinned.** § 9 fixes the *elements* of the scaffold (`# <title>`, then the
+**Ruled by evidence — see the table above (the goldens are the definition).**
+
+**Was unpinned.** § 9 fixes the *elements* of the scaffold (`# <title>`, then the
 configured section headings as empty headings) but not the whitespace: how many
 blank lines between the H1 and the first section, and whether the file ends with
 a newline.
@@ -71,9 +76,11 @@ with exactly one `\n`:
 — the section-write byte rules layered on top (blank-line/insertion/EOF
 shape) are pinned separately by `DECISIONS.md` 68–74, not by this item.
 
-## 3. `nj note` placement details
+## 3. `nj note` placement details — RULED
 
-**Unpinned.** § 10 says `## Notes` "is created at the end of the body if absent"
+**Ruled by evidence — see the table above (§ 10 body rules, `note-*.md`).**
+
+**Was unpinned.** § 10 says `## Notes` "is created at the end of the body if absent"
 and gives the line format. It does not say whether a blank line separates the
 new heading from the preceding body, nor what happens when the body does not end
 with a newline.
@@ -121,18 +128,24 @@ tolerating call sites have since been tightened to a single § 14-derived value.
 The tolerance is now impossible rather than merely discouraged: `T.exit` throws
 when handed an array (see item 23).
 
-**Affects (tolerance carriers):** `ac/ac-02-golden-files.js`,
-`ac/ac-18-tombstone-integrity.js`, `edge/empty-value-rule.js`,
-`edge/fix-duplicate-mtimes.js`, `edge/fix-mtime-snapshot.js`,
-`edge/write-encoding.js`, and `edge/tombstone-partial-loss.js` (which does not
-pin the exit code at all). The stale `ac-09` entry is removed: no `--fix` exit
-tolerance lives there.
+**Affects:** no tolerance sites remain — every `--fix` call in the suite pins
+its exact exit code (verified 2026-09-22 against `oracle-frozen-2`). The string
+`[0, 2]` still appears in three files, in COMMENTS ONLY, quoting the removed
+state: `edge/exit-doctor-fix.js` (header and two step notes),
+`edge/encoding-json-key-order.js` (l. 178), `edge/fix-duplicate-mtimes.js`.
+A search that counts those lines as carriers re-opens a closed item.
 
-## 6. Is `nj new --parent=<archived id>` allowed?
+## 6. Is `nj new --parent=<archived id>` allowed? — RULED
 
-**Unpinned.** § 9 requires `--parent` to "exist with the correct type". § 11
-hides archived elements from `list`, `tree` and the short status. Whether an
-archived element still counts as "existing" for a new child is not stated.
+**Ruled: no.** § 9 (l. 445) "The parent must be **active** — an archived parent
+is refused, since a fresh child of an archived parent would instantly carry
+`archive:split`", and the § 9 code table (l. 655) maps "an archived element as
+`--parent`" to `refused:parent_archived`. Pinned by `edge/parent-refusals.js`.
+The text below is kept as history of why the question was open.
+
+**Was unpinned.** § 9 required `--parent` to "exist with the correct type"; § 11
+hides archived elements from `list`, `tree` and the short status; whether an
+archived element still counted as "existing" for a new child was not stated.
 
 **Why it matters.** It decides whether a long-lived backlog can grow under an
 already-archived epic, or whether the parent must be re-created.
@@ -140,7 +153,8 @@ already-archived epic, or whether the parent must be re-created.
 **How the oracle handles it:** avoided entirely — `ac-08` creates a *second,
 active* epic to parent the new task, so the test does not depend on the answer.
 
-**Affects:** `ac-08` (by avoidance).
+**Affects:** `edge/parent-refusals.js` (pins the refusal and the code); `ac-08`
+still avoids the case, which is harmless now.
 
 ## 7. Is archiving a child while its parent stays active an `archive:split`?
 
@@ -152,7 +166,9 @@ archive while its parent is inside".
 depends on the reading. `edge/rm-and-archive-refusals` asserts `archive:split`
 only in the direction § 11 states.
 
-**Affects:** `ac-08` (by avoidance), `ac-11`.
+**Affects:** `ac-08` (by avoidance), `ac-11`, and the archive-placement probes
+in `edge/cycle-parent-archived.js` / `edge/cycle-parent-shapes.js`, which assert
+only the direction § 11 states.
 
 ## 8. The 100-retry abort is not deterministically reachable
 
@@ -200,7 +216,12 @@ next to a normalisation exception whose boundary is undefined here.
 Whether `errors` counts *elements* at Error level or *findings*, and whether an
 element can be counted in both buckets, is not stated.
 
-**Affects:** `ac-13`.
+**Reading used by the oracle:** `ac-13`'s `isReadShape` derives `expectedCounts`
+by hand from the fixture with § 7's rules — `errors` = elements at Error level,
+`incomplete` = elements at Incomplete level (an Error element is not counted as
+Incomplete), `total` = elements in scope. A reading, not a ruling.
+
+**Affects:** `ac/ac-13-json-contract.js` (`isReadShape`).
 
 ## 12. `tree` ordering when it disagrees with the sort rule
 
@@ -218,15 +239,26 @@ is refreshed on every write. Whether such a call is a no-op (empty `changed`,
 `updated` untouched) or a write (empty `changed`, `updated` bumped) is not
 stated.
 
-**Affects:** `ac-13`.
+**How the oracle handles it:** it does not. No suite asserts the `updated`
+half — `ac-13` never did, and `ac-20` dropped its no-op `updated` check on
+2026-09-22 for exactly this reason (a spec-open value does not belong in the
+oracle). The observed behaviour (no-op ⇒ `updated` untouched, file
+byte-identical) is held byte-exact by the S0 corpus (`scratch:r6.js`), which
+freezes it for the refactor without turning it into a spec claim.
 
-## 14. `--file=` together with `--id=`
+**Affects:** no oracle assertion; `tools/refactor-harness` corpus (`scratch:r6.js`).
 
-**Unpinned.** § 9 introduces `--file` as an alternative "instead of" `--id`.
-Whether supplying both is an error, or which one wins, is not stated.
+## 14. `--file=` together with `--id=` — RULED
 
-**Affects:** `edge/duplicate-id-write-refusal.js` (avoided — the test never
-passes both).
+**Ruled: an error, `invalid_target`.** The § 9 code table (l. 643): "`--id` and
+`--file` given together | `invalid_target`". Pinned by
+`edge/exit-precedence.js` (l. 356, both valid, refused with that code).
+
+**Was unpinned.** § 9 introduced `--file` as an alternative "instead of" `--id`
+without saying whether supplying both was an error or which one won.
+
+**Affects:** `edge/exit-precedence.js`; `edge/duplicate-id-write-refusal.js`
+still never passes both, which is harmless now.
 
 ## 15. What kind of `NJ_NOW` value is "invalid"?
 
@@ -713,6 +745,219 @@ nothing is broken — the false-alarm failure this project has already paid for
 three times (the flaky mkdtemp gate, the over-broad test digest, the colliding
 replay). See items 31–35 for the same division, and decision 77 for the case
 where the freedom itself was the thing worth writing down.
+
+## 40–43. Four co-occurrence and cardinality questions set equality raised
+
+This class **could not arise before**. While the doctor assertions tested
+containment (`found.includes(code)`, `problems.some(p => p.code === …)`),
+nobody had to say *how many* findings a fixture produces or *which ones
+co-occur* — the question was never put, so it never showed that § 7 does not
+answer it. Converting those assertions to `T.sameSet`, with § 7's Doctor
+column as the expected set, forces an answer for every fixture.
+
+**The four readings below are recorded, not derived.** They report what `nj`
+does today; they do not follow from § 7. They are written down so that a
+ruling costs one line instead of a search — not because the question is
+settled. Anyone changing one of them later is not overturning a decision, they
+are answering an open question; the counter-evidence is listed with each
+entry. In the test sources every affected assertion carries the same marker as
+an `// AMBIGUOUS` comment.
+
+**40. Does `backlog:ids_missing` suppress the element-level `id:no_tombstone`?**
+§ 8 defines both separately: a missing or empty `.ids/` while element files
+exist is `backlog:ids_missing` (ERROR), and an element file without a tombstone
+is `id:no_tombstone` (WARNING). With `.ids/` gone, **both** hold literally, for
+every element. Whether the backlog-level code swallows the element-level one is
+not stated.
+*Reading used by the oracle:* both are reported — one `backlog:ids_missing`,
+plus one `id:no_tombstone` per surviving element.
+*Affects:* `edge/exit-doctor-fix.js` (scenarios "`.ids/` lost entirely" and
+"tombstone backfill after the rename"), `ac/ac-18-tombstone-integrity.js`.
+
+**41. `duplicate_id` cardinality — once per clash, or once per participating file?**
+§ 14's prose example shows **one** line for two files:
+`ERROR   EPIC-002 + EPIC-007: duplicate ID`. § 9, by contrast, says
+element-level findings carry an `element` field — and two files are two
+elements. The two passages pull in opposite directions.
+*Reading used by the oracle:* one per participating file.
+*Affects:* `edge/exit-doctor-fix.js` (two scenarios),
+`ac/ac-19-doctor-axis.js`, `edge/fix-duplicate-mtimes.js`,
+`edge/order-doctor-problems-severity.js`. `ac/ac-13` and `ac/ac-17` sidestep
+the question by pinning only the **code** set, not the count.
+
+**42. `config:invalid` cardinality — one per backlog, or one per broken § 5 rule?**
+§ 7 calls the code "backlog-level", which reads as one per backlog. But § 5
+states several independent rules (`statuses` non-empty, at least two, unique,
+`[a-z_]+`, `done` last; `sections` an object), and § 14 has doctor report "the
+defect" — a plural of defects argues for a plural of findings.
+*Reading used by the oracle:* one per violation.
+*Affects:* `edge/exit-doctor-fix.js`. `ac/ac-17-configuration.js` deliberately
+pins only the code set, because one of its fixtures ("no statuses at all")
+breaks several rules at once, which would make the count depend on this very
+reading.
+*How it surfaced:* a fixture reported two `config:invalid` instead of one. Not
+a defect — it violated § 5 twice (`done` not last **and** `sections` absent).
+The derivation was too short, the implementation was not wrong.
+
+**43. Is an unreadable file still subject to the tombstone check?**
+§ 7 defines `file:unreadable` as "element file cannot be read at all". Its
+frontmatter is therefore unreachable and the only available id is the one
+implied by the **file name**. Whether `id:no_tombstone` is evaluated against an
+id obtained that way is not stated — and § 14's `--fix` step 4 ("create missing
+tombstones for every ID **found in element files**") rather suggests an
+unreadable file contributes no id at all.
+*Reading used by the oracle:* both findings — `file:unreadable` (ERROR) and
+`id:no_tombstone` (WARNING).
+*Affects:* `edge/unreadable-stub-refusals.js`.
+
+**Why none of these was visible before:** § 7's table maps each *condition* to
+a code and a severity, and is completely silent on what happens when several
+conditions hold at once — which is the normal case as soon as a backlog has
+more than one defect. The table is complete as a mapping and incomplete as a
+**set specification**. That is not a gap one finds by reading it; it appears
+only when one tries to derive an expected set from it.
+
+
+## 44. Two headings for one role — which one decides completeness?
+
+**Recorded, not derived**, like 40–43: the reading below is what `nj` does
+today, not something § 7 yields.
+
+§ 9 decides the **write** side and says so plainly: "If several headings match
+one role, the **first** match wins." § 7's completeness rule covers the
+**read** side — "A section counts as present only if it exists **and**
+contains at least one non-empty line below the heading ... Headings are
+level-2 (`## `), matched case-insensitively against the configured names" —
+and offers no tie-breaker at all. With two `## Description` headings, the
+first empty and the second filled, "the section" has no defined referent.
+
+*Reading used by the oracle:* the element counts as **complete**. The
+completeness check ranges over *all* headings of the role and is satisfied as
+soon as **any** of them carries content.
+
+*The measured consequence of the disagreement.* The two sides of `nj` do not
+use the same heading. Completeness accepts any; a `set --description=…` writes
+into the **first** and leaves the second standing. So a write on such an
+element produces a file with **two filled description sections** — neither
+side is wrong on its own terms, and together they are incoherent.
+
+*The counter-reading, which the spec supports at least as well:* § 9's
+"first match wins" exists precisely because the spec author saw the
+multi-heading case. Having decided it once, it is defensible to read that
+tie-breaker as governing both directions — in which case the element above is
+**incomplete** (its first description is empty) and today's answer is wrong.
+The alternative reading is that the write side was decided and the read side
+simply forgotten. The spec does not distinguish these, which is why this stays
+open.
+
+*How it surfaced — and why it took this long.* The first fixture draft pinned
+completeness through `doctor`. **`doctor` cannot see it:** `incomplete:*`
+carries Doctor = `—` in § 7's table, so it is never a finding, and
+`doctor --json` reports `"ok": true, "problems": []` for an element in this
+state. The only witness is the warning line in the feedback **after a write**
+(§ 9, "Feedback after writes"). A check routed through `doctor` would have
+confirmed health here forever.
+
+*Why this one is different from every other entry in this file.* Until today
+it was invisible to **both** nets at once: the spec says nothing, so the
+oracle could assert nothing, and no recorded invocation reached the state, so
+the corpus held nothing either. It is the only gap of that kind found so far.
+The fixture closes the corpus half; the spec half is open.
+
+*Affects:* TSK-016's fixture (AC-2). AC-3, the mutant as counter-proof, is
+still outstanding.
+
+
+## 45–46. Two prose forms the spec only shows for a neighbouring command — RULED: NOT PINNED
+
+**Recorded, not derived**, like 40–44: the forms below are what `nj` prints
+today; the spec does not give them.
+
+**Ruled, and the ruling is a division of labour, not a retreat:** neither form
+is pinned in the oracle. The oracle pins what the spec decides; what `nj` does
+beyond that is held byte-for-byte by the corpus. Since
+`edge/doctor-fix-surface.js`, both outputs are produced by oracle runs, so
+after the re-recording they sit in the corpus and any refactor step that
+changes them goes red there — without an unstated format being promoted to
+spec law here. The consequence is stated rather than hidden: the mutants
+`bare-incomplete` and `fix-prose-warn` stay **reached, blind** (1/0) in the
+blindness matrix. That is an honest result: the oracle cannot see what the
+spec does not decide.
+
+**45. The prose form of bare `nj`.**
+§ 9's command table says only "short status: counts, top ready, problems".
+The JSON shape is pinned exactly — `{backlog, counts, ready: [entries ≤ 5],
+incomplete: [entries ≤ 5]}` — and `edge/doctor-fix-surface.js` asserts it
+exactly; for the prose that suite asserts only that the incomplete element,
+its code and a ready element are named.
+*Recorded form:* a first line `backlog: <absolute path>`, then
+`<total> entries · <errors> error(s) · <incomplete> incomplete`, then the
+blocks `Ready to work:` / `Complete first:`.
+*The trap, and how it was caught:* the `Ready to work: / Complete first:`
+block in § 9 is the example for **`$ nj list --ready`**, not for bare `nj`.
+An earlier brief for this work read it as bare `nj`'s form; Oracle
+Determinismus caught the misreading while building the fixture. `nj` itself
+reuses that layout for its short status — a reasonable choice, but a choice.
+*Counter-reading:* § 9 says bare `nj` shows "top ready", and the `list --ready`
+example is the only ready-list layout the spec contains anywhere; reusing it
+is the natural reading. That is an argument by analogy, which is exactly what
+this file does not accept as a derivation (cf. 39).
+*Also unpinned:* the label. Bare `nj` prints `backlog: <absolute path>`,
+`doctor` prints § 14's `backlog/:`. Nothing in the spec makes the two short
+summaries agree or requires them to differ.
+
+**46. The prose form of `doctor --fix`.**
+§ 14 shows the summary line — `backlog/: 47 entries, 2 errors, 1 warning` —
+only under `$ nj doctor`. For `--fix` it says what is reported ("the actions
+it took plus the findings that remain"), not in what form.
+*Recorded form:* a lead-in (`Nothing to fix.` when no step acted), then
+`backlog/: <n> entries, <m> errors, <k> warning(s) remaining`, then the
+finding lines. The lead-in and the ` remaining` suffix are `nj`'s wording.
+The finding lines themselves follow § 14's line form
+(`WARNING EPIC-001: unknown status 'blocked-on-review'`) and **are** asserted,
+in `edge/doctor-fix-surface.js`.
+*Counter-reading:* "remaining" is close to the spec's own word — § 14 has
+`--fix` report "the findings that **remain**". A word in a sentence is still
+not a format.
+
+## 47. Does a PARTIAL tombstone backfill carry § 8's "void" note?
+
+**Recorded, not derived.** Unlike 45–46 this reading **is** pinned — see the
+last paragraph for why the line falls there.
+
+§ 8 words the note in the context of the missing-`.ids/` case: "A missing or
+empty `.ids/` while element files exist is `backlog:ids_missing` … `doctor
+--fix` creates tombstones for every ID found in element files … Tombstones for
+already-deleted IDs cannot be recovered; `--fix` reports that the never-reuse
+guarantee is void for those numbers." Whether a backfill of **one** element's
+tombstone (`id:no_tombstone`, `.ids/` otherwise intact) must carry the same
+note is not stated.
+*Reading used by the oracle:* it does. `nj` emits the void note on a partial
+backfill — checked on both `c1-baseline` and the refactored `nj`, not relayed.
+*Why that is defensible:* § 8 calls `id:no_tombstone` the state of a
+hand-created element **or** of partial tombstone loss, and the two are
+observationally identical. If it was loss, deleted IDs' tombstones may have
+gone with it, and the note is honest; if it was a hand-drafted element, the
+note is a false alarm. `--fix` cannot tell which.
+*The two passages pull in different directions, as in 41:* § 8's placement
+ties the note to the missing-`.ids/` case, but § 14's step 4 lists both codes
+before the clause — "(`id:no_tombstone`, `backlog:ids_missing`; tombstones for
+deleted IDs are unrecoverable and reported as such)" — which reads as the
+report belonging to the step as a whole, and so supports `nj`'s reading.
+*How it surfaced:* while building the "nothing declined → `notes[]` empty"
+case in `edge/doctor-fix-surface.js`, Oracle Determinismus chose H1 drift
+rather than a single missing tombstone precisely to avoid this question.
+*Affects:* `edge/exit-doctor-fix.js`, scenarios "id mismatch, target free" and
+"one tombstone missing" — each pins one note carrying § 8's `never-reuse`,
+marked `// AMBIGUOUS (AMBIGUITIES 47)`.
+
+**Why 47 is pinned and 45–46 are not.** The line is between a **set** and a
+**wording**. 47 is about whether a member of `notes[]` exists — part of the
+`--json` contract § 14 names, the same kind of question as the recorded `also:`
+set in `ac/ac-03` (#9). 45–46 are about how prose is phrased, which only the
+corpus can hold without inventing a rule. A ruling on 47 is a one-line edit per
+scenario; a ruling on 45 or 46 would add assertions, not change them.
+
 
 ## Not an ambiguity, recorded because it looks like one
 

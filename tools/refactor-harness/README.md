@@ -184,6 +184,29 @@ einer Fehlpaarung mit Code `7` ab. Ein hängengebliebenes Lock nach einem
 Absturz ist genau die Fehlerform, die `nj` selbst ablehnt (§ 12); erkennen ist
 hier ehrlicher als ausschließen.
 
+### Ruhe für das Perf-Gate: messen, nicht schätzen
+
+Die § 13-Schranken sagen nur dann etwas über `nj` aus, wenn während der Messung
+sonst nichts läuft. Mehrere Agenten auf derselben Maschine sind der Normalfall,
+nicht die Ausnahme.
+
+**Load Average taugt als Ruhenachweis nicht.** Gemessen: 2,86, während
+gleichzeitig **null** node-Prozesse liefen. Ein Minutenmittel klingt ab und
+besteht deshalb aus Geschichte, nicht aus laufender Arbeit — wer darauf wartet,
+wartet auf die Vergangenheit. Der belastbare Test zählt Prozesse:
+
+```sh
+pgrep -f 'bin/node' | wc -l      # 0 = ruhig; alles andere ist Last
+```
+
+**Und ein einzelner Messsatz reicht auch auf einer ruhigen Maschine nicht.**
+Ein erster Satz lag einmal bei `tree` 282 ms und damit über der Schranke; ein
+interleaved A/B gegen das vorige Binary auf demselben Backlog ergab 197/197.
+Die Regression war die Last dreier parallel arbeitender Agenten, nicht der
+Schritt. Abwechselnd A/B zu messen trennt beides, eine Einzelmessung nicht —
+und ein Perf-Alarm, der sich als Maschinenlast herausstellt, kostet denselben
+Rückrollvorgang wie ein echter.
+
 ## Was bewusst NICHT verglichen wird
 
 Alles hier ist eine benannte Entscheidung, keine Nachlässigkeit. Wer etwas
