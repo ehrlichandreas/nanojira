@@ -37,7 +37,6 @@
  * <reason>` in its detail — never a silent pass (README "not covered").
  */
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { spawnSync, spawn } = require('child_process');
 const H = require('../lib/harness.js');
@@ -1105,7 +1104,9 @@ function swapperSource(rcPath, decoyMaster, payloadMaster, stopFlag) {
 
 {
   const tag = 'T1-follow-up [.njrc swap race, plain file]';
-  const dev = fs.statSync(os.tmpdir()).dev;
+  /* The same device H.freshDir()'s own fixtures live on (H.TMP_ROOT, not
+   * os.tmpdir() — see harness.js for why). */
+  const dev = fs.statSync(H.TMP_ROOT).dev;
   const decoy = findRaceFile('root', dev);
   const payload = findRaceFile('foreign', dev);
   if (RACE_ME === null) {

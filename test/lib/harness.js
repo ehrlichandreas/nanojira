@@ -16,7 +16,6 @@
  */
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { spawnSync } = require('child_process');
@@ -58,11 +57,40 @@ const IDS_REL = '.nanojira/ids';
 const INDEX_REL = '.nanojira/index.json';
 const GITIGNORE = INDEX_REL + '\n.nj-tmp-*\n';
 
+/* Fixture root — deliberately NOT `os.tmpdir()`. `os.tmpdir()` honours
+ * `TMPDIR`, and in at least one real environment this suite has run in,
+ * `TMPDIR` is a path with a genuine backlog somewhere in its OWN ancestor
+ * chain (another team's working tree, `TMPDIR=.../state/tmp` under a repo
+ * whose root holds `backlog/`). A fixture meant to prove "no backlog is
+ * findable" (an empty directory, no `--backlog`, no `NJ_BACKLOG`) then
+ * silently finds that unrelated backlog via nj's own upward search (§ 4) —
+ * a real backlog, real entries, exit 0 — instead of `no_backlog`, passing
+ * or failing for the wrong reason depending on what's in it that day.
+ *
+ * Realpath'd either way — `NJ_TEST_ROOT`'s own value included, not just
+ * the `/tmp` default — because macOS's `/tmp` is itself a symlink to
+ * `/private/tmp`, and a fixture path containing the un-resolved form
+ * causes a real, separate failure: `nj-mcp` resolves its own `--backlog`
+ * at startup and reports paths back in `entry.file`/JSON through that
+ * resolved form, so a byte comparison against the CLI side's own
+ * un-resolved fixture path (`/tmp/nj-xxx/...` vs `/private/tmp/nj-xxx/
+ * ...`) fails on the symlink alone, nothing behavioural
+ * (`ac-32-mcp-sdk.js` C3, `ac-32-mcp.js` M6, `ac-40-next.js` N12 — all
+ * three confirmed passing under this fix). A caller setting
+ * `TMPDIR=/tmp/…` and expecting that alone to steer fixtures would hit
+ * this same trap; realpathing whatever root is actually used, always,
+ * is what closes it, not merely documenting it. `/tmp`'s own ancestors
+ * (`/private`, `/`) are never going to hold a backlog — this is the same
+ * root the team's own standing safety rule already names for ad hoc
+ * fixtures ("Fixtures only under /tmp/oracle-*"), just applied to the
+ * oracle's own harness too. */
+const TMP_ROOT = fs.realpathSync(process.env.NJ_TEST_ROOT || '/tmp');
+
 const _tmpDirs = [];
 
 /** A fresh empty directory. Not a backlog — use mkBacklog() for that. */
 function freshDir(label) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nj-' + (label || 't') + '-'));
+  const dir = fs.mkdtempSync(path.join(TMP_ROOT, 'nj-' + (label || 't') + '-'));
   _tmpDirs.push(dir);
   return dir;
 }
@@ -597,6 +625,7 @@ function cleanup() {
 module.exports = {
   NJ, NJ_MCP, NODE, FIXED_NOW, LATER_NOW, DEFAULT_CONFIG,
   CONFIG_REL, IDS_REL, INDEX_REL, GITIGNORE,
+  TMP_ROOT,
   T,
   renderStatus, statusFor, writeStatus, configValidForStatus,
   freshDir, mkBacklog, writeRaw, readInBacklog, existsInBacklog, listFiles, lsOrEmpty, readOrNull,

@@ -14,6 +14,7 @@ import { folderOf, expectedPlace } from '../core/layout.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, hardExit, writeFeedback, emitWriteResult } from '../core/output.ts';
 import { serialize, normalizeTitle, applySections } from '../core/parse.ts';
+import { valueHint } from '../core/suggest.ts';
 import { refreshStatus } from '../core/status.ts';
 import { nowIso, allocateId, atomicWrite } from '../core/store.ts';
 
@@ -52,7 +53,7 @@ interface NewFlags {
 function validateNewFlags(ctx: Context, flags: Flags): NewFlags {
   const type = flagString(flags, 'type');
   if (type === undefined) return fail('missing_argument', '--type is required', `Known types: ${TYPES.join(', ')}`);
-  if (!TYPES.includes(type)) return fail('invalid_value', `unknown type '${type}'`, `Known types: ${TYPES.join(', ')}`);
+  if (!TYPES.includes(type)) return fail('invalid_value', `unknown type '${type}'`, valueHint('type', type, TYPES));
 
   const title = flagString(flags, 'title');
   if (title === undefined || normalizeTitle(title) === '') return fail('missing_argument', '--title is required and must not be empty');
@@ -82,11 +83,11 @@ function validateNewFlags(ctx: Context, flags: Flags): NewFlags {
 
   const status = flagString(flags, 'status');
   if (status !== undefined && !ctx.cfg.statuses.includes(status)) {
-    fail('invalid_value', `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(', ')}`);
+    fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses));
   }
   const priority = flagString(flags, 'priority');
   if (priority !== undefined && !PRIORITIES.includes(priority)) {
-    fail('invalid_value', `unknown priority '${priority}'`, `Known priorities: ${PRIORITIES.join(', ')}`);
+    fail('invalid_value', `unknown priority '${priority}'`, valueHint('priority', priority, PRIORITIES));
   }
   const assignee = flagString(flags, 'assignee');
   const tags = parseListFlag(flags, 'tags');

@@ -2,14 +2,16 @@
 
 `nj` keeps a backlog of epics, tasks and subtasks as one Markdown file per
 element, next to your code. This guide shows how to use it; the rules behind
-every answer are in `docs/SPECIFICATION.md` (spec v3, through v3.4), and
+every answer are in `docs/SPECIFICATION.md` (spec v3, through v3.6), and
 where this guide and the spec differ, the spec wins.
 
 **Upgrading an existing backlog?** `nj` refuses to touch a v2 backlog
 (`.nanojira.json`/`.ids/` at the top level) until you run the one
-`doctor --fix` that migrates it — see `docs/MIGRATION-v3.md`.
+`doctor --fix` that migrates it — see `docs/MIGRATION-v3.md`. Upgrading
+from an earlier v3 release (this guide already describes the latest):
+`docs/CHANGES.md`.
 
-This describes spec v3.4's end state. Most examples below were run directly
+This describes spec v3.6's end state. Most examples below were run directly
 against `dist/nj`; output is shown as it is printed, with the
 machine-specific path shortened to `…`.
 
@@ -37,6 +39,13 @@ on the machine that runs them.
   shared entry meant to serve several projects.
 - Verify the install with `nj --version`, which prints `nj <version>` and
   exits 0 from anywhere, without needing a backlog (§ 9 of the spec).
+- **No `node` on `PATH`?** `dist/nj`'s shebang (`#!/usr/bin/env node`)
+  needs `node` resolvable there to run as `nj` directly. If an agent's
+  environment doesn't put `node` on `PATH` but does have one available at
+  a known path, run `dist/nj` with it explicitly instead of relying on
+  the shebang: `node /path/to/dist/nj --version` (and the same for
+  `dist/nj-mcp`, in whatever launches it) — `dist/nj` is a plain Node
+  script underneath, so this always works, symlinked onto `PATH` or not.
 
 ## 2. Start a backlog
 
@@ -50,8 +59,15 @@ Created backlog at …/proj/backlog
 `init` creates `./backlog/` with the default configuration, a `README.md`, a
 `.gitignore`, a `STATUS.md` and the empty type folders `epics/`, `tasks/`,
 `subtasks/`, `archive/`; everything only `nj` needs — the configuration and
-the tombstones — lives in one hidden folder, `.nanojira/`. Commit all of it:
-tombstones (`.nanojira/ids/`) are what guarantee that an ID is never reused.
+the tombstones — lives in one hidden folder, `.nanojira/`. Commit all of
+the **files**: tombstones (`.nanojira/ids/`) are what guarantee that an ID
+is never reused. **The empty type folders themselves need not be
+committed** — git does not track empty directories at all, so a clean
+checkout of a freshly-`init`ed backlog simply will not have them; this is
+fine, not a defect, because `nj` creates whichever folder it needs the
+first time something goes into it (`epics/` on the first epic, `archive/`
+on the first archive, and so on) and never treats a missing empty type
+folder as a problem (`nj doctor` stays clean either way).
 
 - Somewhere else: `nj init --backlog=../shared/backlog`, or with `NJ_BACKLOG`
   or a `.njrc` set (next section). `init` never looks for an existing
@@ -72,6 +88,28 @@ Every command finds its backlog from the **first** of these that is set:
 The **nearest directory wins**, and within one directory `.njrc` beats
 `backlog/`. A `.njrc` in a repository root therefore redirects the whole
 repository, while a project with its own `backlog/` deeper down keeps it.
+This is deliberate, not incidental: running `nj` from **anywhere** that
+genuinely has no backlog of its own and no `--backlog`/`NJ_BACKLOG`
+override — including a scratch or temporary directory — will find an
+unrelated `backlog/` sitting in one of its ancestors if one happens to be
+there (another project's, say); give an explicit `--backlog`/`NJ_BACKLOG`
+whenever that ambiguity matters, rather than relying on "no backlog
+nearby" being true of a path you don't control.
+
+**`--backlog`/`--json` also work before the command word**, not just after
+— either order, either place, repeated or mixed:
+
+```sh
+$ nj --backlog=../shared/backlog list --json | head -2
+{
+  "backlog": "…/shared/backlog",
+```
+
+runs `list` exactly as `nj list --backlog=../shared/backlog` would; a flag
+other than these two ahead of the command word (even one valid for the
+command that follows, like `nj --status=doing set --id=TSK-001`) is
+`unknown_field` against the bare invocation instead — the command word is
+never silently dropped or reached past.
 
 ```sh
 $ cat repo/.njrc
@@ -184,7 +222,18 @@ TSK-001 → status=done
 ```
 
 - `nj note` appends `- <time> <author>: <text>` under `## Notes`; the author
-  is the element's `assignee`, else `?`.
+  is the element's `assignee`, else `?`. A multi-line `<text>` is kept, not
+  flattened: every line after the first is indented two spaces under the
+  `- <time> <author>:` line (a Markdown list continuation), and `nj log`
+  reads it back out the same way it went in:
+
+  ```sh
+  $ nj note --id=TSK-001 "$(printf 'First line\nSecond line')"
+  $ tail -3 backlog/tasks/TSK-001.md
+  ## Notes
+  - 2026-10-06T21:16:23Z alice: First line
+    Second line
+  ```
 - `nj set --status=done` on a parent with open children is refused
   (`refused:children_open`); `--allow-open-children` forces it and leaves a
   `done:open_children` warning. `--force` means only one thing: overwrite a
@@ -195,6 +244,37 @@ TSK-001 → status=done
 - Reads: bare `nj` (short status), `nj list [--status --type --tag --parent
   --assignee --ready --all]`, `nj tree`, `nj show --id=…`, `nj find "<text>"`
   (§ 17 below).
+
+**Don't guess which `--type`/`--status`/`--priority` values are allowed —
+ask.** `nj <command> --help` prints that command's own flags, including the
+allowed values for each (the backlog's own configured `statuses` when one
+resolves, else the defaults):
+
+```sh
+$ nj set --help
+  nj set   --id=TSK-009 [--title=…] [--status=…] [--priority=…]
+           [--tags=…] [--assignee=…] [--depends-on=…] [--force] [--allow-open-children]
+           [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=…]
+
+  --id
+  --file
+  --title
+  --status=<value>   allowed: todo, doing, blocked, review, done
+  --priority=<value>   allowed: low, normal, high, urgent
+  …
+```
+
+and a typo'd value — one close enough to exactly one allowed value —
+names it in the hint, never silently, never as an accepted alias:
+
+```sh
+$ nj set --id=EPIC-001 --priority=hgih --json
+{
+  "ok": false,
+  "error": "invalid_value",
+  "hint": "did you mean 'high'? Known priorities: low, normal, high, urgent"
+}
+```
 
 **For agents: add `--json` to every call.** Reads return `{backlog, counts,
 entries}`, writes `{ok, id, changed, entry, _problems}`, and **every** failure
@@ -440,6 +520,15 @@ TSK-001 claimed by alice (status: doing)
   as `claim --status=` does; omit it and status is left alone.
 - **Filters** are `list`'s own: `--type`, `--tag`, `--parent`,
   `--assignee` — narrow which candidates `next` will even consider.
+- **Respects an existing `assignee` by default.** An element already
+  assigned to someone else is never a candidate — `next` never hands out
+  work a human or a prior `claim`/`next` explicitly gave to a specific
+  name. Assign a review (or anything else) to a particular person or
+  agent with `nj set --id=<id> --assignee=<name>`, and only that name's
+  own `next` (or an explicit `nj claim --id=<id> --as=<name>`) will pick
+  it up. This is also the answer to "an author shouldn't review their
+  own work": assign the review task to the reviewer, not the author, and
+  `next` keeps it out of the author's hands on its own.
 - **Leaf work only.** A container with an open child (neither `done` nor
   archived) is never a candidate — its child is, instead:
 

@@ -75,8 +75,12 @@ const ids = a => a.map(e => e && e.id);
   T.exit('bare nj --json exits 0 with an incomplete element present', j, 0);
   T.eq('counts is {total, errors, incomplete} with the incomplete one counted',
     j.json && j.json.counts, { total: 3, errors: 0, incomplete: 1 });
-  T.sameSet('ready[] holds exactly the complete, todo elements',
-    ids((j.json && j.json.ready) || []), ['EPIC-001', 'TSK-007']);
+  /* EPIC-001 has an open child (TSK-007, neither done nor archived), so
+   * bare nj's own leaf rule (DECISIONS 156/158, § 9 "--ready") excludes
+   * it from ready[] in favour of TSK-007 itself — list --ready would
+   * still name both; this is bare nj's own JSON shape specifically. */
+  T.sameSet('ready[] holds exactly the complete, todo, LEAF elements',
+    ids((j.json && j.json.ready) || []), ['TSK-007']);
   T.sameSet('incomplete[] holds exactly the incomplete element',
     ids((j.json && j.json.incomplete) || []), ['TSK-009']);
   const inc = j.json && j.json.incomplete && j.json.incomplete[0];

@@ -64,9 +64,15 @@ function claimEvents(backlog: string, id: string): (LogEvent & { _source: number
   return events;
 }
 
+// A note's continuation lines print one per line, indented the same two
+// spaces the file itself stores them with (§ 10 "Multi-line text") — never
+// rejoined onto the first line.
 function formatEvent(e: LogEvent): string {
   if (e.kind === 'created') return `${e.at} created`;
-  if (e.kind === 'note') return `${e.at} ${e.actor}: ${e.text}`;
+  if (e.kind === 'note') {
+    const [first, ...rest] = (e.text || '').split('\n');
+    return [`${e.at} ${e.actor}: ${first}`, ...rest.map((l) => (l === '' ? '  ' : `  ${l}`))].join('\n');
+  }
   const verb = e.kind === 'reasserted' ? 're-asserted' : e.kind;
   return `${e.at} ${verb} by ${e.actor}`;
 }

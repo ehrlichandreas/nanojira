@@ -6,8 +6,8 @@ by" count in § 2 re-walked mechanically again for v3.3 (DECISIONS 148,
 exports, import edges, commands) — not recalled from memory or from the
 task history that produced this code.
 
-It describes the code as built, which implements spec **v3 through v3.5**
-(DECISIONS 86–156): V3-1, the backlog location (`--backlog`, `NJ_BACKLOG`,
+It describes the code as built, which implements spec **v3 through v3.6**
+(DECISIONS 86–160): V3-1, the backlog location (`--backlog`, `NJ_BACKLOG`,
 `.njrc`, in `core/config.ts`); V3-2, the layout (groups `type`, `hierarchy`
 and `flat`, configurable folder names, the recursive element scan,
 `layout:misplaced`, and moves in `archive`, `rm` and `doctor --fix`; in
@@ -41,6 +41,38 @@ via the new `allEntriesAscending` export and adds `parseNotes` to
 `core/parse.ts`). Both new commands are exposed as `nj-mcp` tools the same
 way every other command already is, through `core/flag-table.ts`'s shared
 schema generation — neither needed its own MCP-side code.
+
+**v3.6** (DECISIONS 158, 160) is docs-and-discoverability plus two outside
+teams' bug reports, not new commands:
+
+- **Global flags before the command word** (EV-6): `nj.ts`'s own
+  `splitCommand` scans a leading run of exactly `--backlog`/`--json`
+  looking for the command word; a token that is neither stops the scan
+  outright, so the whole, unmodified `argv` becomes the bare invocation's
+  own arguments — no partial reordering, no silent fallback to a
+  different command.
+- **Per-command `--help` and did-you-mean** (EV-2/EV-3/PA-1): `core/help.ts`'s
+  `commandHelp` renders one command's own synopsis and flags (reusing
+  `core/flag-table.ts`'s existing schema, the same source `nj-mcp`'s tool
+  schemas already came from); `core/suggest.ts` is new — a tiny fixed
+  synonym table checked first, then an OSA (optimal-string-alignment,
+  DECISIONS 160) distance against the allowed values, length-dependent
+  threshold — feeding the `did you mean '<value>'?` hint onto an
+  `invalid_value` failure's existing `hint`, never the message or the
+  accepted vocabulary.
+- **Multi-line notes** (EV-7): `core/parse.ts`'s `parseNotes` now reads a
+  two-space-indented continuation line as part of the previous note
+  instead of flattening it; `nj note` writes the same shape back out.
+- **The leaf-work rule reused one more place** (EV-4/D157, on top of
+  D156's rule `next` already used): `cmd-status.ts`'s bare-`nj` "Ready to
+  work" now also filters out any element with an open child, via
+  `core/derive.ts`'s shared `hasOpenChild` — `list --ready` itself is
+  unchanged, a pure readiness filter with no leaf condition.
+- **`next` respects an existing `assignee`** (PA-5): `cmd-next.ts`'s own
+  candidate filter now also requires `assignee === '' || assignee ===
+  <acting name>` — an element explicitly assigned to someone else is
+  never a candidate, closing the "assign a review to the reviewer" gap
+  (PA-4) without a new field.
 
 ## 1. Build
 
@@ -112,24 +144,25 @@ would actually reach for, not every name; "imported by" is exact.
 
 | Module | Purpose | Key exports | Imported by |
 |---|---|---|---|
-| `core/types.ts` | Every shared interface/type (`Element`, `Context`, `Flags`, the nine-stage `Skeleton→…→Element` chain, `NonEmptyString`) — never `require()`d, only `import type` | `Element`, `Context`, `Flags`, `Config`, `Finding`, `EntryJson`, staged-builder types | all 30 other modules (type-only) |
-| `core/constants.ts` | Field tables, status/priority vocab, the closed `SEVERITY` map | `TYPE_DIR`, `PARENT_TYPE`, `SEVERITY`, `DEFAULT_CONFIG`, `SETTABLE_FIELDS`, `NEW_FIELDS` | 14 modules: `args`, `config`, `context`, `derive`, `flag-table`, `layout`, `load`, `parse`, `store`, 5×`cmd-*` |
-| `core/help.ts` | The `nj help` text, nothing else | `HELP` | `nj` |
+| `core/types.ts` | Every shared interface/type (`Element`, `Context`, `Flags`, the nine-stage `Skeleton→…→Element` chain, `NonEmptyString`) — never `require()`d, only `import type` | `Element`, `Context`, `Flags`, `Config`, `Finding`, `EntryJson`, staged-builder types | 32 other modules (type-only) |
+| `core/constants.ts` | Field tables, status/priority vocab, the closed `SEVERITY` map | `TYPE_DIR`, `PARENT_TYPE`, `SEVERITY`, `DEFAULT_CONFIG`, `SETTABLE_FIELDS`, `NEW_FIELDS` | 15 modules: `args`, `config`, `context`, `derive`, `flag-table`, `help` (v3.6), `layout`, `load`, `parse`, `store`, 5×`cmd-*` |
+| `core/help.ts` | The `nj help` text, plus (v3.6, DECISIONS 158 EV-2) `commandHelp`, one command's own synopsis/flags/allowed values, reusing `flag-table.ts`'s schema and `config.ts`'s backlog resolution to show the resolved backlog's own `statuses` when one resolves cleanly | `HELP`, `commandHelp` | `nj` |
 | `core/derive.ts` | Read-only views over a loaded `Element`: sort order, readiness, JSON entry shape | `elementProblems`, `isReady`, `compareElements`, `entryJson`, `countsOf` | 18 modules: `context`, `output`, `status`, 15×`cmd-*` (v3.5 adds `cmd-next`, reusing `isReady` rather than re-deriving readiness) |
 | `core/parse.ts` | Frontmatter grammar and body-section editing, no `Element` knowledge | `parseFile`, `serialize`, `syncH1`, `applySections`, `parseNotes` (v3.5, § 12c — reads `## Notes` lines back out, the read-side mirror of `nj note`'s own write grammar) | `args`, `load`, `store`, 4×`cmd-*` (v3.5 adds `cmd-log`) |
-| `core/output.ts` | The `Fail` error type, `--json` state, all printing — and the one module with a real load-time side effect (below) | `fail`, `hardExit`, `out`, `writeFeedback`, `emitWriteResult`, `emitFailure` | 24 modules: `actor`, `args`, `batch`, `config`, `context`, `nj`, `nj-mcp`, `store`, every `cmd-*` |
+| `core/output.ts` | The `Fail` error type, `--json` state, all printing — and the one module with a real load-time side effect (below) | `fail`, `hardExit`, `out`, `writeFeedback`, `emitWriteResult`, `emitFailure` | 26 modules: `actor`, `args`, `batch`, `config`, `context`, `nj`, `nj-mcp`, `store`, every `cmd-*` |
 | `core/args.ts` | CLI flag parsing and validation, no filesystem access; `--backlog` is accepted by every command here, in `checkFlags` | `parseArgs`, `checkFlags`, `flagString`, `readSectionFlags` | `actor`, `batch`, `config`, `context`, `nj`, `nj-mcp`, every `cmd-*` |
-| `core/config.ts` | The v3 configuration at `.nanojira/config.json` (including the `layout` block, § 5) — or, on a legacy backlog, the v2 one at the top level; backlog location (`--backlog` > `NJ_BACKLOG` > upward search, `.njrc` before `backlog/` per directory, either place holding a backlog), the strict `.njrc` parser (ownership re-checked unconditionally through the same fd it reads, not only for a symlink) | `loadConfig`, `findBacklog`, `initLocation`, `holdsBacklog`, `isLegacyBacklog` | `context`, `nj-mcp`, `cmd-init`, `cmd-doctor` |
+| `core/config.ts` | The v3 configuration at `.nanojira/config.json` (including the `layout` block, § 5) — or, on a legacy backlog, the v2 one at the top level; backlog location (`--backlog` > `NJ_BACKLOG` > upward search, `.njrc` before `backlog/` per directory, either place holding a backlog), the strict `.njrc` parser (ownership re-checked unconditionally through the same fd it reads, not only for a symlink) | `loadConfig`, `findBacklog`, `initLocation`, `holdsBacklog`, `isLegacyBacklog` | `context`, `nj-mcp`, `cmd-init`, `cmd-doctor`, `core/help.ts` (v3.6 — per-command `--help` resolves the backlog to show its configured `statuses`) |
 | `core/layout.ts` | Where element files lie (§ 4): the one recursive scan (configured folders first, so a v2 backlog scans in v2's order; never into dot-directories or through directory symlinks), and the place each group gives an element — derived from the frontmatter, never the reverse | `scanBacklog`, `folderOf`, `expectedPlace`, `moveTarget`, `misplacedCode`, `ownFolder` | `load`, `status`, `cmd-archive`, `cmd-doctor`, `cmd-new`, `cmd-rm`, `cmd-unarchive` |
-| `core/store.ts` | Clock, tombstones (keyed by an explicit `idsDir` — `.nanojira/ids`, or a legacy backlog's `.ids`, never assumed), atomic file writes, the write-time compare guard, and the move planner that `archive` and `doctor --fix` share: every target is checked before the first `rename` (ENOENT only, not any other `lstat` failure); existing folders are merged into, a same-file (same dev+ino) target is no move, and existing files are never overwritten (DECISIONS 94, 105 F2, TSK-029 T2) | `nowIso`, `atomicWrite`, `atomicReplace`, `compareGuard`, `guardedWrite`, `planMove`, `runMove`, `renderElement` | 13 modules: `config`, `derive`, `load`, `status`, 9×`cmd-*` |
+| `core/store.ts` | Clock, tombstones (keyed by an explicit `idsDir` — `.nanojira/ids`, or a legacy backlog's `.ids`, never assumed), atomic file writes, the write-time compare guard, and the move planner that `archive` and `doctor --fix` share: every target is checked before the first `rename` (ENOENT only, not any other `lstat` failure); existing folders are merged into, a same-file (same dev+ino) target is no move, and existing files are never overwritten (DECISIONS 94, 105 F2, TSK-029 T2) | `nowIso`, `atomicWrite`, `atomicReplace`, `compareGuard`, `guardedWrite`, `planMove`, `runMove`, `renderElement` | 14 modules: `config`, `derive`, `load`, `status`, 10×`cmd-*` (v3.5 adds `cmd-next`) |
 | `core/load.ts` | `loadElement` (nine derivers), `deriveGraph` (eleven steps, `markPlaces` among them), `loadBacklog` | `loadElement`, `deriveGraph`, `childMap`, `descendants`, `loadBacklog` | 11 modules: `context`, `status`, 9×`cmd-*` |
 | `core/status.ts` | The status overview `STATUS.md` (§ 4): the byte-exact renderer, the freshness check `doctor` reports as `backlog:status_stale`, and the post-write refresh — one full scan, an atomic replace without fault hooks, a failure only ever a `Warning:` on stderr | `renderStatus`, `statusIsFresh`, `refreshStatus` | `cmd-doctor`, `cmd-init`, `cmd-new`, `cmd-set`, `cmd-note`, `cmd-rm`, `cmd-archive`, `cmd-check`, `cmd-claim`, `cmd-unarchive`, `cmd-next` (v3.5 — `next`'s claim, and its optional `--status`, go through the same refresh every other write does; `cmd-log` never appears here, since it writes nothing) |
 | `core/readme-texts.ts` | The two `README.md` texts, kept in one place so they cannot drift apart: the v3 text `init` writes, and the exact v2 text (frozen at `5318888`) step 0 compares a legacy backlog's README against before replacing it — a user's own edit is left alone either way | `V2_README`, `V3_README` | `cmd-init`, `cmd-doctor` |
 | `core/context.ts` | Per-command setup: backlog+config+elements (refusing a legacy backlog with `legacy_layout`, except for `doctor`'s own `lenient`), target resolution, the five `require*` guards | `context`, `resolveTarget`, `requireWritable`, `requireNoStubs`, `requireNoUnreadableDirs`, `requireActive` | every `cmd-*` module except `cmd-init` (which creates the backlog, so there is nothing yet to load a context from) |
-| `core/actor.ts` (v3.1, § 9 "The acting name") | Who is acting, for `note`/`claim`/`release`: `--as` outranks `NJ_AUTHOR`; a name is valid when non-empty after trimming spaces/tabs, one line, no `:` | `validActorName`, `resolveActingName`, `actingNameForRead` | `cmd-note`, `cmd-claim`, `cmd-release`, `cmd-list` |
+| `core/actor.ts` (v3.1, § 9 "The acting name") | Who is acting, for `note`/`claim`/`release`: `--as` outranks `NJ_AUTHOR`; a name is valid when non-empty after trimming spaces/tabs, one line, no `:` | `validActorName`, `resolveActingName`, `actingNameForRead` | `cmd-note`, `cmd-claim`, `cmd-release`, `cmd-list`, `cmd-next` (v3.6 PA-5 — `next`'s own candidate filter now also needs the acting name, to require an unassigned element or one assigned to it) |
 | `core/claims.ts` (v3.1, § 12 "Claims"/§ 12a) | The append-only CAS sequence behind `claim`/`release`: no live pruning, rollback only if this invocation appended, a landed steal is never rolled back; also computes `claim:stale` (v3.2, § 5 `claims.staleAfterHours`); `allEntriesAscending` (v3.5, § 12c) is the read-side sibling of `highestEntry` — same numeric-filename filter, but the whole ascending sequence instead of just the top, for `log` to classify generation-by-generation | `claimsRootDir`, `claimsDir`, `allClaimDirs`, `highestEntry`, `allEntriesAscending`, `readClaim`, `isClaimStale`, `transition`, `rollback`, `removeClaimDirWholesale` | `cmd-claim`, `cmd-release`, `cmd-rm`, `cmd-archive`, `cmd-doctor`, `cmd-unarchive`, `cmd-list`, `cmd-log` (v3.5), `core/derive.ts` |
 | `core/batch.ts` (v3.2, § 9 "Batch writes") | `--id=A,B,C` on `set`/`note`/`check`/`claim`/`release`: preflight every ID before any write, then write independently, `STATUS.md` once, `NJ_FAULT` spent after its first firing — one shared orchestration, each command supplies its own single-element logic as two callbacks | `parseBatchIds`, `runBatch` | `cmd-set`, `cmd-note`, `cmd-check`, `cmd-claim`, `cmd-release` |
-| `core/flag-table.ts` (v3.2 D144 C-2, v3.3 § 17, v3.5 `next`/`log`) | The one per-command flag table both the CLI's own `checkFlags` and `nj-mcp`'s MCP schema generator read — the global `--backlog`/`--json` controls are a separate table, never part of a command's own, so a schema built from this table excludes `backlog` by construction (§ 17) | `FLAG_TABLE`, `cliFieldNames`, `commandFields`, `commandFieldNames` | `nj-mcp.ts` and 15 `cmd-*` modules (every one except `cmd-init`, `cmd-rm`, `cmd-status`, which take no settable fields) |
+| `core/flag-table.ts` (v3.2 D144 C-2, v3.3 § 17, v3.5 `next`/`log`) | The one per-command flag table both the CLI's own `checkFlags` and `nj-mcp`'s MCP schema generator read — the global `--backlog`/`--json` controls are a separate table, never part of a command's own, so a schema built from this table excludes `backlog` by construction (§ 17) | `FLAG_TABLE`, `cliFieldNames`, `commandFields`, `commandFieldNames` | `nj-mcp.ts`, `core/help.ts` (v3.6 — `commandHelp` reuses this same table for each command's own flag list) and 15 `cmd-*` modules (every one except `cmd-init`, `cmd-rm`, `cmd-status`, which take no settable fields) |
+| `core/suggest.ts` (v3.6, DECISIONS 158 EV-3/160) | Did-you-mean: a tiny fixed synonym table checked first, then an OSA (optimal-string-alignment — an adjacent transposition costs 1, not 2) distance against the allowed values, length-dependent threshold (≤ 1 for a ≤ 4-character value, ≤ 2 otherwise), feeding the hint on an `invalid_value` failure — never the message or the accepted vocabulary | `suggestValue`, `valueHint` | 5 modules: `cmd-claim`, `cmd-list`, `cmd-new`, `cmd-next`, `cmd-set` |
 | `commands/cmd-init.ts` … `commands/cmd-log.ts` (18 modules) | One per verb (`init new set note check find show list tree rm archive unarchive claim release next log doctor status`); `init` writes the full `layout` block and the v3 README; `doctor --fix`'s step 0 migrates a legacy layout (unless both places exist, which is ambiguous and moves nothing); `check`/`find` are v3.2 (§ 10a, § 9a), `claim`/`release`/`unarchive` are v3.1 (§ 12a, § 11a), `next`/`log` are v3.5 (§ 12b, § 12c) | one `cmdX` function each | `nj` only |
 | `src/nj-mcp.ts` (v3.3, § 17 "MCP Interface") | A second, separate entry point: the dual-era MCP stdio server. Imports only `core/args.ts`, `core/config.ts`, `core/output.ts` and `core/flag-table.ts` — never a `cmd-*` module directly; a tool call spawns `dist/nj --json` as a child process instead (process-per-call, § 17), so there is no duplicated command logic to keep in sync | (an entry point, not a library — nothing else imports it) | — |
 
@@ -139,11 +172,17 @@ helper or printer calls back into a command (TSK-006's rule, checked against
 every import edge above, not assumed).
 
 Every "imported by" count in the table above, including the rows that
-predate v3.3, was re-walked mechanically for this revision (a small script
-reading every `from '....ts'` import line under `src/`, deduplicated per
-file, matched against each target module) rather than left at its 2026-09-23
-measurement — `core/constants.ts`'s count, for one example, moved from 11
-to 14 once `flag-table.ts` and the new `context`/`args` edges were counted.
+predate v3.3, was re-walked mechanically again for v3.6 (the same kind of
+small script as before: every `from '....ts'` import line under `src/`,
+deduplicated per file, matched against each target module) rather than left
+at its v3.3 measurement — a handful of counts predating v3.6 turned out
+already stale by the time of this walk (e.g. `core/output.ts`'s own count
+was stated as 24 while the list beside it already named 26 modules;
+`core/store.ts`'s had not picked up `cmd-next`'s own edge, added when `next`
+landed in v3.5), corrected here alongside the genuinely new v3.6 edges
+(`core/help.ts` now reaches into `config.ts`/`constants.ts`/`flag-table.ts`
+for `commandHelp`; `core/suggest.ts` is an entirely new module; `cmd-next`
+now also imports `core/actor.ts`, for PA-5's acting-name check).
 
 ## 3. Data flow of one call
 
@@ -188,8 +227,8 @@ an independent check — read them there for the reasoning, not here.
 Three independent nets; the team refers to them as the Oracle, the Corpus,
 and the Blindness matrix (Orakel/Korpus/Blindheits-Matrix in team shorthand).
 
-**Oracle** (`test/`, 84 files derived only from `SPECIFICATION.md` — `ac/`
-34, `edge/` 43, `fault/` 6, `stress/` 1 — run via `npm test`): black-box,
+**Oracle** (`test/`, 93 files derived only from `SPECIFICATION.md` — `ac/`
+43, `edge/` 43, `fault/` 6, `stress/` 1 — run via `npm test`): black-box,
 spawns `nj`/`dist/nj` (and, for the MCP suites, `dist/nj-mcp`), asserts
 exit code/stdout/stderr/file bytes, never reads implementation source.
 Reach for it to answer "is this still spec-conformant" — it is what

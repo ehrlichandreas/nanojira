@@ -192,6 +192,14 @@ function snapshot(root) {
   T.eq('N3 --parent=EPIC-002 picks TSK-002, not the lower-id TSK-001', r.json && r.json.id, 'TSK-002');
 }
 {
+  /* N3's --assignee leg, rewritten (stale vs PA-5, DECISIONS 158): the
+   * old version had `--as=alice --assignee=carol` pick TSK-001, assigned
+   * to carol — but PA-5 means alice can never get an element assigned to
+   * someone else, filter or no filter (AC-44 A6: that combination is
+   * always none_ready). The filter itself still needs covering, so this
+   * now tests it the only way it composes with PA-5's default: the
+   * acting name matching the filter value, and the empty-string filter
+   * narrowing to unassigned candidates only. */
   const dir = H.freshDir('ac40-n3-assignee');
   const bl = path.join(dir, 'backlog');
   ok(run(['init'], { cwd: dir }), 'nj init');
@@ -199,9 +207,25 @@ function snapshot(root) {
   ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=One', '--assignee=carol'].concat(BODY), { cwd: dir, env: at(NOW) }), 'new TSK-001');
   ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=Two'].concat(BODY), { cwd: dir, env: at(NOW) }), 'new TSK-002');
   const x = { dir, bl };
-  const r = next(x, ['--assignee=carol'], { NJ_AUTHOR: 'alice' });
-  T.exit('N3 --assignee=carol: exit 0', r, 0);
-  T.eq('N3 --assignee=carol picks TSK-001 (pre-assigned), not the lower-ranked-by-id TSK-002', r.json && r.json.id, 'TSK-001');
+
+  const asCarol = next(x, ['--assignee=carol'], { NJ_AUTHOR: 'carol' });
+  T.exit('N3 --as=carol --assignee=carol: exit 0', asCarol, 0);
+  T.eq('N3 --as=carol --assignee=carol picks TSK-001 (hers), not the lower-ranked-by-id TSK-002',
+    asCarol.json && asCarol.json.id, 'TSK-001');
+}
+{
+  const dir = H.freshDir('ac40-n3-assignee-empty');
+  const bl = path.join(dir, 'backlog');
+  ok(run(['init'], { cwd: dir }), 'nj init');
+  ok(run(['new', '--type=epic', '--title=Epic', '--description=E.'], { cwd: dir, env: at(NOW) }), 'new epic');
+  ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=One', '--assignee=carol'].concat(BODY), { cwd: dir, env: at(NOW) }), 'new TSK-001');
+  ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=Two'].concat(BODY), { cwd: dir, env: at(NOW) }), 'new TSK-002');
+  const x = { dir, bl };
+
+  const asAliceEmpty = next(x, ['--assignee='], { NJ_AUTHOR: 'alice' });
+  T.exit('N3 --as=alice --assignee= (empty): exit 0', asAliceEmpty, 0);
+  T.eq('N3 --as=alice --assignee= picks TSK-002 (unassigned), excluding TSK-001 (carol\'s)',
+    asAliceEmpty.json && asAliceEmpty.json.id, 'TSK-002');
 }
 
 /* ===================================================================== */

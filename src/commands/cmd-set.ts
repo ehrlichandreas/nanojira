@@ -14,6 +14,7 @@ import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, out, writeFeedback, emitWriteResult } from '../core/output.ts';
 import { syncH1, normalizeTitle, applySections } from '../core/parse.ts';
 import { refreshStatus } from '../core/status.ts';
+import { valueHint } from '../core/suggest.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement } from '../core/store.ts';
 
 type SectionRole = 'description' | 'acceptance';
@@ -126,11 +127,11 @@ function validateFieldValues(ctx: Context, flags: Flags) {
   if (title !== undefined && normalizeTitle(title) === '') fail('invalid_value', '--title must not be empty');
   const status = flagString(flags, 'status');
   if (status !== undefined && !ctx.cfg.statuses.includes(status)) {
-    fail('invalid_value', `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(', ')}`);
+    fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses));
   }
   const priority = flagString(flags, 'priority');
   if (priority !== undefined && !PRIORITIES.includes(priority)) {
-    fail('invalid_value', `unknown priority '${priority}'`, `Known priorities: ${PRIORITIES.join(', ')}`);
+    fail('invalid_value', `unknown priority '${priority}'`, valueHint('priority', priority, PRIORITIES));
   }
 }
 
@@ -154,7 +155,7 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
   const status = flagString(flags, 'status');
   if (status !== undefined) {
     if (!ctx.cfg.statuses.includes(status)) {
-      fail('invalid_value', `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(', ')}`);
+      fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses));
     }
     if (status === 'done') {
       // An unreadable directory anywhere hides whatever elements lie inside
@@ -174,7 +175,7 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
 
   const priority = flagString(flags, 'priority');
   if (priority !== undefined) {
-    if (!PRIORITIES.includes(priority)) fail('invalid_value', `unknown priority '${priority}'`, `Known priorities: ${PRIORITIES.join(', ')}`);
+    if (!PRIORITIES.includes(priority)) fail('invalid_value', `unknown priority '${priority}'`, valueHint('priority', priority, PRIORITIES));
     if (priority !== el.priority) { overrides.set('priority', priority); changed.push('priority'); }
   }
 

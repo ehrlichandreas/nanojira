@@ -13,10 +13,22 @@ const path = require('path');
 const os = require('os');
 const crypto = require('crypto');
 
+// The same canonical root test/lib/harness.js's H.TMP_ROOT computes
+// (duplicated rather than shared across tools/ and test/ — the same
+// established split FIXED_NOW/LATER_NOW already has, below): realpath'd,
+// NJ_TEST_ROOT if set, else /tmp. gate.js's throwaway worktree and
+// baseline.js's own SCRATCH/corpus files now live under exactly this, so
+// it is the one root every call in a gate run actually sits under —
+// included explicitly rather than trusted to arise from os.tmpdir() alone.
+const CANONICAL_TMP_ROOT = fs.realpathSync(process.env.NJ_TEST_ROOT || '/tmp');
+
 // Every spelling of "the scratch area" this platform uses. On macOS
 // os.tmpdir() is /var/folders/<x>/<y>/T — which is where the oracle's mkdtemp
-// actually lands, NOT /tmp. Longest first, so the specific prefix wins.
+// used to land before it moved to the canonical root above; os.tmpdir()'s
+// own spelling is kept here too, in case anything else on the machine still
+// uses it. Longest first, so the specific prefix wins.
 const TMP_ROOTS = Array.from(new Set([
+  CANONICAL_TMP_ROOT,
   (os.tmpdir() || '/tmp').replace(/\/+$/, ''),
   (os.tmpdir() || '/tmp').replace(/\/+$/, '').replace(/^\/private/, ''),
   '/tmp',
@@ -50,6 +62,20 @@ function sha256(buf) {
  *   the wall clock unless every fixture got utimes. Keeping the pinned values
  *   visible is deliberate — it proves the NJ_NOW plumbing still works.
  */
+/* Node's CommonJS loader realpaths the entry script's own path while
+ * resolving it (unless --preserve-symlinks-main is given) — so nj-shim's
+ * own `__dirname` (what ctx.projectRoot is built from) comes back
+ * resolved even when gate.js/baseline.js computed their OWN root
+ * (ROOT/SCRATCH, used for argv/cwd) from the unresolved form of the same
+ * path. The two ends of one exact-match comparison then disagree on
+ * "/private/tmp" vs "/tmp" — not a missing case, a comparison where each
+ * side was stripped (or not) independently. Applying the same strip to
+ * the CONTEXT value itself, not just to the text, is what makes the
+ * comparison agree regardless of which side the realpath happened on. */
+function stripPrivate(p) {
+  return typeof p === 'string' ? p.split('/private/tmp/').join('/tmp/').split('/private/var/').join('/var/') : p;
+}
+
 function normalize(text, ctx) {
   if (typeof text !== 'string') return text;
   let s = text;
@@ -58,8 +84,12 @@ function normalize(text, ctx) {
   s = s.split('/private/tmp/').join('/tmp/');
   s = s.split('/private/var/').join('/var/');
 
-  if (c.projectRoot) s = s.split(c.projectRoot).join('<PROJ>');
-  if (c.home) s = s.split(c.home).join('<HOME>');
+  const projectRoot = stripPrivate(c.projectRoot);
+  const home = stripPrivate(c.home);
+  const fixtureRoot = stripPrivate(c.fixtureRoot);
+
+  if (projectRoot) s = s.split(projectRoot).join('<PROJ>');
+  if (home) s = s.split(home).join('<HOME>');
 
   // The fixture root gets its OWN token, and it gets it FIRST. Our fixture
   // directories are deliberately named and live at a fixed path; foreign
@@ -67,7 +97,7 @@ function normalize(text, ctx) {
   // collapse to <SCRATCH> they are indistinguishable, and any rule that then
   // strips a random-looking tail also eats `fault-before-rename`. Marking our
   // own root apart is what lets the mkdtemp rule below be bound to context.
-  if (c.fixtureRoot) s = s.split(c.fixtureRoot).join('<FIXTURES>');
+  if (fixtureRoot) s = s.split(fixtureRoot).join('<FIXTURES>');
 
   // Any first-level directory under a tmp root is scratch, whoever made it.
   for (const re of SCRATCH_RES) s = s.replace(re, '<SCRATCH>');
@@ -211,6 +241,6 @@ function pinMtimes(dir, when) {
 }
 
 module.exports = {
-  FIXED_NOW, LATER_NOW, FIXED_MTIME,
+  FIXED_NOW, LATER_NOW, FIXED_MTIME, CANONICAL_TMP_ROOT,
   sha256, normalize, findBacklog, snapshotBacklog, pinMtimes, walk, backlogLabel,
 };

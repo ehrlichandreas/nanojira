@@ -58,6 +58,28 @@ const { spawnSync, spawn } = require('child_process');
 
 const HERE = __dirname;
 const NODE = process.execPath;
+// The same canonical root test/lib/harness.js's H.TMP_ROOT and
+// baseline.js's SCRATCH/corpus files now use — realpath'd, NJ_TEST_ROOT if
+// set, else /tmp — not os.tmpdir(). Two reasons: os.tmpdir() honours
+// TMPDIR, which in at least one environment this has actually run in
+// names a path with a real backlog in its own ancestor chain (§ 4's
+// upward search then finds it instead of no_backlog, a real behavioural
+// difference, not a normalisation artefact); and the un-resolved vs
+// realpath'd form of the SAME /tmp (macOS: /tmp -> /private/tmp) made
+// nj-shim's own ctx.projectRoot (realpath'd by Node's module loader) stop
+// matching this worktree's own root (computed un-resolved here) in
+// lib/record.js's normalize() — a bogus multi-hundred-call diff that had
+// nothing to do with nj. Both are closed by every root in one gate run
+// being this same, already-resolved value.
+const TMP_ROOT = require('./lib/record.js').CANONICAL_TMP_ROOT;
+// Set once, inherited by every child this process spawns (tee()'s own env
+// is `Object.assign({}, process.env, …)`): the REPLAY runs the FROZEN
+// tag's own test/, whose test/lib/harness.js cannot be changed (it is
+// exactly what is being replayed) and still calls the raw os.tmpdir().
+// Forcing TMPDIR here means os.tmpdir() returns TMP_ROOT transparently,
+// for old and new test/ alike, without touching one byte of frozen
+// content or the recorded baseline.
+process.env.TMPDIR = TMP_ROOT;
 
 function arg(name) {
   const hit = process.argv.find((a) => a.startsWith('--' + name + '='));
@@ -65,7 +87,7 @@ function arg(name) {
 }
 function usage(msg) {
   process.stderr.write(
-    `gate.js: ${msg}\nusage: gate.js --step=<commit> --frozen=<oracle-frozen tag> [--tests=<rev>] [--nj=<path>] [--harness=<rev>] [--keep]\n`
+    `gate.js: ${msg}\nusage: gate.js --step=<commit> --frozen=<oracle-frozen tag> [--tests=<rev>] [--nj=<path>] [--harness=<rev>] [--keep] [--limit=<n>] [--diff-out=<file>]\n`
   );
   process.exit(2);
 }
@@ -81,6 +103,10 @@ function git(cwd, args, opts) {
 const STEP = arg('step');
 const FROZEN = arg('frozen');
 const KEEP = process.argv.includes('--keep');
+// Forwarded to the replay's own `baseline.js verify` call, unchanged
+// meaning: see baseline.js's own usage/comments.
+const DIFF_OUT_ARG = arg('diff-out') ? ['--diff-out=' + path.resolve(arg('diff-out'))] : [];
+const LIMIT_ARG = arg('limit') ? ['--limit=' + arg('limit')] : [];
 const NJ_OVERRIDE = arg('nj') && path.resolve(arg('nj'));
 if (NJ_OVERRIDE && !fs.existsSync(NJ_OVERRIDE)) usage(`no nj at ${NJ_OVERRIDE}`);
 if (!STEP) usage('--step=<commit> is required');
@@ -121,7 +147,11 @@ function alive(pid) {
 // per-pid scratch and raw corpus files. A root without owner.pid comes from
 // a gate.js before this one and is only reported: nothing says it is dead.
 function pruneLeftovers() {
-  const tmp = os.tmpdir();
+  // TMP_ROOT, not os.tmpdir(): leftovers from before this fix (under the old
+  // os.tmpdir()-based root) are not found here and need a one-time manual
+  // cleanup; nothing new is created there going forward, so there is nothing
+  // recurring to prune.
+  const tmp = TMP_ROOT;
   let names = [];
   try { names = fs.readdirSync(tmp); } catch { return; }
   for (const n of names) {
@@ -148,7 +178,7 @@ pruneLeftovers();
 
 // ------------------------------------------------------------ own cleanup
 
-const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'nj-gate-'));
+const ROOT = fs.mkdtempSync(path.join(TMP_ROOT, 'nj-gate-'));
 fs.writeFileSync(path.join(ROOT, 'owner.pid'), String(process.pid));
 const WT = path.join(ROOT, 'projects', 'nanojira');
 const LOG = path.join(ROOT, 'gate.log');
@@ -170,11 +200,11 @@ function killGroup(sig) {
 const childPids = [];
 function removeChildScratch() {
   let names = [];
-  try { names = fs.readdirSync(os.tmpdir()); } catch { return; }
+  try { names = fs.readdirSync(TMP_ROOT); } catch { return; }
   for (const pid of childPids) {
     for (const n of names) {
       if (new RegExp(`^nj-s0-(?:scratch|record|verify)-${pid}(?:\\.ndjson)?$`).test(n)) {
-        fs.rmSync(path.join(os.tmpdir(), n), { recursive: true, force: true });
+        fs.rmSync(path.join(TMP_ROOT, n), { recursive: true, force: true });
       }
     }
   }
@@ -375,7 +405,7 @@ async function main() {
       `      harness from ${harnessName}, node ${process.version}, worktree ${WT}\n`
   );
 
-  const replay = await tee('replay', [path.join(harnessDst, 'baseline.js'), 'verify', '--nj=' + NJ]);
+  const replay = await tee('replay', [path.join(harnessDst, 'baseline.js'), 'verify', '--nj=' + NJ].concat(LIMIT_ARG, DIFF_OUT_ARG));
 
   // I5: after 2, 6 or 7 the replay's instrument (or its call) is at fault;
   // run-all cannot change that outcome, so it is not run.

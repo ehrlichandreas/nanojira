@@ -15,9 +15,24 @@ import { fail, out, writeFeedback, emitWriteResult } from '../core/output.ts';
 import { refreshStatus } from '../core/status.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement } from '../core/store.ts';
 
+/**
+ * The note's own text, as literal lines (§ 10 "Multi-line text", DECISIONS
+ * 158 EV-7): the first becomes `<text>` on the `- <ts> <author>: <text>`
+ * line itself; every line after it is a Markdown list continuation,
+ * indented by exactly two spaces — a blank line among them is written as
+ * exactly two spaces (never truly empty), the one deliberate exception to
+ * this project's "no trailing whitespace" rule, so a reader (and
+ * `parseNotes`) can tell it apart from the blank line that would otherwise
+ * end `## Notes`.
+ */
+function noteLine(ts: string, signer: string, text: string): string {
+  const [first, ...rest] = text.split('\n');
+  return [`- ${ts} ${signer}: ${first}`, ...rest.map((l) => (l === '' ? '  ' : `  ${l}`))].join('\n');
+}
+
 /** The note line, and the body with it inserted (§ 10) — shared by the single and batch paths. */
 function withNote(el: Element, text: string, signer: string, ts: string): string {
-  const line = `- ${ts} ${signer}: ${text.replace(/[\r\n]+/g, ' ')}`;
+  const line = noteLine(ts, signer, text);
   let body = el.body;
   const lines = body.split('\n');
   let idx = -1;
@@ -38,7 +53,11 @@ function withNote(el: Element, text: string, signer: string, ts: string): string
     if (/^#{1,2}[ \t]/.test(lines[j])) { end = j; break; }
   }
   let insert = end;
-  while (insert > idx + 1 && lines[insert - 1].trim() === '') insert--;
+  // A strict, exact-empty check — not `.trim() === ''` — because a
+  // multi-line note's own blank continuation line is exactly two spaces,
+  // never truly empty; only genuine section-trailing padding is skipped
+  // here, never another note's own content (§ 10 "Multi-line text").
+  while (insert > idx + 1 && lines[insert - 1] === '') insert--;
   lines.splice(insert, 0, line);
   return lines.join('\n');
 }
@@ -49,7 +68,10 @@ function cmdNote(flags: Flags, positional: string[]) {
   const ctx = context(flags);
 
   requireTargetFlagSyntax(flags);
-  const text = positional.join(' ').trim();
+  // \r\n and a lone \r normalise to \n first, the same as every other
+  // write path (§ 7); the overall text is then trimmed, exactly as before
+  // multi-line text existed (§ 10 "Multi-line text").
+  const text = positional.join(' ').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   if (text === '') fail('missing_argument', 'nj note needs the note text as an argument', 'nj note --id=TSK-007 "…"');
 
   const author = resolveActingName(flags, false);

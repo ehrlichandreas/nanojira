@@ -16,7 +16,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const zlib = require('zlib');
 const { spawnSync } = require('child_process');
 const R = require('./lib/record.js');
@@ -30,6 +29,12 @@ const SHIM = path.join(HERE, 'nj-shim');
 // discovery (ac-15) is driven by the one actually running baseline.js, not
 // left to search fixed relative paths that may not exist on this machine.
 const NJ_NODE_FOR_CHILDREN = process.env.NJ_NODE || process.execPath;
+// Set once, inherited by every child this spawns (fixtures via Ctx, oracle
+// suites, scratch scripts: all `Object.assign({}, process.env, …)`). When
+// run outside gate.js (a bare `record`/`verify`), this is baseline.js's
+// own responsibility — gate.js also sets it, for the frozen test/ it
+// replays, which cannot be changed and still calls the raw os.tmpdir().
+process.env.TMPDIR = R.CANONICAL_TMP_ROOT;
 const BASELINE_DIR = path.join(HERE, 'baseline');
 // Gzipped: the raw NDJSON is ~29 MB because every call snapshots every
 // backlog file, and a 100-element AC-7 backlog is snapshotted hundreds of
@@ -37,7 +42,10 @@ const BASELINE_DIR = path.join(HERE, 'baseline');
 // is a Node built-in, so the zero-dependency rule (§ 3) still holds.
 const CORPUS = path.join(BASELINE_DIR, 'corpus.ndjson.gz');
 const HEADER = path.join(BASELINE_DIR, 'header.json');
-const RAW_CORPUS = path.join(os.tmpdir(), `nj-s0-record-${process.pid}.ndjson`);
+// R.CANONICAL_TMP_ROOT, not os.tmpdir(): see its own comment in
+// lib/record.js for why (TMPDIR contamination; the un-resolved-vs-realpath'd
+// /tmp mismatch that broke ctx.projectRoot matching under gate.js).
+const RAW_CORPUS = path.join(R.CANONICAL_TMP_ROOT, `nj-s0-record-${process.pid}.ndjson`);
 
 function arg(name, dflt) {
   const hit = process.argv.find((a) => a.startsWith('--' + name + '='));
@@ -59,6 +67,7 @@ function heartbeat(what) {
 const mode = process.argv[2];
 if (mode !== 'record' && mode !== 'verify' && mode !== 'digest') {
   process.stderr.write('usage: baseline.js <record|verify> --nj=<path to nj> [--scratch=<dir>] [--scripts=<dir>]\n' +
+    '                                   [--limit=<n>] [--diff-out=<file>]  (verify only)\n' +
     '       baseline.js digest    (prints the test/ digest of this tree and the one the baseline pins)\n');
   process.exit(2);
 }
@@ -84,7 +93,7 @@ const NJ_ABS = NJ ? path.resolve(NJ) : null;
 // Determinism does not suffer: the normaliser folds this root to <FIXTURES>
 // before anything is recorded, so the root may vary while the records stay
 // byte-identical. That is checked, not assumed (see README).
-const SCRATCH = path.resolve(arg('scratch', path.join(os.tmpdir(), `nj-s0-scratch-${process.pid}`)));
+const SCRATCH = path.resolve(arg('scratch', path.join(R.CANONICAL_TMP_ROOT, `nj-s0-scratch-${process.pid}`)));
 // No signal handlers here, on purpose. The whole run is one synchronous
 // spawnSync loop that never returns to the event loop, so a JS handler would
 // never run -- and registering one turns off Node's default "die on SIGTERM",
@@ -95,6 +104,16 @@ const SCRATCH = path.resolve(arg('scratch', path.join(os.tmpdir(), `nj-s0-scratc
 // In the repo, not in /tmp: this corpus part vanished on reboot and took
 // `record` down with it (code 4). Same lesson as the scoping sources.
 const SCRIPTS = path.resolve(arg('scripts', path.join(HERE, 'scratch')));
+
+// verify only. LIMIT caps the per-call listing printed to stdout, same
+// default (40) and same meaning as always (DECISIONS 121: the true total
+// and the per-command tally are never capped, only this listing is).
+// DIFF_OUT, if given, writes EVERY differing call — never capped at
+// LIMIT, never clipped at 400 chars — to the named file, so a step with
+// far more diffs than any reasonable stdout listing can still be
+// inspected call by call instead of guessed at from the tally alone.
+const LIMIT = Number(arg('limit', '40'));
+const DIFF_OUT = arg('diff-out', null) ? path.resolve(arg('diff-out', null)) : null;
 
 // Every child — fixture calls, the oracle, the scratch scripts — reaches the
 // shim through this. The shim refuses to run without it, which is how the
@@ -664,31 +683,46 @@ function diff(oldRecs, newRecs, limit) {
   return { shown, total, byCommand };
 }
 
-function clip(s) {
+// `full`: false clips long before/after values to 400 chars for the stdout
+// listing (as always); true (--diff-out) never clips, because a file meant
+// for inspecting every diff defeats its own purpose if it silently
+// truncates the one thing being inspected.
+function clip(s, full) {
   if (s === undefined) return '(undefined)';
+  if (full) return s;
   return s.length > 400 ? s.slice(0, 400) + ' …' : s;
 }
 
-function showDiff(d) {
-  process.stdout.write(`\n  #${d.i} [${d.label}] nj ${(d.argv || []).join(' ')}\n`);
-  if (d.kind !== 'changed') { process.stdout.write(`    ${d.kind}\n`); return; }
-  process.stdout.write(`    differs in: ${d.fields.join(', ')}\n`);
+// Renders one diff as text and returns it, rather than writing directly —
+// so the same rendering serves both the capped stdout listing and the
+// uncapped --diff-out file, the only difference being `full` (clip) and
+// which sink the caller sends the string to.
+function renderDiff(d, full) {
+  const out = [];
+  out.push(`\n  #${d.i} [${d.label}] nj ${(d.argv || []).join(' ')}\n`);
+  if (d.kind !== 'changed') { out.push(`    ${d.kind}\n`); return out.join(''); }
+  out.push(`    differs in: ${d.fields.join(', ')}\n`);
   for (const f of d.fields) {
     if (f === 'after') {
       const fa = (d.a.after && d.a.after.files) || {};
       const fb = (d.b.after && d.b.after.files) || {};
       for (const name of new Set(Object.keys(fa).concat(Object.keys(fb)))) {
         const x = fa[name] && fa[name].nsha, y = fb[name] && fb[name].nsha;
-        if (x !== y) process.stdout.write(`      file ${name}: ${x || '(absent)'} -> ${y || '(absent)'}\n`);
+        if (x !== y) out.push(`      file ${name}: ${x || '(absent)'} -> ${y || '(absent)'}\n`);
       }
       const sa = d.a.after && d.a.after.stray, sb = d.b.after && d.b.after.stray;
-      if (sa !== sb) process.stdout.write(`      stray .nj-tmp: ${sa} -> ${sb}\n`);
+      if (sa !== sb) out.push(`      stray .nj-tmp: ${sa} -> ${sb}\n`);
       const ia = JSON.stringify(d.a.after && d.a.after.ids), ib = JSON.stringify(d.b.after && d.b.after.ids);
-      if (ia !== ib) process.stdout.write(`      .ids: ${ia} -> ${ib}\n`);
+      if (ia !== ib) out.push(`      .ids: ${ia} -> ${ib}\n`);
       continue;
     }
-    process.stdout.write(`      ${f}:\n        was: ${clip(JSON.stringify(d.a[f]))}\n        now: ${clip(JSON.stringify(d.b[f]))}\n`);
+    out.push(`      ${f}:\n        was: ${clip(JSON.stringify(d.a[f]), full)}\n        now: ${clip(JSON.stringify(d.b[f]), full)}\n`);
   }
+  return out.join('');
+}
+
+function showDiff(d) {
+  process.stdout.write(renderDiff(d, false));
 }
 
 // -------------------------------------------------------------------- modes
@@ -844,11 +878,14 @@ VERDICT_ONLY_IN_USE = headerVerdictOnly(header);
   }
 }
 
-const tmp = path.join(os.tmpdir(), `nj-s0-verify-${process.pid}.ndjson`);
+const tmp = path.join(R.CANONICAL_TMP_ROOT, `nj-s0-verify-${process.pid}.ndjson`);
 const total = collect(tmp);
 const oldRecs = readRecords(CORPUS);
 const newRecs = readRecords(tmp);
-const { shown: diffs, total: diffTotal, byCommand: diffByCommand } = diff(oldRecs, newRecs, 40);
+// DIFF_OUT needs every diff, not just the first LIMIT — diff()'s own cap
+// only applies to `shown`, so pass it no cap at all when the file is
+// requested; the stdout listing below still caps at LIMIT regardless.
+const { shown: diffs, total: diffTotal, byCommand: diffByCommand } = diff(oldRecs, newRecs, DIFF_OUT ? Infinity : LIMIT);
 
 reportParts(total);
 const excluded = markNondeterministic(oldRecs).filter(Boolean).length;
@@ -878,8 +915,14 @@ if (cannotRun.length === 0) {
     // never look like "only 40" (DECISIONS 121).
     const tally = [...diffByCommand.entries()].sort((a, b) => b[1] - a[1]).map(([cmd, n]) => `${cmd} ${n}`).join(', ');
     process.stdout.write(`\nBEHAVIOUR CHANGED — ${diffTotal} differing call(s): ${tally}\n`);
-    if (diffs.length < diffTotal) process.stdout.write(`(truncated: showing ${diffs.length} of ${diffTotal})\n`);
-    for (const d of diffs) showDiff(d);
+    const shownOnStdout = diffs.slice(0, LIMIT);
+    if (shownOnStdout.length < diffTotal) process.stdout.write(`(truncated: showing ${shownOnStdout.length} of ${diffTotal})\n`);
+    for (const d of shownOnStdout) showDiff(d);
+    if (DIFF_OUT) {
+      const text = `${diffTotal} differing call(s): ${tally}\n` + diffs.map((d) => renderDiff(d, true)).join('');
+      fs.writeFileSync(DIFF_OUT, text);
+      process.stdout.write(`\nfull diff (all ${diffs.length} call(s), un-clipped) written to ${DIFF_OUT}\n`);
+    }
     process.stdout.write('\nA differing call is a stop, not something to adjust the baseline for.\n');
   }
 }
