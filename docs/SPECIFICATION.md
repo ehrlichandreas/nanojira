@@ -5294,8 +5294,11 @@ reported, not guessed at.
     JSON object (keys = exactly the command's own flag names) — or, for
     `new` only, an array, and `children` nesting with `parent` implied.
     Mutually exclusive with field flags. `set` never takes an array: one
-    object, addressing stays on the CLI. A `ref` (always `@`-prefixed; a
-    bare name or a decorated real id is `invalid_value`) lets `depends_on`
+    object, addressing stays on the CLI. A `ref` (always `@`-prefixed, and
+    needs a name after the `@` — `@` alone is `invalid_value`, naming
+    `field: "ref"`, or `field: "depends_on"` for a `depends_on` entry of
+    just `@`; a bare name or a decorated real id is `invalid_value` too)
+    lets `depends_on`
     target a same-plan sibling **declared earlier in write order** — a
     forward or self reference is `invalid_value`, `failed_at` naming the
     referencing object (DECISIONS 173); `parent` is never `ref`-aware

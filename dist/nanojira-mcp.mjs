@@ -483,7 +483,7 @@ import * as os2 from "node:os";
 import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.7.0";
+var VERSION = "4.7.1";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;

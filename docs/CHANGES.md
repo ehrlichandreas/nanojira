@@ -5,6 +5,18 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nanojira --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 4.7.1
+
+A plan `ref` of just `@` is now refused instead of silently accepted as
+a ref with an empty name; a caller whose plan previously wrote through
+on a bare `@` now gets `invalid_value` there instead.
+
+- Fix: a plan `ref` of just `@`, with no name after it, is now
+  `invalid_value` at that node's own path (`field: "ref"`, hint "a ref
+  needs a name after the @") instead of being silently accepted as a ref
+  with an empty name; a `depends_on` entry of just `@` is refused the
+  same way (`field: "depends_on"`). (DECISIONS 238, TSK-060)
+
 ## 4.7.0
 
 `list`/`find` take a comma-separated `--status` list instead of one call

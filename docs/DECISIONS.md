@@ -6278,6 +6278,31 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        `note --text-file=-` and `set --description-file=-`; red (2 of 170
        checks) against a worktree at this entry's own pre-fix commit.
 
+238. **A plan `ref` of just `@` is refused** (2026-10-24, TSK-060; found
+     by Reviewer while reviewing TSK-056).
+     - The bug: a `new --input=` plan's `"ref": "@"` passed the
+       starts-with-`@` check (it does start with `@`) and was accepted as a
+       ref with an empty name; `"depends_on": ["@"]` then resolved to it.
+       Pre-existing since plans got refs — not introduced by TSK-056.
+     - Settled: a `ref` is `@` followed by at least one character. `@`
+       alone is `invalid_value` at that node's own path, `field: 'ref'`
+       (DECISIONS 237's naming rule), hint `"a ref needs a name after the
+       @"`. A `depends_on` entry of just `@` is refused the same way,
+       `field: 'depends_on'`, same hint — checked in `validatePlanNode`
+       (`cmd-new.ts`) right where the existing `@`-prefix and
+       decorated-real-id checks already run, before either reaches the
+       "does this ref/name resolve to anything" logic. Nothing else about
+       refs changes — no new character rules, no change to a bare name's
+       or a decorated real id's own `invalid_value`.
+     - Tests: two new legs in the existing `test/ac/ac-52-input-plans.ts`
+       (B1c for the `ref` case, B2b for the `depends_on` case; 124 checks
+       total). Red-proved against the real v4.7.0 `bin/nanojira` (a second
+       worktree at `df321f3f`, no stash, removed after): 8 of 124 checks
+       fail there — B1c's five assertions, plus B2b's `error`/`field`/hint
+       (its exit-1 and nothing-written legs already passed before the fix,
+       since the old code's `not_found` on an empty-ref lookup also exits 1
+       and writes nothing — only the code/field/hint distinguish the two).
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

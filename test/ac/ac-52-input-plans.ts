@@ -230,6 +230,21 @@ function taskCount(dir: string) {
 }
 
 /* ===================================================================== */
+/* B1c — ref is just '@', no name after it (TSK-060): invalid_value at   */
+/* the node's own path, field ref, a hint naming the rule                */
+/* ===================================================================== */
+{
+  const dir = fixture('ac52-b1c');
+  const plan = { type: 'subtask', parent: 'TSK-001', ref: '@', title: 'Implement', description: 'D.', acceptance: '- [ ] x' };
+  const r = runStdin(['new', '--input=-'], dir, JSON.stringify(plan));
+  T.exit('B1c ref of just @: exit 1', r, 1);
+  T.eq('B1c invalid_value', r.json && r.json.error, 'invalid_value');
+  T.eq('B1c field is ref', r.json && r.json.field, 'ref');
+  T.eq('B1c hint says a ref needs a name after the @', r.json && r.json.hint, 'a ref needs a name after the @');
+  T.eq('B1c nothing written', subtaskCount(dir), 0);
+}
+
+/* ===================================================================== */
 /* B2 — a depends_on entry that is a decorated real id (@ + real id      */
 /* shape) is invalid_value, regardless of whether that id exists         */
 /* ===================================================================== */
@@ -240,6 +255,21 @@ function taskCount(dir: string) {
   T.exit('B2 depends_on with a decorated real id: exit 1', r, 1);
   T.eq('B2 invalid_value', r.json && r.json.error, 'invalid_value');
   T.eq('B2 nothing written', subtaskCount(dir), 0);
+}
+
+/* ===================================================================== */
+/* B2b — a depends_on entry of just '@' (TSK-060): refused the same way   */
+/* as a ref of just '@', field depends_on, the same hint                  */
+/* ===================================================================== */
+{
+  const dir = fixture('ac52-b2b');
+  const plan = { type: 'subtask', parent: 'TSK-001', title: 'Review', depends_on: ['@'], description: 'D.', acceptance: '- [ ] x' };
+  const r = runStdin(['new', '--input=-'], dir, JSON.stringify(plan));
+  T.exit('B2b depends_on entry of just @: exit 1', r, 1);
+  T.eq('B2b invalid_value', r.json && r.json.error, 'invalid_value');
+  T.eq('B2b field is depends_on', r.json && r.json.field, 'depends_on');
+  T.eq('B2b hint says a ref needs a name after the @', r.json && r.json.hint, 'a ref needs a name after the @');
+  T.eq('B2b nothing written', subtaskCount(dir), 0);
 }
 
 /* ===================================================================== */

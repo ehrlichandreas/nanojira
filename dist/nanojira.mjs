@@ -2691,7 +2691,7 @@ import * as os2 from "node:os";
 import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.7.0";
+var VERSION = "4.7.1";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -4680,6 +4680,7 @@ function validatePlanNode(ctx, node, flat, seenRefs, anyRefIndex, declaredSoFar,
         "ref"
       );
     }
+    if (ref === "@") fail("invalid_value", `'ref' at ${node.path} is just '@'`, "a ref needs a name after the @", "ref");
     if (REAL_ID_SHAPE.test(ref.slice(1))) fail("invalid_value", `'ref' at ${node.path} looks like a real id ('${ref}') \u2014 a decorated real id is never a valid ref name`, void 0, "ref");
     if (seenRefs.has(ref)) fail("invalid_value", `'${ref}' is declared on more than one object in this plan`, void 0, "ref");
     seenRefs.add(ref);
@@ -4691,6 +4692,7 @@ function validatePlanNode(ctx, node, flat, seenRefs, anyRefIndex, declaredSoFar,
     deps = depsRaw;
     for (const d of deps) {
       if (d.startsWith("@")) {
+        if (d === "@") fail("invalid_value", `depends_on entry at ${node.path} is just '@'`, "a ref needs a name after the @", "depends_on");
         if (REAL_ID_SHAPE.test(d.slice(1))) fail("invalid_value", `depends_on entry '${d}' at ${node.path} looks like a real id, not a ref`, void 0, "depends_on");
         if (!anyRefIndex.has(d)) fail("not_found", `depends_on target '${d}' does not resolve to any ref declared in this plan`);
         if (!declaredSoFar.has(d)) {

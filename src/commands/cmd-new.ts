@@ -466,6 +466,7 @@ function validatePlanNode(ctx: Context, node: FlatNode, flat: FlatNode[], seenRe
       fail('invalid_value', `'ref' at ${node.path} must start with '@'`,
         typeof ref === 'string' && ref !== '' ? `use "@${ref}"` : undefined, 'ref');
     }
+    if (ref === '@') fail('invalid_value', `'ref' at ${node.path} is just '@'`, 'a ref needs a name after the @', 'ref');
     if (REAL_ID_SHAPE.test(ref.slice(1))) fail('invalid_value', `'ref' at ${node.path} looks like a real id ('${ref}') — a decorated real id is never a valid ref name`, undefined, 'ref');
     if (seenRefs.has(ref)) fail('invalid_value', `'${ref}' is declared on more than one object in this plan`, undefined, 'ref');
     seenRefs.add(ref);
@@ -478,6 +479,7 @@ function validatePlanNode(ctx: Context, node: FlatNode, flat: FlatNode[], seenRe
     deps = depsRaw as string[];
     for (const d of deps) {
       if (d.startsWith('@')) {
+        if (d === '@') fail('invalid_value', `depends_on entry at ${node.path} is just '@'`, 'a ref needs a name after the @', 'depends_on');
         if (REAL_ID_SHAPE.test(d.slice(1))) fail('invalid_value', `depends_on entry '${d}' at ${node.path} looks like a real id, not a ref`, undefined, 'depends_on');
         if (!anyRefIndex.has(d)) fail('not_found', `depends_on target '${d}' does not resolve to any ref declared in this plan`);
         // A ref must be declared EARLIER in the plan's write order
