@@ -307,5 +307,59 @@ await withServer(model('mcp-m3'), [], {}, async s => {
   });
 }
 
+/* ===================================================================== */
+/* M12 — nj-mcp finds its sibling `nj` by its OWN extension (DECISIONS   */
+/* 179): as `nj-mcp` (no extension) it spawns `nj`; as `nj-mcp.cjs` it   */
+/* must spawn `nj.cjs`, not a same-named sh wrapper next to it — `node`  */
+/* cannot parse a shell script, so the call would otherwise fail.        */
+/* ===================================================================== */
+function spawnMcpAt(njMcpPath, x, args, env) {
+  return MCP.spawnServer(njMcpPath, ['--backlog=' + x.bl].concat(args || []),
+    { cwd: x.dir, env: Object.assign({ NJ_NOW: NOW }, env || {}) });
+}
+async function withServerAt(njMcpPath, x, args, env, fn) {
+  const s = spawnMcpAt(njMcpPath, x, args, env);
+  try { await fn(s); } finally { await s.close(); }
+}
+function copyExec(src, dest) {
+  fs.copyFileSync(src, dest);
+  fs.chmodSync(dest, 0o755);
+}
+{
+  /* M12a — baseline, unchanged layout: dist/nj-mcp next to dist/nj (both
+   * extensionless). Already green; a control for M12b. */
+  const bin = H.freshDir('mcp-m12a-bin');
+  copyExec(H.NJ, path.join(bin, 'nj'));
+  copyExec(H.NJ_MCP, path.join(bin, 'nj-mcp'));
+  const x = model('mcp-m12a');
+  await withServerAt(path.join(bin, 'nj-mcp'), x, [], {}, async s => {
+    const r = await s.modernToolsCall('doctor', {});
+    T.check('M12a extensionless nj-mcp next to extensionless nj: no protocol error',
+      !r.error, J(r.error));
+    T.check('M12a extensionless nj-mcp next to extensionless nj: doctor returns a result',
+      !!(r.result && r.result.structuredContent), J(r.result));
+  });
+}
+{
+  /* M12b — a release per D179: nj-mcp.cjs next to nj.cjs AND a same-named
+   * sh wrapper `nj` (not `nj.cjs`) that a careless sibling lookup would
+   * hit instead. nj-mcp must notice its own `.cjs` extension and spawn
+   * `nj.cjs`, never the wrapper. */
+  const bin = H.freshDir('mcp-m12b-bin');
+  copyExec(H.NJ, path.join(bin, 'nj.cjs'));
+  copyExec(H.NJ_MCP, path.join(bin, 'nj-mcp.cjs'));
+  fs.writeFileSync(path.join(bin, 'nj'),
+    '#!/bin/sh\nexec node "$(dirname "$0")/nj.cjs" "$@"\n');
+  fs.chmodSync(path.join(bin, 'nj'), 0o755);
+  const x = model('mcp-m12b');
+  await withServerAt(path.join(bin, 'nj-mcp.cjs'), x, [], {}, async s => {
+    const r = await s.modernToolsCall('doctor', {});
+    T.check('M12b nj-mcp.cjs spawns nj.cjs (its own extension), not the sh wrapper `nj`: no protocol error',
+      !r.error, J(r.error));
+    T.check('M12b nj-mcp.cjs spawns nj.cjs (its own extension), not the sh wrapper `nj`: doctor returns a result',
+      !!(r.result && r.result.structuredContent), J(r.result) + ' stderr=' + s.stderr());
+  });
+}
+
 T.finish();
 })();

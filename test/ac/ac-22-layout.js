@@ -95,7 +95,9 @@ function elementBytes(id, e) {
   const fields = { id, type: e.type, parent: e.parent, title, status: e.status, created: NOW, updated: NOW };
   if (e.archived) fields.archived = NOW;
   let body = '# ' + title + '\n\n## Description\nSomething.\n';
-  if (e.type !== 'epic' && !e.incomplete) body += '\n## Acceptance Criteria\n- [ ] It works\n';
+  // Ticked for a live `done` element: an unticked box there would also carry
+  // done:open_acceptance (D176 B), which these layout fixtures do not pin.
+  if (e.type !== 'epic' && !e.incomplete) body += '\n## Acceptance Criteria\n- [' + (e.status === 'done' ? 'x' : ' ') + '] It works\n';
   return H.element(fields, body);
 }
 

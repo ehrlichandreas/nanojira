@@ -18,7 +18,8 @@ import { context } from '../core/context.ts';
 import { elementProblems, compareElements } from '../core/derive.ts';
 import { ID_FOLDER, moveTarget, misplacedCode, ownFolder, removeEmptiedIdFolders } from '../core/layout.ts';
 import { out } from '../core/output.ts';
-import { syncH1 } from '../core/parse.ts';
+import { syncH1, sectionCheckboxCounts } from '../core/parse.ts';
+import { article } from './cmd-new.ts';
 import { V2_README, V3_README } from '../core/readme-texts.ts';
 import { statusIsFresh, refreshStatus } from '../core/status.ts';
 import { nowIso, nowMs, mtimeIso, readTombstones, atomicWrite, planMove, runMove, renderElement } from '../core/store.ts';
@@ -67,7 +68,7 @@ function collectFindings(ctx: Context): Finding[] {
         }
         continue;
       }
-      findings.push({ code, severity: sev, element: el.id, file: el.file, message: describeFinding(code, el, dupGroups) });
+      findings.push({ code, severity: sev, element: el.id, file: el.file, message: describeFinding(code, el, dupGroups, ctx.cfg) });
     }
   }
 
@@ -185,7 +186,7 @@ function backlogLabel(backlog: string) {
   return (rel === '' ? '.' : rel) + '/';
 }
 
-function describeFinding(code: string, el: Element, dupGroups: Map<string, Element[]>): string {
+function describeFinding(code: string, el: Element, dupGroups: Map<string, Element[]>, cfg: Context['cfg']): string {
   switch (code) {
     case 'duplicate_id': return `duplicate id, also in: ${(dupGroups.get(el.id) as Element[]).filter((o) => o !== el).map((o) => o.file).join(', ')}`;
     case 'missing:title': return 'title is absent or empty';
@@ -200,7 +201,7 @@ function describeFinding(code: string, el: Element, dupGroups: Map<string, Eleme
     case 'parent:orphaned': return 'parent is absent';
     case 'parent:dangling': return `parent '${el.parent}' points at nothing`;
     case 'parent:cycle': return 'parent chain contains a cycle';
-    case 'parent:hierarchy': return el.type === 'epic' ? 'an epic must not have a parent' : `a ${el.type} needs a ${PARENT_TYPE[el.type as string]} as parent`;
+    case 'parent:hierarchy': return el.type === 'epic' ? 'an epic must not have a parent' : `a ${el.type} needs ${article(PARENT_TYPE[el.type as string])} ${PARENT_TYPE[el.type as string]} as parent`;
     case 'depends_on:dangling': return `depends_on points at a missing element (${el.depends_on.join(', ')})`;
     case 'depends_on:cycle': return 'depends_on graph contains a cycle';
     case 'unknown:status': return `unknown status '${el.status}'`;
@@ -213,6 +214,10 @@ function describeFinding(code: string, el: Element, dupGroups: Map<string, Eleme
     case 'id:no_tombstone': return 'no tombstone in the ids folder — hand-created, or partial tombstone loss';
     case 'acceptance:no_checkbox': return 'acceptance criteria has content but no checkbox items — nothing for check to tick';
     case 'done:no_acceptance': return 'done with no acceptance criteria';
+    case 'done:open_acceptance': {
+      const counts = sectionCheckboxCounts(el.body, cfg.sections.acceptance);
+      return `done with ${counts ? counts.unticked : '?'} of ${counts ? counts.total : '?'} acceptance boxes still unticked`;
+    }
     default: return code;
   }
 }

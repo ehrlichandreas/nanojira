@@ -6,6 +6,7 @@ import type { Element, Config, EntryJson } from './types.ts';
 
 import { readClaim, isClaimStale } from './claims.ts';
 import { PRIORITY_WEIGHT, SEVERITY, BLOCKS_READY, BACKLOG_LEVEL } from './constants.ts';
+import { sectionCheckboxCounts } from './parse.ts';
 import { nowMs } from './store.ts';
 
 // -------------------------------------------------------------- derivations
@@ -119,4 +120,19 @@ function countsOf(scope: Element[], backlogErrors = 0) {
   };
 }
 
-export { elementProblems, isIncomplete, isReady, hasOpenChild, compareElements, entryJson, countsOf };
+/**
+ * `open_acceptance` (§ 9, § 12a, DECISIONS 176 B): the additive result
+ * field `set`/`claim` carry alongside `entry`, present exactly when this
+ * call named `--status=<last>` AND that leaves `done:open_acceptance` on
+ * the written element (not suppressed by `problems.ignore`) -- never
+ * computed, let alone shown, for a write that didn't name the final status
+ * itself, even if the element happened to already be done.
+ */
+function openAcceptanceExtra(el: Element, cfg: Config, isFinal: boolean): { open_acceptance: { unticked: number; total: number } } | Record<string, never> {
+  if (!isFinal) return {};
+  if (!elementProblems(el, cfg.problems.ignore).includes('done:open_acceptance')) return {};
+  const counts = sectionCheckboxCounts(el.body, cfg.sections.acceptance);
+  return counts ? { open_acceptance: counts } : {};
+}
+
+export { elementProblems, isIncomplete, isReady, hasOpenChild, compareElements, entryJson, countsOf, openAcceptanceExtra };

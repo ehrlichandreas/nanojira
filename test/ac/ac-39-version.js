@@ -15,7 +15,7 @@
  * unknown_field."
  *
  * The expected version string is pinned to the package.json "version"
- * field's current value — "3.8.0" as of v3.8's release docs round — the
+ * field's current value — "3.9.0" as of v3.9's release docs round — the
  * same spec-named value this whole criterion exists to check, not a
  * looser pattern match. Bumping this pin is expected to go red until the
  * Implementer bumps package.json to match (and rebuilds); that is the
@@ -30,7 +30,7 @@ const T = H.T;
 H.requireNj();
 H.requireNjMcp();
 
-const VERSION = '3.8.0';
+const VERSION = '3.9.0';
 function J(x) { return JSON.stringify(x === undefined ? null : x); }
 
 function envFor(o) {

@@ -29,7 +29,7 @@ var import_child_process = require("child_process");
 
 // src/core/constants.ts
 var SECTION_FLAGS = ["description", "description-file", "acceptance", "acceptance-file"];
-var SETTABLE_FIELDS = ["title", "status", "priority", "assignee", "tags", "depends_on"].concat(SECTION_FLAGS);
+var SETTABLE_FIELDS = ["title", "parent", "status", "priority", "assignee", "tags", "depends_on"].concat(SECTION_FLAGS);
 var NEW_FIELDS = ["type", "parent", "title", "status", "priority", "assignee", "tags", "depends_on"].concat(SECTION_FLAGS);
 var V3_DIR_REL = ".nanojira";
 var V3_CONFIG_REL = ".nanojira/config.json";
@@ -89,7 +89,7 @@ var os = __toESM(require("os"), 1);
 var path = __toESM(require("path"), 1);
 
 // src/core/version.ts
-var VERSION = "3.8.0";
+var VERSION = "3.9.0";
 
 // src/core/config.ts
 var SOURCE_CODE = { flag: "invalid_backlog_flag", env: "invalid_backlog_env", njrc: "invalid_backlog_njrc" };
@@ -388,7 +388,8 @@ function main() {
 `);
     process.exit(1);
   }
-  const njPath = path2.join(path2.dirname(path2.resolve(process.argv[1])), "nj");
+  const selfIsCjs = path2.basename(process.argv[1]).endsWith(".cjs");
+  const njPath = path2.join(path2.dirname(path2.resolve(process.argv[1])), selfIsCjs ? "nj.cjs" : "nj");
   const liveChildren = /* @__PURE__ */ new Set();
   function send(obj) {
     process.stdout.write(JSON.stringify(obj) + "\n");

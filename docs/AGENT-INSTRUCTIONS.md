@@ -58,7 +58,16 @@ and subtasks, one Markdown file per element, committed alongside the code.
   `nj release --id=<id> --as=<your-name>`, so someone else can claim it.
 - Never hand-edit files under `backlog/` — always go through `nj`.
 - Tick acceptance criteria with `nj check --id=<id> --text="<substring>"`,
-  never by editing the checkbox text yourself.
+  never by editing the checkbox text yourself — and tick every box
+  *before* setting `--status=done`, not after: a `done` task/subtask with
+  an unticked box draws the `done:open_acceptance` warning (never
+  blocking, but `nj doctor` will flag it, and someone will ask).
+- Reorganising the backlog? `nj set --id=<id> --parent=<new-parent-id>`
+  moves a task under a different epic (or a subtask under a different
+  task) in place — id, body, notes and claim all carry over unchanged.
+  Never `nj rm` and recreate just to change where something sits; that
+  loses the id, the history and any claim on it. The new parent must
+  already exist, be live and be the right type, same as `new --parent`.
 - Sign notes with `nj note --id=<id> "..." --as=<your-name>`.
 - Picking up someone else's work, or just confused about an element?
   `nj log --id=<id> --json` shows what happened to it: when it was

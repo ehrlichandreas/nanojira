@@ -79,8 +79,11 @@ const ELEMENTS = {
     '# Legacy epic\n\n## Description\nThe v2 epic.\n'),
   'tasks/TSK-001.md': el({ id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'Open task', status: 'todo' },
     complete('Open task') + '\n## Notes\n\n### 2026-09-21T18:00:00Z\nKept byte for byte: ümlaut, 漢字, 🚀.\n'),
+  // Ticked: a live `done` element with an unticked box would also carry
+  // done:open_acceptance (D176 B), breaking this fixture's "clean on
+  // purpose" intent above.
   'tasks/TSK-003.md': el({ id: 'TSK-003', type: 'task', parent: 'EPIC-001', title: 'Done task', status: 'done' },
-    complete('Done task')),
+    H.doneBody('Done task')),
   'subtasks/SUB-001.md': el({ id: 'SUB-001', type: 'subtask', parent: 'TSK-001', title: 'A subtask', status: 'todo' },
     complete('A subtask')),
   'archive/TSK-004.md': el({ id: 'TSK-004', type: 'task', parent: 'EPIC-001', title: 'Archived task', status: 'done',

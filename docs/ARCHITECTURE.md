@@ -136,6 +136,40 @@ existing ones, again no new commands:
   entries[0] } : {}` — no new module, no change to `list`/`find`, which
   never spread this object in.
 
+**v3.9** (DECISIONS 176, 177) is `set`'s first write to `parent`, plus a
+third acceptance-quality warning — no new module, both additions to
+existing ones:
+
+- **`set --parent`** (176 A, 177): `cmd-set.ts` reuses `cmd-new.ts`'s own
+  `checkExplicitParent` unchanged for the missing/wrong-type/archived/
+  epic validation, so the two commands' error codes for the same four
+  conditions can never drift apart. `reparentMove` (new, `cmd-set.ts`)
+  computes the `hierarchy`-layout move — `core/layout.ts`'s
+  `expectedPlace` against a shadow copy of the element with `parent`
+  already swapped, never touching the real graph — and returns `null`
+  under `type`/`flat`, where reparenting only ever changes the
+  frontmatter. The frontmatter write (`guardedWrite`/
+  `guardedWriteCatchable`) lands first; the physical move (`core/store.ts`
+  `runMove`, the same primitive `archive`/`doctor --fix` already use for a
+  subtree) runs only once that write has actually landed, so a crash
+  between the two never leaves a half-moved element. `set --parent` never
+  calls `core/load.ts`'s `descendants`, so the `childMap`/`ctx.kids` memo
+  (§ 4 "Invariants", DECISIONS 81) is never populated during a reparenting
+  call — the invariant that memo depends on now has its first real verb
+  to watch, and holds.
+- **`done:open_acceptance`** (176 B): the third deriver alongside
+  `acceptance:no_checkbox`/`done:no_acceptance` in `core/load.ts`, reusing
+  the same span-and-checkbox scan `core/parse.ts` already exposed for
+  those two (and for `nj check`'s own scan) — one more count read off the
+  same pass, not a second scan. `core/derive.ts`'s new
+  `openAcceptanceExtra(el, cfg, isFinal)` is the one place the additive
+  `open_acceptance: {unticked, total}` field is built, called from both
+  `cmd-set.ts` and `cmd-claim.ts` for the same `--status=<last>` condition
+  `released?` (171 B) already uses, so the two additive fields share one
+  "did this call land the element in the final status" test. `doctor`'s
+  and `new`/`set`/`note`/`check`'s own prose (`core/output.ts`) name the
+  count via the same deriver output, never re-deriving it.
+
 ## 1. Build
 
 ```
@@ -209,14 +243,14 @@ would actually reach for, not every name; "imported by" is exact.
 | `core/types.ts` | Every shared interface/type (`Element`, `Context`, `Flags`, the nine-stage `Skeleton→…→Element` chain, `NonEmptyString`) — never `require()`d, only `import type` | `Element`, `Context`, `Flags`, `Config`, `Finding`, `EntryJson`, staged-builder types | 32 other modules (type-only) |
 | `core/constants.ts` | Field tables, status/priority vocab, the closed `SEVERITY` map | `TYPE_DIR`, `PARENT_TYPE`, `SEVERITY`, `DEFAULT_CONFIG`, `SETTABLE_FIELDS`, `NEW_FIELDS` | 15 modules: `args`, `config`, `context`, `derive`, `flag-table`, `help` (v3.6), `layout`, `load`, `parse`, `store`, 5×`cmd-*` |
 | `core/help.ts` | The `nj help` text, plus (v3.6, DECISIONS 158 EV-2) `commandHelp`, one command's own synopsis/flags/allowed values, reusing `flag-table.ts`'s schema and `config.ts`'s backlog resolution to show the resolved backlog's own `statuses` when one resolves cleanly | `HELP`, `commandHelp` | `nj` |
-| `core/derive.ts` | Read-only views over a loaded `Element`: sort order, readiness, JSON entry shape | `elementProblems`, `isReady`, `compareElements`, `entryJson`, `countsOf` | 18 modules: `context`, `output`, `status`, 15×`cmd-*` (v3.5 adds `cmd-next`, reusing `isReady` rather than re-deriving readiness) |
+| `core/derive.ts` | Read-only views over a loaded `Element`: sort order, readiness, JSON entry shape | `elementProblems`, `isReady`, `compareElements`, `entryJson`, `countsOf`, `openAcceptanceExtra` (v3.9, 176 B) | 18 modules: `context`, `output`, `status`, 15×`cmd-*` (v3.5 adds `cmd-next`, reusing `isReady` rather than re-deriving readiness; v3.9 adds `cmd-set`/`cmd-claim` calling `openAcceptanceExtra`) |
 | `core/parse.ts` | Frontmatter grammar and body-section editing, no `Element` knowledge | `parseFile`, `serialize`, `syncH1`, `applySections`, `parseNotes` (v3.5, § 12c — reads `## Notes` lines back out, the read-side mirror of `nj note`'s own write grammar), `CHECKBOX_RE`/`sectionHasCheckbox` (v3.7, 163 E — `CHECKBOX_RE` moved here from `cmd-check.ts` so `acceptance:no_checkbox`'s span check and `nj check`'s own scan can never disagree on what counts as a checkbox) | `args`, `load`, `store`, 5×`cmd-*` (v3.5 adds `cmd-log`; v3.7's `cmd-check` now imports `CHECKBOX_RE` from here instead of defining its own) |
 | `core/output.ts` | The `Fail` error type, `--json` state, all printing — and the one module with a real load-time side effect (below) | `fail`, `hardExit`, `out`, `writeFeedback`, `emitWriteResult`, `emitFailure` | 26 modules: `actor`, `args`, `batch`, `config`, `context`, `nj`, `nj-mcp`, `store`, every `cmd-*` |
 | `core/args.ts` | CLI flag parsing and validation, no filesystem access; `--backlog` is accepted by every command here, in `checkFlags` | `parseArgs`, `checkFlags`, `flagString`, `readSectionFlags` | `actor`, `batch`, `config`, `context`, `nj`, `nj-mcp`, every `cmd-*` |
 | `core/config.ts` | The v3 configuration at `.nanojira/config.json` (including the `layout` block, § 5) — or, on a legacy backlog, the v2 one at the top level; backlog location (`--backlog` > `NJ_BACKLOG` > upward search, `.njrc` before `backlog/` per directory, either place holding a backlog), the strict `.njrc` parser (ownership re-checked unconditionally through the same fd it reads, not only for a symlink). v3.7 (165/166/167) added `problems.ignore`'s validation (a known error/`incomplete:*` code listed there stays `invalid_config`; an unknown one is the warning `config:unknown_code` and is skipped), every config key's unknown-key check now returning a warning (`config:unknown_key`) instead of an `errs` entry, and `minVersion`'s own version-tuple comparison, checked first and short-circuiting into a new `needsNewerNj` result field before any other validation runs | `loadConfig`, `findBacklog`, `initLocation`, `holdsBacklog`, `isLegacyBacklog` | `context`, `nj-mcp`, `cmd-init`, `cmd-doctor`, `core/help.ts` (v3.6 — per-command `--help` resolves the backlog to show its configured `statuses`) |
 | `core/layout.ts` | Where element files lie (§ 4): the one recursive scan (configured folders first, so a v2 backlog scans in v2's order; never into dot-directories or through directory symlinks), and the place each group gives an element — derived from the frontmatter, never the reverse | `scanBacklog`, `folderOf`, `expectedPlace`, `moveTarget`, `misplacedCode`, `ownFolder` | `load`, `status`, `cmd-archive`, `cmd-doctor`, `cmd-new`, `cmd-rm`, `cmd-unarchive` |
 | `core/store.ts` | Clock, tombstones (keyed by an explicit `idsDir` — `.nanojira/ids`, or a legacy backlog's `.ids`, never assumed), atomic file writes, the write-time compare guard, and the move planner that `archive` and `doctor --fix` share: every target is checked before the first `rename` (ENOENT only, not any other `lstat` failure); existing folders are merged into, a same-file (same dev+ino) target is no move, and existing files are never overwritten (DECISIONS 94, 105 F2, TSK-029 T2) | `nowIso`, `atomicWrite`, `atomicReplace`, `compareGuard`, `guardedWrite`, `planMove`, `runMove`, `renderElement` | 14 modules: `config`, `derive`, `load`, `status`, 10×`cmd-*` (v3.5 adds `cmd-next`) |
-| `core/load.ts` | `loadElement` (nine derivers), `deriveGraph` (eleven steps, `markPlaces` among them), `loadBacklog`. v3.7 (163 E/F, 167) adds `acceptance:no_checkbox`/`done:no_acceptance` to the same deriver that already computes `incomplete:acceptance` — both new codes skip archived elements entirely | `loadElement`, `deriveGraph`, `childMap`, `descendants`, `loadBacklog` | 11 modules: `context`, `status`, 9×`cmd-*` |
+| `core/load.ts` | `loadElement` (nine derivers), `deriveGraph` (eleven steps, `markPlaces` among them), `loadBacklog`. v3.7 (163 E/F, 167) adds `acceptance:no_checkbox`/`done:no_acceptance` to the same deriver that already computes `incomplete:acceptance` — both new codes skip archived elements entirely; v3.9 (176 B) adds `done:open_acceptance` to the same deriver, skipping archived elements the same way | `loadElement`, `deriveGraph`, `childMap`, `descendants`, `loadBacklog` | 11 modules: `context`, `status`, 9×`cmd-*` |
 | `core/status.ts` | The status overview `STATUS.md` (§ 4): the byte-exact renderer, the freshness check `doctor` reports as `backlog:status_stale`, and the post-write refresh — one full scan, an atomic replace without fault hooks, a failure only ever a `Warning:` on stderr | `renderStatus`, `statusIsFresh`, `refreshStatus` | `cmd-doctor`, `cmd-init`, `cmd-new`, `cmd-set`, `cmd-note`, `cmd-rm`, `cmd-archive`, `cmd-check`, `cmd-claim`, `cmd-unarchive`, `cmd-next` (v3.5 — `next`'s claim, and its optional `--status`, go through the same refresh every other write does; `cmd-log` never appears here, since it writes nothing) |
 | `core/readme-texts.ts` | The two `README.md` texts, kept in one place so they cannot drift apart: the v3 text `init` writes, and the exact v2 text (frozen at `b65aa5f`) step 0 compares a legacy backlog's README against before replacing it — a user's own edit is left alone either way | `V2_README`, `V3_README` | `cmd-init`, `cmd-doctor` |
 | `core/context.ts` | Per-command setup: backlog+config+elements (refusing a legacy backlog with `legacy_layout`, except for `doctor`'s own `lenient`), target resolution, the five `require*` guards | `context`, `resolveTarget`, `requireWritable`, `requireNoStubs`, `requireNoUnreadableDirs`, `requireActive` | every `cmd-*` module except `cmd-init` (which creates the backlog, so there is nothing yet to load a context from) |
@@ -278,7 +312,7 @@ printed feedback reflects the post-write graph, not the pre-write one.
 | `doctorFix`'s step 0 (legacy migration) plus its ten numbered steps (mtime snapshot + § 14's steps 1–9) run in order | **Compiler** (phantom `FixCtx<S>`; a swapped call is a `tsc` error) for steps 1–9 — step 0 runs before the typed chain even starts, since a legacy backlog has no v3 layout to snapshot yet — *and*, independently, **Oracle**, because `exit-doctor-fix.js` pins `fixed[]` in step order | `cmd-doctor.ts` |
 | `deriveGraph`'s eleven steps may run in any order **only while** (1) no pass reads another's `problems`, (2) no pass writes any field but `problems`, (3) no mark pass reads `byId`/`children` | **Corpus** convention, not mechanically enforced — a comment at `deriveGraph`, checked by a differential mutant | `load.ts` `deriveGraph`; DECISIONS 77 |
 | `assignee` stays `''` (never normalised to `null` like `parent`) — `cmdSet`'s `--assignee=` delete depends on the distinction | **Oracle** (`cmd-set.ts` behaviour is spec-pinned) — nothing mechanical stops someone from "cleaning up" the asymmetry | `load.ts` `deriveOptionals` |
-| The `childMap`/`ctx.kids` memo across `deriveGraph`'s calls is harmless **only** while no verb moves parentage | **None mechanical** — a property of round one (no command takes `--parent`), not a guarantee the type system or a fixture enforces; the trigger for a fixture is the first verb that moves an element | `load.ts` `childMap`/`descendants`; DECISIONS 81 |
+| The `childMap`/`ctx.kids` memo across `deriveGraph`'s calls is harmless **only** while no verb moves parentage | **None mechanical** — `set --parent` (v3.9, DECISIONS 176/177) is now that first verb, but it never calls `descendants` (`ctx.kids` is memoized lazily, only by `cmd-archive.ts`/`cmd-rm.ts`), so the memo is never populated during a reparenting call; still not a guarantee the type system or a fixture enforces against a future caller | `load.ts` `childMap`/`descendants`; `commands/cmd-set.ts` `reparentMove`; DECISIONS 81, 176/177 |
 | EPIPE on stdout (reader closed early, e.g. `\| head`) exits 0 silently; any other stdout write error still crashes visibly | **Code**, one place: `output.ts`'s `process.stdout` error handler re-throws everything except `EPIPE` | `output.ts` (registered at load time); AMBIGUITIES.md 48 |
 
 DECISIONS 77 and 81 are cited, not repeated: both record a case where the

@@ -154,9 +154,15 @@ disagrees with the layout carries `type:folder` (group `type`) or
 `layout:misplaced` (groups `hierarchy` and `flat`); it still loads and every
 command still works on it. `nj doctor --fix` moves it (§ 14).
 
-`nj` never changes `parent` (`nj set` has no `--parent`), so under
-`hierarchy` a file moves only through `nj archive`, `nj doctor --fix`, or by
-hand. Changing `layout` in the configuration is allowed at any time:
+**`nj set --parent=<id>` reparents a task or subtask** (DECISIONS 176 A, §
+9 "Rules") — the one way `nj` itself changes `parent` outside a hand edit.
+Under `hierarchy`, the move is one `rename` (the element's own file for a
+subtask; its whole folder, children included, for a task), the same
+atomic-within-one-filesystem move `archive`/`doctor --fix` already use for
+a subtree. Under `type` or `flat`, reparenting writes only the frontmatter
+— the type never changes, so there is nowhere to move the file to. Besides
+`--parent`, a file still moves only through `nj archive`, `nj doctor
+--fix`, or by hand. Changing `layout` in the configuration is allowed at any time:
 afterwards every element reports its old place, and one `nj doctor --fix`
 moves the backlog into the new layout. The same step migrates a legacy
 backlog. Grouping by type stays the default because it is the only grouping
@@ -667,6 +673,7 @@ condition that produces it:
 | `incomplete:acceptance` | acceptance section absent/empty (task/subtask) | — | yes |
 | `acceptance:no_checkbox` | acceptance section has content but no countable checkbox line (task/subtask) — nothing for `check` to tick | warning | no |
 | `done:no_acceptance` | `status` is `done` and the acceptance section is absent/empty (task/subtask) | warning | no |
+| `done:open_acceptance` | `status` is `done` and the acceptance section has at least one unticked countable checkbox (task/subtask) | warning | no |
 | `active_refs_archived` | `depends_on` points into the archive (satisfied) | — | no |
 | `id:no_tombstone` | element file has no tombstone (hand-created, or partial tombstone loss) | warning | no |
 | `backlog:stray_tmp` | stray `.nj-tmp-*` file (crashed write), backlog-level | warning | — |
@@ -692,20 +699,23 @@ invariant: for element-level codes, Doctor = `error` implies Blocks = `yes`
 the columns must not disagree. A code can block `--ready` without being a
 finding (`incomplete:*`) and a warning finding need not block `--ready`
 (`id:no_tombstone`, `parent:orphaned`, `acceptance:no_checkbox`,
-`done:no_acceptance`). `doctor --json` problem objects carry
+`done:no_acceptance`, `done:open_acceptance`). `doctor --json` problem objects carry
 the field `severity` (the Doctor column value); `ok` is true exactly when no
 `error` finding exists.
 
-### Acceptance quality warnings (DECISIONS 163 E/F, 167)
+### Acceptance quality warnings (DECISIONS 163 E/F, 167, 176 B)
 
 Found by an outside team (feedback/team-b-tests TSK-011: acceptance
 text without `- [ ]` lines is silently untickable, and `doctor` says
 nothing; feedback/team-a TSK-006: a `done` task/subtask with empty
 acceptance criteria was never defined as "done", and `doctor` says
-nothing about that either). Both become visible, **never blocking**:
-nothing new is rejected, and no existing backlog starts failing where it
-did not before — a backlog with many such elements today keeps working
-exactly as it does now, just with warnings added to `doctor`'s report.
+nothing about that either; feedback/team-c TSK-001: a `done`
+task/subtask that still has an *unticked* box — content exists, it is
+simply not finished — was likewise never flagged). All three become
+visible, **never blocking**: nothing new is rejected, and no existing
+backlog starts failing where it did not before — a backlog with many such
+elements today keeps working exactly as it does now, just with warnings
+added to `doctor`'s report.
 
 - **E, `acceptance:no_checkbox`** (task/subtask, **live** elements only —
   see below): the acceptance section is present and has content
@@ -730,28 +740,63 @@ exactly as it does now, just with warnings added to `doctor`'s report.
   requires the first configured status, `done` can never reach it
   regardless of this warning, so Blocks `--ready` = no is not a new
   leniency, just consistent with what was already true.
+- **G, `done:open_acceptance`** (task/subtask, **live** elements only —
+  see below, DECISIONS 176 B): `status` is `done` and the acceptance
+  section (its own span, exactly as E scans it) contains **at least one**
+  countable checkbox line (§ 10a's own definition, reused verbatim — the
+  same list-marker-then-`[ ]`/`[x]`/`[X]` rule, fence-aware) that is
+  **unticked** (`[ ]`). This requires at least one countable checkbox to
+  exist at all, so it is mutually exclusive with E (which fires on
+  *zero* countable checkboxes) by construction — neither condition can
+  hold alongside the other, no carve-out needed to keep them apart. It is
+  mutually exclusive with F the same way: F fires when the section is
+  absent or empty, which leaves no checkbox line for G to find unticked.
+  `acceptance:no_checkbox` not firing and `done:no_acceptance` not firing
+  does not imply G fires instead — an element can be `done` with every
+  checkbox ticked, the ordinary, warning-free case this whole family
+  exists to leave alone.
 
-**Both apply to live elements only** (DECISIONS 167): an **archived**
-element never carries `acceptance:no_checkbox` or `done:no_acceptance`,
-whatever its acceptance section holds. An archived element is history —
+**All three apply to live elements only** (DECISIONS 167, extended to G
+by 176 B): an **archived** element never carries `acceptance:no_checkbox`,
+`done:no_acceptance` or `done:open_acceptance`, whatever its acceptance
+section holds. An archived element is history —
 nobody can act on a warning about it, the same reason archived work is
 read-only everywhere else (§ 9, § 11). `archive` already requires every
 element in the subtree to be `done`, but never content-complete (§ 11),
-so archiving an incomplete element was always possible; this exemption
-just stops that archive from retroactively picking up a *new* warning
-in the process — neither code's own motivating report (team-b-
-tests TSK-011, team-a TSK-006) was ever about archived history,
-only live-backlog noise.
+so archiving an incomplete or open element was always possible; this
+exemption just stops that archive from retroactively picking up a *new*
+warning in the process — none of the three codes' own motivating reports
+(team-b-tests TSK-011, team-a TSK-006, team-c TSK-001)
+was ever about archived history, only live-backlog noise.
 
-Both are shown by `doctor` (warning severity, so `doctor`'s exit code is
+All three are shown by `doctor` (warning severity, so `doctor`'s exit code is
 unaffected — 0 unless some other, unrelated error exists) and by `new`/
 `set`/`note`/`check`'s own text feedback, the same place `incomplete:*`
-already appears:
+already appears. `done:open_acceptance`'s own message, in both `doctor
+--json`'s `message` field and this same text feedback, names the count —
+unticked out of the section's own total countable checkboxes:
 
 ```
 ⚠ TSK-009 has acceptance criteria with no checkbox items — nothing for check to tick.
 ⚠ TSK-010 is done with no acceptance criteria.
+⚠ TSK-011 is done with 1 of 3 acceptance boxes still unticked.
 ```
+
+**`nj set` (and `nj claim`, for the same `--status=<last>` call D171 B
+already covers) additionally report `done:open_acceptance` in their own
+`--json` result** — not only inside `_problems`, which carries the bare
+code same as every other result consumer, but with the count attached, the
+same "elaborate a `_problems` code with more detail" precedent `rm`'s own
+`dependents` field already set. **`open_acceptance?: {unticked, total}`**
+(both plain counts of countable checkboxes in the section) is present
+exactly when a write naming `--status=<last>` in that same call (whether
+it is a genuine transition into the final status or a re-assertion of it,
+the same condition D171 B's own `released?` uses) leaves the element
+carrying `done:open_acceptance` — absent, not `null`, otherwise. A
+refused `set --status=done` releases nothing and reports nothing here
+either, for the same reason D171 B's own refusal case reports no
+`released`: the refusal is decided, and the call exits, before any write
+or count is attempted.
 
 Counted, read-only, against the two outside teams' real backlogs before
 this lands (so the Lead can warn them what to expect): team-a's 54
@@ -764,7 +809,9 @@ elements track completion through tags and an external test-case
 reference instead of a checklist, with `## Acceptance Criteria` left
 empty by design. None of this changes `--ready`, `list`, or any count:
 only `doctor`'s own report and `new`/`set`/`note`/`check`'s prose gain
-these two warnings.
+these two warnings. `done:open_acceptance` (G) was added later (DECISIONS
+176 B) and was not part of this read-only count; it is the same kind of
+warning, counted the same way, against whichever backlogs ask for it.
 
 ### Warnings can be switched off per backlog: `problems.ignore` (DECISIONS 165, amended 166)
 
@@ -784,7 +831,12 @@ alike), never in `new`/`set`/`note`/`check`'s own text feedback, and
 (one with no single element behind it, e.g. `backlog:claims_unignored`)
 is suppressed from `doctor`'s findings the same way — it was never in any
 element's `_problems` to begin with, so the other three places are moot
-for it.
+for it. **`done:open_acceptance` listed in `ignore` also suppresses
+`set`/`claim`'s own additive `open_acceptance?` field** (DECISIONS 176
+B, above) — the field exists only to elaborate a `_problems` code that is
+itself gone once ignored, so reporting the count anyway while hiding the
+code it belongs to would be the one inconsistent case "suppressed
+everywhere" could have, had this not been stated plainly.
 
 **What it does *not* change: the readiness rule.** `--ready` (§ 9) keeps
 evaluating the exact same underlying condition every element always had,
@@ -805,7 +857,7 @@ codes — the only ones ever eligible — is: `missing:status`,
 `done:open_children`, `title:h1_mismatch`, `id:no_tombstone`,
 `backlog:stray_tmp`, `claim:mismatch`, `claim:orphaned`, `claim:stale`,
 `backlog:claims_unignored`, `acceptance:no_checkbox`,
-`done:no_acceptance`, `config:unknown_key`, and `config:unknown_code`
+`done:no_acceptance`, `done:open_acceptance`, `config:unknown_key`, and `config:unknown_code`
 themselves (DECISIONS 166 — both are warnings, so both are eligible to
 be silenced the same way any other warning is; nothing about being part
 of this very mechanism exempts them). A **known error**-severity code, or any
@@ -1222,6 +1274,44 @@ model `assignee` has (§ 6).
   type cannot be verified, and § 6 forbids inventing facts about it.
   `--depends-on` targets must exist. `--priority` and `--status` are validated
   against the config.
+- **`nj set --parent=<id>` reparents a task or subtask** (DECISIONS 176
+  A, 177, feedback/team-b-tests TSK-014). The id, the body (description,
+  acceptance, any unknown sections) and the claim log are all kept
+  unchanged — a claim is keyed by **id** (§ 12 "Claims"), never by path,
+  so reparenting never disturbs it. The type never changes: a task moves
+  under a different epic, a subtask under a different task; moving a
+  subtask under a task's own sibling epic, or converting a subtask to a
+  task (or back), is out of scope and not what this flag does. The error
+  codes **mirror `new`'s own `--parent` validation exactly** (DECISIONS
+  177 — D176's original "uniform `invalid_value`" ruling was a mistake,
+  corrected before implementation): a missing new parent is `not_found`;
+  a wrong-type new parent (task↦epic, subtask↦task, the same direction
+  `new` already requires) is `invalid_target`; an archived new parent is
+  `refused:parent_archived`; `--parent` given to `set` on an **epic** at
+  all is `invalid_value`, the same "forbidden for epics" code `new`'s own
+  `--parent` already uses. Nothing is written in any of these cases. An
+  **unreadable stub** as the new parent is refused the same way `new`
+  already refuses one (`file:unreadable`, its type unverifiable).
+  `nj set --parent=<old>` (moving an element back to its previous parent)
+  is an ordinary reparent like any other and **restores the previous
+  state**: the file sits back at its old location, and the frontmatter is
+  identical to before apart from `updated` — there is no separate `nj
+  undo` command (DECISIONS 177 corrects D176's mistaken mention of one;
+  `undoRelease` in `core/claims.ts` is only the internal rollback of a
+  failed `set`, never a user-facing command). Under
+  `hierarchy` the file (subtask) or whole folder (task, children
+  included) relocates to sit under the new parent, exactly as
+  `archive`/`doctor --fix` already relocate a subtree (§ 4, § 12); under
+  `type`/`flat` only the frontmatter changes, since placement there
+  never depended on `parent` to begin with. **The frontmatter write and
+  the relocation are one operation, not two:** on success, the file (or
+  folder) sits at its new location carrying its new `parent`; on any
+  failure partway through, the backlog is left exactly as it read before
+  the call — same `parent`, same location, nothing written, no
+  half-moved element — the same guarded-write, nothing-or-everything
+  guarantee every other write in this spec already gives (§ 12).
+  `--input set` accepts `parent` as one more of
+  `set`'s own settable fields, same as every other flag (§ 9 "`--input`").
 - `nj new` scaffolds the body: `# <title>` plus the configured section
   headings as **empty** headings (`## Description`, and for task/subtask also
   `## Acceptance Criteria`). Empty headings count as absent for completeness
@@ -1480,8 +1570,9 @@ through JSON instead of two flags.
 
 **`set --input=` takes exactly one object — never an array.** The object's
 keys are `set`'s own settable fields only (`title`, `status`, `priority`,
-`assignee`, `tags`, `depends_on`, `description`(`-file`),
-`acceptance`(`-file`), `add-tags`, `remove-tags`) — **not** `id`/`file`:
+`assignee`, `tags`, `depends_on`, `parent` (DECISIONS 176 A),
+`description`(`-file`), `acceptance`(`-file`), `add-tags`,
+`remove-tags`) — **not** `id`/`file`:
 addressing stays exactly where it is today, on the CLI (`--id=<id>`,
 `--file=<path>`, or the existing `--id=A,B,C` batch, § 9 "Batch writes"),
 unchanged. `--input` only ever supplies the field map; it composes with
@@ -1966,9 +2057,9 @@ when claimed, `null` when not (§ 12 "Claims").
 | Command | JSON shape |
 |---|---|
 | `list`, `show`, `find` | `{backlog, counts, entries: [{…, _problems}]}` — `find`'s shape is identical to `list`'s, no `_match` field (§ 9a); **`show` additionally carries `entry: {…, _problems}`** (DECISIONS 171 C), identical to `entries[0]`, exactly when `entries` has **exactly one** element — never when it has several (a `duplicate_id` target, `entries.length > 1`) or, hypothetically, none; `list`/`find` never carry it, since returning many entries is their own point |
-| `new`, `set`, `note`, `check`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nj new`/`nj set`, `changed` also names the section roles written (`description`, `acceptance`); for `nj check`, `changed` is `["body"]` or `[]` (a no-op); **`nj set` additionally carries `released?: "<holder>"`** (DECISIONS 171 B) when a write setting `status` to the last configured status released an existing claim — absent, not `null`, when there was no claim to release |
+| `new`, `set`, `note`, `check`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nj new`/`nj set`, `changed` also names the section roles written (`description`, `acceptance`); for `nj check`, `changed` is `["body"]` or `[]` (a no-op); **`nj set` additionally carries `released?: "<holder>"`** (DECISIONS 171 B) when a write setting `status` to the last configured status released an existing claim — absent, not `null`, when there was no claim to release; **and `open_acceptance?: {unticked, total}`** (DECISIONS 176 B) when that same write leaves the element carrying `done:open_acceptance` — absent otherwise |
 | `archive`, `unarchive`, `rm --cascade` | `{ok, ids: […], changed: ["archived" \| "unarchived" \| "deleted"], entries: […], _problems: […]}` — for `rm --cascade` the top-level `_problems` is `[]`: the elements are gone, so their problems are too. `archive` and `unarchive` emit the union, because the elements still exist and can still carry findings. **`rm --cascade` additionally carries `dependents: […]`**, the remaining elements whose `depends_on` names a removed one — archived elements included, since they carry `depends_on:dangling` too and the agent must know it; `archive` and `unarchive` do **not** — a `depends_on` pointing into the archive is satisfied by definition (§ 11), so there is nothing to warn about and nothing an agent must act on. |
-| `claim`, `release` | `{ok, id, changed: […], entry: {…, _problems, _claim}, _problems, claim: {by, since}\|null, stolen_from?, previous_assignee?, released?}` (§ 12 "Claims") — the write-result shape plus `claim`, the element's claim state after the call; `stolen_from` names the previous holder after a `--steal`; `previous_assignee` when the claim overwrote a different `assignee`; `changed` names `assignee` and `status` when written, a `release` reports `changed: ["claim"]`; **`released?: "<holder>"`** (DECISIONS 171 B) on `claim` only, when `--status=<last>` released the very claim this same call just made — absent, not `null`, otherwise; `release` never carries it (a plain release is already reported via `claim: null`) |
+| `claim`, `release` | `{ok, id, changed: […], entry: {…, _problems, _claim}, _problems, claim: {by, since}\|null, stolen_from?, previous_assignee?, released?}` (§ 12 "Claims") — the write-result shape plus `claim`, the element's claim state after the call; `stolen_from` names the previous holder after a `--steal`; `previous_assignee` when the claim overwrote a different `assignee`; `changed` names `assignee` and `status` when written, a `release` reports `changed: ["claim"]`; **`released?: "<holder>"`** (DECISIONS 171 B) on `claim` only, when `--status=<last>` released the very claim this same call just made — absent, not `null`, otherwise; `release` never carries it (a plain release is already reported via `claim: null`); **`open_acceptance?: {unticked, total}`** (DECISIONS 176 B) on `claim` only, same condition as `set`'s own — `release` never carries it, since `release` never writes `status` |
 | `tree` | `{backlog, counts, entries: […]}` — **flat**, each entry carries `parent`; depth-first order conveys the tree |
 | `doctor` | `{backlog, ok, problems: [{code, severity, element?, file?, line?, message}]}` — `severity` ∈ `error`\|`warning` (the Doctor column value; `—` codes never appear as findings); element-level findings carry `element`, backlog-level ones do not |
 | bare `nj` | `{backlog, counts, ready: [entries ≤ 5], incomplete: [entries ≤ 5]}` |
@@ -2048,6 +2139,10 @@ just makes it a lookup instead of a re-read of the hint every time:
 | `--id` and `--file` given together | `invalid_target` | § 9 | — |
 | `--parent` on an `epic`, which may have none | `invalid_value` | § 9 | — |
 | `--parent`, `--depends-on` or `--file` names nothing | `not_found` | § 9 | — |
+| `set --parent` names nothing | `not_found` | § 9, DECISIONS 177 | — |
+| `set --parent` names the **wrong type** | `invalid_target` | § 9, DECISIONS 177 | — |
+| `set --parent` names an archived element | `refused:parent_archived` | § 9, DECISIONS 177 | — |
+| `set --parent` is given to an `epic` | `invalid_value` | § 9, DECISIONS 177 | — |
 | a `--description-file` / `--acceptance-file` path cannot be read | `not_found` | § 9 | — |
 | two files carry the same `id` | `duplicate_id` | § 9 | — (address one file directly with `--file=<path>` instead) |
 | `init` target already exists (even an empty directory) | `exists` | § 4 | — |
@@ -3963,6 +4058,36 @@ reported, not guessed at.
     of strings, one `- [ ] …` line each, so `acceptance:no_checkbox`
     cannot happen through `--input`. `--dry-run` (`new` only, requires
     `--input`) validates and reports the would-be shape, writing nothing.
+55. **`nj set --parent=<id>` reparents a task or subtask.** The id, body
+    and claim log (keyed by id, § 12 "Claims") are unchanged; the type
+    never changes. The new parent must exist, be live and be the correct
+    type — the error codes **mirror `new`'s own `--parent` validation**:
+    missing is `not_found`, wrong-type is `invalid_target`, archived is
+    `refused:parent_archived`, given to an epic at all is `invalid_value`
+    (DECISIONS 177, correcting D176's original "uniform `invalid_value`"
+    ruling); nothing is written in any of these cases. `nj
+    set --parent=<old>` restores the previous state exactly — same file
+    location, same frontmatter apart from `updated` — there is no
+    separate `nj undo` command (DECISIONS 177 corrects D176's mistaken
+    mention of one). Under `hierarchy` the file (subtask) or whole folder
+    (task) relocates to the new parent in the same write that changes
+    `parent`; under `type`/`flat` only the frontmatter changes. `--input
+    set` accepts `parent` as one more settable field.
+56. **`done:open_acceptance` (G).** A third, never-blocking acceptance
+    warning (DECISIONS 176 B, feedback/team-c TSK-001): a live
+    task/subtask that is `done` with at least one unticked countable
+    checkbox in its Acceptance Criteria section. Mutually exclusive with
+    `acceptance:no_checkbox` (E, zero checkboxes) and `done:no_acceptance`
+    (F, section absent/empty) by construction — each requires a
+    different checkbox count to exist. Archived elements never carry it,
+    same as E/F. `doctor` and `new`/`set`/`note`/`check`'s own prose name
+    the count (`"1 of 3 acceptance boxes still unticked"`); `set`/`claim`
+    additionally carry it in their own `--json` result as
+    `open_acceptance?: {unticked, total}`, present exactly when a write
+    naming `--status=<last>` in that call leaves it on the element, the
+    same "elaborate a `_problems` code" precedent `rm`'s own `dependents`
+    field already set. `problems.ignore` silences the code **and** this
+    additive field together.
 
 ---
 

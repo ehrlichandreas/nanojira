@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { PREFIX_TYPE, TYPE_FOLDER_ROLE, TYPES, PARENT_TYPE, PRIORITIES } from './constants.ts';
 import { scanBacklog, folderOf, inArchive, samePlace, foldEq, expectedPlace, misplacedCode } from './layout.ts';
-import { parseFile, h1Of, sectionPresent, sectionHasCheckbox, normalizeTitle } from './parse.ts';
+import { parseFile, h1Of, sectionPresent, sectionHasCheckbox, sectionCheckboxCounts, normalizeTitle } from './parse.ts';
 import { mtimeIso, readTombstones } from './store.ts';
 
 // ------------------------------------------------------------- element load
@@ -238,12 +238,18 @@ function deriveBody(el: WithArchiveState, p: ParsedFile, cfg: Config): WithArchi
         // new leniency, just a second, more specific warning on top. Live
         // elements only (DECISIONS 167): an archived element is exempt.
         if (el.status === 'done' && !el.archived) el.problems.add('done:no_acceptance');
-      } else if (!sectionHasCheckbox(p.body, cfg.sections.acceptance) && !el.archived) {
+      } else if (!sectionHasCheckbox(p.body, cfg.sections.acceptance)) {
         // E, acceptance:no_checkbox (§ 7, DECISIONS 163, 167): mutually
         // exclusive with incomplete:acceptance -- this one requires content
         // to exist at all, which the `acceptanceOk` branch above already
         // confirmed. Live elements only: an archived element is exempt.
-        el.problems.add('acceptance:no_checkbox');
+        if (!el.archived) el.problems.add('acceptance:no_checkbox');
+      } else if (el.status === 'done' && !el.archived) {
+        // G, done:open_acceptance (§ 7, DECISIONS 176 B): mutually exclusive
+        // with E/F by construction -- this branch only runs once a checkbox
+        // section with actual checkboxes exists. Live, done elements only.
+        const counts = sectionCheckboxCounts(p.body, cfg.sections.acceptance);
+        if (counts && counts.unticked > 0) el.problems.add('done:open_acceptance');
       }
     }
   }
