@@ -406,7 +406,8 @@ function refused(desc, x, args, code, env) {
 function spawnNj(args, cwd, env) {
   const e = Object.assign({}, process.env, { NJ_NOW: LATER, HOME }, env);
   for (const k of ['NJ_BACKLOG', 'NJ_AUTHOR']) delete e[k];
-  const child = spawn(H.NODE, [H.NJ].concat(args), { cwd, env: e });
+  const inv = H.njCommand(H.NJ, args);
+  const child = spawn(inv.cmd, inv.args, { cwd, env: e });
   let out = '', err = '';
   child.stdout.on('data', c => { out += c; });
   child.stderr.on('data', c => { err += c; });

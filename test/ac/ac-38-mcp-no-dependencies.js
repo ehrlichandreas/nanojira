@@ -6,10 +6,19 @@
  * `test/ac/ac-15-no-dependencies.js` proves this for `dist/nj` by copying
  * it ALONE into a bare directory (no `node_modules` beside it) and
  * confirming it still runs. This file does the identical thing for
- * `dist/nj-mcp`, extended to confirm the copied-alone binary answers
- * BOTH protocol eras it claims to speak (§ 17): a legacy
- * `initialize`/`tools/list` round trip, and a modern
- * `server/discover`/`tools/list` round trip.
+ * `nj-mcp`, extended to confirm the copied binary answers BOTH protocol
+ * eras it claims to speak (§ 17): a legacy `initialize`/`tools/list`
+ * round trip, and a modern `server/discover`/`tools/list` round trip.
+ *
+ * "Alone" means alone outside its own shipped unit (§ 18, DECISIONS 187):
+ * for a bare `dist/nj-mcp.mjs` that's still just the one file (none of
+ * these round trips ever issues a `tools/call`, so its `nj.mjs` sibling is
+ * never needed — ac-32-mcp.js's own M12 covers the sibling-lookup
+ * contract); for `bin/nj-mcp` it is the whole `SKILL.md` + `bin/` +
+ * `dist/` release tree, since the launcher's own relative lookup depends
+ * on sitting next to `dist/` (harness.js's copyShippedUnit copies exactly
+ * one or the other). Either way, nothing beside that unit — no
+ * `node_modules` — is required.
  *
  * The driver is `test/lib/mcp-stdio.js` — hand-rolled, zero dependencies
  * itself — never the official SDK client (that would reintroduce exactly
@@ -28,21 +37,32 @@ H.requireNjMcp();
 
 function J(x) { return JSON.stringify(x === undefined ? null : x); }
 
-(async () => {
-  const distNjMcp = H.NJ_MCP;
+/** Every relative path under dir, recursively, sorted. */
+function walk(dir) {
+  const out = [];
+  (function rec(abs, rel) {
+    for (const n of fs.readdirSync(abs).sort()) {
+      const a = path.join(abs, n), r = rel ? rel + '/' + n : n;
+      out.push(r);
+      if (fs.statSync(a).isDirectory()) rec(a, r);
+    }
+  })(dir, '');
+  return out.sort();
+}
 
-  /* A bare directory: nothing else in it, not `node_modules`, not
-   * `package.json` — the same "it runs on its own or not at all" check
-   * AC-15 already makes for `dist/nj`. */
+(async () => {
+  /* A bare directory holding only the shipped unit nj-mcp is part of —
+   * nothing else, not `node_modules`, not `package.json` — the same "it
+   * runs on its own or not at all" check AC-15 already makes for
+   * `dist/nj`. */
   const scratch = H.freshDir('ac38-mcp-alone');
-  const lonely = path.join(scratch, 'nj-mcp');
-  fs.copyFileSync(distNjMcp, lonely);
-  fs.chmodSync(lonely, 0o755);
-  T.eq('nothing was copied alongside nj-mcp — it runs on its own or not at all',
-    JSON.stringify(fs.readdirSync(scratch)), JSON.stringify(['nj-mcp']));
+  const unit = H.copyShippedUnit(scratch);
+  const before = JSON.stringify(walk(scratch));
+  T.check('nothing beyond nj-mcp\'s own shipped unit was copied in — no node_modules anywhere',
+    walk(scratch).every(p => !p.split(path.sep).includes('node_modules')), before);
 
   /* A real backlog for it to serve, built with the nj under test (not the
-   * lonely copy — the backlog itself has no dependency story to check). */
+   * copied unit — the backlog itself has no dependency story to check). */
   const projDir = H.freshDir('ac38-mcp-proj');
   const bl = path.join(projDir, 'backlog');
   const env = { NJ_NOW: H.FIXED_NOW };
@@ -50,7 +70,7 @@ function J(x) { return JSON.stringify(x === undefined ? null : x); }
   T.exit('fixture: nj init builds the backlog nj-mcp will serve', init, 0);
 
   function spawnLonely(args) {
-    return MCP.spawnServer(lonely, ['--backlog=' + bl].concat(args || []),
+    return MCP.spawnServer(unit.njMcp, ['--backlog=' + bl].concat(args || []),
       { cwd: scratch, env: Object.assign({}, { NJ_NOW: H.FIXED_NOW }, { NODE_PATH: '' }) });
   }
 
@@ -91,8 +111,8 @@ function J(x) { return JSON.stringify(x === undefined ? null : x); }
     }
   }
 
-  T.check('still nothing else appeared beside the lone copy — no node_modules was pulled in',
-    JSON.stringify(fs.readdirSync(scratch).sort()), JSON.stringify(['nj-mcp']));
+  T.eq('still nothing else appeared beside the shipped unit — no node_modules was pulled in',
+    JSON.stringify(walk(scratch)), before);
 
   T.finish();
 })().catch(e => {

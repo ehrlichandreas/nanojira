@@ -5,6 +5,27 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nj --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 3.12.0
+
+Packaging changes only — no command, flag or output behaviour changed.
+
+- **This repository is now the skill folder itself.** `SKILL.md`, `bin/`
+  and `dist/` live at the repo root, committed — not assembled only at
+  export time as in 3.11.0. `bin/nj`/`bin/nj-mcp` (and their `.cmd`
+  siblings) are generated from a single template, checked the same way
+  `dist/*.mjs` already is.
+
+- **`VERSION` is gone.** The version lives in exactly two places:
+  `SKILL.md`'s own `metadata.version`, and `nj --version`. The exported
+  folder is now simply `SKILL.md` + `bin/` + `dist/` of the tag —
+  nothing else, and nothing to assemble beyond a plain copy.
+
+- **Migrating from 3.11.0:** drop any check or script that reads a
+  `VERSION` file out of an exported folder — read `SKILL.md`'s
+  `metadata.version` instead (or `nj --version`, which always agrees
+  with it). Re-export to pick up the new, smaller folder shape; nothing
+  else about invoking `bin/nj`/`bin/nj-mcp` changed.
+
 ## 3.11.0
 
 Packaging changes only — no command, flag or output behaviour changed.

@@ -47,7 +47,8 @@ function fixture(label) {
 function startNj(args, opts) {
   const o = opts || {};
   const env = Object.assign({}, process.env, { NJ_NOW: o.now || H.LATER_NOW }, o.env || {});
-  const child = spawn(H.NODE, [H.NJ].concat(args), { cwd: o.cwd, env });
+  const inv = H.njCommand(H.NJ, args);
+  const child = spawn(inv.cmd, inv.args, { cwd: o.cwd, env });
   let out = '', err = '';
   child.stdout.on('data', d => { out += d; });
   child.stderr.on('data', d => { err += d; });

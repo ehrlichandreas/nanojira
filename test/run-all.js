@@ -12,9 +12,14 @@ const fs = require('fs');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-const NJ = process.env.NJ || process.argv[2] || null;
-const NODE = process.env.NJ_NODE || process.execPath;
 const ROOT = __dirname;
+const REPO_ROOT = path.join(ROOT, '..');
+/* Defaults to the repo's own launcher (§ 18, DECISIONS 187) -- the real
+ * entry point every consumer actually calls, not only the dist/ bundle it
+ * wraps. An explicit NJ/argv[2] (the gate passes a frozen dist/*.mjs step,
+ * for instance) still wins. */
+const NJ = process.env.NJ || process.argv[2] || path.join(REPO_ROOT, 'bin', 'nj');
+const NODE = process.env.NJ_NODE || process.execPath;
 
 function collect(dir) {
   const out = [];

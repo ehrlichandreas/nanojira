@@ -48,7 +48,8 @@ function runBounded(args, o, ms) {
   const e = envFor(o);
   const env = Object.assign({}, process.env, { NJ_NOW: NOW }, e.env);
   for (const k of e.unsetEnv) delete env[k];
-  const r = spawnSync(H.NODE, [H.NJ].concat(args), { cwd: e.cwd, env, encoding: 'utf8', timeout: ms });
+  const inv = H.njCommand(H.NJ, args);
+  const r = spawnSync(inv.cmd, inv.args, { cwd: e.cwd, env, encoding: 'utf8', timeout: ms });
   const hung = !!(r.error && r.error.code === 'ETIMEDOUT');
   let json = null;
   try { json = JSON.parse(r.stdout || ''); } catch (err) { /* reported by the caller */ }

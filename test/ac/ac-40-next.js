@@ -452,7 +452,8 @@ function spawnNj(args, cwd, env) {
   const e = Object.assign({}, process.env, { NJ_NOW: LATER, HOME }, env);
   delete e.NJ_BACKLOG;
   return new Promise(resolve => {
-    const child = spawn(H.NODE, [H.NJ].concat(args), { cwd, env: e });
+    const inv = H.njCommand(H.NJ, args);
+    const child = spawn(inv.cmd, inv.args, { cwd, env: e });
     let out = '', err = '';
     child.stdout.on('data', d => { out += d; });
     child.stderr.on('data', d => { err += d; });
@@ -645,7 +646,8 @@ function readyFixture(label, n) {
   async function runMidLoopFailure(x, breakSecond) {
     const env = Object.assign({}, process.env, { NJ_NOW: LATER, HOME, NJ_FAULT: 'before-compare', NJ_AUTHOR: 'alice' });
     delete env.NJ_BACKLOG;
-    const child = spawn(H.NODE, [H.NJ, 'next', '--json'], { cwd: x.dir, env });
+    const inv = H.njCommand(H.NJ, ['next', '--json']);
+    const child = spawn(inv.cmd, inv.args, { cwd: x.dir, env });
     let out = '', err = '';
     child.stdout.on('data', d => { out += d; });
     child.stderr.on('data', d => { err += d; });

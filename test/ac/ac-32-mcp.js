@@ -329,18 +329,16 @@ async function withServerAt(njMcpPath, x, args, env, fn) {
   const s = spawnMcpAt(njMcpPath, x, args, env);
   try { await fn(s); } finally { await s.close(); }
 }
-function copyExec(src, dest) {
-  fs.copyFileSync(src, dest);
-  fs.chmodSync(dest, 0o755);
-}
 {
-  /* M12a — both siblings present, copied together: a tool call works
-   * exactly as it does against the repo's own dist/. */
+  /* M12a — both siblings present, the shipped unit copied together (§ 18:
+   * the whole SKILL.md+bin/+dist/ tree for a bin/ launcher, just the two
+   * .mjs files for a bare dist/*.mjs — H.copyShippedUnit picks whichever
+   * matches what's under test): a tool call works exactly as it does
+   * against the repo's own dist/. */
   const bin = H.freshDir('mcp-m12a-bin');
-  copyExec(H.NJ, path.join(bin, 'nj.mjs'));
-  copyExec(H.NJ_MCP, path.join(bin, 'nj-mcp.mjs'));
+  const unit = H.copyShippedUnit(bin);
   const x = model('mcp-m12a');
-  await withServerAt(path.join(bin, 'nj-mcp.mjs'), x, [], {}, async s => {
+  await withServerAt(unit.njMcp, x, [], {}, async s => {
     let r;
     try {
       r = await s.modernToolsCall('doctor', {});
@@ -355,18 +353,21 @@ function copyExec(src, dest) {
   });
 }
 {
-  /* M12b — nj-mcp.mjs copied WITHOUT its nj.mjs sibling: the server
-   * process itself starts and stays up (it needs no sibling to answer
-   * server/discover or to parse a request — only a tool call that
-   * actually spawns nj needs one); the tools/call this leg makes must
-   * fail fast as a clean JSON-RPC protocol error (§ 17), never hang and
-   * never crash nj-mcp.mjs itself — confirmed separately by a second,
-   * unrelated call succeeding afterward in the SAME session. */
+  /* M12b — the shipped unit copied WITHOUT nj-mcp's nj.mjs sibling
+   * module (only that module removed — the launcher itself, in bin/
+   * mode, is left in place): the server process itself starts and stays
+   * up (it needs no sibling to answer server/discover or to parse a
+   * request — only a tool call that actually spawns nj needs one); the
+   * tools/call this leg makes must fail fast as a clean JSON-RPC
+   * protocol error (§ 17), never hang and never crash nj-mcp itself —
+   * confirmed separately by a second, unrelated call succeeding
+   * afterward in the SAME session. */
   const bin = H.freshDir('mcp-m12b-bin');
-  copyExec(H.NJ_MCP, path.join(bin, 'nj-mcp.mjs'));
-  T.check('fixture: M12b has no nj.mjs sibling', !fs.existsSync(path.join(bin, 'nj.mjs')), bin);
+  const unit = H.copyShippedUnit(bin);
+  fs.rmSync(unit.njModule, { force: true });
+  T.check('fixture: M12b has no nj.mjs sibling module', !fs.existsSync(unit.njModule), unit.njModule);
   const x = model('mcp-m12b');
-  await withServerAt(path.join(bin, 'nj-mcp.mjs'), x, [], {}, async s => {
+  await withServerAt(unit.njMcp, x, [], {}, async s => {
     let r;
     try {
       r = await s.modernToolsCall('doctor', {}, { timeout: 5000 });

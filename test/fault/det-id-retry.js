@@ -93,10 +93,15 @@ function fixture(label) {
   });
 }
 
-/** Run nj with the first `n` exclusive tombstone creates failing with EEXIST. */
+/** Run nj with the first `n` exclusive tombstone creates failing with EEXIST.
+ * Always against the bundle (H.NJ_BUNDLE), never through a `bin/` launcher:
+ * the shim is loaded via NODE_OPTIONS=--require, and `bin/nj`'s wrapper
+ * deliberately strips NODE_OPTIONS before exec'ing node (§ 18, D187
+ * addendum) — going through it would silently defeat the shim instead of
+ * exercising the retry path this file exists to reach. */
 function runInjected(d, n, args) {
   const log = path.join(d, 'shim.json');
-  const r = H.runNj(args, {
+  const r = H.runPath(H.NJ_BUNDLE, args, {
     cwd: d,
     env: {
       NODE_OPTIONS: (process.env.NODE_OPTIONS ? process.env.NODE_OPTIONS + ' ' : '') +

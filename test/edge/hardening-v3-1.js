@@ -713,15 +713,22 @@ const EACCES_RE = /EACCES|EPERM|permission denied|read-only|not permitted/i;
 /* A deleted working directory. spawn() cannot start a child in a directory
  * that does not exist, so a shell enters it, removes it, and execs nj —
  * nj starts with a cwd that is gone. Exit 97/98 means the wrapper failed,
- * which is the suite's fault, reported as CANNOT RUN. */
-function runInDeletedCwd(args, json) {
+ * which is the suite's fault, reported as CANNOT RUN.
+ *
+ * njPath defaults to H.NJ_BUNDLE, not H.NJ, for the same reason
+ * runUnderLockedAncestor's own doc comment gives (D187 addendum, 81cd90a):
+ * execing `bin/nj` here is execing a SECOND shell from a cwd that is
+ * already gone, and that nested shell's own startup getcwd() failure
+ * prints its own line to stderr before nj's own code runs. */
+function runInDeletedCwd(args, json, njPath) {
   const parent = H.freshDir('hard-f4-gone');
   const dir = mkdir(path.join(parent, 'gone'));
   const env = Object.assign({}, process.env, { NJ_NOW: H.FIXED_NOW, HOME });
   delete env.NJ_BACKLOG;
+  const inv = H.njCommand(njPath || H.NJ_BUNDLE, args.concat(json ? ['--json'] : []));
   const r = spawnSync('/bin/sh',
-    ['-c', 'cd "$1" || exit 97; rmdir "$1" || exit 98; shift; exec "$@"', 'sh', dir, H.NODE, H.NJ]
-      .concat(args, json ? ['--json'] : []),
+    ['-c', 'cd "$1" || exit 97; rmdir "$1" || exit 98; shift; exec "$@"', 'sh', dir, inv.cmd]
+      .concat(inv.args),
     { cwd: parent, env, encoding: 'utf8', timeout: 60000 });
   const res = { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', parent, dir };
   if (r.error) res.missing = 'spawn /bin/sh failed: ' + r.error.message;
@@ -749,6 +756,29 @@ for (const [desc, args] of [
   T.eq(desc + ': nothing created where the cwd was', H.lsOrEmpty(r.parent), []);
 }
 
+/* F4 deleted cwd, bin/nj-specific (D187 addendum, 81cd90a) — same reasoning
+ * and same shape as D96's own bin/nj-specific leg below: skipped when the
+ * path under test already IS the bundle. */
+if (H.NJ && H.NJ !== H.NJ_BUNDLE) {
+  for (const [desc, args] of [
+    ['F4 (bin/nj) list in a deleted cwd', ['list']],
+    ['F4 (bin/nj) bare nj in a deleted cwd', []],
+    ['F4 (bin/nj) doctor in a deleted cwd', ['doctor']],
+    ['F4 (bin/nj) init in a deleted cwd', ['init']],
+  ]) {
+    const r = runInDeletedCwd(args, false, H.NJ);
+    const rBundle = runInDeletedCwd(args, false, H.NJ_BUNDLE);
+    if (r.missing || rBundle.missing) { cannotRun(desc, r.missing || rBundle.missing); continue; }
+    T.exit(desc + ': exit 1, nj\'s own exit code, regardless of any nested shell banner first', r, 1);
+    noStack(desc, r);
+    const lines = stderrLines(r);
+    const last = lines[lines.length - 1] || '';
+    T.eq(desc + ': the LAST stderr line is exactly nj\'s own (same as against the bundle)',
+      last, (stderrLines(rBundle)[0] || ''));
+    T.eq(desc + ': nothing created where the cwd was', H.lsOrEmpty(r.parent), []);
+  }
+}
+
 /* ===================================================================== */
 /* D90 / D96 — `.njrc` odd files and lexing that AC-21 A7b does not cover */
 /* ===================================================================== */
@@ -770,7 +800,8 @@ function runBounded(args, o, ms) {
   const e = envFor(o);
   const env = Object.assign({}, process.env, { NJ_NOW: H.FIXED_NOW }, e.env);
   for (const k of e.unsetEnv) delete env[k];
-  const r = spawnSync(H.NODE, [H.NJ].concat(args), { cwd: e.cwd, env, encoding: 'utf8', timeout: ms });
+  const inv = H.njCommand(H.NJ, args);
+  const r = spawnSync(inv.cmd, inv.args, { cwd: e.cwd, env, encoding: 'utf8', timeout: ms });
   const hung = !!(r.error && r.error.code === 'ETIMEDOUT');
   const out = { status: hung ? 'hung — killed after ' + ms + ' ms' : r.status, stdout: r.stdout || '', stderr: r.stderr || '', hung };
   try { out.json = JSON.parse(out.stdout); } catch (err) { out.json = null; }
@@ -939,16 +970,30 @@ function rcLineRefusal(desc, cwd, rcPath, line) {
 /* A shell enters <root>/locked/cwd, then chmod 000 <root>/locked, runs nj,
  * and restores the mode. The cwd itself still exists; every absolute path
  * through `locked` — the cwd's own, and each `.njrc`/`backlog/` probe on
- * the search — now fails with EACCES. */
-function runUnderLockedAncestor(args, json) {
+ * the search — now fails with EACCES.
+ *
+ * njPath defaults to H.NJ_BUNDLE, not H.NJ (D187 addendum, 81cd90a): when
+ * the path under test is `bin/nj`, the outer orchestrating `/bin/sh` here
+ * execs a SECOND, nested shell (bin/nj's own shebang) after the ancestor is
+ * already locked — that nested shell's own startup getcwd() call fails and
+ * prints its own "shell-init: ... getcwd ..." line to stderr before nj's
+ * own code ever runs, which is not nj's own output and would defeat the
+ * single-stderr-line assertion below for a reason that has nothing to do
+ * with nj. Against the bundle (`dist/nj.mjs`, run directly by node, no
+ * nested shell) that banner never appears, so the strict check stays
+ * meaningful; the bin/nj-specific leg below checks only what still holds
+ * for a `bin/` launcher — the LAST stderr line and the exit code are nj's
+ * own, regardless of what a nested shell may have printed first (§ 18). */
+function runUnderLockedAncestor(args, json, njPath) {
   const root = H.freshDir('hard-f4-locked');
   const locked = mkdir(path.join(root, 'locked'));
   const cwd = mkdir(path.join(locked, 'cwd'));
   const env = Object.assign({}, process.env, { NJ_NOW: H.FIXED_NOW, HOME });
   delete env.NJ_BACKLOG;
+  const inv = H.njCommand(njPath || H.NJ_BUNDLE, args.concat(json ? ['--json'] : []));
   const r = spawnSync('/bin/sh',
     ['-c', 'cd "$1" || exit 97; chmod 000 "$2" || exit 98; shift 2; "$@"; rc=$?; chmod 755 "$0"; exit $rc',
-      locked, cwd, locked, H.NODE, H.NJ].concat(args, json ? ['--json'] : []),
+      locked, cwd, locked, inv.cmd].concat(inv.args),
     { cwd: root, env, encoding: 'utf8', timeout: 60000 });
   try { fs.chmodSync(locked, 0o755); } catch (e) { /* restored by the shell already */ }
   const res = { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', root, locked };
@@ -980,6 +1025,45 @@ function runUnderLockedAncestor(args, json) {
     /* AMBIGUOUS (AMBIGUITIES 64): as for a deleted cwd, getcwd() itself
      * fails here, so the path is not asserted — only the OS reason. */
     ioError(desc, r, rj, null, EACCES_RE);
+    T.eq(desc + ': nothing created in the cwd', H.lsOrEmpty(path.join(r.locked, 'cwd')), []);
+  }
+}
+
+/* D96, bin/nj-specific (D187 addendum, 81cd90a): skipped when the path
+ * under test already IS the bundle (the strict leg above already covers
+ * that case, identically). When it is a `bin/` launcher, its own shebang
+ * execs a second, nested `/bin/sh` after the ancestor is already locked;
+ * that shell's own startup getcwd() call fails and writes its own
+ * "shell-init: ... getcwd ..." line to stderr BEFORE nj's own code ever
+ * runs — confirmed by hand: against `bin/nj` this adds exactly that one
+ * line ahead of nj's own, unchanged, single line; against the bundle there
+ * is no such line at all. Not nj's output and not asserted against; what
+ * still holds, and is checked here, is that the exit code and the LAST
+ * stderr line remain exactly nj's own (§ 18 notes this limitation). */
+if (H.NJ && H.NJ !== H.NJ_BUNDLE) {
+  const probeRoot = H.freshDir('hard-f4-lockprobe-bin');
+  const lk = mkdir(path.join(probeRoot, 'l'));
+  mkdir(path.join(lk, 'x'));
+  fs.chmodSync(lk, 0o000);
+  let searchable = false;
+  try { fs.statSync(path.join(lk, 'x')); searchable = true; } catch (e) { /* expected */ }
+  fs.chmodSync(lk, 0o755);
+  for (const [desc, args] of [
+    ['D96 (bin/nj) list with an unsearchable ancestor of the cwd', ['list']],
+    ['D96 (bin/nj) bare nj with an unsearchable ancestor of the cwd', []],
+    ['D96 (bin/nj) doctor with an unsearchable ancestor of the cwd', ['doctor']],
+    ['D96 (bin/nj) init with an unsearchable ancestor of the cwd', ['init']],
+  ]) {
+    if (searchable) { cannotRun(desc, 'a mode-000 directory is still searchable here (uid ' + ME + ')'); continue; }
+    const r = runUnderLockedAncestor(args, false, H.NJ);
+    const rBundle = runUnderLockedAncestor(args, false, H.NJ_BUNDLE);
+    if (r.missing || rBundle.missing) { cannotRun(desc, r.missing || rBundle.missing); continue; }
+    T.exit(desc + ': exit 1, nj\'s own exit code, regardless of any nested shell banner first', r, 1);
+    noStack(desc, r);
+    const lines = stderrLines(r);
+    const last = lines[lines.length - 1] || '';
+    T.eq(desc + ': the LAST stderr line is exactly nj\'s own (same as against the bundle)',
+      last, (stderrLines(rBundle)[0] || ''));
     T.eq(desc + ': nothing created in the cwd', H.lsOrEmpty(path.join(r.locked, 'cwd')), []);
   }
 }
@@ -1154,7 +1238,8 @@ function swapperSource(rcPath, decoyMaster, payloadMaster, stopFlag) {
         for (; ran < N && Date.now() - started < DEADLINE_MS; ran++) {
           const env = Object.assign({}, process.env, { NJ_NOW: H.FIXED_NOW, HOME });
           delete env.NJ_BACKLOG;
-          const r = spawnSync(H.NODE, [H.NJ, 'list'], { cwd: dir, env, encoding: 'utf8', timeout: 5000 });
+          const inv = H.njCommand(H.NJ, ['list']);
+          const r = spawnSync(inv.cmd, inv.args, { cwd: dir, env, encoding: 'utf8', timeout: 5000 });
           if (r.error && r.error.code === 'ETIMEDOUT') { hung++; continue; }
           const out = (r.stdout || '') + (r.stderr || '');
           if (out.includes(payloadSignature)) { leaked = true; if (!leakedSample) leakedSample = out.slice(0, 400); }
