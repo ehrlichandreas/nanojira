@@ -139,6 +139,20 @@ const T = H.T;
   T.check('both are marked duplicate_id',
     dupes.every(e => (e._problems || []).includes('duplicate_id')),
     JSON.stringify(dupes.map(e => e._problems)));
+
+  /* § 14's summary line, ERROR count. `doc-sum-err` (the mutant that forces
+   * the printed error count to 0) was covered by exactly one suite
+   * (`ac-18-tombstone-integrity.js`, via a negative substring check,
+   * `!/0 errors/`) — one point of failure, unlike `doc-sum-warn` and
+   * `doc-sum-entries`, each already caught by two independent suites
+   * (this file's warning scenario, and `edge/doctor-fix-surface.js`).
+   * This fixture already carries five errors and zero warnings for the
+   * scenario above; the two extra lines below are the cheap fix — an exact
+   * pin, in this file's own style, needing no new fixture. */
+  const docHuman = H.runNj(['doctor'], { cwd: d });
+  T.exit('the human form also exits 2 (an error present)', docHuman, 2);
+  T.contains('the § 14 summary line is exact, error count included',
+    docHuman.stdout, H.summaryLine('backlog/', 2, 5, 0));
 }
 
 T.finish();

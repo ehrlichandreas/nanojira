@@ -660,6 +660,78 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     parent-child relation moves across a write *and* is reported, this verdict
     flips.
 
+82. **The step order in 75 is replaced: the module split comes first, and the
+    reason is the user's, not a technical one.** After S1 and S2, `nj` had grown
+    from 2094 to 2210 lines and was still one file. The user asked three times
+    for the split along `main()`'s `switch`. 75 had put it last, behind two
+    preconditions — "no function over 40 lines" and "S7 first". Neither holds:
+    moving a 181-line `doctorFix` into its own module changes nothing about it,
+    and decomposing it there is easier than in a 2200-line file. `JSON_MODE`, the
+    only mutable top-level binding, became an `output` object as part of the
+    split. S7 is therefore done and drops out.
+
+    New order, each step behind the previous one:
+
+        TSK-015 A  shared code to lib/, JSON_MODE -> output   done, 342aa89
+        TSK-015 B  commands to lib/cmd-*.js, nj a thin entry
+        TSK-019    zero-dependency bundler -> dist/nj, package.json without
+                   dependencies (bin, test, build); replay against dist/nj too
+        S3         loadElement into 9 derivers, inside lib/load.js
+        TSK-017    test block before S4 -- lands in ONE batch, then re-record
+                   and tag oracle-frozen-4
+        S4         doctorFix into fixCtx + step functions -- still never earlier
+        S8         JSDoc, module map, architecture note
+        TSK-013    final gate
+        after      TSK-018 (EPIPE) and any move to ESM/.mjs: both change
+                   behaviour or its surface and do not belong inside a
+                   behaviour-preserving refactor
+
+    Unchanged: the five gates per step, author ≠ verifier before the next step
+    is released, red means roll back to the last green commit. The bundle adds
+    one gate from TSK-019 on: the replay must also be 0 diffs against `dist/nj`,
+    because that is what ships. A faulty build tool is worse than a faulty meter
+    -- its error goes into the product -- so the bundler gets its own
+    verification round.
+
+    Test work is batched: every change under `test/` forces a re-record, so
+    oracle work for S4 is prepared outside `test/` and lands once.
+
+    The order lives in the backlog as `depends_on`, so `nj list --ready` names
+    the next step. That is the authoritative plan; this entry records why.
+
+83. **"Dependencies: none" meant no external services — we read it as no
+    libraries, and tightened it further on that misreading.** The user, who
+    wrote the requirement in the brainstorming phase, clarified: NanoJira must
+    not depend on Jira or any other external service. It never meant "no npm
+    packages". The team read § 3 literally, built its own bundler, test harness
+    and parsers, and on the day of the bundle step even added "at run time
+    **and** at build time" to § 3. That addition is withdrawn.
+
+    What stands: the shipped `dist/nj` is one self-contained file that runs on
+    the portable Node without `node_modules` and without network. What changes:
+    development tools may be `devDependencies`. The user chose TypeScript,
+    introduced gradually, and esbuild in place of `tools/build.js`.
+
+    Order after S3, each behind the previous one:
+
+        TSK-017  test block, now also: § 3 corrected to "no external
+                 services", AC-15 asserting that dist/nj runs without
+                 node_modules instead of forbidding node_modules in the
+                 project -- must land BEFORE any npm install, or the first
+                 install turns the oracle red. Re-record, oracle-frozen-4.
+        TSK-021  toolchain: esbuild replaces tools/build.js, tsc type-checks
+                 (checkJs, noEmit); replay 0 diffs against the new dist/nj
+        TSK-022  JSDoc types until tsc is clean -- replaces TSK-010
+        TSK-023  modules to .ts, one by one; the instruments that read
+                 source text (verify.js SEVERITY, codeSha, the blindness
+                 matrix) follow in the same step, as they had to for the split
+        S4       with compiler help across every seam
+
+    Runtime libraries stay out of `nj` itself: its output is pinned byte for
+    byte by the spec and the corpus, and a YAML or argument-parsing library
+    would accept or print differently. That is a behaviour change, not a
+    simplification.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

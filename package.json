@@ -1,0 +1,12 @@
+{
+  "name": "nanojira",
+  "private": true,
+  "description": "NanoJira: a local, file-based task tool for agents.",
+  "bin": {
+    "nj": "dist/nj"
+  },
+  "scripts": {
+    "build": "node tools/build.js",
+    "test": "node tools/build.js --check && node test/run-all.js dist/nj"
+  }
+}

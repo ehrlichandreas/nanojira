@@ -3,8 +3,8 @@
   "njPath": "nj",
   "node": "v24.21.0",
   "platform": "darwin-arm64",
-  "recordedAt": "2026-09-22T17:42:14.120Z",
-  "calls": 3451,
+  "recordedAt": "2026-09-22T21:17:50.776Z",
+  "calls": 3452,
   "parts": [
     {
       "name": "fixtures",
@@ -13,7 +13,7 @@
     },
     {
       "name": "oracle",
-      "calls": 1338,
+      "calls": 1339,
       "detail": "passed 62/62, failed 0, cannot run 0"
     },
     {
@@ -86,7 +86,7 @@
     "edge/unreadable-stub-refusals.js",
     "edge/write-encoding.js"
   ],
-  "testDigest": "ce6e08ed4a299f9f6081f00874a1dde92445e3705f400e54176d0fafdfd7bcec",
+  "testDigest": "64ad06103374d0fc2c9bc9a47c698f56a75090ca021699e6cbd9f263f84edcea",
   "testDigestScope": [
     "test/ac/",
     "test/edge/",
@@ -102,5 +102,5 @@
     "verify.js (white-box probe: reads nj's source, verdict taken directly, calls not in the corpus)"
   ],
   "note": "Comparison key excludes per-file raw sha; nsha (normalised content) is normative.",
-  "corpusSha256": "cf0cd890a782c778a29ba8b099b2e5b26d8529eafb02f14588c44d35e39c6f45"
+  "corpusSha256": "e13361307579df0bc2f2bf7f2b5e2ea500f88fb45c7c90240e2885e843e344a9"
 }

@@ -180,6 +180,42 @@ function scenario(name, opts) {
       needles.every(n => note.includes(n)), JSON.stringify(notes));
   });
 
+  /* fixed[] — the first array of § 14's report ("`fixed[]`, `notes[]` and
+   * `problems[]`"), and the one this file produced in 9 scenarios without
+   * asserting anything about it — the exact gap `notes[]` had before this.
+   *
+   * § 14: "`doctor --fix` reports the **actions it took**" — the eight steps
+   * it enumerates, in the order it enumerates them ("Steps run **in this
+   * order**"). So `fixed[]` is derivable per scenario without reading `nj`:
+   * one entry per DISTINCT step that acted (never one per file a step
+   * touched — the tombstone step reports once whether it claims one id or
+   * several, the same singular-report shape `notes[]`'s void note already
+   * established for step 4), in ascending step order. A step that finds
+   * nothing to do ("steps that find nothing to do leave the file
+   * untouched") contributes no entry.
+   *
+   * `opts.fixed` is one array of required substrings per expected entry, in
+   * step order — the same shape `opts.notes` uses. Every substring is
+   * either a structural identifier already fixed by the fixture (an id or
+   * file name the scenario itself named) or a word the spec uses for that
+   * step (§ 14: "rename", "move … into the correct type folder", "write the
+   * `id`", "write `status`", "the H1", "tombstone", "stray"), never a
+   * fragment of `nj`'s sentence. Checked against both the pre-split and the
+   * post-split `nj`, identical on each. */
+  const fixed = fix.json && Array.isArray(fix.json.fixed) ? fix.json.fixed : null;
+  T.check(name + ' — --fix --json carries a fixed array (§ 14)', fixed !== null,
+    JSON.stringify(fix.json && fix.json.fixed));
+  T.check(name + ' — the scenario declares its expected fixed[] steps', Array.isArray(opts.fixed),
+    'opts.fixed missing');
+  const wantFixed = Array.isArray(opts.fixed) ? opts.fixed : [];
+  T.eq(name + ' — fixed[] holds exactly ' + wantFixed.length + ' step(s)',
+    fixed === null ? '<no fixed array>' : fixed.length, wantFixed.length);
+  wantFixed.forEach((needles, i) => {
+    const entry = fixed && typeof fixed[i] === 'string' ? fixed[i] : '';
+    T.check(name + ' — fixed step ' + (i + 1) + ' names ' + needles.join(' + '),
+      needles.every(n => entry.includes(n)), JSON.stringify(fixed));
+  });
+
   if (opts.after) opts.after(d, fix, post);
   return d;
 }
@@ -191,6 +227,7 @@ function scenario(name, opts) {
 /* The control. A clean backlog must not be dirtied by --fix; if this one ever
  * exits 2, every "repaired" verdict below is meaningless. */
 scenario('clean backlog', {
+  fixed: [],
   notes: [],
   fixture: () => H.mkBacklog({
     label: 'exitfix-clean', files: EPIC, tombstones: ['EPIC-001'],
@@ -202,6 +239,9 @@ scenario('clean backlog', {
  * `id:derived` is a WARNING, so the pre-exit is already 0 — this case pins
  * the other half of the rule: repairing a warning must not *raise* the exit. */
 scenario('id missing (warning, step 1)', {
+  /* Step 1 acted, no other step could: § 14 step 1 writes id from the file
+   * name. */
+  fixed: [['EPIC-001']],
   notes: [],
   fixture: () => H.mkBacklog({
     label: 'exitfix-idderived',
@@ -223,6 +263,9 @@ scenario('id missing (warning, step 1)', {
  * free". `id:mismatch` is an ERROR (§ 7), so this is the decisive shape:
  * 2 before, 0 after. */
 scenario('id mismatch, target free (error, step 2)', {
+  /* Step 2 acted (rename), then step 4 (the newly-named TSK-002 had no
+   * tombstone) — in that order, exactly as § 14 requires. */
+  fixed: [['TSK-001.md', 'TSK-002.md'], ['tombstone']],
   /* AMBIGUOUS (AMBIGUITIES 47): recorded, not derived. A PARTIAL backfill —
    * one element's tombstone, `.ids/` otherwise intact — is not the case § 8
    * words the void note for, yet `nj` emits it. The count is pinned as the
@@ -252,6 +295,7 @@ scenario('id mismatch, target free (error, step 2)', {
 /* § 14 step 3: "move a file into the correct type folder — only when `id`
  * prefix and `type` agree". `type:folder` is an ERROR. */
 scenario('wrong type folder (error, step 3)', {
+  fixed: [['TSK-003']],
   notes: [],
   fixture: () => H.mkBacklog({
     label: 'exitfix-folder',
@@ -275,6 +319,7 @@ scenario('wrong type folder (error, step 3)', {
  * loss but tolerates `[0, 2]` on the `--fix` call; here the code is the
  * assertion. */
 scenario('.ids/ lost entirely (error, step 4)', {
+  fixed: [['tombstone']],
   /* § 8's case exactly: `.ids/` gone, so deleted IDs' tombstones may be lost. */
   notes: [['never-reuse']],
   fixture: () => {
@@ -297,6 +342,7 @@ scenario('.ids/ lost entirely (error, step 4)', {
 
 /* § 14 step 4 on the WARNING half: `id:no_tombstone`. */
 scenario('one tombstone missing (warning, step 4)', {
+  fixed: [['tombstone']],
   /* AMBIGUOUS (AMBIGUITIES 47): recorded, not derived. A PARTIAL backfill —
    * one element's tombstone, `.ids/` otherwise intact — is not the case § 8
    * words the void note for, yet `nj` emits it. The count is pinned as the
@@ -320,6 +366,7 @@ scenario('one tombstone missing (warning, step 4)', {
 
 /* § 14 step 5: status/created/updated filled in — all three WARNINGS. */
 scenario('status and timestamps missing (warnings, step 5)', {
+  fixed: [['EPIC-001']],
   notes: [],
   fixture: () => H.mkBacklog({
     label: 'exitfix-step5',
@@ -343,6 +390,7 @@ scenario('status and timestamps missing (warnings, step 5)', {
 /* § 14 step 6: "pull the H1 up from `title`". `title:h1_mismatch` is a
  * WARNING. */
 scenario('H1 drift (warning, step 6)', {
+  fixed: [['EPIC-001', 'H1']],
   notes: [],
   fixture: () => H.mkBacklog({
     label: 'exitfix-h1',
@@ -363,6 +411,7 @@ scenario('H1 drift (warning, step 6)', {
 /* § 14 step 7: "remove stray `.nj-tmp-*` files". `backlog:stray_tmp` is a
  * WARNING. */
 scenario('stray temp file (warning, step 7)', {
+  fixed: [['.nj-tmp-4242-deadbeef']],
   notes: [],
   fixture: () => {
     const d = H.mkBacklog({
@@ -387,6 +436,10 @@ scenario('stray temp file (warning, step 7)', {
  * exit is still 0. An implementation that summed severities instead of
  * counting errors would return 2 here, and `[0, 2]` would not notice. */
 scenario('unknown status survives --fix (warning stays, exit stays 0)', {
+  /* Not a step that acted: step 5 writes status only "when missing" — it
+   * is present, just invalid, and an invalid existing value is "reported,
+   * not repaired" (§ 14) — through problems[], not fixed[]. */
+  fixed: [],
   /* Not a declined step: step 5 fills status only "when missing". The
    * invalid value is "reported, not repaired" — through problems[]. */
   notes: [],
@@ -420,6 +473,8 @@ scenario('unknown status survives --fix (warning stays, exit stays 0)', {
 
 /* § 14's "never" list: "resolve duplicate IDs". `duplicate_id` is an ERROR. */
 scenario('duplicate id survives (error, exit 2)', {
+  /* § 14's "never" list: "resolve duplicate IDs" — no step acts. */
+  fixed: [],
   /* Step 2 declines for TSK-002.md: its rename target TSK-001.md exists. */
   notes: [['TSK-002.md']],
   fixture: () => H.mkBacklog({
@@ -451,6 +506,7 @@ scenario('duplicate id survives (error, exit 2)', {
 
 /* § 14's "never" list: "invent parents". `parent:dangling` is an ERROR. */
 scenario('dangling parent survives (error, exit 2)', {
+  fixed: [],
   notes: [],
   fixture: () => H.mkBacklog({
     label: 'exitfix-dangling',
@@ -470,6 +526,8 @@ scenario('dangling parent survives (error, exit 2)', {
 
 /* `depends_on:dangling` is an ERROR and is not among the eight steps. */
 scenario('dangling depends_on survives (error, exit 2)', {
+  /* depends_on:dangling is not one of the eight steps. */
+  fixed: [],
   notes: [],
   fixture: () => H.mkBacklog({
     label: 'exitfix-dep',
@@ -489,6 +547,7 @@ scenario('dangling depends_on survives (error, exit 2)', {
  * not among the eight steps — § 14 must not silently flip a status to make
  * the archive consistent. */
 scenario('archive:not_done survives (error, exit 2)', {
+  fixed: [],
   notes: [],
   fixture: () => H.mkBacklog({
     label: 'exitfix-archnotdone',
@@ -510,6 +569,8 @@ scenario('archive:not_done survives (error, exit 2)', {
  * eight repair steps — `doctor` is the only command that runs at all here,
  * and it must still report 2 after `--fix`. */
 scenario('invalid config survives (error, exit 2)', {
+  /* config:invalid is not one of the eight steps. */
+  fixed: [],
   notes: [],
   fixture: () => H.mkBacklog({
     label: 'exitfix-badconfig', files: EPIC, tombstones: ['EPIC-001'],
@@ -543,6 +604,9 @@ scenario('invalid config survives (error, exit 2)', {
  * `after` assertions below carry the actual content of this case, by showing
  * the step *declined* rather than overwrote. */
 scenario('id mismatch, target occupied (step 2 declines, exit 2)', {
+  /* Step 2 DECLINES (§ 14: "only when ... the target is free") — a decline
+   * is a note, not a fixed[] entry: the step took no action. */
+  fixed: [],
   /* Step 2 declines for TSK-001.md: its rename target TSK-002.md exists. */
   notes: [['TSK-001.md']],
   fixture: () => H.mkBacklog({
@@ -592,6 +656,11 @@ scenario('id mismatch, target occupied (step 2 declines, exit 2)', {
  * guarantee quietly void. The exit code alone cannot see that, which is why
  * it is asserted separately. */
 scenario('tombstone backfill runs after the rename (step 4 after step 2)', {
+  /* Step 2 acted (rename TSK-005 -> TSK-009), then step 4 (both the freshly
+   * renamed element and the pre-existing gap needed tombstones) — § 14's
+   * own ordering rule, made observable a second way alongside the `after`
+   * assertion below. */
+  fixed: [['TSK-005.md', 'TSK-009.md'], ['tombstone']],
   /* `.ids/` empty = § 8's case. Two types are unclaimed and there is still
    * ONE report: § 8 says `--fix` "reports that" the guarantee is void. */
   notes: [['never-reuse']],

@@ -127,6 +127,21 @@ function njSha() {
   return R.sha256(fs.readFileSync(NJ_ABS));
 }
 
+// The code under test is nj PLUS the modules it loads from lib/. Hashing nj
+// alone would print the same number after a change that lives entirely in
+// lib/ -- an identity that does not cover what it names. Only the `current`
+// side of verify is multi-file; the header's njSha256 is the single-file
+// baseline every record runs against, and stays as it is.
+function codeSha() {
+  const root = path.dirname(NJ_ABS);
+  const lib = path.join(root, 'lib');
+  let mods = [];
+  try { mods = fs.readdirSync(lib).filter((n) => n.endsWith('.js')).sort(); } catch { /* no lib/: nj alone */ }
+  const lines = [`${R.sha256(fs.readFileSync(NJ_ABS))}  ${path.basename(NJ_ABS)}\n`]
+    .concat(mods.map((n) => `${R.sha256(fs.readFileSync(path.join(lib, n)))}  lib/${n}\n`));
+  return { sha: R.sha256(lines.join('')), files: 1 + mods.length };
+}
+
 // ------------------------------------------------------------- corpus parts
 
 function countLines(p) {
@@ -546,7 +561,8 @@ const diffs = diff(oldRecs, newRecs, 40);
 reportParts(total);
 const excluded = markNondeterministic(oldRecs).filter(Boolean).length;
 process.stdout.write(`\nbaseline: ${oldRecs.length} calls, nj sha256 ${header.njSha256}\n`);
-process.stdout.write(`current : ${newRecs.length} calls, nj sha256 ${njSha()}\n`);
+const code = codeSha();
+process.stdout.write(`current : ${newRecs.length} calls, current code sha256 (nj + lib/, ${code.files} files) ${code.sha}\n`);
 process.stdout.write(`compared: ${oldRecs.length - excluded} calls (${excluded} excluded as nondeterministic by design — AC-7 concurrency)\n`);
 
 // The oracle part of the corpus is only comparable while test/ holds the same
