@@ -2655,6 +2655,50 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      tagged and installed with the D179 wrapper layout; the first such
      install turns `current` from a symlink into a directory.
 
+181. **current/nj is the bundle itself, not a wrapper (corrects D179)**
+     (2026-10-09). The first real D179 install broke team-a at once.
+     Their wrapper workspace/bin/nj runs `<their bundled node>
+     .../current/nj`, which is exactly the interface D159 told teams to
+     use, and `node` cannot parse an sh wrapper. The Lead caught it right
+     after installing and fixed it in place within minutes: current/nj and
+     current/nj-mcp were replaced with copies of 3.9.0's nj.cjs and
+     nj-mcp.cjs, and `workspace/bin/nj --version` gives 3.9.0 again. The
+     MCP path through `node current/nj-mcp` was tested too. Ruling:
+     - `current/nj` and `current/nj-mcp` are plain copies of the bundles,
+       written via a temp file plus an atomic rename. Nothing is a symlink
+       (the user's rule holds). They run directly (shebang) and through
+       any caller's own `node`. There is no package.json above
+       bin/nanojira (checked), so the extensionless CommonJS file is safe
+       there. The ESM-scope problem only hits people who copy the file
+       elsewhere; they copy `<ver>/nj.cjs`.
+     - `current/*.cmd` call into `../<ver>/`.
+     - The version directories keep the D179 layout (`.cjs` + sh/.cmd
+       wrappers).
+     Lesson: a change to the install layout must be checked against every
+     known consumer's real wrapper before the install, not only against
+     our own calls. The 3.9.0 release directory's CHANGES.md copy still
+     describes `current/` as wrappers. Releases are immutable, so
+     docs/CHANGES.md in the repo carries the correction.
+
+182. **v3.10 scope: doctor --fix releases claims on finished elements; the
+     last "a epic"** (2026-10-09). team-a's backlog move turned up
+     32 claim:stale warnings, all on elements set to done before 3.8. Only
+     the holder could release them, so their cleanup loop had to pose as
+     each holder (`release --as=<holder>`). A claim on a finished element
+     serves no purpose: v3.8 already releases it on the transition to the
+     final status.
+     A. **`nj doctor --fix` releases every claim held on an element in the
+        final status**, live or archived, whoever holds it. This is the
+        same unconditional release as v3.8 B, recorded the same way in the
+        claim log. Claims on unfinished elements are never touched by
+        --fix, stale or not; for those, the holder or `--steal` still
+        decides. Plain `doctor` without --fix keeps reporting them as
+        before. The report names what was released. The Oracle specifies
+        the exact output and the claim-log entry.
+     B. **The --input plan-nesting message** ("a epic cannot have a subtask
+        child") goes through the same article helper as the rest
+        (D180 known gap).
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

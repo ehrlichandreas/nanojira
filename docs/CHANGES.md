@@ -5,6 +5,50 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nj --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 3.10.0
+
+Two small gaps closed, both found live: a holder loop an outside team
+shouldn't have needed, and the last place a wrong article could still
+show up.
+
+- **`nj doctor --fix` releases every claim still held on a final-status
+  element** — live or archived, whoever holds it — the same unconditional
+  release `set`/`claim --status=<last>` already perform in one write,
+  applied in bulk. The claim log gets the identical entry a normal
+  release writes (`released`, the holder, the next generation); the
+  element's own file is never touched either way:
+
+  ```sh
+  $ nj doctor
+  backlog/: 2 entries, 0 errors, 1 warning
+
+  WARNING TSK-001: claimed by 'alice' since 2026-01-01T00:00:00Z, past the
+  24h staleness threshold
+  $ nj doctor --fix
+  FIXED   TSK-001: released alice
+
+  backlog/: 2 entries, 0 errors, 0 warnings remaining
+  ```
+
+  An archived final-status element with a leftover claim directory is
+  named in the fix the same way, holder included, even though the
+  existing orphan cleanup usually already empties the directory by the
+  time this step runs. Claims on anything not yet in the final status
+  are left exactly as they are, stale or not — only finality releases a
+  claim, never staleness by itself — and plain `doctor` (no `--fix`)
+  still only reports, never writes. A second `--fix` releases nothing,
+  since there is nothing left to release. **This replaces the
+  one-holder-at-a-time `release --as=<holder>` loop** that was previously
+  the only way to clear a backlog's worth of claims left over from before
+  this existed. (team-a, 32 `claim:stale` warnings found on a single
+  backlog move)
+
+- **The `--input` plan-nesting rejection message's last hardcoded
+  article** is fixed: a subtask nested directly under an epic now reads
+  "an epic cannot have a subtask child", not "a epic cannot have a
+  subtask child" — the one call site DECISIONS 180's article-helper pass
+  had missed.
+
 ## 3.9.0
 
 Reorganising a backlog without losing an element's history, and a warning
@@ -103,17 +147,17 @@ both found live by outside teams.
   were back to zero.
 
 - **Packaging:** from this release, the shared workspace install
-  (`tools/release-local.sh`) ships the bundles as `nj.cjs`/`nj-mcp.cjs`
-  (CommonJS — an extensionless file otherwise takes its module type from
-  the nearest `package.json`, which breaks with `require is not defined
-  in ES module scope` under a `"type": "module"` scope), plus plain `sh`
-  wrappers `nj`/`nj-mcp` and `.cmd` wrappers for Windows that `exec`/call
-  into the matching `.cjs` file. `current/` is a real directory of the
-  same four wrapper names, each calling into the release it points at, so
-  `current/nj` keeps its path and working teams change nothing. Anyone
-  copying the binary directly into an ESM project (rather than running it
-  from the shared install) should copy `nj.cjs` itself — Team B
-  already does this.
+  (`tools/release-local.sh`) has no symlinks. Each version directory ships
+  the bundles as `nj.cjs`/`nj-mcp.cjs`. They are CommonJS: an extensionless
+  file takes its module type from the nearest `package.json` and breaks
+  with `require is not defined in ES module scope` under a
+  `"type": "module"` scope. Next to them sit plain `sh` wrappers
+  `nj`/`nj-mcp` and `.cmd` wrappers for Windows. `current/` is a real
+  directory. `current/nj` and `current/nj-mcp` are copies of the bundles
+  themselves, so both `current/nj …` and `node …/current/nj …` work exactly
+  as before. Its `.cmd` files call into the current version. Anyone copying
+  the binary into an ESM project should copy `<version>/nj.cjs`, as
+  Team B already does. (DECISIONS 178, 179, 181)
 
 ## 3.8.0
 

@@ -1202,7 +1202,7 @@ var os = __toESM(require("os"), 1);
 var path3 = __toESM(require("path"), 1);
 
 // src/core/version.ts
-var VERSION = "3.9.0";
+var VERSION = "3.10.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -3060,7 +3060,7 @@ function validatePlanNode(ctx, node, flat, seenRefs, anyRefIndex, declaredSoFar,
     parentIndex = node.parentIndex;
     const parentType = flat[parentIndex].raw.type;
     if (type === "epic" || PARENT_TYPE[type] !== parentType) {
-      fail("invalid_target", `${node.path}: a ${parentType} cannot have a ${String(type)} child`);
+      fail("invalid_target", `${node.path}: ${article(parentType)} ${parentType} cannot have ${article(String(type))} ${String(type)} child`);
     }
   }
   const status = raw.status;
@@ -3836,8 +3836,11 @@ function fixStep7a(fc) {
   for (const { id, dir } of allClaimDirs(ctx.backlog)) {
     const el = ctx.elements.find((e) => e.id === id);
     if (el && !el.archived) continue;
+    const entry = highestEntry(dir);
+    const holder = entry && entry.kind === "claimed" ? entry.name : null;
     removeClaimDirWholesale(ctx.backlog, id);
-    if (!fs12.existsSync(dir)) fc.actions.push(`removed the orphaned claim directory for ${id}`);
+    if (fs12.existsSync(dir)) continue;
+    fc.actions.push(holder !== null ? `${id}: released ${holder}` : `removed the orphaned claim directory for ${id}`);
   }
   if (claimsNeedGitignoreLine(ctx.backlog)) {
     const p = path10.join(ctx.backlog, ".gitignore");
@@ -3850,6 +3853,18 @@ function fixStep7a(fc) {
     }
     atomicWrite(p, appendGitignoreLine(content, CLAIMS_GITIGNORE_LINE));
     fc.actions.push(`.gitignore: appended '${CLAIMS_GITIGNORE_LINE}'`);
+  }
+  return { ...fc, stage: 8 };
+}
+function fixStep7b(fc) {
+  const ctx = fc.reload();
+  const finalStatus = ctx.cfg.statuses[ctx.cfg.statuses.length - 1];
+  const ts = nowIso();
+  for (const { id } of allClaimDirs(ctx.backlog)) {
+    const el = ctx.elements.find((e) => e.id === id);
+    if (!el || el.status !== finalStatus) continue;
+    const released = releaseUnconditional(ctx.backlog, id, ts);
+    if (released !== void 0) fc.actions.push(`${id}: released ${released.holder}`);
   }
   return { ...fc, stage: 8 };
 }
@@ -3886,7 +3901,8 @@ function doctorFix(flags, json) {
   const fc7 = fixStep6(fc6);
   const fc8 = fixStep7(fc7);
   const fc8a = fixStep7a(fc8);
-  const fc9 = fixStep8(fc8a);
+  const fc8b = fixStep7b(fc8a);
+  const fc9 = fixStep8(fc8b);
   const { actions, notes, ctx, findings } = fixStep9(fc9);
   return fixReport(json, actions, notes, ctx, findings);
 }

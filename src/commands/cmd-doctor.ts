@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { checkFlags } from '../core/args.ts';
 import { cliFieldNames } from '../core/flag-table.ts';
-import { allClaimDirs, claimsRootDir, highestEntry, isClaimStale, removeClaimDirWholesale } from '../core/claims.ts';
+import { allClaimDirs, claimsRootDir, highestEntry, isClaimStale, releaseUnconditional, removeClaimDirWholesale } from '../core/claims.ts';
 import {
   PREFIX_TYPE, PARENT_TYPE, SEVERITY,
   V3_DIR_REL, V3_CONFIG_REL, V3_IDS_REL, V3_INDEX_REL, LEGACY_CONFIG_REL, LEGACY_IDS_REL, LEGACY_INDEX_REL,
@@ -654,8 +654,16 @@ function fixStep7a(fc: FixCtx<8>): FixCtx<8> {
   for (const { id, dir } of allClaimDirs(ctx.backlog)) {
     const el = ctx.elements.find((e) => e.id === id);
     if (el && !el.archived) continue; // live: never touched
+    // DECISIONS 182 A: an archived element's claim directory is wholesale-
+    // removed exactly as before (unconditionally, regardless of status) --
+    // but when it was still actively claimed, the report names the holder
+    // released the same way step 7b below does, rather than silently
+    // discarding who held it.
+    const entry = highestEntry(dir);
+    const holder = entry && entry.kind === 'claimed' ? entry.name : null;
     removeClaimDirWholesale(ctx.backlog, id);
-    if (!fs.existsSync(dir)) fc.actions.push(`removed the orphaned claim directory for ${id}`);
+    if (fs.existsSync(dir)) continue;
+    fc.actions.push(holder !== null ? `${id}: released ${holder}` : `removed the orphaned claim directory for ${id}`);
   }
   if (claimsNeedGitignoreLine(ctx.backlog)) {
     const p = path.join(ctx.backlog, '.gitignore');
@@ -668,6 +676,31 @@ function fixStep7a(fc: FixCtx<8>): FixCtx<8> {
     }
     atomicWrite(p, appendGitignoreLine(content, CLAIMS_GITIGNORE_LINE));
     fc.actions.push(`.gitignore: appended '${CLAIMS_GITIGNORE_LINE}'`);
+  }
+  return { ...fc, stage: 8 };
+}
+
+// 7b. release every claim still held on an element in the final status
+// (DECISIONS 182 A, § 14 step 7b, feedback/team-a): the same
+// unconditional release set/claim --status=<last> already perform inside
+// one write (§ 12a), applied here in bulk to elements that reached that
+// status some other way and were left claimed. Live elements only in
+// practice -- an archived final-status element's claim directory is
+// already gone by the time this runs, wholesale-removed by step 7a above
+// (which now names the holder it released, for exactly that case).
+// Claims on elements not in the final status are left exactly as they
+// are, stale or not. Idempotent: releaseUnconditional itself returns
+// undefined once nothing is left to release, so a second --fix reports
+// nothing here.
+function fixStep7b(fc: FixCtx<8>): FixCtx<8> {
+  const ctx = fc.reload();
+  const finalStatus = ctx.cfg.statuses[ctx.cfg.statuses.length - 1];
+  const ts = nowIso();
+  for (const { id } of allClaimDirs(ctx.backlog)) {
+    const el = ctx.elements.find((e) => e.id === id);
+    if (!el || el.status !== finalStatus) continue;
+    const released = releaseUnconditional(ctx.backlog, id, ts);
+    if (released !== undefined) fc.actions.push(`${id}: released ${released.holder}`);
   }
   return { ...fc, stage: 8 };
 }
@@ -741,7 +774,8 @@ function doctorFix(flags: Flags, json: boolean) {
   const fc7 = fixStep6(fc6);
   const fc8 = fixStep7(fc7);
   const fc8a = fixStep7a(fc8);
-  const fc9 = fixStep8(fc8a);
+  const fc8b = fixStep7b(fc8a);
+  const fc9 = fixStep8(fc8b);
   const { actions, notes, ctx, findings } = fixStep9(fc9);
   return fixReport(json, actions, notes, ctx, findings);
 }

@@ -2997,6 +2997,16 @@ result reports it additively: `released: "<holder>"`.
   each tool call spawns `dist/nj --json` as a child process and returns
   its output verbatim (§ 17), so `released` surfaces there automatically,
   the same way every other additive JSON field in this spec always has.
+- **`nj doctor --fix` performs the same unconditional release in bulk**
+  (DECISIONS 182 A, § 14 step 7b) for any element that reached the final
+  status **before** this release existed, or through any other path that
+  left a claim behind — the gap feedback/team-a found as 32
+  `claim:stale` warnings on pre-v3.8 `done` elements. Same mechanism,
+  same claim-log entry (`released N` at the next generation), same
+  "whoever holds it" unconditionality; the only difference is *when* it
+  runs (a `--fix` sweep instead of inside one write) and that it also
+  reaches already-**archived** final-status elements, which this section
+  never touches (one write, one still-live element).
 
 **Visibility.** `list` and `show` mark a claimed element with its holder via
 `_claim` (§ 9); a reader lists the directory and reads the highest entry.
@@ -3475,9 +3485,30 @@ unprotected:
     touches a live claim's entries: no pruning while the element could
     still be claimed. Never resolves a `claim:mismatch` (§ 7) — which of the
     claim and `assignee` is right is exactly the kind of question this
-    section forbids guessing. Never touches `claim:stale` (§ 7) either —
-    there is nothing to repair, only to report: no step here, or anywhere
-    in `--fix`, releases or steals a stale claim
+    section forbids guessing. **Staleness alone is never a reason to
+    release or steal a claim** — `claim:stale` (§ 7) is reported, not
+    repaired, by this step or any other; step 7b below releases on
+    **finality of status**, never on age
+7b. **release every claim still held on an element in the final status**
+    (live or archived), whoever holds it — the same unconditional release
+    `set`/`claim --status=<last>` already perform inside one write (§ 12a
+    "Final status releases the claim", DECISIONS 182 A), applied here in
+    bulk to elements that reached that status through some other path and
+    were left claimed (most commonly: `done` before that release existed,
+    feedback/team-a). One `released <holder>` entry appended at the
+    next generation per element, the same claim-log mechanism and shape;
+    the element's own file is never touched (a release never touches the
+    file, § 12a). Claims on elements **not** in the final status are left
+    exactly as they are, stale or not — only `--release`'d by this step
+    when the status itself is final. Runs after 7a: an archived
+    final-status element's claim directory is typically already gone by
+    this point (7a's orphan rule covers any archived element, regardless
+    of status), so 7b's practical effect is almost always on **live**
+    final-status elements; it is specified for both to match the
+    unconditional rule it mirrors exactly, and to cover the window where
+    archiving and finality do not coincide in whatever order a backlog's
+    history happens to produce. Idempotent: a second `--fix` finds no
+    claim left to release and reports nothing for this step
 8. rebuild the index (round two)
 9. regenerate `STATUS.md` (with `statusFile: true`) — last, so it reflects
    every repair above; a merge conflict in it is thereby resolved
@@ -3494,7 +3525,11 @@ plus the findings that **remain** — with `--json` as `fixed[]`, `notes[]` and
 `problems[]`, the last reflecting the state *after* the repairs — while its
 **exit code reflects the state *after*** them: 0 when no error remains, 2
 when one does. A warning that survives does not raise the exit code. An agent
-that uses `--fix` as a gate therefore needs no second `doctor` run.
+that uses `--fix` as a gate therefore needs no second `doctor` run. Step 7b's
+releases are named the same way every other step's action already is — one
+`fixed[]` line per element, naming the id and the holder it released — since
+`claim:stale`/nothing-to-report is no longer true for it after the release,
+`problems[]` reflects that too.
 
 For **known** fields (the ones § 6 defines), an empty value counts as absent:
 `status:` is reported as `missing:status` and `--fix` may fill it. For
@@ -4088,6 +4123,21 @@ reported, not guessed at.
     same "elaborate a `_problems` code" precedent `rm`'s own `dependents`
     field already set. `problems.ignore` silences the code **and** this
     additive field together.
+57. **`nj doctor --fix` releases every claim on a final-status element**
+    (DECISIONS 182 A, feedback/team-a: 32 `claim:stale` elements,
+    pre-v3.8 `done`, forced to release-as-each-holder by hand). Step 7b
+    (§ 14) — live or archived, whoever holds it: the same unconditional
+    release `set`/`claim --status=<last>` already perform in one call
+    (item 52 above, § 12a), applied in bulk for elements that reached the
+    final status some other way and were left claimed. Same claim-log
+    entry (`released <holder>`, next generation), the element's own file
+    untouched either way. Claims on elements **not** in the final status
+    are never touched by `--fix` — stale or not, the holder or `--steal`
+    still decides. Plain `doctor` (no `--fix`) is unaffected: it keeps
+    reporting `claim:stale`/`claim:mismatch`/`claim:orphaned` exactly as
+    before, never releases anything itself. Named in `fixed[]`, one line
+    per element, naming the id and the released holder. Idempotent: a
+    second `--fix` releases nothing (nothing left to release).
 
 ---
 

@@ -630,4 +630,30 @@ function taskCount(dir) {
   }
 }
 
+/* ===================================================================== */
+/* I1 -- the nesting-rejection message uses the article helper, same as   */
+/* every other message built from a type name (DECISIONS 182 B, D180's    */
+/* known gap: this one spot still said "a epic"). A subtask nested        */
+/* directly under an epic -- the invalid_target case line 396 of          */
+/* cmd-new.ts raises -- names the WRONG parent type with its correct      */
+/* article: "an epic", not "a epic".                                      */
+/* ===================================================================== */
+{
+  const dir = fixture('ac52-i1');
+  const plan = {
+    type: 'epic', title: 'E', description: 'D.',
+    children: [
+      { type: 'subtask', title: 'S', description: 'D.', acceptance: '- [ ] x' },
+    ],
+  };
+  const r = runStdin(['new', '--input=-'], dir, JSON.stringify(plan));
+  T.exit('I1 a subtask nested directly under an epic: exit 1', r, 1);
+  T.eq('I1 invalid_target', r.json && r.json.error, 'invalid_target');
+  /* The prose text (where the article lives) is Fail's own `message`,
+   * never part of --json (only `error`/`hint` are, § 9) -- so this reads
+   * stderr, same as every other article-wording check in this tree. */
+  T.check('I1 stderr says "an epic", not "a epic"', /\ban epic\b/.test(r.stderr), r.stderr);
+  T.check('I1 stderr never says "a epic"', !/\ba epic\b/.test(r.stderr), r.stderr);
+}
+
 T.finish();

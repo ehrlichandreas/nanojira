@@ -393,7 +393,7 @@ function validatePlanNode(ctx: Context, node: FlatNode, flat: FlatNode[], seenRe
     parentIndex = node.parentIndex;
     const parentType = flat[parentIndex].raw.type as string;
     if (type === 'epic' || PARENT_TYPE[type as string] !== parentType) {
-      fail('invalid_target', `${node.path}: a ${parentType} cannot have a ${String(type)} child`);
+      fail('invalid_target', `${node.path}: ${article(parentType)} ${parentType} cannot have ${article(String(type))} ${String(type)} child`);
     }
   }
 
