@@ -16,7 +16,7 @@ import { nowIso, atomicWrite, compareGuard, renderElement } from '../core/store.
 function cmdArchive(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'id', 'file']), true);
   const json = flags.has('json');
-  const ctx = context();
+  const ctx = context(flags);
   requireNoStubs(ctx, 'archive');
   const el = resolveTarget(ctx, flags, true);
   requireActive(el, 'archive');

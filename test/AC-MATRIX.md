@@ -1,6 +1,10 @@
 # Acceptance-criteria matrix
 
-**Last full run: 39 / 39 passed, 0 failed, 0 cannot-run, 1 595 checks.**
+**Last full run (2026-09-28, against the committed v2 `dist/nj` of `c8fd3a9`):
+64 / 65 passed, 1 failed, 0 cannot-run, 2 945 checks.** The one failure is
+AC-21 — spec v3, written before V3-1, red by design until V3-1 lands (row 21).
+Every v2 row below is green in that run. *(The earlier v2-round figure,
+39 / 39 and 1 595 checks, predates the edge and fault suites added since.)*
 Reproduce with `$NODE run-all.js /abs/path/to/nj`, where `$NODE` is the bundled
 runtime
 `/home/dev/workspace/portable/runtime/darwin-arm64/bin/node`
@@ -55,6 +59,7 @@ says so.
 | 18 | Tombstone integrity | `ac/ac-18-tombstone-integrity.js` + `edge/tombstone-partial-loss.js` | **pass** | |
 | 19 | Doctor axis | `ac/ac-19-doctor-axis.js` | **pass** | |
 | 20 | Section writes | `ac/ac-20-section-writes.js` | **pass** | byte-level readings pinned by `DECISIONS.md` 68–74, not by `AMBIGUITIES.md` |
+| 21 | Backlog location (spec v3, V3-1) | `ac/ac-21-backlog-location.js` | **fail** — expected | written before V3-1, from spec v3 only: against the committed v2 `dist/nj` 203 of 389 checks fail (every v3 clause), no crash; the `NJ_BACKLOG`, nested-`backlog/` and comment-only-`.njrc` legs pass on v2 as they should. Not yet run against a committed V3-1. Clause map: A1 `--backlog` on every command + every `Known flags:` line (not `new`/`set`'s `Known fields:`, DECISIONS 88) + `missing_value`; A2 `NJ_BACKLOG`; A3 `.njrc` in cwd/ancestor, relative, absolute, `~/`, literal, whitespace, no `~/.njrc`; A4 flag > env > search; A5 nearest wins (strictly: a config-less `backlog/` ends the search), `.njrc` beats `backlog/`; A6 binding errors per source (missing, empty dir, regular file, project dir); A7 `invalid_njrc` + line, only reached `.njrc` parsed; A8 `.njrc` without `backlog`; A9 `init` per source and `./backlog`, past a nearer `backlog/`, `exists` on an empty dir; empty `--backlog=` / `NJ_BACKLOG=` and literal `~/` outside `.njrc` (A1/A2). `DECISIONS.md` 88–89; `AMBIGUITIES.md` 49–55, all ruled |
 
 ## Coverage beyond the criteria
 

@@ -14,7 +14,7 @@ import { fail, out } from '../core/output.ts';
 function cmdRm(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'cascade', 'id', 'file']), true);
   const json = flags.has('json');
-  const ctx = context();
+  const ctx = context(flags);
   requireNoStubs(ctx, 'rm');
   const el = resolveTarget(ctx, flags, true);
   requireActive(el, 'rm');

@@ -11,7 +11,7 @@ import { out } from '../core/output.ts';
 
 function cmdShow(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'id', 'file']), false);
-  const ctx = context();
+  const ctx = context(flags);
   const el = resolveTarget(ctx, flags, false);
   const scope = ctx.elements;
   // Reads show every file claiming the id, each marked duplicate_id (§ 9).

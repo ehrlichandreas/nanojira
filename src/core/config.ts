@@ -2,10 +2,12 @@
 
 // Configuration and backlog discovery.
 
-import type { Config } from './types.ts';
+import type { Config, Flags } from './types.ts';
 
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
+import { flagString } from './args.ts';
 import { DEFAULT_CONFIG } from './constants.ts';
 import { fail } from './output.ts';
 
@@ -62,32 +64,122 @@ function loadConfig(backlog: string) {
 
 // ----------------------------------------------------------------- discover
 
-function findBacklog(lenient: boolean): string {
+// Where the backlog comes from (§ 4, Backlog location). The first source that
+// is set is binding: when it holds no backlog the command fails naming that
+// source, and never falls through to a lower one.
+type Source = { kind: 'flag' } | { kind: 'env' } | { kind: 'njrc'; file: string };
+
+const SOURCE_CODE = { flag: 'invalid_backlog_flag', env: 'invalid_backlog_env', njrc: 'invalid_backlog_njrc' } as const;
+
+function sourceName(src: Source) {
+  return src.kind === 'flag' ? '--backlog' : src.kind === 'env' ? 'NJ_BACKLOG' : src.file;
+}
+
+// `lenient` (doctor) accepts any existing directory, so a missing config can
+// be reported instead of refused.
+function claim(dir: string, src: Source, lenient: boolean): string {
+  if (!isDir(dir)) fail(SOURCE_CODE[src.kind], `no backlog at ${dir} (from ${sourceName(src)})`);
+  if (!lenient && !fs.existsSync(path.join(dir, '.nanojira.json'))) {
+    fail(SOURCE_CODE[src.kind], `no backlog at ${dir} (from ${sourceName(src)})`,
+      'the directory has no .nanojira.json — check the path, or run `nj init` with the same source to create a backlog there');
+  }
+  return dir;
+}
+
+// The sources before the upward search: --backlog, then NJ_BACKLOG. Both
+// resolve against the working directory; `init` shares this with findBacklog.
+function explicitLocation(flags: Flags): { dir: string; src: Source } | null {
+  const flag = flagString(flags, 'backlog');
+  if (flag !== undefined) {
+    if (flag === '') fail('missing_value', '--backlog needs a value (use --backlog=…)');
+    return { dir: path.resolve(flag), src: { kind: 'flag' } };
+  }
   const env = process.env.NJ_BACKLOG;
-  if (env !== undefined && env !== '') {
-    const dir = path.resolve(env);
-    if (!isDir(dir)) fail('invalid_backlog_env', `NJ_BACKLOG points at '${dir}', which is not a directory`);
-    if (!lenient && !fs.existsSync(path.join(dir, '.nanojira.json'))) {
-      fail('backlog_without_config', `no .nanojira.json in NJ_BACKLOG '${dir}'`, 'run `nj doctor` for details, or `nj init` to create a backlog');
-    }
-    return dir;
+  if (env !== undefined && env !== '') return { dir: path.resolve(env), src: { kind: 'env' } };
+  return null;
+}
+
+// The `.njrc` in `dir`, if there is one and it sets `backlog`: the value,
+// `~/` expanded and resolved against `dir`. Any format violation is fatal —
+// a `.njrc` the search reaches is always parsed in full.
+// A symlinked `.njrc` is read through the link, but a relative value still
+// resolves against the directory the link lies in — where the search found it.
+function njrcLocation(dir: string): { dir: string; src: Source } | null {
+  const file = path.join(dir, '.njrc');
+  const raw = readNjrc(file);
+  if (raw === null) return null;
+  const value = parseNjrc(file, raw).get('backlog');
+  if (value === undefined) return null;
+  const expanded = value.startsWith('~/') ? path.join(os.homedir(), value.slice(2)) : value;
+  return { dir: path.resolve(dir, expanded), src: { kind: 'njrc', file } };
+}
+
+// null when there is no `.njrc` at all. Anything else that is not a readable
+// regular file — a directory, a dangling symlink, a FIFO, no read permission —
+// is a `.njrc` the search reached and could not use: fatal, not "absent" (§ 4).
+function readNjrc(file: string): string | null {
+  try { fs.lstatSync(file); } catch { return null; }
+  const bad = (reason: string): never => fail('invalid_njrc', `invalid .njrc at ${file}: ${reason}`);
+  let st;
+  try { st = fs.statSync(file); } catch { return bad('it is a dangling symlink'); }
+  if (!st.isFile()) return bad(st.isDirectory() ? 'it is a directory, not a file' : 'it is not a regular file');
+  let raw;
+  try { raw = fs.readFileSync(file, 'utf8'); } catch (e: any) { return bad(`cannot read it — ${e.code || e.message}`); }
+  return raw.startsWith('\uFEFF') ? raw.slice(1) : raw;
+}
+
+const NJRC_KEYS = ['backlog'];
+
+function parseNjrc(file: string, raw: string): Map<string, string> {
+  const values: Map<string, string> = new Map();
+  const bad = (n: number, reason: string): never =>
+    fail('invalid_njrc', `invalid .njrc at ${file}: line ${n}: ${reason}`,
+      `one \`key = value\` per line, a line starting with \`#\` is a comment; known keys: ${NJRC_KEYS.join(', ')}`);
+  raw.split('\n').forEach((line, i) => {
+    const t = line.trim();
+    if (t === '' || t.startsWith('#')) return;
+    const eq = t.indexOf('=');
+    if (eq === -1) bad(i + 1, `no '=' in '${t}'`);
+    const key = t.slice(0, eq).trim();
+    const value = t.slice(eq + 1).trim();
+    if (!NJRC_KEYS.includes(key)) bad(i + 1, `unknown key '${key}'`);
+    if (value === '') bad(i + 1, `empty value for '${key}'`);
+    if (values.has(key)) bad(i + 1, `repeated key '${key}'`);
+    values.set(key, value);
+  });
+  return values;
+}
+
+// `init` takes its target from the same sources, except that the upward
+// search looks only for a `.njrc` — an existing `backlog/` is never a target
+// for `init` — and ends at `./backlog` (§ 4, `nj init`).
+function initLocation(flags: Flags): string {
+  const explicit = explicitLocation(flags);
+  if (explicit !== null) return explicit.dir;
+  for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+    const rc = njrcLocation(dir);
+    if (rc !== null) return rc.dir;
+    if (path.dirname(dir) === dir) break;
   }
-  let dir = process.cwd();
-  let headless: string | null = null;
-  for (;;) {
+  return path.resolve(process.cwd(), 'backlog');
+}
+
+function findBacklog(flags: Flags, lenient: boolean): string {
+  const explicit = explicitLocation(flags);
+  if (explicit !== null) return claim(explicit.dir, explicit.src, lenient);
+  // Nearest directory wins; within one directory `.njrc` beats `backlog/`.
+  for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+    const rc = njrcLocation(dir);
+    if (rc !== null) return claim(rc.dir, rc.src, lenient);
     const candidate = path.join(dir, 'backlog');
-    if (fs.existsSync(path.join(candidate, '.nanojira.json'))) return candidate;
-    if (lenient && isDir(candidate)) return candidate;
-    if (headless === null && isDir(candidate)) headless = candidate;
-    const up = path.dirname(dir);
-    if (up === dir) break;
-    dir = up;
-  }
-  // A backlog folder without its config is a different failure from "none at
-  // all" and must say so rather than send the caller hunting (§ 4).
-  if (headless !== null) {
-    fail('backlog_without_config', `${headless} exists but has no .nanojira.json`,
-      'run `nj doctor` — it tolerates the missing file and reports config:invalid');
+    if (isDir(candidate)) {
+      if (lenient || fs.existsSync(path.join(candidate, '.nanojira.json'))) return candidate;
+      // A backlog folder without its config is a different failure from "none
+      // at all" and must say so rather than send the caller hunting (§ 4).
+      fail('backlog_without_config', `${candidate} exists but has no .nanojira.json`,
+        'run `nj doctor` — it tolerates the missing file and reports config:invalid');
+    }
+    if (path.dirname(dir) === dir) break;
   }
   return fail('no_backlog', 'no backlog found (looked for backlog/.nanojira.json upward from the working directory)',
     'run `nj init` to create one, or set NJ_BACKLOG');
@@ -103,4 +195,4 @@ function listMd(dir: string) {
   return names.filter((n: string) => n.endsWith('.md')).sort().map((n: string) => path.join(dir, n));
 }
 
-export { loadConfig, findBacklog, listMd };
+export { loadConfig, findBacklog, initLocation, listMd };

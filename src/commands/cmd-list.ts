@@ -42,7 +42,7 @@ function applyFilters(elements: Element[], flags: Flags, cfg: Config) {
 
 function cmdList(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'ready', 'all', 'status', 'type', 'tag', 'parent', 'assignee']), false);
-  const ctx = context();
+  const ctx = context(flags);
   const scope = ctx.elements.filter((e: Element) => flags.has('all') || !e.archived);
   const filtered = applyFilters(ctx.elements, flags, ctx.cfg);
 

@@ -35,6 +35,12 @@ $NODE run-all.js "$NJ"
 $NODE ac/ac-01-basic-run.js "$NJ"
 ```
 
+`ac/ac-15-no-dependencies.js` needs the runtime Node itself, not just any
+Node: it takes `NJ_NODE` when set, otherwise the first
+`runtime/<platform>/bin/node` or `portable/runtime/<platform>/bin/node` found
+walking up from the project directory, and reports `CANNOT RUN` when there is
+none.
+
 Run these commands from this directory (`test/`): `run-all.js` and the test
 folders are addressed relative to it. From the project root the same invocation
 is `$NODE test/run-all.js "$NJ"`, and a relative `$NJ` then resolves against the
@@ -72,7 +78,7 @@ test ever fails with an unrelated `ENOENT` about a file that was never created.
 | `lib/harness.js` | The shared contract: process runner, fixture builders, assertions |
 | `golden/` | Byte-exact expected file content, one fixture per write path |
 | `golden/MANIFEST.sha256` | Frozen hashes — see "Freezing" below |
-| `ac/ac-NN-*.js` | One executable test per acceptance criterion, AC-1 … AC-20 |
+| `ac/ac-NN-*.js` | One executable test per acceptance criterion, AC-1 … AC-21 (AC-21 is derived from spec v3, written before V3-1) |
 | `fault/` | `NJ_FAULT` and `NJ_NOW` verification hooks (§ 12) |
 | `stress/` | The 20-wide concurrency run that AC-7 needs |
 | `edge/` | Boundary cases the ACs name but do not fully pin |

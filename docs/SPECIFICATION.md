@@ -1,10 +1,15 @@
-# NanoJira — Specification v2
+# NanoJira — Specification v3
 
 A local, file-based task tool for agents. No database, no server, no
 dependencies. Epics → Tasks → Subtasks, one Markdown file per element.
 
-Status: **approved by the user, 2026-09-23.** Synthesis of the brainstorming
-phase; changes since are recorded in `docs/DECISIONS.md`.
+Status: **v3 draft, 2026-09-24 — released for implementation 2026-09-28
+(DECISIONS 87), not yet implemented.**
+v2 was approved by the user on 2026-09-23 and is what `dist/nj` implements.
+v3 adds a configurable backlog location (`--backlog`, `.njrc`), a configurable
+layout (groupings, folder names), the generated `STATUS.md` and the
+`.nanojira/` folder for internal files — DECISIONS 86, which also fixes the
+implementation order. Changes since are recorded in `docs/DECISIONS.md`.
 
 ---
 
@@ -86,64 +91,208 @@ macOS system Python.
 ## 4. Storage and Layout
 
 ```
-<project>/backlog/
-├── .nanojira.json            configuration (§ 5)
-├── .nanojira-index.json      search index — round two (§ 13), never committed
-├── .gitignore                written by init; ignores the index
-├── README.md                 written by init; format notes for humans
-├── epics/                    EPIC-001.md …
-├── tasks/                    TSK-001.md …
-├── subtasks/                 SUB-001.md …
-├── archive/                  archived elements, flat (§ 11)
-└── .ids/                     ID tombstones (§ 8)
+<backlog>/                     default location: <project>/backlog/ (below)
+├── README.md                  written by init; format notes for humans
+├── STATUS.md                  generated overview by status (below)
+├── .gitignore                 written by init; ignores the index and temp files
+├── epics/                     EPIC-001.md …   ┐ group "type" (default);
+├── tasks/                     TSK-001.md …    │ folder names configurable (§ 5)
+├── subtasks/                  SUB-001.md …    ┘
+├── archive/                   archived elements (§ 11); name configurable
+└── .nanojira/                 everything only nj itself needs
+    ├── config.json            configuration (§ 5)
+    ├── ids/                   ID tombstones (§ 8)
+    └── index.json             search index — round two (§ 13), never committed
 ```
 
-**One file per element, grouped by type.** The type is immutable — the ID
-prefix fixes it, an epic can never become a task — so the folder layout can
-mirror it and never becomes wrong. Re-parenting never moves a file: only the
-frontmatter changes.
+**Content and bookkeeping are separated.** The top level of a backlog shows
+the elements and the two human-facing files; everything that exists only for
+`nj` — configuration, tombstones, the future index — lives in one hidden
+folder, `.nanojira/`. The v2 layout (`.nanojira.json` and `.ids/` at the top
+level) is a **legacy layout**: every command except `nj doctor` refuses it
+with `legacy_layout` and points at `nj doctor --fix`, which migrates it (§ 14).
 
-Grouping by type is a coarse partition (`list --type=task` scans one folder)
-and makes the backlog browsable by agents that do not use `nj`. Nesting by
-hierarchy is deliberately **not** used: it would freeze one view (the tree)
-into the filesystem while `assignee`, `tags` and `priority` exist as other
-views, and it would turn re-parenting into file moves.
+**One file per element; the grouping is configurable** (`layout.group`, § 5):
 
-A backlog is **self-contained** — moving the folder is enough.
+- **`type`** (default) — one folder per type, as drawn above. The type is
+  immutable, so this placement can never become wrong through `nj`.
+- **`hierarchy`** — the tree becomes the folder structure. An epic and a task
+  each get a folder named after their ID that holds their own file; a subtask
+  is a file in its task's folder:
 
-**Versioned state.** `.nanojira.json`, `README.md`, `.ids/` and every element
-file are versioned — they travel with git and must be committed. The only
-uncommitted artifact is the index (§ 13). `nj init` writes a `.gitignore`
-containing exactly two patterns: `.nanojira-index.json` and `.nj-tmp-*`.
-`.ids/` is never ignored, by design.
+  ```
+  <backlog>/EPIC-001/EPIC-001.md
+  <backlog>/EPIC-001/TSK-003/TSK-003.md
+  <backlog>/EPIC-001/TSK-003/SUB-007.md
+  ```
+
+- **`flat`** — every element file directly in `<backlog>/`.
+
+**The frontmatter is the truth, the location is derived from it** — from
+`type` under `type`, from the `parent` chain under `hierarchy`. `nj` never
+infers `type` or `parent` from where a file lies. It finds element files
+wherever they lie: every `*.md` below the backlog except `README.md`,
+`STATUS.md` and anything under `.nanojira/` is an element file, and it is
+archived exactly when it lies below the archive folder. A file whose location
+disagrees with the layout carries `type:folder` (group `type`) or
+`layout:misplaced` (groups `hierarchy` and `flat`); it still loads and every
+command still works on it. `nj doctor --fix` moves it (§ 14).
+
+`nj` never changes `parent` (`nj set` has no `--parent`), so under
+`hierarchy` a file moves only through `nj archive`, `nj doctor --fix`, or by
+hand. Changing `layout` in the configuration is allowed at any time:
+afterwards every element reports its old place, and one `nj doctor --fix`
+moves the backlog into the new layout. The same step migrates a legacy
+backlog. Grouping by type stays the default because it is the only grouping
+no edit can invalidate; `hierarchy` freezes one view — the tree — into the
+filesystem, which is worth it only where people browse the backlog without
+`nj`.
+
+A backlog is **self-contained** — moving the folder is enough. A `.njrc`
+pointing at it (below) is outside the backlog and has to follow.
+
+**Versioned state.** `.nanojira/config.json`, `.nanojira/ids/`, `README.md`,
+`STATUS.md` and every element file are versioned — they travel with git and
+must be committed. The only uncommitted artifacts are the index (§ 13) and
+temp files (§ 12). `nj init` writes a `.gitignore` containing exactly two
+patterns: `.nanojira/index.json` and `.nj-tmp-*`. `.nanojira/ids/` is never
+ignored, by design.
+
+### Status overview (`STATUS.md`)
+
+A generated, read-only overview of the active backlog by status, so the state
+is readable without `nj` — in an editor or a forge's web view.
+
+- **Written** by `nj init` and after every successful write of `new`, `set`,
+  `note`, `rm`, `archive` and `doctor --fix`, from a full scan, atomically
+  (§ 12). **Never read** by `nj`: it is derived, never the truth.
+- **Format** (normative, byte-exact; a golden fixture pins it):
+
+  ```
+  # Status
+
+  ## todo (2)
+
+  - [TSK-002](tasks/TSK-002.md) Not-covered-Blindstellen schliessen
+  - [TSK-007](tasks/TSK-007.md) Parser haerten
+
+  ## doing (0)
+
+  ## done (1)
+
+  - [EPIC-001](epics/EPIC-001.md) Verhaltensvertrag
+  ```
+
+  One `## <status> (<count>)` section per configured status, in configuration
+  order, each present even when empty. Elements whose status is not configured
+  follow in a last section `## ? (<count>)`, present only when non-empty.
+  Within a section: `list` order (priority descending, id ascending, § 9).
+  The link is the file path relative to the backlog, with `/` separators; the
+  title is written as stored. Archived elements are not listed. Every line
+  ends in `\n`, sections are separated by one empty line, the file ends in
+  exactly one `\n`.
+- **Staleness is tolerated, never hidden.** Two writers racing each regenerate
+  it; the last rename wins and may be one write behind. Hand edits and git
+  merges can leave it stale or conflicted. `nj doctor` compares it with a
+  fresh rendering and reports `backlog:status_stale` (warning); `doctor --fix`
+  regenerates it — which also resolves a merge conflict in it.
+- **A failed overview never fails the write.** The element write is the
+  operation; if `STATUS.md` cannot be written afterwards, the command keeps
+  its exit code and prints `nj: warning: STATUS.md not updated (<reason>)` on
+  stderr.
+- `layout.statusFile: false` (§ 5) switches it off: nothing is written and
+  `doctor` does not check it. An existing file is then left alone.
+- **Cost:** one full scan per write — ≈200 ms at 10 000 elements (§ 13). The
+  § 13 index trigger applies to writes as well once this lands.
 
 ### `nj init`
 
-Creates the layout above in the current directory, with default configuration
-and the README. Refuses if a `backlog/` already exists.
+Creates the layout above with default configuration, the README, `STATUS.md`
+and the `.gitignore`, at the location given by `--backlog`, `NJ_BACKLOG` or
+the nearest `.njrc` (rules below, in that order); without any of them at
+`./backlog`. The upward search for an existing `backlog/` is **not** used by
+`init`. Refuses with `exists` if anything already exists at the target.
 
-### Backlog discovery
+### Backlog location
 
-Commands that need a backlog locate it as follows:
+Commands that need a backlog take its location from the **first** of these
+sources that is set:
 
-1. If `NJ_BACKLOG` is set, it points at the backlog folder. Use it.
-2. Otherwise walk **upward from the working directory** to the first directory
-   that contains `backlog/.nanojira.json`. Use that backlog.
-3. If nothing is found: **exit 1 with a hard error.** Never fall back to a
-   relative path, never operate on an empty backlog, never auto-create outside
-   `nj init`. If a `backlog/` exists but `.nanojira.json` is missing, the
-   error says exactly that and points at `nj doctor` (which tolerates the
-   missing file and reports `config:invalid`) — never a plain "no backlog
-   found".
+1. **`--backlog=<path>`** — accepted by every command (§ 9); relative to the
+   working directory.
+2. **`NJ_BACKLOG=<path>`** — relative to the working directory.
+3. **The upward search.** Starting at the working directory and moving to the
+   parent directory until the filesystem root, look in each directory for
+   a. a `.njrc` that sets `backlog` — use its value; a relative value resolves
+      against the directory containing that `.njrc`;
+   b. a `backlog/` folder — use it.
+   The **nearest** directory wins; within one directory `.njrc` wins over
+   `backlog/`. So a `.njrc` in a repository root redirects the whole
+   repository, while a project that has its own `backlog/` deeper down keeps
+   it.
+4. **Nothing found: exit 1, `no_backlog`, hard error.** Never fall back to a
+   relative path, never operate on an empty backlog, never auto-create
+   outside `nj init`.
+
+**A chosen source is binding.** When the source picked by these rules does
+not hold a backlog, the command exits 1 with an error that names the path and
+the source, and never falls through to a lower source:
+
+```
+nj: no backlog at /abs/path (from --backlog)            invalid_backlog_flag
+nj: no backlog at /abs/path (from NJ_BACKLOG)           invalid_backlog_env
+nj: no backlog at /abs/path (from /abs/dir/.njrc)       invalid_backlog_njrc
+```
+
+"Holds a backlog" means `.nanojira/config.json` exists there. A folder with
+`.nanojira/` but without `config.json`, or a `backlog/` found by the search
+with neither, is `backlog_without_config` — the error says exactly that and
+points at `nj doctor` (which tolerates the missing file and reports
+`config:invalid`), never a plain "no backlog found". A folder with the legacy
+`.nanojira.json` at its top level is `legacy_layout`, pointing at
+`nj doctor --fix`.
 
 Silently reporting "0 entries" from the wrong directory would be the worst
 failure mode of a tool whose job is telling an agent what to do.
+
+### `.njrc`
+
+A project-level file, meant to be committed with the project, so relative
+paths travel with the repository:
+
+```
+# NanoJira — where this project's backlog lives
+backlog = ../shared/backlog
+```
+
+- One `key = value` per line. Whitespace around `=` and at both line ends is
+  ignored; empty lines and lines whose first non-blank character is `#` are
+  ignored. The value is literal — no quotes, no variables — except that a
+  leading `~/` expands to the user's home directory.
+- Lexing, exactly: an optional UTF-8 BOM at the start is dropped; a trailing
+  `\r` counts as line-end whitespace (CRLF files work); a line splits at its
+  **first** `=`, so the value may contain `=`; keys are case-sensitive
+  (`Backlog` is unknown); a `#` after the first non-blank character is part
+  of the value — only whole-line comments exist.
+- A `.njrc` that exists but is not a readable regular file (a directory, a
+  dangling symlink, no read permission) is `invalid_njrc` —
+  `nj: invalid .njrc at <abs path>: <reason>`, no line number. A symlinked
+  `.njrc` resolves a relative value against the directory where the link
+  lies, not its target's. `~/.njrc` has no special role: it is read only
+  when the home directory is on the search path, like any ancestor.
+- Known keys: `backlog`. A `.njrc` without `backlog` (e.g. only comments) does
+  not set a location; the search continues upward.
+- An unknown key, a line without `=`, an empty value or a repeated key: exit
+  1 with `invalid_njrc` and `nj: invalid .njrc at <abs path>: line <n>:
+  <reason>` — strict for the same reason unknown flags are (§ 9). Only a
+  `.njrc` the search actually reaches is parsed; a search stopped by
+  `--backlog` or `NJ_BACKLOG` never reads one.
 
 ---
 
 ## 5. Configuration
 
-`backlog/.nanojira.json`:
+`<backlog>/.nanojira/config.json` — as written by `nj init`:
 
 ```json
 {
@@ -152,9 +301,24 @@ failure mode of a tool whose job is telling an agent what to do.
   "sections": {
     "description": ["Description"],
     "acceptance": ["Acceptance Criteria"]
+  },
+  "layout": {
+    "group": "type",
+    "folders": {
+      "epics": "epics",
+      "tasks": "tasks",
+      "subtasks": "subtasks",
+      "archive": "archive"
+    },
+    "statusFile": true
   }
 }
 ```
+
+`init` writes the `layout` block out in full, so the defaults are visible
+where they are changed. Every part of it is optional: a missing `layout`, or a
+missing key inside it, means the default shown here — a migrated v2
+configuration without `layout` is valid as it is.
 
 Rules:
 
@@ -166,6 +330,18 @@ Rules:
   case-insensitively (§ 7). The lists exist so a backlog can rename its
   headings (`["Akzeptanzkriterien", "Acceptance Criteria"]`) without breaking
   the completeness check.
+- `layout.group`: `type`, `hierarchy` or `flat` (§ 4).
+- `layout.folders`: exactly the four keys `epics`, `tasks`, `subtasks`,
+  `archive`, each a folder name matching `[A-Za-z0-9][A-Za-z0-9_-]*`, pairwise
+  distinct, none of the form `EPIC-<n>`, `TSK-<n>` or `SUB-<n>` (those are
+  folder names under `hierarchy`). Under `hierarchy` and `flat` only
+  `archive` is used; the other three are still validated.
+- `layout.statusFile`: `true` or `false` (§ 4, `STATUS.md`).
+- An unknown key inside `layout` or `layout.folders` is invalid — a typo must
+  not silently fall back to a default.
+- Changing `layout` is always allowed; it never invalidates the configuration.
+  The elements then report their old places, and `nj doctor --fix` moves them
+  (§ 4, § 14).
 - An invalid configuration makes every command except `nj doctor` fail with
   exit 1 and a pointer to `nj doctor`; `doctor` reports the defect (exit 2).
 
@@ -181,7 +357,7 @@ Rules:
 | `type` | enum | `epic` \| `task` \| `subtask`, must match the ID prefix |
 | `parent` | ID | required for `task` and `subtask`, forbidden for `epic` |
 | `title` | string | single line, non-empty |
-| `status` | enum | from `.nanojira.json`, defaults to `statuses[0]` |
+| `status` | enum | from the configuration (§ 5), defaults to `statuses[0]` |
 | `created` | timestamp | ISO-8601 UTC with `Z`, set on creation |
 | `updated` | timestamp | ISO-8601 UTC with `Z`, refreshed on every write |
 
@@ -327,7 +503,8 @@ condition that produces it:
 | `id:derived` | `id` absent — derived from file name | warning | no |
 | `id:mismatch` | `id` ≠ file name | error | yes |
 | `type:derived` | `type` absent — derived from ID prefix | warning | no |
-| `type:folder` | file lies in the wrong type folder | error | yes |
+| `type:folder` | file lies in the wrong type folder (group `type`) | error | yes |
+| `layout:misplaced` | file does not lie where group `hierarchy` or `flat` puts it (§ 4) | error | yes |
 | `parent:orphaned` | `parent` absent on task/subtask | warning | no |
 | `parent:dangling` | `parent` points at nothing | error | yes |
 | `parent:cycle` | `parent` graph contains a cycle | error | yes |
@@ -345,8 +522,10 @@ condition that produces it:
 | `active_refs_archived` | `depends_on` points into the archive (satisfied) | — | no |
 | `id:no_tombstone` | element file has no tombstone (hand-created, or partial tombstone loss) | warning | no |
 | `backlog:stray_tmp` | stray `.nj-tmp-*` file (crashed write), backlog-level | warning | — |
-| `backlog:ids_missing` | `.ids/` absent or empty while element files exist, backlog-level | error | — |
-| `config:invalid` | `.nanojira.json` violates § 5 (backlog-level) | error | — |
+| `backlog:ids_missing` | `.nanojira/ids/` absent or empty while element files exist, backlog-level | error | — |
+| `config:invalid` | `.nanojira/config.json` violates § 5 (backlog-level) | error | — |
+| `backlog:legacy_layout` | v2 layout (`.nanojira.json`, `.ids/` at the top level), backlog-level | error | — |
+| `backlog:status_stale` | `STATUS.md` differs from a fresh rendering or is missing (§ 4), backlog-level | warning | — |
 
 The two axes are independent: **Doctor** says whether a code is a doctor
 finding, **Blocks `--ready`** says whether it keeps an element out of the
@@ -378,9 +557,10 @@ their original order. Empty optional fields are omitted. The serializer is
 Per type, sequential, zero-padded to three digits: `EPIC-001`, `TSK-001`,
 `SUB-001`. Past 999 the number naturally grows.
 
-**IDs are never reused — provided `.ids/` is preserved.** Allocation is
+**IDs are never reused — provided `.nanojira/ids/` is preserved** (`.ids/`
+below, for short). Allocation is
 decoupled from the element files: the true allocator is an empty **tombstone
-file** `backlog/.ids/TSK-007`, created with `O_CREAT|O_EXCL`. `O_CREAT|O_EXCL`
+file** `<backlog>/.nanojira/ids/TSK-007`, created with `O_CREAT|O_EXCL`. `O_CREAT|O_EXCL`
 is the **sole** claiming authority: the allocator computes only a **start
 value** — the highest number found across `.ids/` *and* all element files
 (active and archive) — and probes upward from there with `O_CREAT|O_EXCL`
@@ -420,6 +600,7 @@ line, file, JSON output. The agent translates nothing.
 ```
 nj                                     short status: counts, top ready, problems
 nj init                                create backlog layout (§ 4)
+nj <any command> --backlog=<path>      use this backlog (§ 4, Backlog location)
 nj new   --type=task --parent=EPIC-001 --title="…"
          [--priority=…] [--tags=a,b] [--assignee=…] [--depends-on=…]
          [--description=… | --description-file=…]
@@ -439,7 +620,9 @@ nj archive --id=EPIC-001 (§ 11)
 nj doctor [--fix] [--json]
 ```
 
-All commands accept `--json`; reads *and* writes (§ below).
+All commands accept `--json`; reads *and* writes (§ below). All commands
+accept `--backlog=<path>` as well, and it appears in every command's list of
+known flags; `--backlog` without a value is `missing_value`.
 
 ### Rules
 
@@ -637,12 +820,15 @@ problem codes: those describe element state, these describe command outcomes.
 ```
 no_backlog            backlog_without_config   invalid_config
 invalid_env           invalid_backlog_env      unknown_field
+invalid_backlog_flag  invalid_backlog_njrc     invalid_njrc
+legacy_layout
 unknown_command       missing_argument         missing_value
 invalid_value         invalid_target           not_found
 duplicate_id          exists                   changed_in_parallel
 id_allocation_failed  internal_error
 refused:<reason>      reason ∈ unreadable | archived | children_open |
-                               has_children | not_done | parent_archived
+                               has_children | not_done | parent_archived |
+                               misplaced
 fault:<hook>          hook ∈ before-compare | after-tmp-write | before-rename
 ```
 
@@ -656,9 +842,14 @@ its code. These mappings are normative:
 
 | Condition | Code | Stated in |
 |---|---|---|
-| no backlog found by the discovery rule | `no_backlog` | § 4 |
-| `backlog/` exists but `.nanojira.json` is missing | `backlog_without_config` | § 4 |
-| `.nanojira.json` violates § 5 | `invalid_config` | § 5 |
+| no backlog found by the location rules | `no_backlog` | § 4 |
+| `--backlog` names a place without a backlog | `invalid_backlog_flag` | § 4 |
+| `NJ_BACKLOG` names a place without a backlog | `invalid_backlog_env` | § 4 |
+| a `.njrc` names a place without a backlog | `invalid_backlog_njrc` | § 4 |
+| a reached `.njrc` violates its format | `invalid_njrc` | § 4 |
+| backlog found but `.nanojira/config.json` is missing | `backlog_without_config` | § 4 |
+| backlog in the v2 layout (any command except `doctor`) | `legacy_layout` | § 4 |
+| `.nanojira/config.json` violates § 5 | `invalid_config` | § 5 |
 | unknown field flag | `unknown_field` | § 9 |
 | unknown subcommand | `unknown_command` | § 9 |
 | a required flag or its value is missing | `missing_argument` / `missing_value` | § 9 |
@@ -669,6 +860,7 @@ its code. These mappings are normative:
 | `--parent`, `--depends-on` or `--file` names nothing | `not_found` | § 9 |
 | a `--description-file` / `--acceptance-file` path cannot be read | `not_found` | § 9 |
 | two files carry the same `id` | `duplicate_id` | § 9 |
+| `init` target already exists (even an empty directory) | `exists` | § 4 |
 | an `archive` target path is occupied | `exists` | § 11 |
 | the file changed between read and write | `changed_in_parallel` | § 12 |
 | an archived element is written or removed | `refused:archived` | § 9 |
@@ -677,10 +869,11 @@ its code. These mappings are normative:
 | `rm` while child elements exist | `refused:has_children` | § 9 |
 | `archive` with an unfinished subtree | `refused:not_done` | § 11 |
 | an archived element as `--parent` | `refused:parent_archived` | § 9 |
+| `archive` under `hierarchy` on a subtree not lying in its own folder | `refused:misplaced` | § 11 |
 | an `NJ_FAULT` hook fires | `fault:<hook>` | § 12 |
 
 Codes of the closed set that no passage above names — `invalid_env`,
-`invalid_backlog_env`, `id_allocation_failed`, `internal_error` — are
+`id_allocation_failed`, `internal_error` — are
 **reserved**: the implementation may emit them from its own error paths, but
 only from the set. A later revision may pin them.
 
@@ -738,14 +931,25 @@ writer.
 ## 11. `nj archive`
 
 `nj archive --id=EPIC-001` moves the element and its **entire subtree** into
-`backlog/archive/` (flat; IDs are unique and never reused, so no collisions
-are possible).
+the archive folder (`layout.folders.archive`, default `archive/`):
+
+- groups `type` and `flat`: flat, every file directly in the archive folder
+  (IDs are unique and never reused, so no collisions are possible);
+- group `hierarchy`: the archive mirrors the active nesting — the subtree's
+  folder moves as a whole, with **one** `rename`, to the same relative place
+  below the archive folder (`archive/EPIC-001/TSK-003/`); missing ancestor
+  folders there are created first and hold no element file of their own.
+  When the target folder already exists as such an ancestor — left by an
+  earlier archive of a descendant — it is not "occupied": the subtree's
+  entries move into it, one `rename` per entry, and the emptied source
+  folder is removed. A target is occupied only where an element file or a
+  folder holding one would be overwritten (DECISIONS 90).
 
 - **Precondition:** the element and every descendant are `done`. Otherwise the
   command refuses and lists the open elements. There is no `--force`: finish
   first, then archive.
 - **All move targets are verified before the first move.** If any target path
-  already exists in `archive/`, the command aborts with `exists` and moves
+  already exists in the archive, the command aborts with `exists` and moves
   **nothing**. A partially executed archive is forbidden — it would leave the
   backlog with an archived parent and a live child (`archive:split`,
   `duplicate_id`) and no clean recovery.
@@ -779,6 +983,16 @@ eventually "hangs" — exactly the complexity that was ruled out. Mechanisms:
 `.nj-tmp-<pid>-<rand>` in the same folder, `fsync`, then `rename`. `rename`
 within one filesystem is atomic: a reader sees either the old **or** the new
 complete file, never half of one. That is why reading never needs to lock.
+
+`STATUS.md` (§ 4) is written the same way: temp file, `fsync`, `rename`.
+
+**Folders under `hierarchy`.** `nj new` creates the element's folder (epic,
+task) with `mkdir` before writing the file into it; a folder that already
+exists is reused. `nj rm` removes the element's file and then its folder,
+only if the folder is then empty; `rm --cascade` removes the subtree's files
+children-first and each folder once empty — never a recursive delete of
+whatever else a folder holds. Moving a subtree (`archive`, `doctor --fix`) is
+**one `rename` of its top folder**, atomic within one filesystem.
 
 **Compare before writing.** On `nj set`, `nj note` and `nj archive`: read the
 file, remember the content, re-read immediately before writing and compare
@@ -827,6 +1041,10 @@ serializer defects (wrong format, missing `Z`).
   differently there.
 - Same element in the same millisecond: a residual window, overridable with
   `--force` on `set` and `note` — `archive` has no override (§ 12).
+- Under `hierarchy`, an archive that merges into an existing archive folder
+  (§ 11) takes several `rename`s. A crash between them leaves part of the
+  subtree live under an archived parent: `archive:split`, reported by
+  `doctor` — the same state a manual move produces.
 - Tombstones and the directory entry are not `fsync`'d: they survive a
   process crash, but a machine crash within the write window may lose one —
   the allocator's file-scan start value and `doctor --fix` restore the
@@ -863,7 +1081,7 @@ when backlogs approach ~12 000–15 000 elements, or ~9 000 if `list --json` is
 routinely on the agent's hot path. Round one ships without it; the design is
 fixed now so it can land later without touching the data model.
 
-- **Location:** `backlog/.nanojira-index.json`, created by `nj init`'s
+- **Location:** `<backlog>/.nanojira/index.json`, listed in `nj init`'s
   `.gitignore` as uncommitted — a local cache, never a versioned artifact.
   This keeps it out of git merge conflicts, the failure mode that argues
   against committing derived state.
@@ -891,12 +1109,17 @@ ERROR   EPIC-002 + EPIC-007: duplicate ID
 WARNING TSK-101: unknown status 'blocked-on-review'
 ```
 
-Checked: configuration validity (§ 5); every condition whose Doctor column is
-not `—` (table in § 7); unreadable frontmatter lines; duplicate IDs; wrong
-type folders;
+Checked: the legacy layout (`backlog:legacy_layout` — `doctor` is the one
+command that runs on a legacy backlog, reading `.nanojira.json` and `.ids/`
+from their v2 places); configuration validity (§ 5); every condition whose
+Doctor column is not `—` (table in § 7); unreadable frontmatter lines;
+duplicate IDs; files outside their layout place (`type:folder`,
+`layout:misplaced`);
 a missing or empty `.ids/` while elements exist (`backlog:ids_missing`);
 element files without tombstones (`id:no_tombstone`); stray `.nj-tmp-*` files
-(`backlog:stray_tmp`); archive rules (§ 11). The summary line splits the
+(`backlog:stray_tmp`); archive rules (§ 11); `STATUS.md` against a fresh
+rendering (`backlog:status_stale`, only with `statusFile: true`). The summary
+line splits the
 counts — `backlog/: 47 entries, 2 errors, 1 warning` — and the exit code is 2
 exactly when at least one `error` finding exists; warnings are reported but
 exit 0.
@@ -908,12 +1131,25 @@ tombstone backfill claims the **frontmatter** `id`, so it must run after the
 rename, or it would claim the wrong number while the right one stays
 unprotected:
 
+0. migrate a legacy layout: create `.nanojira/`, move `.nanojira.json` to
+   `.nanojira/config.json` and `.ids/` to `.nanojira/ids/` (each one
+   `rename`; the configuration content is not rewritten), delete the v2
+   index file `.nanojira-index.json` if present, and replace the pattern
+   `.nanojira-index.json` in `.gitignore` by `.nanojira/index.json` — only
+   when that line is present verbatim; otherwise `.gitignore` is left alone
+   and a note says so. If both the v2 and the v3 location of the
+   configuration or of the tombstones exist, nothing is moved — ambiguous,
+   reported, never merged
 1. write the `id` from the file name, and the `type` from the ID prefix, when
    missing
 2. rename the file to match the `id` when frontmatter and file name disagree
    and the target is free
-3. move a file into the correct type folder — only when `id` prefix and
-   `type` agree (frontmatter > prefix > folder precedence; the folder loses)
+3. move a file to its layout place (`type:folder`, `layout:misplaced`) —
+   under `type` only when `id` prefix and `type` agree (frontmatter > prefix >
+   folder precedence; the folder loses); under `hierarchy` only when the
+   whole `parent` chain resolves without `parent:*` problems, and a subtree
+   moves with its top folder in one `rename`, top-down; every target must be
+   free, otherwise that element is reported and stays
 4. create missing tombstones for every ID found in element files
    (`id:no_tombstone`, `backlog:ids_missing`; tombstones for deleted IDs are
    unrecoverable and reported as such)
@@ -922,6 +1158,8 @@ unprotected:
 6. pull the H1 up from `title`
 7. remove stray `.nj-tmp-*` files
 8. rebuild the index (round two)
+9. regenerate `STATUS.md` (with `statusFile: true`) — last, so it reflects
+   every repair above; a merge conflict in it is thereby resolved
 
 Each step that modifies a file refreshes that file's `updated` (§ 6, "every
 write"); steps that find nothing to do leave the file untouched. Original file
@@ -987,7 +1225,7 @@ reported, not guessed at.
     `archive:split` and `archive:not_done` are caught by `doctor`.
 12. **Discovery.** `list` from a nested subdirectory finds the backlog;
     from an unrelated directory it exits 1 with a hard error (never a silent
-    empty result); `NJ_BACKLOG` is honoured.
+    empty result); `NJ_BACKLOG` is honoured. (Extended by AC-21.)
 13. **JSON contract.** Every command supports `--json`; read shapes and the
     write result shape match § 9; `_problems` contains only closed-vocabulary
     codes; `changed` lists exactly the fields that changed.
@@ -998,10 +1236,12 @@ reported, not guessed at.
 16. **Language.** Non-ASCII values (umlauts, CJK, emoji) survive every write
     cycle byte-exact — except the documented `title` normalisation — and
     English output is produced regardless of the values' language.
-17. **Configuration.** An invalid `.nanojira.json` (bad statuses, `done` not
-    last) makes commands fail with exit 1 pointing at `doctor`, and `doctor`
-    reports it with exit 2.
-18. **Tombstone integrity.** Deleting `backlog/.ids/` and running `doctor`
+17. **Configuration.** An invalid `.nanojira/config.json` (bad statuses,
+    `done` not last, an unknown `layout` key, an invalid or duplicate folder
+    name) makes commands fail with exit 1 pointing at `doctor`, and `doctor`
+    reports it with exit 2. A configuration without `layout` is valid and
+    behaves exactly like the defaults.
+18. **Tombstone integrity.** Deleting `.nanojira/ids/` and running `doctor`
     yields `backlog:ids_missing` as ERROR with exit 2 — never a clean pass;
     `doctor --fix` restores tombstones for all surviving element IDs and
     reports that tombstones for deleted IDs are unrecoverable; a subsequent
@@ -1019,6 +1259,42 @@ reported, not guessed at.
     forms for one role (or `-` for both roles) is rejected with nothing
     written. Without the section flags, `nj new`'s scaffold stays
     byte-identical to the AC-2 fixture.
+21. **Backlog location.** Each source works alone: `--backlog` (on every
+    command, including `init`), `NJ_BACKLOG`, a `.njrc` in the working
+    directory and in an ancestor (relative value against the `.njrc`'s own
+    directory, `~/` expanded). The order holds pairwise: flag over
+    environment over search; within the search the nearest directory wins
+    and `.njrc` beats `backlog/` in the same directory. A chosen source that
+    holds no backlog exits 1 with its own code and names the source — even
+    when a lower source would have found one (except for `init`, which
+    creates the backlog there). Every `.njrc` format violation
+    exits 1 with `invalid_njrc` and the line number; a `.njrc` without
+    `backlog` lets the search continue. Without any source `init` creates
+    `./backlog`.
+22. **Layout.** For each group (`type`, `hierarchy`, `flat`) and for renamed
+    folders: `new`, `archive`, `rm` and `rm --cascade` put and remove files
+    exactly where § 4, § 11 and § 12 say; `list`, `tree`, `show` and `--json`
+    give the same answers in every group, apart from file paths. Changing
+    `group` or a folder name on a populated backlog: every element reports
+    `type:folder` or `layout:misplaced`, commands keep working, one
+    `doctor --fix` moves everything, a following `doctor` is clean, and every
+    element file is byte-identical to before the move. Under `hierarchy` a
+    hand-edited `parent` makes the file `layout:misplaced`, and `--fix` moves
+    it; an unresolvable `parent` chain is reported and never moved.
+23. **Status overview.** After `init` and after every write command,
+    `STATUS.md` is byte-identical to the golden fixture of § 4 for that
+    state — including empty statuses, the `?` section and archived elements
+    left out. A hand-edited or deleted `STATUS.md` is `backlog:status_stale`
+    (warning, exit 0) and `doctor --fix` restores it. With `statusFile: false`
+    no command creates or checks it. An unwritable `STATUS.md` leaves the
+    write's exit code unchanged and prints the § 4 warning.
+24. **Legacy migration.** On a v2 backlog every command except `doctor` exits
+    1 with `legacy_layout` and changes nothing; `doctor` reports
+    `backlog:legacy_layout` (exit 2); `doctor --fix` migrates it. Afterwards
+    the configuration and every tombstone are at their v3 places with
+    unchanged content, every element file is byte-identical, `doctor` is
+    clean, and the next `nj new` allocates above every existing number. With
+    both v2 and v3 places present, `--fix` moves nothing and reports it.
 
 ---
 

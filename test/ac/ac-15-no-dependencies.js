@@ -20,10 +20,23 @@
  * beside it, still runs — the shipped file does not reach for a
  * `node_modules` the project may have for its own build tooling.
  *
- * The harness reads NJ_NODE when it is loaded, so it is set before the require
- * below — otherwise `nj` would be driven by whatever Node runs this test and
- * the criterion would be vacuous. The environment variable is only defaulted,
- * never overwritten, so a caller can pin a different runtime deliberately.
+ * WHICH NODE. The harness reads NJ_NODE when it is loaded, so the runtime is
+ * resolved before the require below — otherwise `nj` would be driven by
+ * whatever Node runs this test and the criterion would be vacuous. Search
+ * order, first hit wins:
+ *
+ *   1. NJ_NODE, when set — a caller can pin a runtime deliberately; it is
+ *      never overwritten.
+ *   2. Walking up from the project directory, the first ancestor D holding
+ *      D/runtime/<platform>/bin/node or D/portable/runtime/<platform>/bin/node.
+ *      That covers both checkouts the project has lived in:
+ *      workspace/portable/projects/nanojira (runtime two levels up, beside
+ *      `projects/`) and workspace/nanojira (runtime under workspace/portable).
+ *
+ * If neither yields an existing file the test reports CANNOT RUN, not FAIL:
+ * a missing runtime is a missing prerequisite, not a defect of `nj`. Every
+ * spawn below uses that one resolved path, so an explicit NJ_NODE is the Node
+ * the whole criterion is checked on.
  *
  * "Without network" is not observable from a spawned process without a
  * sandbox; what is observable is that no module outside the Node distribution
@@ -31,11 +44,36 @@
  * check below pins for `dist/nj` specifically.
  */
 const path = require('path');
-// test/ac -> four levels up: ac, test, nanojira, projects -> workspace/portable
-const PORTABLE = path.resolve(__dirname, '..', '..', '..', '..');
 const PLATFORM = process.platform === 'darwin' ? 'darwin-arm64' : 'linux-x64';
-const RUNTIME_NODE = PORTABLE + '/runtime/' + PLATFORM + '/bin/node';
-if (!process.env.NJ_NODE) process.env.NJ_NODE = RUNTIME_NODE;
+const PROJECT = path.resolve(__dirname, '..', '..');
+
+function findRuntime() {
+  const fsx = require('fs');
+  const tried = [];
+  if (process.env.NJ_NODE) {
+    tried.push('NJ_NODE=' + process.env.NJ_NODE);
+    return { node: fsx.existsSync(process.env.NJ_NODE) ? process.env.NJ_NODE : null, tried };
+  }
+  const rel = path.join('runtime', PLATFORM, 'bin', 'node');
+  for (let d = PROJECT; ; d = path.dirname(d)) {
+    for (const c of [path.join(d, rel), path.join(d, 'portable', rel)]) {
+      tried.push(c);
+      if (fsx.existsSync(c)) return { node: c, tried };
+    }
+    if (path.dirname(d) === d) return { node: null, tried };
+  }
+}
+
+const found = findRuntime();
+if (!found.node) {
+  console.log('FAIL ' + path.basename(__filename) + ' — CANNOT RUN');
+  console.log('  no runtime Node found for ' + PLATFORM + '; tried, in order:');
+  for (const t of found.tried.slice(0, 12)) console.log('    ' + t);
+  console.log('  Set NJ_NODE to the runtime Node (§ 3: workspace/portable/runtime/<platform>/bin/node).');
+  process.exit(1);
+}
+const RUNTIME_NODE = found.node;
+process.env.NJ_NODE = RUNTIME_NODE;
 
 const fs = require('fs');
 const { execFileSync, spawnSync } = require('child_process');
@@ -45,13 +83,11 @@ const T = H.T;
 /* Stringify for failure details: never throws on undefined. */
 function J(x) { return JSON.stringify(x === undefined ? null : x); }
 
-const PROJECT = path.resolve(__dirname, '..', '..');
-
 /* ---- the runtime itself ------------------------------------------------- */
 
 {
   const exists = fs.existsSync(RUNTIME_NODE);
-  T.check('the runtime Node ships at runtime/' + PLATFORM + '/bin/node', exists, RUNTIME_NODE);
+  T.check('the runtime Node exists (' + RUNTIME_NODE + ')', exists, RUNTIME_NODE);
   T.eq('the harness drives nj with the runtime Node', H.NODE, process.env.NJ_NODE);
   T.check('the harness knows where nj is', !!H.NJ, 'no NJ path given (argv[2] or NJ)');
 

@@ -10,6 +10,7 @@ const HELP = `nj — NanoJira, a local file-based task tool for agents
 
   nj                                     short status: counts, top ready, problems
   nj init                                create the backlog layout
+  nj <any command> --backlog=<path>      use this backlog (else NJ_BACKLOG, else .njrc/backlog/ upward)
   nj new   --type=task --parent=EPIC-001 --title="…"
            [--status=…] [--priority=…] [--tags=a,b] [--assignee=…] [--depends-on=…]
            [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=…]

@@ -100,9 +100,9 @@ function describeFinding(code: string, el: Element, dupGroups: Map<string, Eleme
 function cmdDoctor(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'fix']), false);
   const json = flags.has('json');
-  if (flags.has('fix')) return doctorFix(json);
+  if (flags.has('fix')) return doctorFix(flags, json);
 
-  const ctx = context({ lenient: true, tolerateConfig: true });
+  const ctx = context(flags, { lenient: true, tolerateConfig: true });
   const findings = collectFindings(ctx);
   const errors = findings.filter((f) => f.severity === 'error');
   const warnings = findings.filter((f) => f.severity === 'warning');
@@ -162,10 +162,10 @@ interface FixShared {
  */
 interface FixCtx<S extends number> extends FixShared { readonly stage: S }
 
-function makeFixCtx(): FixCtx<0> {
+function makeFixCtx(flags: Flags): FixCtx<0> {
   const actions: string[] = [];
   const notes: string[] = [];
-  const reload = () => context({ lenient: true, tolerateConfig: true });
+  const reload = () => context(flags, { lenient: true, tolerateConfig: true });
   const skipped: Set<string> = new Set();
   const guard = (el: Element) => {
     if (!el.problems.has('file:unreadable') && !el.problems.has('frontmatter:unreadable')) return false;
@@ -335,8 +335,8 @@ function fixStep8(fc: FixCtx<8>): FixResult {
   return { ...fc, stage: 9, ctx, findings };
 }
 
-function doctorFix(json: boolean) {
-  const fc0 = makeFixCtx();
+function doctorFix(flags: Flags, json: boolean) {
+  const fc0 = makeFixCtx(flags);
   const fc1 = fixSnapshotMtimes(fc0);
   const fc2 = fixStep1(fc1);
   const fc3 = fixStep2(fc2);

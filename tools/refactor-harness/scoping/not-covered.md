@@ -18,10 +18,10 @@ beschrieben waren dort nur sechs davon. Deshalb steht sie jetzt hier.
 | NC9 | — | nicht rekonstruierbar | Wie NC1. |
 | NC10a | `--tag`/`--assignee`: Flag-Tippfehler unvalidiert | geschlossen | `test/edge/norm-tag-assignee-typos.js` (§ 9: unbekannte Flags → `unknown_field`). |
 | NC10b | `--tag`/`--assignee`: Unicode-Werte byte-exakt | geschlossen | `test/ac/ac-16-language.js` (`Jörg`, `hören,日本語,🎉`, Datei und JSON). |
-| NC11 | `test/ac/ac-15-no-dependencies.js:33` hartkodiert `PORTABLE` auf den macOS-Pfad — Orakel selbst nicht plattformportabel | offen, getrackt | Erst beim linux-x64-Lauf (SUB-001) aufgefallen: `RUNTIME_NODE` existiert unter dem hartkodierten Pfad im Container nicht, jeder darauf aufbauende `spawn` bricht mit `ENOENT` ab (15 von 21 Checks der Suite). Bestätigt als Testdefekt, nicht als `nj`-Verhalten: mit dem Runtime-Verzeichnis unter dem hartkodierten Pfad gemountet lief dieselbe Suite grün. Fix (nicht selbst umgesetzt, da `test/`-Änderung eine Neuaufzeichnung erzwingt): `PORTABLE` aus `__dirname` ableiten, `test/ac` vier Ebenen hoch zu `workspace/portable` — analog zu `PROJECT`, das zwei Ebenen hoch zum Projekt auflöst. |
+| NC11 | `test/ac/ac-15-no-dependencies.js:33` hartkodiert `PORTABLE` auf den macOS-Pfad — Orakel selbst nicht plattformportabel | geschlossen | Fix umgesetzt (225983f): `PORTABLE` jetzt `path.resolve(__dirname, '..','..','..','..')` — analog zu `PROJECT` (Z. 47, zwei Ebenen hoch), hier vier Ebenen von `test/ac` hoch zu `workspace/portable`. Getestet: löst korrekt auf `/home/dev/workspace/portable` auf; Suite PASS (22 Checks) gegen `dist/nj`. Neuaufzeichnung → `oracle-frozen-7` (2105985): Freeze bestätigt (nur diese eine Datei im DIGEST_SCOPE seit cd7f8e0, per `git diff` und `-newermt` gegengeprüft), 3454 Aufrufe, Orakel 64/64. Replay gegen `oracle-frozen-7`: 0 Diffs, BEHAVIOUR UNCHANGED, sowohl gegen `dist/nj` als auch direkt gegen `src/nj.ts` (2943/2943 verglichen je Lauf). |
 
-**Stand:** 6 geschlossen (NC3–6, NC8, NC10 in beiden Lesarten),
-1 offen und getrackt (NC11), 4 nicht rekonstruierbar (NC1/2/7/9).
+**Stand:** 7 geschlossen (NC3–6, NC8, NC10 in beiden Lesarten, NC11),
+0 offen, 4 nicht rekonstruierbar (NC1/2/7/9).
 
 ## Weitere bekannte Grenzen, nicht Teil von NC1–10
 

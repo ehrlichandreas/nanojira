@@ -13,7 +13,7 @@ import { nowIso, guardedWrite, renderElement } from '../core/store.ts';
 function cmdNote(flags: Flags, positional: string[]) {
   checkFlags(flags, [], new Set(['json', 'force', 'id', 'file']), true);
   const json = flags.has('json');
-  const ctx = context();
+  const ctx = context(flags);
   const el = resolveTarget(ctx, flags, true);
   requireWritable(el);
   requireActive(el, 'note');
