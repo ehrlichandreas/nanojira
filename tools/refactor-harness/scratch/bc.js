@@ -1,6 +1,7 @@
 'use strict';
 const fs = require('fs'), path = require('path'), crypto = require('crypto');
 const { spawn } = require('child_process');
+const { track } = require('./lib/cleanup.js');
 // Scratch base made self-sufficient: these probes hardcoded /tmp/v2, so the
 // corpus part they feed vanished on reboot and `record` aborted with code 4.
 // os.tmpdir() always exists; HARNESS_SCRATCH_BASE overrides it.
@@ -14,7 +15,7 @@ const CFG = JSON.stringify({ schema: 1, statuses: ['todo','doing','blocked','rev
 const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 const orig = (st, up) => `---\nid: TSK-001\ntype: task\nparent: EPIC-001\ntitle: T\nstatus: ${st}\ncreated: ${NOW}\nupdated: ${up}\n---\n\n# T\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n`;
 function mk(label) {
-  const d = fs.mkdtempSync(SCRATCH_BASE + '/' + label + '-'); const bl = path.join(d, 'backlog');
+  const d = track(fs.mkdtempSync(SCRATCH_BASE + '/' + label + '-')); const bl = path.join(d, 'backlog');
   for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
   fs.writeFileSync(path.join(bl, '.nanojira/config.json'), CFG); fs.writeFileSync(path.join(bl, 'tasks', 'TSK-001.md'), orig('todo', NOW)); fs.writeFileSync(path.join(bl, '.nanojira/ids', 'TSK-001'), '');
   return d;

@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 // corpus part they feed vanished on reboot and `record` aborted with code 4.
 // os.tmpdir() always exists; HARNESS_SCRATCH_BASE overrides it.
 const SCRATCH_BASE = process.env.HARNESS_SCRATCH_BASE || require('os').tmpdir();
+const { track } = require('./lib/cleanup.js');
 // argv[2] zuerst: ohne das laeuft die Sonde am Shim vorbei, traegt nichts
 // zum Korpus bei -- und prueft obendrein ein anderes nj als das, das
 // gerade unter Test steht.
@@ -17,7 +18,7 @@ function el(f, body) { const order = ['id','type','parent','title','status','pri
 const complete = t => '# ' + t + '\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n';
 function sums(d) { const out = {}; const bl = path.join(d, 'backlog'); for (const dir of ['epics','tasks','subtasks','archive']) { let names = []; try { names = fs.readdirSync(path.join(bl, dir)).sort(); } catch {} for (const nme of names) { const c = rd(path.join(bl, dir, nme)); out[dir + '/' + nme] = c === null ? '<unreadable>' : sha(c); } } return out; }
 function mk(label) {
-  const d = fs.mkdtempSync(SCRATCH_BASE + '/r3bc-' + label + '-'); const bl = path.join(d, 'backlog');
+  const d = track(fs.mkdtempSync(SCRATCH_BASE + '/r3bc-' + label + '-')); const bl = path.join(d, 'backlog');
   for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
   fs.writeFileSync(path.join(bl, '.nanojira/config.json'), CFG);
   fs.writeFileSync(path.join(bl, 'epics', 'EPIC-001.md'), el({ id: 'EPIC-001', type: 'epic', title: 'E', status: 'done', created: NOW, updated: NOW }, '# E\n\n## Description\nD\n'));

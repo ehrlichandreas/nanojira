@@ -2924,6 +2924,105 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      the last line with nj's exit code. The D96 suite gets an extra
      bin/nj leg that asserts exactly that.
 
+188. **v3.12 accepted** (2026-10-09). Verifier PASS (docs/verification/
+     v3-12.md, 1a609eb). The repo is now the skill folder:
+     - SKILL.md at the root;
+     - bin/ is rendered by tools/bundle.js from tools/wrapper.sh and
+       tools/wrapper.cmd, carries a header and is committed;
+     - `bundle --check` covers dist/, bin/ and the SKILL.md frontmatter and
+       version;
+     - the export copies SKILL.md, bin/ and dist/ from the signed tag;
+     - there is no VERSION file;
+     - package.json declares engines node >= 24;
+     - the suites run through bin/nj.
+     The Verifier's four mutations were all caught: no bin/ render, no
+     SKILL.md check, export from the working tree or with an extra file,
+     and the harness secretly using node again. Running through bin/
+     brought out three MCP suites that had copied nj-mcp without dist/;
+     they now copy the shipped unit (1c3609b). It also showed two internals
+     suites that cannot run through the sh launcher; per the D187 addendum
+     they run against the bundle. AC-56 X2 reports CANNOT RUN without
+     esbuild (d96e041). run-all gives 99/101 through bin/nj and
+     dist/nj.mjs, with the 2 known gaps. The gate shows 1057 calls with the
+     v3.11 breakdown, unchanged.
+     Lead checks against signed tag v3.12:
+     - the export holds 7 files, no links, and is byte-identical to
+       `git archive v3.12 SKILL.md bin dist`;
+     - bundle --check is clean;
+     - team-a's node on their backlog copy gives a clean doctor;
+     - the Team B copy with skills/nj replaced by the export gives
+       list 500 entries and a clean doctor;
+     - NJ_NODE=/nope gives exit 127 with the § 18 line;
+     - our own backlog through `sh bin/nj` gives a clean doctor.
+
+189. **Refactor-harness scratch probes clean up after themselves**
+     (2026-10-09). The white-box probes in tools/refactor-harness/scratch/
+     (bc, r3bc, r4, r4bc, r5, r6, r6bc, r8, …) create
+     `<SCRATCH_BASE>/<label>-XXXXXX/backlog` fixtures with mkdtempSync and
+     never remove them. About 320 had piled up in /tmp by today. From now
+     on:
+     - every probe removes the directories it created when it exits,
+       including on failure and on an uncaught exception;
+     - it removes only paths it created itself, never anything else under
+       SCRATCH_BASE;
+     - fixture contents, probe output and the closing verdict line stay
+       byte-identical, so the baseline and the gate are unchanged;
+     - a test shows that a probe run leaves no new entries under a fresh
+       HARNESS_SCRATCH_BASE.
+     This is tooling only: no nj behaviour, no version bump, no tag.
+
+190. **History squashed to tagged commits only** (2026-10-09, user
+     request, modelled on ehrlichandreas/bosun: one signed commit per tag,
+     subject `nanojira <tag>: <title>`).
+     - main is rewritten so that every remaining commit carries at least
+       one tag. The 536 commits become 26: the 25 distinct tagged commits
+       plus v3.12.1.
+     - Each new commit keeps the exact tree of its tagged commit. The
+       gate, the baseline and the export only use tag names, so they work
+       unchanged.
+     - Every tag keeps its name, type and message. Annotated tags are
+       re-signed with the original tagger date; lightweight tags stay
+       lightweight.
+     - The commits after v3.12 (D188, D189) need a tag of their own. That
+       tag is **v3.12.1**: a patch release with tooling only (the D189
+       scratch-probe cleanup) and no change in nj's behaviour. It
+       overrides "no version bump, no tag" in D189.
+     - docs/history-squash-20261009.map maps every old commit to the tag
+       of the squashed commit that now contains it (`<old-sha> <tag>`).
+       Tag names are stable, while new hashes would change with every
+       further rewrite. Old hashes quoted in DECISIONS, CHANGES and
+       docs/verification resolve through this map, and older ones first
+       through docs/history-resign-20261009.map.
+     - backlog/ and feedback/ have no tags and stay untouched.
+     - A `git bundle --all` of the pre-squash state goes outside the repo
+       before the rewrite.
+     - **Addendum (user request): anonymous time, as in bosun.** Commit i
+       (1-based, oldest first) and its tags get `1970-01-(i+1) 12:00:00
+       +0000` as author, committer and tagger date. The GPG signature time
+       cannot predate the key, so it is pinned to the key's creation time
+       plus 60 s (`gpg --faked-system-time`). It carries no work time.
+       From now on every release tag squashes its untagged tail the same
+       way, so main only ever holds tagged commits with anonymous time.
+
+191. **v3.12.1 accepted** (2026-10-09). The Verifier gives PASS in
+     docs/verification/d189.md (base, addendum 1 for the signal
+     follow-up, addendum 2 for the bump and LICENSE).
+     - D189: every scratch probe removes its own fixtures, on exit, on an
+       uncaught exception and on SIGHUP/SIGINT/SIGTERM. SIGKILL is the
+       documented limit.
+     - Gate on f7f9f65: replay 1057 calls with the 8 known diffs; oracle
+       phase 100/102 with the 2 known cannot-run; scratch-cleanup 32/32.
+     - The bump to 3.12.1 changes version strings only. LICENSE (MIT)
+       was added at the user's request; it is not yet in the export.
+     Lead checks on the tagged tree:
+     - bundle --check is clean;
+     - `sh bin/nj --version` gives 3.12.1;
+     - our own backlog gives a clean doctor (87 entries);
+     - NJ_NODE=/nope gives exit 127 with the § 18 line;
+     - AC-39 and scratch-cleanup are green.
+     The history is then squashed per D190; docs/history-squash-20261009.map
+     is in this commit.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now
