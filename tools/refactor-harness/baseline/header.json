@@ -1,10 +1,10 @@
 {
-  "njSha256": "45da9e4afbf6dd733a24d41cb55e8a9f924d9caf803c736128a9f2b49a71111c",
-  "njPath": "../../../../../../../../../var/folders/xg/9sw6yt791zsf3rsmffcg8w2m0000gp/T/tmp.xuMbDWUH7E/projects/nanojira/dist/nj",
+  "njSha256": "37a7ece6bcdd6a75d6fc85d2b9901879c64a405731175a0438ac1da59650431f",
+  "njPath": "../../../../../../../../../var/folders/xg/9sw6yt791zsf3rsmffcg8w2m0000gp/T/tmp.u4BbP9QUcR/projects/nanojira/dist/nj",
   "node": "v24.21.0",
   "platform": "darwin-arm64",
-  "recordedAt": "2026-10-03T11:00:12.358Z",
-  "calls": 5849,
+  "recordedAt": "2026-10-03T21:21:28.666Z",
+  "calls": 6313,
   "parts": [
     {
       "name": "fixtures",
@@ -13,8 +13,8 @@
     },
     {
       "name": "oracle",
-      "calls": 3736,
-      "detail": "passed 73/74, failed 0, cannot run 1"
+      "calls": 4200,
+      "detail": "passed 74/75, failed 0, cannot run 1"
     },
     {
       "name": "scratch",
@@ -49,6 +49,7 @@
     "ac/ac-24-legacy-migration.js",
     "ac/ac-25-note-author.js",
     "ac/ac-26-unarchive.js",
+    "ac/ac-27-claim.js",
     "fault/det-fence-heading.js",
     "fault/det-id-retry.js",
     "fault/fault-hook-json.js",
@@ -98,7 +99,7 @@
     "edge/v3-2-regressions.js",
     "edge/write-encoding.js"
   ],
-  "testDigest": "1acd6e4912c3ad10028d81647097a7784b6a90a4e78f9e8c86c9e1604edcd1f9",
+  "testDigest": "67731e5362198f9a04eb17e7ffebc6c166a112687d90db40d3786a36bd8d0c43",
   "testDigestScope": [
     "test/ac/",
     "test/edge/",
@@ -126,5 +127,5 @@
     "edge/hardening-njrc-foreign-link.js: needs root, or a symlink owned by another non-root uid on the scratch filesystem, to prove a foreign-owned .njrc link is refused (DECISIONS 98); a normal user account on this machine has neither (718c230)"
   ],
   "note": "Comparison key excludes per-file raw sha; nsha (normalised content) is normative.",
-  "corpusSha256": "34dbb16dc9a7f888149dd3133686218fc3056dca3b1953655c865dda52539566"
+  "corpusSha256": "9d4c8561d9fadea5b3bc6afac09c099dbf4d9faf1e197eb2d32e507aa63409f3"
 }

@@ -102,6 +102,7 @@ macOS system Python.
 └── .nanojira/                 everything only nj itself needs
     ├── config.json            configuration (§ 5)
     ├── ids/                   ID tombstones (§ 8)
+    ├── claims/                claim sequences (§ 12 "Claims"), never committed
     └── index.json             search index — round two (§ 13), never committed
 ```
 
@@ -153,10 +154,13 @@ pointing at it (below) is outside the backlog and has to follow.
 
 **Versioned state.** `.nanojira/config.json`, `.nanojira/ids/`, `README.md`,
 `STATUS.md` and every element file are versioned — they travel with git and
-must be committed. The only uncommitted artifacts are the index (§ 13) and
-temp files (§ 12). `nj init` writes a `.gitignore` containing exactly two
-patterns: `.nanojira/index.json` and `.nj-tmp-*`. `.nanojira/ids/` is never
-ignored, by design.
+must be committed. The only uncommitted artifacts are the index (§ 13),
+temp files (§ 12), and claim sequences (`.nanojira/claims/`, § 12 "Claims") —
+local runtime state, not project memory: a claim coordinates processes
+sharing one working tree, and a claim made in another clone cannot be
+honoured without a server. `nj init` writes a `.gitignore` containing exactly
+three patterns: `.nanojira/index.json`, `.nj-tmp-*` and `.nanojira/claims/`.
+`.nanojira/ids/` is never ignored, by design.
 
 ### Status overview (`STATUS.md`)
 
@@ -164,8 +168,9 @@ A generated, read-only overview of the active backlog by status, so the state
 is readable without `nj` — in an editor or a forge's web view.
 
 - **Written** by `nj init` and after every successful write of `new`, `set`,
-  `note`, `rm`, `archive`, `unarchive` and `doctor --fix`, from a full scan, atomically
-  (§ 12). **Never read** by `nj`: it is derived, never the truth.
+  `note`, `check`, `rm`, `archive`, `unarchive`, `claim`, `release` and
+  `doctor --fix`, from a full scan, atomically (§ 12). **Never read** by
+  `nj`: it is derived, never the truth.
 - **Format** (normative, byte-exact; a golden fixture pins it):
 
   ```
@@ -398,7 +403,7 @@ creation.
 | Field | Type | Default | Purpose |
 |---|---|---|---|
 | `priority` | enum | `normal` | `low` \| `normal` \| `high` \| `urgent` |
-| `assignee` | string | empty | who (which agent) is on it; free text, no registry |
+| `assignee` | string | empty | who (which agent) is on it; free text, no registry — **advisory**, unless the element is claimed (§ 12 "Claims"), where the claim sequence is the truth for exclusivity and `assignee` is its mirror |
 | `tags` | list | empty | filter dimension |
 | `depends_on` | list of IDs | empty | dependencies, enables `--ready` |
 | `archived` | timestamp | absent | set by `nj archive` (§ 11), tool-written only |
@@ -480,15 +485,19 @@ byte-exact rule.
 ### Body
 
 The body belongs to the user. `nj` writes it back **byte-for-byte unchanged**
-— with exactly three sanctioned exceptions: the H1 synchronisation above,
-`nj note` appending under `## Notes` (§ 10), and `nj new`/`nj set` writing a
+— with exactly four sanctioned exceptions: the H1 synchronisation above,
+`nj note` appending under `## Notes` (§ 10), `nj new`/`nj set` writing a
 configured **section role** (`description`, `acceptance`) when one of the
-section flags in § 9 is given. Unknown sections are preserved.
+section flags in § 9 is given, and `nj check` flipping one checkbox's
+bracket content (§ 10a). Unknown sections are preserved.
 
 Section matching is line-based and **not** fenced-code-aware: a
 `## Description` line inside a fenced block is a section heading for reads and
 writes alike, so a section write replaces that region and destroys the fence
-content. Fence-aware matching is deliberately out of scope for round one.
+content. Fence-aware matching is deliberately out of scope for round one —
+**except for `nj check`** (§ 10a), which tracks fence state and never
+matches a checkbox-shaped line inside one; that command's own section states
+the one exception, this rule is otherwise unchanged.
 
 ### Completeness (derived, never stored)
 
@@ -540,6 +549,8 @@ condition that produces it:
 | `done:open_children` | `done` set while children are not `done` | warning | yes |
 | `archive:not_done` | archived element is not `done` | error | yes |
 | `archive:split` | part of a subtree in archive, part outside | error | yes |
+| `claim:mismatch` | the element is `claimed N` but its `assignee` is not N — a crash between the append and the mirror write, a hand edit, or a claim's own rollback losing a race to a concurrent `archive`/`unarchive` (§ 12 "Claims") | warning | no |
+| `claim:orphaned` | a claim directory for an element that is archived or does not exist (backlog-level when it does not exist) — not merely `done`: a done-but-still-live element can still legitimately be claimed | warning | — |
 | `title:h1_mismatch` | H1 ≠ `title` | warning | no |
 | `incomplete:description` | description section absent/empty | — | yes |
 | `incomplete:acceptance` | acceptance section absent/empty (task/subtask) | — | yes |
@@ -551,6 +562,7 @@ condition that produces it:
 | `backlog:legacy_layout` | v2 layout (`.nanojira.json`, `.ids/` at the top level), backlog-level | error | — |
 | `backlog:unreadable_dir` | a directory below the backlog cannot be listed (permissions), backlog-level | error | — |
 | `backlog:status_stale` | `STATUS.md` differs from a fresh rendering or is missing (§ 4), backlog-level | warning | — |
+| `backlog:claims_unignored` | `.nanojira/claims/` exists and `.gitignore` has no line that is exactly `.nanojira/claims/`, backlog-level | warning | — |
 
 The two axes are independent: **Doctor** says whether a code is a doctor
 finding, **Blocks `--ready`** says whether it keeps an element out of the
@@ -627,7 +639,7 @@ nj                                     short status: counts, top ready, problems
 nj init                                create backlog layout (§ 4)
 nj <any command> --backlog=<path>      use this backlog (§ 4, Backlog location)
 nj new   --type=task --parent=EPIC-001 --title="…"
-         [--priority=…] [--tags=a,b] [--assignee=…] [--depends-on=…]
+         [--status=…] [--priority=…] [--tags=a,b] [--assignee=…] [--depends-on=…]
          [--description=… | --description-file=…]
          [--acceptance=…  | --acceptance-file=…]
 nj set   --id=TSK-009 [--title=…] [--status=…] [--priority=…]
@@ -635,7 +647,9 @@ nj set   --id=TSK-009 [--title=…] [--status=…] [--priority=…]
          [--description=… | --description-file=…]
          [--acceptance=…  | --acceptance-file=…]
          [--force] [--allow-open-children]
-nj note  --id=TSK-009 "text" (§ 10)
+nj note  --id=TSK-009 "text" [--as=<name>] (§ 10)
+nj check --id=TSK-009 --text=<substring> [--on | --off] [--force] (§ 10a)
+nj check --id=TSK-009 --item=<n>         [--on | --off] [--force] (§ 10a)
 nj show  --id=TSK-009 [--json]
 nj list  [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
          [--ready] [--all] [--json]
@@ -643,12 +657,50 @@ nj tree  [--id=EPIC-001] [--all] [--json]
 nj rm    --id=TSK-009 [--cascade]
 nj archive --id=EPIC-001 (§ 11)
 nj unarchive --id=EPIC-001 (§ 11a)
+nj claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] (§ 12 "Claims")
+nj release --id=TSK-007 [--as=<name>] (§ 12 "Claims")
 nj doctor [--fix] [--json]
 ```
 
 All commands accept `--json`; reads *and* writes (§ below). All commands
 accept `--backlog=<path>` as well, and it appears in every command's list of
 known flags; `--backlog` without a value is `missing_value`.
+
+### The acting name
+
+Two commands need to know **who is acting**: `nj note` (§ 10, who signs) and
+`nj claim`/`nj release` (§ 12 "Claims", who claims). Both resolve it the same
+way, in this order:
+
+1. an explicit `--as=<name>` flag, on the commands that have one;
+2. `NJ_AUTHOR=<name>` from the environment;
+3. none.
+
+An empty `NJ_AUTHOR` counts as **unset** — the same rule as an empty
+`NJ_BACKLOG` (DECISIONS 89). This does **not** extend to `--as`: an empty
+`--as=` is not unset, it is an invalid name (`invalid_value`, DECISIONS 119)
+— an explicit flag given with nothing in it is a caller's mistake, the same
+as a whitespace-only or multi-line one; only an empty environment variable
+gets the "unset" reading. A name — from either source — is valid when,
+after dropping leading and trailing whitespace, it is non-empty, is a single
+line, and contains no `:`; only spaces and tabs are trimmed, any `\n` or `\r`
+left (trailing included) makes it multi-line, and Unicode spaces are literal,
+not trimmed. The trimmed value is used. The colon is excluded because `nj
+note`'s line format (§ 10) is `- <timestamp> <author>: <text>`: a name with a
+colon would make the author/text boundary unreadable.
+
+An invalid name is a hard error, nothing written: `NJ_AUTHOR` → exit 1,
+`invalid_env`; `--as` → exit 1, `invalid_value`. A valid `--as` outranks the
+environment, so a malformed `NJ_AUTHOR` does not fail a command that was
+given one. Reads never fail on it: `list --ready` (condition 5, § 12
+"Claims") treats an invalid or absent acting name as no name. Whether the
+**absence** of any acting name is itself an error depends on the command:
+`nj note` falls back to `assignee`, else `?` (§ 10); `nj claim`/`nj release`
+require one (`missing_argument`, § 12 "Claims").
+
+Names are labels, not identities: there is no registry, no authentication,
+and two agents that choose the same name are the same actor — the same trust
+model `assignee` has (§ 6).
 
 ### Rules
 
@@ -755,6 +807,11 @@ known flags; `--backlog` without a value is `missing_value`.
 - Archived elements are **read-only**: `set`, `note`, `rm` and `archive`
   refuse them; `nj unarchive` (§ 11a) is the one write that accepts an
   archived element. Reads and `--all` keep working.
+- **A claim is exclusive only against another claim** (§ 12 "Claims"): it
+  never blocks a read or any other write — `set`, `note`, `rm`, `archive`,
+  `doctor --fix` work on a claimed element exactly as on an unclaimed one.
+  It blocks only a competing `nj claim`, and hides the element from another
+  acting name's `--ready` (below).
 - `list` filters are validated: `--status` against the configured statuses,
   `--parent` against existence — a typo'd filter is an error (exit 1), never a
   silently empty result.
@@ -771,10 +828,14 @@ An element is ready when **all** hold:
    a target in the archive counts as satisfied (`active_refs_archived`,
    informational),
 3. no problem code that blocks `--ready` (table in § 7),
-4. the element is complete per § 7.
+4. the element is complete per § 7,
+5. the element is unclaimed, or claimed by the acting name (§ 12 "Claims").
 
 Ancestor status does not affect `--ready` — only explicit `depends_on` edges
-do; broken references are caught by the code table instead.
+do; broken references are caught by the code table instead. So
+`NJ_AUTHOR=agent-7 nj list --ready` shows what agent-7 may take or already
+holds, and never an element another acting name has claimed; a backlog
+without claims answers exactly as before condition 5 existed.
 
 ```
 $ nj list --ready
@@ -787,7 +848,9 @@ Complete first:
 
 `list --ready` combines with the other filters (`--tag`, `--assignee`, …).
 `--all` includes archived elements; otherwise they are hidden from `list`,
-`tree` and the short status.
+`tree` and the short status. Claims affect `--ready` only: `list` without
+`--ready`, `tree`, `show` and `doctor`'s exit code are unaffected by a claim
+one way or the other.
 
 ### JSON interface
 
@@ -801,7 +864,7 @@ Reads:
     { "id": "TSK-009", "type": "task", "parent": "EPIC-001",
       "title": "Registration", "status": "todo",
       "created": "…", "updated": "…",
-      "_problems": ["incomplete:acceptance"] }
+      "_problems": ["incomplete:acceptance"], "_claim": null }
   ]
 }
 ```
@@ -815,14 +878,18 @@ Writes return one result object:
 
 `_problems` is always present — empty when nothing is pending, codes only
 from the closed table (§ 7). Agents branch on codes, never on prose.
+`_claim` is likewise always present on every entry — derived the same way,
+never stored in the element file: `{"by": "<name>", "since": "<ISO-8601>"}`
+when claimed, `null` when not (§ 12 "Claims").
 
 ### JSON shapes per command
 
 | Command | JSON shape |
 |---|---|
 | `list`, `show` | `{backlog, counts, entries: [{…, _problems}]}` |
-| `new`, `set`, `note`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nj new`/`nj set`, `changed` also names the section roles written (`description`, `acceptance`) |
+| `new`, `set`, `note`, `check`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nj new`/`nj set`, `changed` also names the section roles written (`description`, `acceptance`); for `nj check`, `changed` is `["body"]` or `[]` (a no-op) |
 | `archive`, `unarchive`, `rm --cascade` | `{ok, ids: […], changed: ["archived" \| "unarchived" \| "deleted"], entries: […], _problems: […]}` — for `rm --cascade` the top-level `_problems` is `[]`: the elements are gone, so their problems are too. `archive` and `unarchive` emit the union, because the elements still exist and can still carry findings. **`rm --cascade` additionally carries `dependents: […]`**, the remaining elements whose `depends_on` names a removed one — archived elements included, since they carry `depends_on:dangling` too and the agent must know it; `archive` and `unarchive` do **not** — a `depends_on` pointing into the archive is satisfied by definition (§ 11), so there is nothing to warn about and nothing an agent must act on. |
+| `claim`, `release` | `{ok, id, changed: […], entry: {…, _problems, _claim}, _problems, claim: {by, since}\|null, stolen_from?, previous_assignee?}` (§ 12 "Claims") — the write-result shape plus `claim`, the element's claim state after the call; `stolen_from` names the previous holder after a `--steal`; `previous_assignee` when the claim overwrote a different `assignee`; `changed` names `assignee` and `status` when written, a `release` reports `changed: ["claim"]` |
 | `tree` | `{backlog, counts, entries: […]}` — **flat**, each entry carries `parent`; depth-first order conveys the tree |
 | `doctor` | `{backlog, ok, problems: [{code, severity, element?, file?, line?, message}]}` — `severity` ∈ `error`\|`warning` (the Doctor column value; `—` codes never appear as findings); element-level findings carry `element`, backlog-level ones do not |
 | bare `nj` | `{backlog, counts, ready: [entries ≤ 5], incomplete: [entries ≤ 5]}` |
@@ -852,10 +919,10 @@ legacy_layout
 unknown_command       missing_argument         missing_value
 invalid_value         invalid_target           not_found
 duplicate_id          exists                   changed_in_parallel
-id_allocation_failed  internal_error
+id_allocation_failed  internal_error           ambiguous_target
 refused:<reason>      reason ∈ unreadable | archived | children_open |
                                has_children | not_done | parent_archived |
-                               misplaced | not_archived
+                               misplaced | not_archived | claimed
 fault:<hook>          hook ∈ before-compare | after-tmp-write | before-rename
 ```
 
@@ -904,7 +971,17 @@ its code. These mappings are normative:
 | `unarchive` of a subtree not lying in its own folder, or with an unresolvable `parent` chain (`hierarchy`) | `refused:misplaced` | § 11a |
 | an `unarchive` target path is occupied | `exists` | § 11a |
 | an `NJ_FAULT` hook fires | `fault:<hook>` | § 12 |
-| `NJ_AUTHOR` is not a valid name, on a command that uses it | `invalid_env` | § 10 |
+| `NJ_AUTHOR` is not a valid name, on a command that uses it | `invalid_env` | § 9 |
+| `--as` is not a valid name | `invalid_value` | § 9 |
+| `claim` or `release` without an acting name | `missing_argument` | § 9 |
+| `claim`, `release` or `claim --steal` where another name holds the claim | `refused:claimed` | § 12 Claims |
+| `claim` on an archived element | `refused:archived` | § 9 |
+| `claim` on an unreadable stub | `refused:unreadable` | § 12 Claims |
+| the claim decision loop exhausts its 100 rounds | `changed_in_parallel` | § 12 Claims |
+| `check` on an archived element | `refused:archived` | § 9 |
+| `check` on an unreadable stub | `refused:unreadable` | § 10a |
+| `check --text`/`--item` matches no countable checkbox, or `--item` is out of range | `not_found` | § 10a |
+| `check --text` matches two or more countable checkboxes | `ambiguous_target` | § 10a |
 
 Codes of the closed set that no passage above names —
 `id_allocation_failed`, `internal_error` — are
@@ -942,18 +1019,20 @@ signed line to the body:
 - 2026-09-21T18:02:44Z coder-agent: Parser splits at the first colon
 ```
 
-**`NJ_AUTHOR`.** `NJ_AUTHOR=<name>` overrides who signs a note. An empty
-`NJ_AUTHOR` counts as **unset** — the same rule as an empty `NJ_BACKLOG`
-(DECISIONS 89). A name is valid when, after dropping leading and trailing
-whitespace, it is non-empty, is a single line, and contains no `:`; only
-spaces and tabs are trimmed, any `\n` or `\r` left (trailing included) makes
-it multi-line, and Unicode spaces are literal, not trimmed. The colon is
-excluded because a note line is `- <timestamp> <author>: <text>`: a name
-with a colon would make the author/text boundary unreadable for humans and
-for any tool that parses notes. The trimmed value is used. `NJ_AUTHOR` is a
-label, not an identity: there is no registry, no authentication, and two
-agents that choose the same name are the same author — the same trust model
-`assignee` has today (§ 6).
+**The acting name signs the note** (§ 9 "The acting name"): `--as=<name>` or
+`NJ_AUTHOR=<name>` overrides who signs; `--as` outranks `NJ_AUTHOR` when both
+are given. An empty `NJ_AUTHOR` counts as **unset** — the same rule as an
+empty `NJ_BACKLOG` (DECISIONS 89). A name is valid when, after dropping
+leading and trailing whitespace, it is non-empty, is a single line, and
+contains no `:`; only spaces and tabs are trimmed, any `\n` or `\r` left
+(trailing included) makes it multi-line, and Unicode spaces are literal, not
+trimmed. The colon is excluded because a note line is
+`- <timestamp> <author>: <text>`: a name with a colon would make the
+author/text boundary unreadable for humans and for any tool that parses
+notes. The trimmed value is used. The acting name is a label, not an
+identity: there is no registry, no authentication, and two agents that
+choose the same name are the same author — the same trust model `assignee`
+has today (§ 6).
 
 Rules:
 
@@ -961,20 +1040,22 @@ Rules:
   exception to the byte-for-byte rule, alongside the H1). It is separated
   from the preceding body by exactly one blank line; if the body already ends
   in a blank line, none is added.
-- Line format: `- <ISO-8601 UTC> <author>: <text>`. `<author>` is
-  `NJ_AUTHOR`, trimmed, if it is set and valid; else the element's
-  `assignee` if set; else `?`. Consecutive notes are consecutive lines
-  directly below the heading — no blank lines between them.
-- An invalid `NJ_AUTHOR` makes `nj note` exit 1 with `invalid_env` and write
-  nothing. Other writes (`new`, `set`, …) do not use `NJ_AUTHOR` and ignore
-  it; reads never fail on it. Precedence: argument parsing (`unknown_field`,
+- Line format: `- <ISO-8601 UTC> <author>: <text>`. `<author>` is the acting
+  name (`--as`, else `NJ_AUTHOR`; § 9), trimmed, if set and valid; else the
+  element's `assignee` if set; else `?`. Consecutive notes are consecutive
+  lines directly below the heading — no blank lines between them.
+- An invalid acting name makes `nj note` exit 1 — `invalid_env` for
+  `NJ_AUTHOR`, `invalid_value` for `--as` — and writes nothing. Other writes
+  (`new`, `set`, …) do not use the acting name and ignore it; reads never
+  fail on it. Precedence: argument parsing (`unknown_field`,
   `missing_argument`, `missing_value`, and `invalid_target` for `--id` and
   `--file` given together — both given ranks with argument parsing, like
-  neither given) is checked first, then `NJ_AUTHOR` (`invalid_env`), then
-  target resolution (`not_found`, `duplicate_id`), then refusals (e.g.
-  `refused:archived`). The wrong-type-`--parent` reading of `invalid_target`
-  does not apply here: `nj note` takes no `--parent`.
-- `NJ_AUTHOR` changes only the note line. It never sets or changes
+  neither given) is checked first, then the acting name (`invalid_env` for
+  `NJ_AUTHOR`, `invalid_value` for `--as`), then target resolution
+  (`not_found`, `duplicate_id`), then refusals (e.g. `refused:archived`).
+  The wrong-type-`--parent` reading of `invalid_target` does not apply here:
+  `nj note` takes no `--parent`.
+- The acting name changes only the note line. It never sets or changes
   `assignee`.
 - A note **does not** satisfy the `## Description` requirement. Its write
   result reports `changed: ["body"]`.
@@ -984,6 +1065,79 @@ Rules:
 Notes are how decisions, findings and verification reports get captured in
 the backlog — the body is the project memory, `nj note` is its sanctioned
 writer.
+
+---
+
+## 10a. `nj check`
+
+`nj check` flips one Markdown checkbox in the body — the dedicated, guarded
+writer for exactly this one edit, so ticking a box no longer means a hand
+edit or a full `--acceptance=<text>` rewrite of a section to change one line.
+
+```
+nj check --id=TSK-009 --text=<substring> [--on | --off] [--force] [--json]
+nj check --id=TSK-009 --item=<n>         [--on | --off] [--force] [--json]
+```
+
+(`--file=<path>` instead of `--id`, and `--backlog`, as for every write.)
+
+**What counts as a checkbox.** After optional leading whitespace
+(indentation — nested list items count the same as top-level ones), a line
+is a checkbox when it starts with one of the list markers `-`, `*`, `+`, or
+an ordered marker `<digits>.` or `<digits>)` (e.g. `1.`, `1)`), followed by
+one space and `[ ]`, `[x]` or `[X]`. **Reading:** `[x]` and `[X]` both count
+as **ticked**; only `[ ]` counts as **unticked**. **Writing:** `--on`
+always writes `[x]` (lowercase); `--off` always writes `[ ]` — regardless
+of which of `[x]`/`[X]` was read, a write never produces `[X]`.
+
+**Scope.** Every section is scanned except `## Notes` (§ 10: an
+append-only audit trail of past decisions — re-ticking history there would
+read as editing the record, not doing the work). `nj check` tracks fence
+state (` ``` ` and `~~~`, either of length 3 or more, matched at the start
+of a line after optional leading whitespace, closed only by a matching or
+longer fence of the same character) line by line and never counts or
+matches a checkbox-shaped line while inside one. **This is the one place in
+the spec where fence-awareness exists** (§ 7: section matching is
+otherwise, and remains, line-based and not fenced-code-aware).
+
+**Addressing.** Exactly one of `--text`/`--item` is required — neither
+given is `missing_argument`, both given is `invalid_value`.
+
+- `--text=<substring>` — the **countable** checkbox (in scope, per above)
+  whose line, with the list marker and the `[ ]`/`[x]`/`[X]` box stripped,
+  contains `<substring>` (a plain substring match, not a regex).
+- `--item=<n>` — the *n*-th countable checkbox, 1-based, in document order
+  (top to bottom, depth-first through nested lists).
+
+`--text` matching no countable checkbox, or `--item` out of range (< 1 or
+> the count), is `not_found` — the same code `--parent`/`--depends-on`/
+`--file` already reuse for "names nothing" (§ 9). `--text` matching two or
+more countable checkboxes is `ambiguous_target` (§ 9) — ambiguity is
+reported, never guessed at (§ 14). `--item` can never be ambiguous: an
+index names at most one line.
+
+Rules:
+
+- Refused before anything is written: an archived element
+  (`refused:archived`); `--id`/`--file` together (`invalid_target`, § 9); X
+  itself an unreadable stub (`refused:unreadable`, this element only — a
+  check reserves and edits one element and moves nothing, so § 9's
+  backlog-wide stub guard for `rm`/`archive` does not apply).
+- A no-op is not refused: `--on` on an already-ticked box, or `--off` on an
+  already-empty one, exits 0 and writes nothing (`changed: []`).
+- The write flips exactly the bracket content (per "What counts as a
+  checkbox", above) and nothing else on the line — not the line's leading
+  whitespace or list marker, not trailing content after the `]`. `updated`
+  is refreshed; the atomic write and compare-before-write rules (§ 12)
+  apply, with `--force` available as for `set`/`note`.
+- Ticking or unticking does not itself satisfy or un-satisfy completeness
+  (§ 7): checkbox state and section completeness are independent.
+- `changed: ["body"]` on a write, `[]` on a no-op — the same marker `nj
+  note` uses, since a checkbox flip is a body edit, not a section-role
+  write.
+
+**Output.** `{ok, id, changed: ["body"] | [], entry: {…, _problems},
+_problems}` — the § 9 write-result shape, nothing new.
 
 ---
 
@@ -1106,6 +1260,20 @@ bulk moves do not take it).
 Descendants of the element that are *not* archived are untouched; they
 already lie at their active places.
 
+**Claims (§ 12 "Claims").** Once every refusal above has cleared — the
+element is confirmed archived, among other things — and before the first
+move, `nj unarchive` removes the element's claim directory wholesale, the
+same removal `archive`/`rm` use: normally none exists, since `archive`
+already removed it; this only ever fires on a `claim:orphaned` straggler a
+partially-cleaned archive left behind. A straggler's own in-flight claim
+`link()`, racing this removal, may still land: the directory is then left
+non-empty, exactly as `archive`'s own cleanup already tolerates
+(`claim:orphaned` if unclaimed-looking, `claim:mismatch` if its mirror write
+also raced the version bump `archive`/`unarchive` themselves make) —
+`doctor` reports it, never auto-resolves it, same as always. So the
+unarchived element starts unclaimed unless a straggler's append raced the
+removal, the same residual case `archive`'s own cleanup already discloses.
+
 **Output.** Same shape as `archive` (§ 9 table): `{ok, ids: […], changed:
 ["unarchived"], entries: […], _problems: […]}` — `ids` top-down in pre-order
 (depth-first, as `tree` prints: EPIC-001, TSK-001, SUB-001, TSK-002), siblings
@@ -1136,8 +1304,8 @@ children-first and each folder once empty — never a recursive delete of
 whatever else a folder holds. Moving a subtree (`archive`, `doctor --fix`) is
 **one `rename` of its top folder**, atomic within one filesystem.
 
-**Compare before writing.** On `nj set`, `nj note`, `nj archive` and
-`nj unarchive`: read the file, remember the content, re-read immediately
+**Compare before writing.** On `nj set`, `nj note`, `nj check`, `nj archive`
+and `nj unarchive`: read the file, remember the content, re-read immediately
 before writing and compare **byte for byte**. A difference aborts with
 "changed in parallel, please run again". The comparison runs over the full
 content, not over `updated` — second-level timestamps would be too coarse for
@@ -1145,13 +1313,13 @@ two writes within the same second. `archive` and `unarchive` route their
 comparison through the same guarded path as the other two, so
 `NJ_FAULT=before-compare` covers them.
 
-`--force` overrides a parallel change on **`set` and `note` only**.
-**`archive` and `unarchive` have no override**, and that is deliberate: § 11's
-and § 11a's "no `--force`" governs, a bulk move must never silently overwrite
-a parallel edit, and `--force` must not acquire a second meaning — the same
-reason the parent rule got its own flag (`--allow-open-children`). A parallel
-change during `archive` or `unarchive` aborts the run; the caller retries once
-the backlog is stable.
+`--force` overrides a parallel change on **`set`, `note` and `check`
+only**. **`archive` and `unarchive` have no override**, and that is
+deliberate: § 11's and § 11a's "no `--force`" governs, a bulk move must
+never silently overwrite a parallel edit, and `--force` must not acquire a
+second meaning — the same reason the parent rule got its own flag
+(`--allow-open-children`). A parallel change during `archive` or
+`unarchive` aborts the run; the caller retries once the backlog is stable.
 
 **Fault injection (verification hook, not a feature).** `NJ_FAULT` accepts three
 distinct injection points, each exiting with code 1 and leaving the target
@@ -1164,7 +1332,7 @@ file untouched:
   poll for `<backlog>/.nj-fault-go` (timeout 10 s, then exit 1). The test
   changes the target file, then creates the marker: expect exit 1 with
   "changed in parallel", or exit 0 with `--force` where the command takes it
-  (`set`, `note` — not `archive` or `unarchive`)
+  (`set`, `note`, `check` — not `archive` or `unarchive`)
 
 It exists so that criterion AC-9 is testable. The abandoned temp file is
 reported by `nj doctor` (`backlog:stray_tmp`) and removed by `doctor --fix`.
@@ -1175,6 +1343,68 @@ fixes the clock: if set, every timestamp the tool writes (`created`,
 value exits 1. It exists so that AC-2's byte-exact golden comparison needs no
 normalisation — normalising timestamps in the verifier would silently hide
 serializer defects (wrong format, missing `Z`).
+
+**Claims.** The exclusivity mechanism behind `nj claim`/`nj release`
+(§ 12a). **The claim of an element is an append-only sequence of immutable
+entries**, one directory per element:
+
+```
+<backlog>/.nanojira/claims/<ID>/1
+<backlog>/.nanojira/claims/<ID>/2
+…
+```
+
+Each entry is a file named by its **generation**, a positive decimal
+integer, with exactly this content:
+
+```
+claimed\n<name>\n<ISO-8601 UTC>\n          (or)          released\n<name>\n<ISO-8601 UTC>\n
+```
+
+— the transition, the acting name that made it (§ 9), and its time
+(`NJ_NOW` applies, above). **The claim state is the entry with the highest
+generation**: `claimed <N>` means N holds the claim; `released`, no entry, or
+no directory means the element is unclaimed.
+
+**Every change of claim state is one compare-and-swap:** a process that has
+read the state at generation *g* writes the new entry completely into a temp
+file in the same directory (`.nj-tmp-<pid>-<rand>`, `fsync`, above), then
+`link()`s it to the name *g+1* and removes the temp file. The first
+transition creates the element's directory with `mkdir`; an existing one is
+reused. `link` fails with `EEXIST` when *g+1* exists, so of any number of
+processes that read generation *g*, **exactly one** creates *g+1*; every
+other one learns that the state moved on, re-reads, and decides again. This
+is the mechanism § 8 already trusts — exclusive creation, atomic on a local
+filesystem, no lock — used as a compare-and-swap instead of a counter.
+Entries are written whole before they get their name, so a reader never sees
+a half-written entry.
+
+`link` can also fail with **`ENOENT`**: the temp file was removed out from
+under it (a concurrent `doctor --fix` step 7 sweeping stray temp files — it
+has no way to tell a claim's in-flight temp file from a genuinely abandoned
+one, the same unguarded window every atomic write in the tool already has),
+or the claim directory itself is gone (a concurrent `archive`/`rm`/
+`unarchive`). Both are treated exactly like `EEXIST`: **a retry round** —
+re-read (a missing directory reads as unclaimed; `mkdir` recreates it on the
+next attempt) and decide again, bounded by the same 100-round limit as ID
+allocation (§ 8); exhausting it exits 1 with `changed_in_parallel`.
+
+Two rules make the sequence safe: **nothing is moved or deleted while the
+element is live** — claim, steal, release and rollback only *append*, so
+there is no moment in which the claim path is empty and a competitor could
+slip in; and **generations never restart while the element is live** — the
+highest entry is never deleted while the element is active, so a new
+transition is always *max+1*, and a process acting on a stale read always
+meets `EEXIST`, `ENOENT` (above), or a higher entry on its next read.
+`doctor --fix` never prunes a live claim's entries (§ 14) — that is what
+keeps the first rule true; `archive`/`rm`/`unarchive` remove the directory
+entirely (above, and § 11a), never partially. A successful `link()` is
+sufficient on its own; nothing is re-checked afterward.
+
+The frontmatter mirrors the claim for humans and for git: a successful claim
+writes `assignee: <name>` through the guarded write above. **The claim
+sequence is the truth for exclusivity; `assignee` is its mirror** (§ 6).
+Claims are local runtime state and are not committed (§ 4).
 
 ### Limits, disclosed
 
@@ -1195,6 +1425,173 @@ serializer defects (wrong format, missing `Z`).
   process crash, but a machine crash within the write window may lose one —
   the allocator's file-scan start value and `doctor --fix` restore the
   recoverable part (§ 8).
+- Claims are exclusive among processes on **one** local filesystem — the
+  agents sharing a working tree, the case NanoJira is built for. Two clones
+  on two machines each accept a claim for the same element; the second push
+  then conflicts on `assignee` in git, which is where cross-machine
+  coordination belongs. `link()` is part of the "local filesystem" guarantee
+  above, like `O_CREAT|O_EXCL` and `rename`.
+- A claim guarantees nobody else *claims*; it does not stop an agent that
+  ignores claims from writing (§ 12a). That is deliberate: the alternative
+  is a lock.
+- The claim sequence grows by one entry per transition until `doctor --fix`
+  removes the whole directory once the element is archived or gone (§ 14) —
+  a few bytes per claim, bounded by the number of claims made.
+- **A same-named re-assertion that loses a race leaves one doomed entry in
+  the history, briefly** (DECISIONS 114/115): if a re-assertion's own mirror
+  write fails just as a separate, successful re-assertion or steal under the
+  same name lands ahead of it, the chain still shows the failed attempt's
+  entry until the newer one supersedes it — its own rollback, which restores
+  `claimed N` rather than releasing it, typically meets that newer
+  generation and is abandoned, since there is nothing left for it to usefully
+  restore. No process's belief about who currently holds the claim is ever
+  wrong — this is a pure audit-trail oddity in the *history*, not the
+  *state* — and it is disclosed here rather than fixed: closing it would
+  mean giving rollback special knowledge that a same-named entry doesn't
+  count as "someone else moved on", which reopens exactly the trust question
+  above already settles the other way.
+- **A read caches, per process, whether `.nanojira/claims/` exists —
+  a narrow, one-time staleness window.** If a backlog's very first claim
+  ever lands while a `list`/`tree`/bare-`nj`/`show` is already in progress,
+  that one read may report `_claim: null` for elements it checks after the
+  moment the claim landed, and may count one of them as ready that no
+  longer is. Claim exclusivity itself is unaffected — only `_claim`'s
+  display and `--ready`'s filter read this cache, never the claim
+  mechanism — and the next read is correct: the window exists once per
+  backlog, for the very first claim only.
+
+---
+
+## 12a. `nj claim` / `nj release`
+
+```
+nj claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] [--json]
+nj release --id=TSK-007 [--as=<name>] [--json]
+```
+
+(`--file=<path>` instead of `--id`, and `--backlog`, as for every write.)
+`release` is its own verb: § 9's "verb as a subcommand, not as a flag". The
+mechanism is § 12 "Claims"; this section is the interface built on it.
+
+**`nj claim`** — with the acting name N (§ 9; none → exit 1,
+`missing_argument`):
+
+1. Refused before anything is written: an archived element
+   (`refused:archived`); X itself an unreadable stub (`refused:unreadable` —
+   only the addressed element: a claim reserves one element and moves
+   nothing, so § 9's backlog-wide stub guard for `rm`/`archive` does not
+   apply); a duplicate id without `--file` (`duplicate_id`); an invalid
+   `--status` (`invalid_value`).
+2. Read the state at generation *g* and decide:
+   - unclaimed → append *g+1* `claimed N`;
+   - `claimed N` → N holds it already: **re-assert** by appending *g+1*
+     `claimed N` again — one real compare-and-swap, the same as every other
+     transition, not a bare read; this grows the sequence by one entry even
+     though the holder does not change — `changed` is empty unless
+     `--status` changes the status;
+   - `claimed H`, H ≠ N → exit 1, **`refused:claimed`**, naming H and the
+     claim time — unless `--steal=H` (below).
+   On `EEXIST` or `ENOENT` (§ 12) re-read and decide again: a racing
+   claimant that won is now the holder, and N gets `refused:claimed`.
+3. Write `assignee: N` (and `status`, when `--status` is given) in one
+   guarded write (§ 12). If that write fails (`changed_in_parallel`, a fault
+   hook, any I/O error), the **rollback restores what this invocation
+   read** — it is not always a bare `released N`:
+   - **A plain claim** read `unclaimed`, so its rollback appends
+     `released N`.
+   - **A re-assertion** read its own prior `claimed N`, so its rollback
+     restores `claimed N` — a failed mirror write on a re-assertion must
+     not give up a claim N already held before the command ran; in effect,
+     a re-assertion's rollback has nothing to undo.
+   - Either way, if the rollback append itself meets a higher generation
+     (`EEXIST` — a stealer took the claim in between), it is abandoned: the
+     newer holder is the holder.
+   - **A steal is never rolled back.** Once a steal's own `link()` has
+     succeeded it is final: a mirror-write failure afterward is reported as
+     `claim:mismatch` (§ 7) and N remains the holder on the chain, rather
+     than guessing whether some later transition has already relied on the
+     steal having landed.
+   The command exits 1 with the write's code either way. A plain claim
+   either holds with its mirror, or is released again; a re-assertion
+   either holds with its mirror, or keeps holding without it; a steal
+   either holds with its mirror, or holds without it; a crash between any
+   append and its write likewise leaves `claimed N` without the mirror —
+   `claim:mismatch`.
+
+`--status=<s>` lets an agent claim and start in one write
+(`nj claim --id=TSK-007 --status=doing`), validated as for `nj set`
+(`invalid_value`; the parent rule of § 9 applies unchanged).
+
+**Stealing.** `--steal=H` takes over a claim held by H — the only way to
+recover from a crashed claimant, and deliberately explicit: the stealer must
+name the holder it replaces. With the state read at *g*:
+
+- `claimed H` → append *g+1* `claimed N`. On `EEXIST` or `ENOENT`, re-read:
+  whatever landed first (another stealer, H's own release, a claimant after
+  that release) is decided again from the new state — a steal from H
+  succeeds only while H is still the holder.
+- `claimed X`, X ≠ H → `refused:claimed`, naming X. Nothing is appended: a
+  steal that names the wrong holder changes nothing, and in particular
+  cannot disturb X's claim.
+- unclaimed → a plain claim of N.
+
+So of any number of concurrent steals and claims **exactly one** changes the
+holder, and every other one exits `refused:claimed` naming the holder it
+lost to. The result names the previous holder (`stolen_from`). A concurrent
+`release` of the same claim is not one of these (DECISIONS 120): if it lands
+first, the steal's retry reads `unclaimed` and becomes a plain claim (the
+third bullet above), so both exit 0; if the steal lands first, the release
+reads a different holder and exits 1 with `refused:claimed` naming the
+stealer. Either way the stealer ends up holding it.
+
+**`nj release`** — the holder gives the claim up. With the state read at
+*g*: `claimed N` → append *g+1* `released N`; on `EEXIST` or `ENOENT`
+re-read — if a stealer got there first, `refused:claimed` naming the new
+holder, since N no longer has anything to release. `claimed H`, H ≠ N →
+`refused:claimed` naming H (a release of someone else's claim is a steal
+and must say so). Unclaimed → exit 0, nothing to do. `assignee` is **left as
+it is** — it records who worked on the element; clearing it is an explicit
+`nj set --assignee=`.
+
+**Visibility.** `list` and `show` mark a claimed element with its holder via
+`_claim` (§ 9); a reader lists the directory and reads the highest entry.
+
+**Git (`.gitignore`, amends § 4 and § 14).** `nj init` writes a third
+pattern, `.nanojira/claims/`, after the two of § 4 (one byte change to
+existing `init` output). An existing backlog gains it through `doctor`:
+
+- `doctor` reports **`backlog:claims_unignored`** (§ 7) when
+  `.nanojira/claims/` exists and `.gitignore` has no line that is exactly
+  `.nanojira/claims/`. A backlog that never claimed anything carries no
+  finding, so v3 backlogs stay clean.
+- `doctor --fix` then **appends** the line to an existing `.gitignore`, with
+  the discipline of step 0 (§ 14): the line is added exactly once, verbatim,
+  after a final newline if the file lacks one, in the file's own line
+  ending (CRLF kept, DECISIONS 101) — for a file with **mixed** line
+  endings, the last line's ending, or `LF` if the file is empty or its last
+  line has none. Without a `.gitignore`, `--fix` creates none and says so in
+  a note — it is the user's file, and its absence may be deliberate.
+
+**Doctor (§ 14).** `doctor --fix` removes claim directories only for
+elements that are archived or gone (§ 7 `claim:orphaned`) — not merely
+`done`, since a done-but-still-live element can still legitimately be
+claimed — and never touches a live claim's entries: no pruning while the
+element could still be claimed. It never resolves a `claim:mismatch` (§ 7)
+either — which of the claim and `assignee` is right is exactly the kind of
+question § 14 forbids guessing. `nj archive` and `nj rm` remove the claim
+directories of the elements they move or delete (entries, then `rmdir`; a
+directory that is not empty afterwards — a stale process appended in
+between — is left for `doctor` as `claim:orphaned`); `nj unarchive` does
+the same, while the element is still archived (§ 11a).
+
+**Output.** `claim` and `release` return the shape of § 9's JSON-shapes
+table.
+
+### Limits, disclosed
+
+See § 12 "Limits, disclosed" — claims share that section's limits (one
+local filesystem, no lock against a non-claiming writer, sequence growth
+until cleanup, the same-named re-assertion audit-trail residual).
 
 ---
 
@@ -1284,10 +1681,13 @@ Doctor column is not `—` (table in § 7); unreadable frontmatter lines;
 duplicate IDs; files outside their layout place (`type:folder`,
 `layout:misplaced`);
 a missing or empty `ids/` while elements exist (`backlog:ids_missing`);
-element files without tombstones (`id:no_tombstone`); stray `.nj-tmp-*` files
-(`backlog:stray_tmp`); archive rules (§ 11); `STATUS.md` against a fresh
-rendering (`backlog:status_stale`, only with `statusFile: true`). The summary
-line splits the
+element files without tombstones (`id:no_tombstone`); stray `.nj-tmp-*`
+files, including inside `.nanojira/claims/` (`backlog:stray_tmp`, § 12
+"Claims"); archive rules (§ 11); claim directories that are mismatched or
+orphaned (`claim:mismatch`, `claim:orphaned`, § 12a) and a `.gitignore`
+missing the claims line (`backlog:claims_unignored`); `STATUS.md` against a
+fresh rendering (`backlog:status_stale`, only with `statusFile: true`). The
+summary line splits the
 counts — `backlog/: 47 entries, 2 errors, 1 warning` — and the exit code is 2
 exactly when at least one `error` finding exists; warnings are reported but
 exit 0.
@@ -1331,7 +1731,15 @@ unprotected:
 5. write `status` from `statuses[0]`, and `created`/`updated` when missing —
    `created` from the file mtime, `updated` = now (this step is a write)
 6. pull the H1 up from `title`
-7. remove stray `.nj-tmp-*` files
+7. remove stray `.nj-tmp-*` files (now covers `.nanojira/claims/` too, § 12
+   "Claims")
+7a. remove the claim directories of orphaned claims — archived or gone,
+    never merely `done` (§ 7 `claim:orphaned`) — and append the
+    `.nanojira/claims/` line to `.gitignore` if missing (§ 12a). Never
+    touches a live claim's entries: no pruning while the element could
+    still be claimed. Never resolves a `claim:mismatch` (§ 7) — which of the
+    claim and `assignee` is right is exactly the kind of question this
+    section forbids guessing
 8. rebuild the index (round two)
 9. regenerate `STATUS.md` (with `statusFile: true`) — last, so it reflects
    every repair above; a merge conflict in it is thereby resolved
@@ -1494,15 +1902,77 @@ reported, not guessed at.
     edit aborts with `changed_in_parallel`; with `NJ_FAULT=before-rename`
     nothing has moved and every file is its previous revision.
 
+27. **Claims.** Twenty processes run `nj claim --id=TSK-001` in parallel,
+    each with its own acting name: exactly one exits 0; the other nineteen
+    exit 1 with `refused:claimed` naming the winner; the element is claimed
+    by the winner and its `assignee` is the winner's name; `doctor` is clean
+    but for `backlog:claims_unignored` where the fixture's `.gitignore`
+    lacks the line. A claim by the holder again is exit 0, re-asserting with
+    one more `claimed` entry — `changed` is empty unless `--status` changes
+    the status. `release` by another name is `refused:claimed`; by the
+    holder it releases the claim and keeps `assignee`. **Steal race:** ten
+    concurrent `--steal=<holder>` have exactly one winner, and **no claim is
+    lost** — the final holder is the one process that reported success, the
+    claim sequence holds exactly one `claimed` entry per successful claim or
+    steal and nothing between them, and a steal naming the wrong holder, run
+    concurrently with the others, changes nothing. A landed steal whose own
+    `assignee` write then fails is reported as `claim:mismatch`, not rolled
+    back — the steal stands. `release` racing a steal of the same claim:
+    the steal always exits 0; the release exits 0 (if it lands first, the
+    steal's retry finds it unclaimed and becomes a plain claim) or
+    `refused:claimed` naming the stealer (if the steal lands first) — either
+    way the stealer ends up holding it, with `assignee` agreeing and no
+    `claim:mismatch`. `NJ_AUTHOR=b nj list --ready` omits an
+    element claimed by `a` and lists one claimed by `b`; a backlog without
+    claims answers `--ready` exactly as before condition 5 existed. A
+    claimed element can still be `set`, `note`d, archived and removed by
+    anyone, and `archive`/`rm` remove its claim. A plain claim whose
+    `assignee` write fails (`NJ_FAULT=before-rename`) is rolled back and
+    ends `released`; a re-assertion whose `assignee` write fails instead
+    keeps its claim — its rollback restores `claimed N`, the entry it read,
+    not a release. A done-but-live element keeps its claim through
+    `doctor --fix` (only archived or gone elements are `claim:orphaned`); a
+    stray temp file in the claims tree is `backlog:stray_tmp`, removed by
+    `doctor --fix`. `nj unarchive` of an element with a leftover orphaned
+    claim directory removes it wholesale, the same as `archive`/`rm`, before
+    the first move: the unarchived element starts unclaimed unless a
+    straggler's append raced the removal. `nj init` writes
+    `.nanojira/claims/` into `.gitignore`; on an existing backlog with
+    claims, `doctor --fix` appends it once, keeping CRLF, and never creates
+    a missing `.gitignore`. `claim` without a name is `missing_argument`; on
+    an archived element, `refused:archived`. `--as` outranks `NJ_AUTHOR`; an
+    invalid `--as` is `invalid_value`, an invalid `NJ_AUTHOR` is
+    `invalid_env`, on `claim`, `release` and `note` alike.
+
+28. **Check.** A checkbox is any `-`/`*`/`+`/`<digits>.`/`<digits>)`-marked
+    list item, at any indentation, followed by `[ ]`, `[x]` or `[X]`; `[x]`
+    and `[X]` both count as ticked on read, only `[ ]` as unticked, and a
+    write always produces `[x]` (`--on`) or `[ ]` (`--off`), never `[X]`.
+    `nj check --id=TSK-007 --text=<substring>` and `--item=<n>` each
+    address the same checkbox when there is exactly one countable match;
+    `--on` an unticked box and `--off` a ticked one each flip exactly that
+    line's bracket content and nothing else, byte-for-byte, with `updated`
+    refreshed; `--on` already-on and `--off` already-off each exit 0 with
+    `changed: []` and change no byte. A checkbox inside `## Notes`, or
+    inside a fenced code block (` ``` ` or `~~~`, nested or indented), is
+    never counted or matched — neither addresses it and neither index
+    includes it. `--text` matching no countable checkbox, or `--item` out
+    of range, is `not_found`; `--text` matching two or more is
+    `ambiguous_target`. `check` on an archived element is
+    `refused:archived`, on an unreadable stub `refused:unreadable`, and
+    `--id`+`--file` together is `invalid_target`, each exiting 1 and
+    changing nothing. `NJ_FAULT=before-rename` leaves the file at its
+    previous revision; a parallel edit aborts with `changed_in_parallel`
+    unless `--force`.
+
 ---
 
 ## 16. Not in Round One
 
 Terminal board (`nj board`), Obsidian Dataview snippet, import/export of
 foreign backlogs, full-text search over the body, attachments, the search
-index's implementation (§ 13), batch writes (`--id=A,B,C`), `nj claim`
-(exclusive claiming; `assignee` is advisory in round one), `nj check`
-(checkbox ticking in the body), an MCP wrapper, Windows.
+index's implementation (§ 13), batch writes (`--id=A,B,C`), an MCP wrapper,
+Windows.
 
 A language migration (Go as the candidate; Rust considered and set aside) is
 deliberately deferred: round one ships on Node to gather real experience. The

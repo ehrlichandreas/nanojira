@@ -7,6 +7,7 @@ import type { Flags, Element, Context } from '../core/types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { checkFlags } from '../core/args.ts';
+import { removeClaimDirWholesale } from '../core/claims.ts';
 import { context, resolveTarget, requireWritable, requireNoStubs, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
 import { elementProblems, entryJson } from '../core/derive.ts';
 import { ownFolder } from '../core/layout.ts';
@@ -106,13 +107,16 @@ function cmdArchive(flags: Flags) {
   const moved = ctx.cfg.layout.group === 'hierarchy'
     ? archiveHierarchy(ctx, el, subtree, ts)
     : archiveFlat(ctx, subtree, ts);
+  // archive ends every live claim relationship by design (§ 12a): the
+  // elements it moves or deletes lose their claim directory wholesale.
+  for (const e of subtree) removeClaimDirWholesale(ctx.backlog, e.id);
   deriveGraph(ctx.elements.filter((e: Element) => !subtree.includes(e)).concat(moved), ctx.idsDir, ctx.cfg.layout);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
 
   if (json) {
     out(JSON.stringify({
       ok: true, ids: moved.map((m) => m.id), changed: ['archived'],
-      entries: moved.map(entryJson),
+      entries: moved.map((m) => entryJson(m, ctx.backlog)),
       _problems: Array.from(new Set(moved.flatMap(elementProblems))).sort(),
     }, null, 2));
   } else {

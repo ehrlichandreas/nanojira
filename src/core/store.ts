@@ -105,6 +105,34 @@ function atomicWrite(target: string, content: string) {
 }
 
 /**
+ * Identical to atomicWrite, except a fault hook raises a catchable `Fail`
+ * instead of exiting the process directly. `nj claim`'s mirror write (§ 12a)
+ * must run its rollback after ANY failure, fault hooks included, so it
+ * cannot use atomicWrite's own hard-exit shortcut — there would be no
+ * process left to perform the rollback.
+ */
+function mirrorWrite(target: string, content: string) {
+  const dir = path.dirname(target);
+  const tmp = path.join(dir, `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
+  const fault = process.env.NJ_FAULT;
+  const fd = fs.openSync(tmp, 'wx');
+  try {
+    fs.writeFileSync(fd, content, 'utf8');
+    if (fault === 'after-tmp-write') {
+      fs.closeSync(fd);
+      fail('fault:after-tmp-write', 'nj: aborted at fault injection point after-tmp-write');
+    }
+    fs.fsyncSync(fd);
+  } finally {
+    try { fs.closeSync(fd); } catch { /* already closed */ }
+  }
+  if (fault === 'before-rename') {
+    fail('fault:before-rename', 'nj: aborted at fault injection point before-rename');
+  }
+  fs.renameSync(tmp, target);
+}
+
+/**
  * The same temp + fsync + rename as atomicWrite, for a derived file
  * (STATUS.md): no fault hooks — they belong to the element write, which
  * has already happened — and a failure throws after removing its temp file,
@@ -230,4 +258,4 @@ function renderElement(el: Element, fieldOverrides: Map<string, string | string[
   return serialize(fields, order, bodyOverride === undefined ? el.body : bodyOverride);
 }
 
-export { nowIso, mtimeIso, readTombstones, allocateId, atomicWrite, atomicReplace, compareGuard, guardedWrite, planMove, runMove, renderElement };
+export { nowIso, mtimeIso, readTombstones, allocateId, atomicWrite, mirrorWrite, atomicReplace, compareGuard, guardedWrite, planMove, runMove, renderElement };

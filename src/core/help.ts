@@ -19,13 +19,15 @@ const HELP = `nj — NanoJira, a local file-based task tool for agents
            [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=…]
 
 Section writes replace the section; --<role>-file=- reads stdin.
-  nj note  --id=TSK-009 "text"
+  nj note  --id=TSK-009 "text" [--as=…]
   nj show  --id=TSK-009
   nj list  [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…] [--ready] [--all]
   nj tree  [--id=EPIC-001] [--all]
   nj rm    --id=TSK-009 [--cascade]
   nj archive --id=EPIC-001
   nj unarchive --id=EPIC-001
+  nj claim   --id=TSK-009 [--as=…] [--status=…] [--steal=<holder>]
+  nj release --id=TSK-009 [--as=…]
   nj doctor [--fix]
 
 Every command accepts --json. Write commands accept --file=<path> instead of

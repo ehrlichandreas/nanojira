@@ -1457,6 +1457,187 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      claim-dir removal sits in § 11a's order. Tests (AC-27) follow from
      the promoted text.
 
+118. **C tests in place; implementation starts.** AC-27 (227 checks) and
+     the flipped AC-25 N6 (`--as`, 236 checks) are at 20eed2a, red against
+     the current dist/nj as expected. AMBIGUITIES 84 (a third kind of file
+     in a claims directory: asserted only as "must not crash a read") and 85
+     (the unarchive straggler race: no hook to force it) are accepted as
+     recorded gaps, not ruled further now. *Stale tests:* ac-01 asserts
+     init's `.gitignore` has exactly two patterns, which b7ffad6 made
+     three. The Oracle fixes it and sweeps the suites for other assertions
+     that C's promotion makes stale: help text, "Known flags" lines for
+     `note`, init output, `--ready`, JSON shapes. That sweep touches only
+     test/, so it runs in parallel with the Implementer's src/ work. *Gate:*
+     against c5-baseline / oracle-frozen-10, the replay and the frozen
+     suites will differ where the spec changed (at least the help lines,
+     init's third `.gitignore` pattern, and note's `--as`). The
+     Implementer lists every differing call, and the lead names the classes
+     here before acceptance, as in D88/D113.
+
+119. **An empty `--as=` is `invalid_value`, not unset.** The Implementer
+     found that AC-25 N6 contradicts itself: one loop expects `--as=` →
+     `invalid_value`, the next block expects `--as=` → unset, exit 0.
+     § 9 "The acting name" decides it: "an empty `NJ_AUTHOR` counts as
+     unset" is stated for the environment variable only, and "a name, from
+     either source, is valid when … it is non-empty". An empty environment
+     variable is a common shell artefact; an explicit flag with no name is
+     a caller's mistake and fails loudly. The Oracle drops the contradicting
+     block (or flips it to `invalid_value`) and adds one clarifying
+     sentence to § 9; the Implementer changes `--as=` handling to match.
+     This holds for `note`, `claim` and `release` alike.
+
+120. **Release racing a steal: both may succeed; the stealer always ends
+     up holding.** AC-27 C5 asserts that exactly one of a concurrent
+     `release` (by holder H) and `claim --steal=H` succeeds. § 12a says
+     otherwise. If the release lands first, the steal's retry reads
+     `unclaimed` and becomes a plain claim (Stealing, bullet 3), so both
+     exit 0. If the steal lands first, the release reads `claimed N` ≠ H
+     and is `refused:claimed` naming N. The model shows no violation for
+     this race (S2/S11 under P3). *Invariant to test instead:* the steal
+     exits 0; the release exits 0 or `refused:claimed` naming the
+     stealer; afterwards the stealer holds the claim and the mirror agrees.
+     § 12a's "of any number of concurrent steals and claims exactly one
+     changes the holder" is about claims and steals among themselves; the
+     Oracle adds that a concurrent release is not one of them.
+
+121. **V3.1-C verified: accept, with three follow-ups before acceptance**
+     (docs/verification/v3-1-c-claim.md, 4393780). core/claims.ts matches
+     model P3 on every point; live `NJ_FAULT` rollbacks match § 12a; the
+     AC-27 count gap (296 against the old dist vs 262) is 34 fixture guards
+     that fire only on a failed precondition, so no check is skipped.
+     *Replay classes against c5-baseline*, all four named and confirmed
+     call by call (2,934 calls): (1) init's third `.gitignore` pattern
+     (~1,748), (2) `_claim` in every JSON entry (~1,522), (3) `note`
+     gaining `--as` (9), (4) the help text gaining the claim/release lines
+     (3). The Implementer's report said 40 calls in two classes because
+     gate.js truncates its diff list at 40 without giving the total. That
+     was not dishonest, but it is a gap in the instrument.
+     *Follow-ups:* (a) `nj help` shows no `[--as=…]` on `note`, while § 9
+     lists it (help mirrors § 9, D88): the Implementer fixes it. (b)
+     gate.js must always print the total number of differing calls and a
+     per-command tally, even when it truncates the listing: the Implementer
+     fixes it. (c) The per-process cache "does .nanojira/claims/ exist" has
+     a narrow staleness window: a backlog's first-ever claim racing a read
+     can make that one read's `--ready`/`_claim` momentarily stale. Claim
+     exclusivity is unaffected. The Oracle discloses it under § 12 Limits.
+     Also, unrelated to C: § 9's synopsis of `nj new` omits `--status`,
+     which help and code have. The Oracle fixes that typo. C is accepted
+     once the Verifier has checked the (a)/(b) delta; then the replay
+     baseline is re-recorded as `c6-baseline` at the accepted state.
+
+122. **v3.2 and v3.3 released by the user** (2026-10-03, "setzt alle eure
+     vorschläge um"), following the lead's list of ideas. *v3.2:*
+     (1) `nj check`, ticking a checkbox in an element's body;
+     (2) stale claims made visible: claim age in `list`/`show`, and a
+     `doctor` warning for old claims;
+     (3) `nj find`, full-text search including the body;
+     (4) batch writes, `--id=A,B,C`;
+     (6) known gaps closed: a deterministic hook for the `.njrc` swap race,
+     `doctor --fix` cleanup of a stray `.ids/` left by a crash in step 0
+     (G1), and the absolute § 13 perf measurement on a quiet machine.
+     *v3.3:* (5) an MCP wrapper, as its own project after v3.2, with its own
+     proposal. *How:* exactly as D110. First finish v3.1 (C accepted,
+     `c6-baseline`). Then a written proposal (docs/proposals/v3.2.md) with
+     open questions put to the lead, and an independent review of it. Then
+     one feature at a time: spec → tests → implementation → verification →
+     acceptance. Only one agent writes `src/`. Same three teammates, no new
+     ones. Drafting the proposal may start now, because it is a document only.
+
+123. **v3.2 proposal (5fe6af5): open questions ruled by the lead.** The
+     Oracle's recommendations are taken, with these precisions:
+     - *A `nj check`:* addressing by `--text` (primary, a substring match on
+       the item text) and `--item=<n>` (1-based among the countable
+       checkboxes). Zero matches or several are distinct, named errors.
+       Exactly one of the two flags is required. `## Notes` is excluded.
+       Fence-aware matching (a checkbox inside a fence never counts) is a
+       deliberate, stated exception to § 7. It is a guarded write; `--force`
+       extends to `check` like `set`/`note`.
+     - *B stale claims:* no new `_claim` field, because the claim time it
+       already carries is enough and age is computed by the reader.
+       `doctor` warns (`claim:stale`, severity warning) above
+       `staleAfterHours` in .nanojira/config.json: default 24, unit hours, 0
+       disables the warning. `--ready` is unchanged, and nothing is ever
+       auto-stolen.
+     - *C `nj find`:* title, body and notes are searched; case-insensitive
+       (the spec states which folding, e.g. `toLowerCase`); substring match;
+       `--all` includes the archive; list's filters combine; output shape as
+       `list`, no `_match` field this round.
+     - *D batch writes:* `--id=A,B,C` for `set`, `note`, `check`, `claim`,
+       `release` only. Every ID is resolved and validated before anything is
+       written: an unknown ID or invalid input aborts the whole batch with
+       nothing written. Per-ID runtime failures (`changed_in_parallel`,
+       `refused:claimed`, …) do not stop the others. Exit 1 if any ID failed;
+       the JSON reports a result per ID. The spec pins the wrapper shape and
+       field names exactly.
+     - *E gaps:* the `.njrc` hook's go-marker placement as the Oracle leans
+       (§ 4, beside the `.njrc` rule), and the spec says where the marker
+       lives before a backlog is resolved. The stray `.ids/` cleanup is a
+       `--fix` note only, with no new finding. E3 (perf) is scheduling, run
+       by the lead on a quiet machine.
+     The Oracle folds these rulings into the proposal; then the Verifier
+     reviews it independently (D122) before any promotion.
+
+124. **V3.1-C accepted.** `nj claim` / `nj release` (§ 9 acting name,
+     § 12 Claims, § 12a; AC-25, AC-27) passes independent verification
+     (docs/verification/v3-1-c-claim.md: 4393780 accept; D121 delta b697762
+     accept). Replay against c5-baseline: 2,934 differing calls, exactly
+     D121's four classes. The Verifier re-derived the counts in the delta
+     and corrected two miscounts in its own first report: `.gitignore`
+     third pattern 1,399, `_claim` 1,523, `note --as` 6, help 6. gate.js
+     now prints the true total and a per-command tally. TSK-032 done.
+     *v3.1 is functionally complete*; only TSK-033 (the quiet-machine perf
+     measurement, folded into v3.2 E3 by D122) remains. *Next, in parallel
+     because they share no files:* the Implementer records `c6-baseline` /
+     `oracle-frozen-11` at the accepted state, and the Verifier reviews the
+     ruled v3.2 proposal (aa6ee56).
+
+125. **v3.2 proposal review adopted** (docs/review/v3.2-proposal.md,
+     717fd84: "needs changes", text only). Rulings:
+     - *D's example* uses a genuine runtime failure (`refused:claimed`),
+       not `refused:archived`, which is preflight and aborts the whole batch.
+     - *STATUS.md* is regenerated **once**, after the whole batch, and only
+       if at least one ID was written.
+     - *A repeated ID* (`--id=A,A`, also after trimming) is an argument
+       error in preflight: `invalid_value`, nothing written.
+     - *Per-ID failure entries* carry the same fields a single-element
+       failure carries, including `hint`.
+     - *Claim age* is computed against `NJ_NOW` when it is set, like every
+       other time-dependent behaviour, so AC-29 is deterministic.
+     - *An unknown key in the `claims` config block* follows § 5's
+       precedent for the `layout` block.
+     - *Checkbox markers* are stated normatively, not by example: list
+       markers `-`, `*`, `+`, `1.`, `1)`; nested (indented) items count; a
+       box reads `[ ]`, `[x]` or `[X]`; `check` writes `[x]` and `--uncheck`
+       writes `[ ]`.
+     - *A zero-match `nj check` stays `not_found`* (the reviewer's
+       recommendation). `nj` already reuses `not_found` beyond missing
+       elements, and the message names what was not found; the lead's
+       concern is answered by that precedent.
+     The Oracle folds these into the proposal. The lead checks the text
+     diff; no second review round is needed for text-only fixes. Then
+     promotion starts with A (`nj check`).
+
+126. **v3.2 proposal final (cd6da2f); promotion starts with A.** The lead
+     checked the text diff of the D125 fixes. One supersession: `nj check`
+     uses `--on`/`--off` as the proposal writes them; D125's "`--uncheck`"
+     wording is replaced, because the pair is symmetric and explicit.
+     Backlog: EPIC-008 with TSK-034 (A) … TSK-038 (E). TSK-033 (perf) stays
+     under EPIC-007, which closes when it is measured. Order: A → B → C → D
+     → E, each spec → tests → implementation → verification → acceptance.
+
+127. **AC-27 joins the replay's concurrent-suite allowlist (92db73d), at
+     file granularity, for now.** Recording `c6-baseline` showed that
+     AC-27's C5 races (real parallel processes) are nondeterministic by
+     design, like AC-7. baseline.js can exclude only whole suites, because
+     its label is per file, so 436 of 6,313 calls (6.9 %, 61 scratch
+     backlogs) leave the byte replay. Only 3 of those backlogs
+     (ac27-c5-claim, -steal, -release-steal) actually race; the other 58 are
+     deterministic and lose replay coverage only through the granularity.
+     AC-27's verdict still runs in every gate. *Accepted as a stated gap.*
+     *Follow-up in v3.2 E (TSK-038):* exclude by scratch backlog (or
+     scenario label) so that only the three C5 backlogs leave the replay.
+     The Verifier audits 92db73d together with the c6 recording.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

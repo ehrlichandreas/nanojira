@@ -31,7 +31,7 @@ function cmdSet(flags: Flags) {
   const { overrides, changed, newBody } = collectSetOverrides(ctx, el, flags, allowOpen);
 
   if (changed.length === 0) {
-    if (json) emitWriteResult(true, el, []);
+    if (json) emitWriteResult(true, el, [], ctx.backlog);
     else writeFeedback(el, ctx.cfg, `${el.id} unchanged`);
     return 0;
   }
@@ -42,7 +42,7 @@ function cmdSet(flags: Flags) {
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
   deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-  if (json) emitWriteResult(true, fresh, changed);
+  if (json) emitWriteResult(true, fresh, changed, ctx.backlog);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} → ${changed.map((c: SetField) => `${c}=${describeField(fresh, c)}`).join(', ')}`);
   return 0;
 }
