@@ -172,10 +172,13 @@ function init(dir) {
     },
     tombstones: ['EPIC-001', 'TSK-005'],
   });
-  /* AMBIGUOUS (AMBIGUITIES.md 5): whether `--fix` samples findings before or
-   * after the repairs is unpinned, so 0 and 2 are both correct here. */
+  /* § 14: "0 when no error remains, 2 when one does." TSK-005's only defect is
+   * a missing `id` — `id:derived` (§ 7: warning, since the file name `TSK-005`
+   * agrees with the `tasks/` folder, so no `id:mismatch` error applies) — and
+   * EPIC-001 is clean. No error-level code applies anywhere in this fixture,
+   * so the exit code is pinned at exactly 0. */
   T.exit('doctor --fix (missing id)',
-    H.runNj(['doctor', '--fix'], { cwd: d, env: { NJ_NOW: H.LATER_NOW } }), [0, 2]);
+    H.runNj(['doctor', '--fix'], { cwd: d, env: { NJ_NOW: H.LATER_NOW } }), 0);
   T.goldenEq('--fix writes id from file name == golden', taskFile2(d), 'fix-id-from-name.md');
 }
 
@@ -192,8 +195,14 @@ function taskFile2(d) { return path.join(d, 'backlog', 'tasks', 'TSK-005.md'); }
     },
     tombstones: ['TSK-001'],
   });
+  // § 14: "0 when no error remains, 2 when one does." This fixture's
+  // `parent: EPIC-001` points at nothing — no epics/EPIC-001.md, and no
+  // EPIC-001 tombstone either — so `parent:dangling` applies (§ 7: error).
+  // § 14 explicitly forbids `--fix` from inventing parents, so this finding
+  // survives the repair regardless of AMBIGUITIES.md 5's before/after
+  // question (both readings see it): the exit code is pinned at exactly 2.
   T.exit('doctor --fix (H1 drift)',
-    H.runNj(['doctor', '--fix'], { cwd: d, env: { NJ_NOW: H.LATER_NOW } }), [0, 2]);
+    H.runNj(['doctor', '--fix'], { cwd: d, env: { NJ_NOW: H.LATER_NOW } }), 2);
   T.goldenEq('--fix pulls the H1 up from title == golden', taskFile(d), 'fix-h1.md');
 }
 

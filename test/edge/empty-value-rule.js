@@ -92,12 +92,13 @@ function hasEmptyValueLine(text, key) {
     T.eq(id + ': and the status falls back to statuses[0]', e && e.status, 'open');
   }
 
-  // AMBIGUOUS: § 9 pins exit 2 for `nj doctor` with an error finding, but not
-  // whether `--fix` samples the findings before or after the repairs
-  // (AMBIGUITIES.md #5); as at every other --fix call in the suite, both codes
-  // are accepted and the assertion that matters is on the bytes.
+  // § 14: "0 when no error remains, 2 when one does." Both TSK-001 and
+  // TSK-002's only defect is an empty `status` — `missing:status` (§ 7:
+  // warning) — with everything else present, complete, and H1-synced. No
+  // error-level code applies anywhere in this fixture, so the exit code is
+  // pinned at exactly 0.
   T.exit('doctor --fix on an empty known value',
-    H.runNj(['doctor', '--fix'], { cwd: d, env: { NJ_NOW: H.LATER_NOW } }), [0, 2]);
+    H.runNj(['doctor', '--fix'], { cwd: d, env: { NJ_NOW: H.LATER_NOW } }), 0);
 
   for (const id of ['TSK-001', 'TSK-002']) {
     T.eq(id + ': --fix filled the empty status from statuses[0]',

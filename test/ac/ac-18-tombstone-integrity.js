@@ -81,11 +81,16 @@ T.eq('new ID allocates above every existing element number',
 
 /* ---- doctor --fix restores ------------------------------------------- */
 const fix = H.runNj(['doctor', '--fix'], { cwd: d });
-/* AMBIGUOUS (AMBIGUITIES.md 5): § 9 pins exit 2 for `doctor` with an error
- * finding, but not whether `--fix` samples the findings before or after the
- * repairs — so a repairable backlog may legitimately exit 0 or 2 here. Both
- * are accepted; the real assertion is on the resulting files. */
-T.exit('doctor --fix runs', fix, [0, 2]);
+/* § 14: "0 when no error remains, 2 when one does." This fixture's only
+ * error-level finding is `backlog:ids_missing` (§ 7: error while `.ids/` is
+ * absent/empty and element files exist) — step 4 creates tombstones for every
+ * ID found in element files (EPIC-001, TSK-007, TSK-008), which both repopulates
+ * `.ids/` (closing `backlog:ids_missing`) and gives each surviving element a
+ * tombstone (closing the warning `id:no_tombstone`). No other error-level code
+ * applies to this fixture (both elements are complete; no duplicate/hierarchy
+ * issues). Nothing error-level survives the repair, so the exit code is
+ * pinned at exactly 0. */
+T.exit('doctor --fix runs', fix, 0);
 
 for (const id of ['EPIC-001', 'TSK-007', 'TSK-008']) {
   T.check('--fix restored the tombstone for ' + id,

@@ -234,22 +234,28 @@ const T = {
   },
 
   /**
-   * Assert the exit code. `expected` may be a single code or an array of
-   * acceptable codes — an array is the honest form where the spec does not
-   * pin the code (see AMBIGUITIES.md), and it is better than a tolerant
-   * assertion that hides a real difference.
+   * Assert the exit code against a single expected value.
+   *
+   * `expected` must not be an array. An array reads as the honest form of
+   * "the spec does not pin the code", but it is indistinguishable from
+   * quietly accepting a bug (AMBIGUITIES.md 23: an either/or here once let a
+   * wrong-but-in-set exit code through for a whole round). Derive one value
+   * from the spec instead — if it comes back red, that is a finding to
+   * escalate, not a reason to widen the assertion.
    */
   exit(desc, result, expected) {
+    if (Array.isArray(expected)) {
+      throw new Error('T.exit(' + JSON.stringify(desc) + ', …): expected must be a single ' +
+        'exit code, not an array — derive one value from the spec (AMBIGUITIES.md 23) ' +
+        'instead of tolerating a set of them');
+    }
     if (result.missing) {
       return this.check(desc, false, 'CANNOT RUN: ' + result.missing +
         '\n     (the implementation does not exist yet — the oracle is built first)');
     }
-    const ok = Array.isArray(expected)
-      ? expected.includes(result.status)
-      : result.status === expected;
+    const ok = result.status === expected;
     return this.check(desc, ok,
-      'expected exit ' + (Array.isArray(expected) ? expected.join('|') : expected) +
-      ', got ' + result.status +
+      'expected exit ' + expected + ', got ' + result.status +
       (result.stderr ? '\n     stderr: ' + trunc(result.stderr) : ''));
   },
 

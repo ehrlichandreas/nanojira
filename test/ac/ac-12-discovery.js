@@ -140,9 +140,9 @@ const other = H.mkBacklog({
   // would silently answer from a different backlog.
   // AMBIGUOUS: § 4 pins "use it" and forbids falling back, but does not spell
   // out the exit code for a NJ_BACKLOG target that does not exist. Exit 1 is
-  // the code for every other hard error (§ 9), hence the one-element array.
+  // the code for every other hard error (§ 9).
   const r3 = H.runJson(['list'], { cwd: nested, env: { NJ_BACKLOG: path.join(unrelated, 'nope') } });
-  T.exit('NJ_BACKLOG pointing at a non-existent folder is a hard error', r3, [1]);
+  T.exit('NJ_BACKLOG pointing at a non-existent folder is a hard error', r3, 1);
   T.check('no fallback to the backlog the walk would have found',
     !(r3.json && Array.isArray(r3.json.entries)),
     J(r3.json || r3.stdout).slice(0, 300));

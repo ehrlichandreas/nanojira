@@ -107,14 +107,18 @@ for (const [id, instant] of [['TSK-001', ORIGINAL_A], ['TSK-002', ORIGINAL_B]]) 
 
 /* ---- run the repair ---------------------------------------------------- */
 const fix = H.runNj(['doctor', '--fix'], { cwd: d, env: { NJ_NOW: H.LATER_NOW } });
-// AMBIGUOUS: § 9 pins exit 2 for `nj doctor` with an error finding, but not
-// whether `--fix` samples the findings before or after the repairs
-// (AMBIGUITIES.md #5); as at every other --fix call in the suite, both codes
-// are accepted and the assertion that matters is on the bytes.
-// AMBIGUOUS: § 14 does not say whether a run of `--fix` reports the elements
-// it repaired or says nothing on success; nothing is asserted about its output
-// here, only about the resulting file.
-T.exit('doctor --fix', fix, [0, 2]);
+// § 14: "0 when no error remains, 2 when one does." This fixture's findings
+// are all warning-level per § 7's table: TSK-001 is missing `type`
+// (`type:derived`) and TSK-002 is missing `id` (`id:derived`) — both derived
+// consistently from the file name/folder, so no `type:folder`/`id:mismatch`
+// error applies — and both are missing `created`/`updated`
+// (`missing:created`/`missing:updated`, also warnings). No error-level code
+// applies anywhere in this fixture, before or after the repair, so the exit
+// code is pinned at exactly 0.
+// AMBIGUOUS (unrelated to the exit code): § 14 does not say whether a run of
+// `--fix` reports the elements it repaired or says nothing on success;
+// nothing is asserted about its output here, only about the resulting file.
+T.exit('doctor --fix', fix, 0);
 
 /* ---- the two timestamps ------------------------------------------------ */
 for (const id of ['TSK-001', 'TSK-002']) {
