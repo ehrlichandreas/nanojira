@@ -633,6 +633,87 @@ resolved**: even a `--id` that names nothing yields `refused:unreadable`, not
 `not_found`". That the spec becomes explicit there and stays silent here argues
 against, not for, a general "arguments before resolution" principle.
 
+## 36. Which of two duplicate IDs counts as the parent / dependency target?
+
+**Unpinned, and it hides a bug class that passes both safety nets.** § 9 says a
+duplicate ID means "reads show both entries, marked `duplicate_id`". It does not
+say which of the two an *other* element resolves to when it names that ID as its
+`parent` or in `depends_on`.
+
+`nj` resolves **first in scan order wins** (`if (!byId.has(el.id))`). That is an
+implementation reading, not a spec rule.
+
+**Why it matters more than an ordering question normally would.** Turning
+first-wins into last-wins is a one-character change — dropping the `has` guard,
+exactly the shape a pass decomposition using `Map.set` in a loop produces. And
+it is invisible to both nets as they stand:
+
+| Net | Sees last-wins? |
+|---|---|
+| Oracle (56 suites) | **no** — its `archive/TSK-001.md` fixtures carry no child |
+| Corpus byte replay | **no** — none of the recorded calls builds the shape |
+
+It *is* observable: a duplicate `TSK-001` in `tasks/` (todo) and `archive/`
+(done) with a child `SUB-001` gives `_problems: []` on the child under first-wins
+and `["archive:split"]` under last-wins, in both `list` and `doctor`. The same
+split exists on the `depends_on` side via `active_refs_archived`.
+
+**How it is handled:** a corpus fixture carrying both sides (child + dependent)
+pins the observed behaviour, with a mutation proof that dropping the guard turns
+the replay red. The oracle does **not** pin it — § 9 does not decide the
+question, so an oracle assertion would be nj-provenance (see items 31–35 for the
+same division).
+
+**If the spec owner rules:** one sentence in § 9 naming scan order — or, better,
+declaring the resolution target undefined while a `duplicate_id` finding stands,
+which is arguably the more honest contract.
+
+**Affects:** `tools/refactor-harness/fixtures.js` (scenario for the duplicate
+shape), `nj` `indexById`.
+
+## 37–39. Three orderings the spec does not decide
+
+**Unpinned, all three.** § 9 shows what a deliberate ordering rule looks like in
+this spec: *"Sort order of `list`, `tree` and bare `nj` is deterministic:
+priority … then `id` ascending. **Never filesystem order.**"* (Z. 528–530) —
+normative, and explicit about what it rules out. Nothing of that kind exists for
+the three below. Where the authors meant an order, they said so.
+
+**37. `doctor`'s `problems[]`.** The only anchor is § 14's terminal example
+(Z. 857–863), which happens to show two `ERROR` lines before a `WARNING` line.
+That is an illustration under the section heading, not a rule — the numbered
+`--fix` step list in the same section shows what § 14 looks like when it is
+being normative.
+
+A test was written for the reading "error severity before warning severity" and
+it comes back **red** against `c1-baseline`: `nj` returns
+`["warning","error","error","error"]`. The fixture was built so that
+alphabetical and severity-grouped order make *distinguishable* predictions
+(warning on `AAA-001`, errors on `ZZZ-001/002`), so the red is informative
+rather than accidental. It was escalated, **not** adapted to `nj` — the right
+handling: the observed order is `nj`'s reading, not a contract.
+
+Resolution: the test keeps the fixture and asserts only what holds under every
+reading — the findings appear with the correct severities. The order assertion
+stays as a comment, one line from being sharp if the spec owner ever rules.
+
+**38. `doctor --fix`'s `notes[]`.** § 14 names it as a category beside
+`fixed[]`/`problems[]` without any ordering statement, and not even implicitly
+via the step list — `notes[]` does not map one-to-one onto the eight steps.
+No test: no anchor to derive one from.
+
+**39. `entries[]` / `ids[]` / `dependents[]` for multi-element results**
+(`archive`, `rm --cascade`). § 9's shape table names the fields, not an order.
+§ 13's "depth-first" is scoped to `tree`; carrying it over would be an analogy,
+not a derivation. No test, for the same reason.
+
+**Why none of these gets pinned:** an order that `nj` merely happens to have is
+not a contract. Pinning it would make a legitimate reordering go red while
+nothing is broken — the false-alarm failure this project has already paid for
+three times (the flaky mkdtemp gate, the over-broad test digest, the colliding
+replay). See items 31–35 for the same division, and decision 77 for the case
+where the freedom itself was the thing worth writing down.
+
 ## Not an ambiguity, recorded because it looks like one
 
 - **`archive:not_done` severity.** § 11's prose used to say "warning" while the

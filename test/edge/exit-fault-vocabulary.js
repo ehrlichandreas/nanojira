@@ -198,10 +198,8 @@ function broken(label) {
    * error at all, and every assertion below would be about a clean backlog. */
   const doc = H.runJson(['doctor'], { cwd: d });
   T.exit('the fixture really carries an error finding (doctor exits 2)', doc, 2);
-  T.check('doctor names parent:dangling',
-    !!doc.json && Array.isArray(doc.json.problems) &&
-    doc.json.problems.some(p => p && p.code === 'parent:dangling'),
-    JSON.stringify(doc.json && doc.json.problems));
+  T.sameSet('the findings are exactly § 7\'s set for this fixture',
+    H.doctorSet(doc) || ['<no problems array>'], ['parent:dangling:error']);
 
   /* § 9's row for `0`: "success — including reads that merely *report* data
    * problems via `_problems`". */

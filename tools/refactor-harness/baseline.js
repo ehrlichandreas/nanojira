@@ -32,7 +32,7 @@ const BASELINE_DIR = path.join(HERE, 'baseline');
 // is a Node built-in, so the zero-dependency rule (§ 3) still holds.
 const CORPUS = path.join(BASELINE_DIR, 'corpus.ndjson.gz');
 const HEADER = path.join(BASELINE_DIR, 'header.json');
-const RAW_CORPUS = path.join(os.tmpdir(), 'nj-s0-record.ndjson');
+const RAW_CORPUS = path.join(os.tmpdir(), `nj-s0-record-${process.pid}.ndjson`);
 
 function arg(name, dflt) {
   const hit = process.argv.find((a) => a.startsWith('--' + name + '='));
@@ -55,17 +55,73 @@ if (!fs.existsSync(NJ)) {
   process.exit(2);
 }
 const NJ_ABS = path.resolve(NJ);
-const SCRATCH = path.resolve(arg('scratch', path.join(os.tmpdir(), 'nj-s0-scratch')));
-const SCRIPTS = path.resolve(arg('scripts', '/tmp/v2'));
+// Per RUN, not a fixed path. A shared scratch tree made two concurrent runs
+// tear at the same fixtures, and the result was indistinguishable from a real
+// regression: same exit 1, same wall of content diffs, no distinguishing
+// message. "Red means roll back" is only sound while red says something about
+// the code — otherwise someone eventually discards a clean step, and trust in
+// red runs goes with it.
+//
+// Determinism does not suffer: the normaliser folds this root to <FIXTURES>
+// before anything is recorded, so the root may vary while the records stay
+// byte-identical. That is checked, not assumed (see README).
+const SCRATCH = path.resolve(arg('scratch', path.join(os.tmpdir(), `nj-s0-scratch-${process.pid}`)));
+// In the repo, not in /tmp: this corpus part vanished on reboot and took
+// `record` down with it (code 4). Same lesson as the scoping sources.
+const SCRIPTS = path.resolve(arg('scripts', path.join(HERE, 'scratch')));
 
 // Every child — fixture calls, the oracle, the scratch scripts — reaches the
 // shim through this. The shim refuses to run without it, which is how the
 // fixture corpus silently recording nothing would be caught.
 process.env.HARNESS_NJ = NJ_ABS;
+// Lets the shim tell our fixtures apart from foreign mkdtemp directories.
+process.env.HARNESS_SCRATCH = SCRATCH;
 
 const cannotRun = [];   // coverage gaps — never counted as success
 const notRecorded = [];  // ran and passed, but NOT in the byte corpus
 const parts = [];       // { name, calls, detail }
+
+// What the digest covers. Executable test content only: the suites, their
+// shared library, and the golden fixtures with their manifest. Prose under
+// test/ (AMBIGUITIES.md, AC-MATRIX.md, README.md) is deliberately OUT.
+//
+// A digest over all of test/ once fired on a single documentation line. A
+// guard that cries over a comment teaches people to click Code 6 away — and
+// then the case it exists for, a suite changed without being renamed, goes
+// past unnoticed. Narrowing it is not weakening it; it is aiming it.
+// `run-all.js` belongs in here and is not a document: it decides which suites
+// are collected at all, how a result is classified, and what counts as
+// "cannot run". That classification is precisely where today's recurring
+// disease sat — "ran" mistaken for "checked". Change the collecting logic and
+// the digest must move, or this guard looks straight past it.
+const DIGEST_SCOPE = ['ac', 'edge', 'fault', 'golden', 'lib', 'run-all.js', 'stress'];
+
+/**
+ * Digest over the scoped oracle content: every path plus its hash, folded into
+ * one value. The suite LIST alone would not notice a suite that changed while
+ * keeping its name. Equivalent to
+ *   find test/ac test/edge test/fault test/golden test/lib test/run-all.js \
+ *        test/stress -type f | sort | xargs shasum -a 256 | shasum -a 256
+ * Run from the project root: the paths go into the hash, so the `test/` prefix
+ * is part of the value.
+ */
+function testDigest(root) {
+  const base = root || path.join(PROJECT, 'test');
+  if (!fs.existsSync(base)) return null;
+  const files = [];
+  for (const entry of DIGEST_SCOPE) {
+    const abs = path.join(base, entry);
+    if (!fs.existsSync(abs)) continue;
+    if (fs.statSync(abs).isDirectory()) {
+      for (const f of R.walk(abs, '', [])) files.push({ abs: f.abs, rel: entry + '/' + f.rel });
+    } else {
+      files.push({ abs, rel: entry });
+    }
+  }
+  files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
+  const lines = files.map((f) => `${R.sha256(fs.readFileSync(f.abs))}  test/${f.rel}\n`);
+  return R.sha256(lines.join(''));
+}
 
 function njSha() {
   return R.sha256(fs.readFileSync(NJ_ABS));
@@ -175,6 +231,20 @@ function runOracle(recordPath) {
   };
 }
 
+/**
+ * Probes that must NOT be routed through the shim. `verify.js` reads nj's own
+ * source and parses its SEVERITY table out of it — handed the shim it finds no
+ * such table, dies mid-run, and leaves a truncated trail of calls in the
+ * corpus, which is worse than contributing none. A white-box probe cannot be
+ * byte-recorded through a stand-in, the same way the preload-instrumented
+ * oracle suite cannot.
+ *
+ * Explicit list, like CONCURRENT_SUITES: a NEW white-box probe is not
+ * tolerated silently, it shows up as a coverage gap and has to be entered here
+ * deliberately.
+ */
+const DIRECT_ONLY_SCRIPTS = new Set(['verify.js']);
+
 function runScratchScripts(recordPath) {
   if (!fs.existsSync(SCRIPTS)) {
     cannotRun.push(`scratch scripts: ${SCRIPTS} not found — the verifier's ad-hoc probes are not in the corpus`);
@@ -186,9 +256,24 @@ function runScratchScripts(recordPath) {
     return null;
   }
   const before = countLines(recordPath);
-  let ran = 0;
+  let contributed = 0;
   for (const n of files) {
     const p = path.join(SCRIPTS, n);
+
+    if (DIRECT_ONLY_SCRIPTS.has(n)) {
+      const direct = spawnSync(process.execPath, [p, NJ_ABS], {
+        cwd: SCRIPTS,
+        env: Object.assign({}, process.env, { NJ: NJ_ABS }),
+        encoding: 'utf8',
+        timeout: 5 * 60 * 1000,
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      if (direct.status !== 0) cannotRun.push(`scratch ${n}: exited ${direct.status} even when run directly`);
+      else notRecorded.push(`${n} (white-box probe: reads nj's source, verdict taken directly, calls not in the corpus)`);
+      continue;
+    }
+
+    const at = countLines(recordPath);
     const r = spawnSync(process.execPath, [p, SHIM], {
       cwd: SCRIPTS,
       env: Object.assign({}, process.env, {
@@ -201,10 +286,22 @@ function runScratchScripts(recordPath) {
       timeout: 5 * 60 * 1000,
       maxBuffer: 64 * 1024 * 1024,
     });
+    // "Spawned without error" is NOT the same as "took part". Nine of these
+    // probes hardcoded an absolute nj path, ignored the one they were handed,
+    // and so ran past the shim entirely: they recorded nothing while the
+    // summary happily said "11/11 scripts executed". A script that contributes
+    // no call has verified nothing here, and must not read as coverage.
+    const added = countLines(recordPath) - at;
     if (r.error) cannotRun.push(`scratch ${n}: ${r.error.message}`);
-    else ran++;
+    else if (r.status !== 0) cannotRun.push(`scratch ${n}: exited ${r.status} — did not complete`);
+    else if (added === 0) cannotRun.push(`scratch ${n}: ran but recorded no call — does it honour the nj path it is given?`);
+    else contributed++;
   }
-  return { name: 'scratch', calls: countLines(recordPath) - before, detail: `${ran}/${files.length} scripts executed` };
+  return {
+    name: 'scratch',
+    calls: countLines(recordPath) - before,
+    detail: `${contributed}/${files.length} scripts contributed calls`,
+  };
 }
 
 function collect(recordPath) {
@@ -387,6 +484,10 @@ if (mode === 'record') {
     calls: total,
     parts: parts.map((p) => ({ name: p.name, calls: p.calls, detail: p.detail })),
     oracleSuites: oracleSuites(),
+    testDigest: testDigest(),
+    // Verzeichnisse mit Schrägstrich, Dateien ohne — der Geltungsbereich soll
+    // lesbar sein, ohne dass man raten muss, was davon ein Verzeichnis ist.
+    testDigestScope: DIGEST_SCOPE.map((d) => 'test/' + d + (d.includes('.') ? '' : '/')),
     cannotRun: cannotRun.slice(),
     notRecorded: notRecorded.slice(),
     note: 'Comparison key excludes per-file raw sha; nsha (normalised content) is normative.',
@@ -395,7 +496,14 @@ if (mode === 'record') {
   // driver compresses once, at the end.
   fs.writeFileSync(CORPUS, zlib.gzipSync(fs.readFileSync(RAW_CORPUS), { level: 9 }));
   fs.rmSync(RAW_CORPUS, { force: true });
+  // The header names the corpus it belongs to. Two `record` runs at once would
+  // still race on these two files, and a header paired with someone else's
+  // corpus is the one corruption that would look plausible. No lock: a stale
+  // lock after a crash is the failure mode nj itself refuses (§ 12). Detect
+  // instead of exclude.
+  header.corpusSha256 = R.sha256(fs.readFileSync(CORPUS));
   fs.writeFileSync(HEADER, JSON.stringify(header, null, 2) + '\n');
+  if (!process.env.HARNESS_KEEP) fs.rmSync(SCRATCH, { recursive: true, force: true });
   reportParts(total);
   process.stdout.write(`\nnj sha256 ${header.njSha256}\nbaseline written: ${path.relative(PROJECT, CORPUS)} (${total} calls)\n`);
   const oracle = parts.find((p) => p.name === 'oracle');
@@ -414,6 +522,21 @@ if (!fs.existsSync(CORPUS)) {
   process.exit(2);
 }
 const header = JSON.parse(fs.readFileSync(HEADER, 'utf8'));
+
+// Does this header belong to this corpus? Only checked when the baseline was
+// recorded with the field, so an older baseline still verifies. A mismatch
+// gets its OWN exit code: a damaged reference must never wear the shape of a
+// finding about nj.
+if (header.corpusSha256) {
+  const actual = R.sha256(fs.readFileSync(CORPUS));
+  if (actual !== header.corpusSha256) {
+    process.stdout.write('\nABORT: header and corpus do not belong together.\n');
+    process.stdout.write(`  header names: ${header.corpusSha256}\n  corpus is   : ${actual}\n`);
+    process.stdout.write('Two recordings probably overlapped. Re-record; this says nothing about nj.\n');
+    process.exit(7);
+  }
+}
+
 const tmp = path.join(os.tmpdir(), `nj-s0-verify-${process.pid}.ndjson`);
 const total = collect(tmp);
 const oldRecs = readRecords(CORPUS);
@@ -431,6 +554,17 @@ process.stdout.write(`compared: ${oldRecs.length - excluded} calls (${excluded} 
 // expected case, not a freak one — and it must be said out loud. Otherwise the
 // extra calls show up as a wall of "extra"/"missing" records and read like an
 // nj regression, which is the worst way to learn that test/ moved.
+if (header.testDigest) {
+  const now = testDigest();
+  if (now !== header.testDigest) {
+    process.stdout.write('\nABORT: test/ has changed since the baseline was recorded.\n');
+    process.stdout.write(`  recorded: ${header.testDigest}\n  current : ${now}\n`);
+    process.stdout.write('This is a stale baseline, not an nj regression.\n');
+    process.stdout.write('Re-record on the unchanged nj, then verify again.\n');
+    process.exit(6);
+  }
+}
+
 const recordedSuites = header.oracleSuites || null;
 if (recordedSuites) {
   const now = oracleSuites();
@@ -447,6 +581,11 @@ if (recordedSuites) {
 }
 
 abortOnCoverageGap();
+
+if (!process.env.HARNESS_KEEP) {
+  fs.rmSync(SCRATCH, { recursive: true, force: true });
+  fs.rmSync(tmp, { force: true });
+}
 
 if (diffs.length === 0 && oldRecs.length === newRecs.length) {
   process.stdout.write('\nBEHAVIOUR UNCHANGED — the recorded surface is identical.\n');

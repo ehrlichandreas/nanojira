@@ -76,15 +76,18 @@ function scenario(name, opts) {
   const d = opts.fixture();
 
   /* The state *before* the repairs, so a fixture that never carried the
-   * problem cannot pass by accident. */
+   * problem cannot pass by accident.
+   *
+   * `preSet`/`postSet` are the COMPLETE set of findings § 7's table produces
+   * for the fixture, as `code:severity` — not a code the run must contain.
+   * Containment was the old form and it is blind by construction: a mutant
+   * that appends one spurious `title:h1_mismatch` warning alongside real
+   * findings left this file green with 23 logged hits. Set equality is what
+   * turns an *extra* finding into a failure. */
   const pre = H.runJson(['doctor'], { cwd: d });
   T.exit(name + ' — doctor before --fix exits ' + opts.preExit, pre, opts.preExit);
-  if (opts.preCode) {
-    T.check(name + ' — the fixture really carries ' + opts.preCode,
-      !!pre.json && Array.isArray(pre.json.problems) &&
-      pre.json.problems.some(p => p && p.code === opts.preCode),
-      JSON.stringify(pre.json && pre.json.problems));
-  }
+  T.sameSet(name + ' — findings before --fix are exactly § 7\'s set',
+    H.doctorSet(pre) || ['<no problems array>'], opts.preSet);
 
   const fix = H.runJson(['doctor', '--fix'], { cwd: d, env: FIXENV });
 
@@ -133,6 +136,14 @@ function scenario(name, opts) {
   const post = H.runJson(['doctor'], { cwd: d });
   T.exit(name + ' — doctor after --fix exits ' + opts.fixExit, post, opts.fixExit);
 
+  /* § 14: `--fix` repairs exactly the steps it lists and nothing else, so the
+   * surviving set is derivable too — and a repair that *introduced* a finding
+   * would show up here and nowhere else. */
+  T.sameSet(name + ' — findings after --fix are exactly § 7\'s remaining set',
+    H.doctorSet(post) || ['<no problems array>'], opts.postSet);
+  T.sameSet(name + ' — --fix\'s own problems[] matches the post-state (§ 14)',
+    H.doctorSet(fix) || ['<no problems array>'], opts.postSet);
+
   if (opts.after) opts.after(d, fix, post);
   return d;
 }
@@ -147,7 +158,7 @@ scenario('clean backlog', {
   fixture: () => H.mkBacklog({
     label: 'exitfix-clean', files: EPIC, tombstones: ['EPIC-001'],
   }),
-  preExit: 0, fixExit: 0,
+  preExit: 0, fixExit: 0, preSet: [], postSet: [],
 });
 
 /* § 14 step 1: "write the `id` from the file name ... when missing".
@@ -163,7 +174,9 @@ scenario('id missing (warning, step 1)', {
     },
     tombstones: ['EPIC-001'],
   }),
-  preExit: 0, fixExit: 0, preCode: 'id:derived',
+  preExit: 0, fixExit: 0,
+  /* § 7: `id:derived` — "`id` absent — derived from file name" (warning). */
+  preSet: ['id:derived:warning'], postSet: [],
   after: d => T.contains('the id was written from the file name',
     H.readInBacklog(d, 'epics/EPIC-001.md'), 'id: EPIC-001'),
 });
@@ -182,7 +195,10 @@ scenario('id mismatch, target free (error, step 2)', {
     }),
     tombstones: ['EPIC-001'],
   }),
-  preExit: 2, fixExit: 0, preCode: 'id:mismatch',
+  preExit: 2, fixExit: 0,
+  /* `id:mismatch` (error) from TSK-001.md carrying TSK-002, plus
+   * `id:no_tombstone` (warning) because TSK-002 was never claimed. */
+  preSet: ['id:mismatch:error', 'id:no_tombstone:warning'], postSet: [],
   after: d => {
     T.check('the file was renamed to match the id',
       H.existsInBacklog(d, 'tasks/TSK-002.md') && !H.existsInBacklog(d, 'tasks/TSK-001.md'),
@@ -203,7 +219,8 @@ scenario('wrong type folder (error, step 3)', {
     }),
     tombstones: ['EPIC-001', 'TSK-003'],
   }),
-  preExit: 2, fixExit: 0, preCode: 'type:folder',
+  preExit: 2, fixExit: 0,
+  preSet: ['type:folder:error'], postSet: [],
   after: d => T.check('the file was moved into tasks/',
     H.existsInBacklog(d, 'tasks/TSK-003.md') && !H.existsInBacklog(d, 'subtasks/TSK-003.md'),
     'tasks=' + JSON.stringify(H.listFiles(d, 'tasks')) +
@@ -221,7 +238,13 @@ scenario('.ids/ lost entirely (error, step 4)', {
     fs.rmSync(path.join(d, 'backlog', '.ids'), { recursive: true, force: true });
     return d;
   },
-  preExit: 2, fixExit: 0, preCode: 'backlog:ids_missing',
+  preExit: 2, fixExit: 0,
+  /* AMBIGUOUS: § 8 makes an absent `.ids/` `backlog:ids_missing` (error) and
+   * separately makes an element without a tombstone `id:no_tombstone`
+   * (warning). Both conditions literally hold here; the spec does not say
+   * the backlog-level code suppresses the element-level one. Reading used:
+   * both are reported. */
+  preSet: ['backlog:ids_missing:error', 'id:no_tombstone:warning'], postSet: [],
   after: d => T.eq('the tombstone was restored',
     JSON.stringify(idsOf(d)), JSON.stringify(['EPIC-001'])),
 });
@@ -238,7 +261,8 @@ scenario('one tombstone missing (warning, step 4)', {
     }),
     tombstones: ['EPIC-001'],
   }),
-  preExit: 0, fixExit: 0, preCode: 'id:no_tombstone',
+  preExit: 0, fixExit: 0,
+  preSet: ['id:no_tombstone:warning'], postSet: [],
   after: d => T.eq('the missing tombstone was created',
     JSON.stringify(idsOf(d)), JSON.stringify(['EPIC-001', 'TSK-001'])),
 });
@@ -253,7 +277,10 @@ scenario('status and timestamps missing (warnings, step 5)', {
     },
     tombstones: ['EPIC-001'],
   }),
-  preExit: 0, fixExit: 0, preCode: 'missing:status',
+  preExit: 0, fixExit: 0,
+  /* § 7: three separate warnings, one per absent known field. */
+  preSet: ['missing:status:warning', 'missing:created:warning', 'missing:updated:warning'],
+  postSet: [],
   after: d => {
     const body = H.readInBacklog(d, 'epics/EPIC-001.md');
     T.contains('status was filled from statuses[0]', body, 'status: todo');
@@ -274,7 +301,8 @@ scenario('H1 drift (warning, step 6)', {
     },
     tombstones: ['EPIC-001'],
   }),
-  preExit: 0, fixExit: 0, preCode: 'title:h1_mismatch',
+  preExit: 0, fixExit: 0,
+  preSet: ['title:h1_mismatch:warning'], postSet: [],
   after: d => T.contains('the H1 was pulled up from title',
     H.readInBacklog(d, 'epics/EPIC-001.md'), '# Real Title'),
 });
@@ -289,7 +317,8 @@ scenario('stray temp file (warning, step 7)', {
     H.writeRaw(d, 'tasks/.nj-tmp-4242-deadbeef', 'half a file\n');
     return d;
   },
-  preExit: 0, fixExit: 0, preCode: 'backlog:stray_tmp',
+  preExit: 0, fixExit: 0,
+  preSet: ['backlog:stray_tmp:warning'], postSet: [],
   after: d => T.eq('the stray temp file is gone',
     JSON.stringify(H.listFiles(d, 'tasks')), '[]'),
 });
@@ -314,7 +343,10 @@ scenario('unknown status survives --fix (warning stays, exit stays 0)', {
     },
     tombstones: ['EPIC-001'],
   }),
-  preExit: 0, fixExit: 0, preCode: 'unknown:status',
+  preExit: 0, fixExit: 0,
+  /* The warning survives § 14's "never guess status values" — same set
+   * before and after, which is the whole point of this scenario. */
+  preSet: ['unknown:status:warning'], postSet: ['unknown:status:warning'],
   after: (d, fix, post) => {
     T.contains('the invalid status was NOT overwritten',
       H.readInBacklog(d, 'epics/EPIC-001.md'), 'status: blocked-on-review');
@@ -345,7 +377,14 @@ scenario('duplicate id survives (error, exit 2)', {
     }),
     tombstones: ['EPIC-001', 'TSK-001', 'TSK-002'],
   }),
-  preExit: 2, fixExit: 2, preCode: 'duplicate_id',
+  preExit: 2, fixExit: 2,
+  /* Two files share TSK-001, so `duplicate_id` (error) applies to both; and
+   * TSK-002.md carrying `id: TSK-001` is additionally `id:mismatch` (error).
+   * AMBIGUOUS: § 7 does not say whether `duplicate_id` is reported once for
+   * the clash or once per participating file. Reading used: per file, since
+   * § 9 says element-level findings carry `element`. */
+  preSet: ['duplicate_id:error', 'duplicate_id:error', 'id:mismatch:error'],
+  postSet: ['duplicate_id:error', 'duplicate_id:error', 'id:mismatch:error'],
   after: d => T.eq('both files are still there — the duplicate was not resolved',
     JSON.stringify(H.listFiles(d, 'tasks')),
     JSON.stringify(['TSK-001.md', 'TSK-002.md'])),
@@ -363,7 +402,8 @@ scenario('dangling parent survives (error, exit 2)', {
     }),
     tombstones: ['EPIC-001', 'TSK-001'],
   }),
-  preExit: 2, fixExit: 2, preCode: 'parent:dangling',
+  preExit: 2, fixExit: 2,
+  preSet: ['parent:dangling:error'], postSet: ['parent:dangling:error'],
   after: d => T.contains('the parent was not invented',
     H.readInBacklog(d, 'tasks/TSK-001.md'), 'parent: EPIC-404'),
 });
@@ -380,7 +420,8 @@ scenario('dangling depends_on survives (error, exit 2)', {
     }),
     tombstones: ['EPIC-001', 'TSK-001'],
   }),
-  preExit: 2, fixExit: 2, preCode: 'depends_on:dangling',
+  preExit: 2, fixExit: 2,
+  preSet: ['depends_on:dangling:error'], postSet: ['depends_on:dangling:error'],
 });
 
 /* `archive:not_done` is an ERROR (§ 11's "archived ⇒ done" invariant) and is
@@ -397,7 +438,8 @@ scenario('archive:not_done survives (error, exit 2)', {
     },
     tombstones: ['EPIC-001'],
   }),
-  preExit: 2, fixExit: 2, preCode: 'archive:not_done',
+  preExit: 2, fixExit: 2,
+  preSet: ['archive:not_done:error'], postSet: ['archive:not_done:error'],
   after: d => T.contains('the status was not flipped to done',
     H.readInBacklog(d, 'archive/EPIC-001.md'), 'status: todo'),
 });
@@ -411,7 +453,19 @@ scenario('invalid config survives (error, exit 2)', {
     /* `done` is not the last entry — § 5's positions are load-bearing. */
     config: JSON.stringify({ schema: 1, statuses: ['todo', 'done', 'doing'] }) + '\n',
   }),
-  preExit: 2, fixExit: 2, preCode: 'config:invalid',
+  preExit: 2, fixExit: 2,
+  /* TWO findings, not one: the fixture's config violates § 5 twice — `done`
+   * is not the last status, and `sections` is absent entirely (the override
+   * replaces the harness default rather than extending it). § 14 has doctor
+   * report "the defect", and two defects are two findings that happen to
+   * share a code.
+   *
+   * AMBIGUOUS: § 7 labels `config:invalid` "backlog-level", which could also
+   * be read as one finding per backlog no matter how many § 5 rules are
+   * broken. Reading used: one per violation — it is the one that keeps the
+   * count informative, and § 14's summary counts findings, not codes. */
+  preSet: ['config:invalid:error', 'config:invalid:error'],
+  postSet: ['config:invalid:error', 'config:invalid:error'],
 });
 
 /* § 14 step 2 is conditional: the rename happens "when frontmatter and file
@@ -441,6 +495,10 @@ scenario('id mismatch, target occupied (step 2 declines, exit 2)', {
     tombstones: ['EPIC-001', 'TSK-002'],
   }),
   preExit: 2, fixExit: 2,
+  /* Same shape as the duplicate-id scenario: both files carry TSK-002, and
+   * TSK-001.md's name disagrees with its frontmatter id. */
+  preSet: ['duplicate_id:error', 'duplicate_id:error', 'id:mismatch:error'],
+  postSet: ['duplicate_id:error', 'duplicate_id:error', 'id:mismatch:error'],
   after: d => {
     /* The isolating assertion: the rename did NOT happen. Without it the
      * scenario would also pass if `--fix` had overwritten the occupant —
@@ -480,7 +538,14 @@ scenario('tombstone backfill runs after the rename (step 4 after step 2)', {
       }, taskBody('T')),
     }),
   }),
-  preExit: 2, fixExit: 0, preCode: 'id:mismatch',
+  preExit: 2, fixExit: 0,
+  /* `.ids/` is empty while elements exist (`backlog:ids_missing`, error),
+   * TSK-005.md carries TSK-009 (`id:mismatch`, error), and neither element
+   * is claimed (`id:no_tombstone` ×2, warning) — same co-occurrence reading
+   * as the `.ids/`-lost scenario above. */
+  preSet: ['backlog:ids_missing:error', 'id:mismatch:error',
+    'id:no_tombstone:warning', 'id:no_tombstone:warning'],
+  postSet: [],
   after: d => {
     T.check('the file carries its frontmatter id',
       H.existsInBacklog(d, 'tasks/TSK-009.md') && !H.existsInBacklog(d, 'tasks/TSK-005.md'),

@@ -73,6 +73,8 @@ function fixture(label) {
    * warning is a warning about, and § 7 makes it an error finding. */
   const doc = H.runJson(['doctor'], { cwd: d });
   T.exit('doctor exits 2 on the dangling reference (§ 7: Doctor = error)', doc, 2);
+  T.sameSet('the findings are exactly the one dangling-reference error',
+    H.doctorSet(doc) || ['<no problems array>'], ['depends_on:dangling:error']);
   const findings = ((doc.json && doc.json.problems) || []).filter(x => x.code === 'depends_on:dangling');
   T.eq('exactly one depends_on:dangling finding', findings.length, 1);
   T.eq('the finding is carried by the dependent (§ 9 doctor shape: element)',

@@ -128,7 +128,16 @@ for (const bad of INVALID) {
   const problems = Array.isArray(j.problems) ? j.problems : [];
   const invalid = problems.filter(p => p.code === 'config:invalid');
   T.check('doctor reports config:invalid (' + bad.label + ')', invalid.length >= 1,
+    /* CODE-set equality: every one of these fixtures breaks § 5 and nothing
+     * else, so `config:invalid` must be the ONLY code reported. The count is
+     * left open on purpose — § 5 lists several rules and does not say whether
+     * breaking two of them yields one finding or two ('no statuses at all'
+     * violates more than one), so cardinality is unpinned while the code set
+     * is not. This is what closes the blindness: containment could not see a
+     * spurious extra finding of a different code. */
     (rj.parseError || J(problems)).slice(0, 400));
+  T.sameSet('config:invalid is the only code reported (' + bad.label + ')',
+    [...new Set(H.doctorSet(rj) || ['<no problems array>'])], ['config:invalid:error']);
   T.check('config:invalid is an error finding (' + bad.label + ')',
     invalid.length >= 1 && invalid[0].severity === 'error', J(invalid[0] || null));
   T.check('config:invalid is backlog-level: it carries no element (§ 9)',

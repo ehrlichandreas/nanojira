@@ -3,23 +3,23 @@
   "njPath": "nj",
   "node": "v24.21.0",
   "platform": "darwin-arm64",
-  "recordedAt": "2026-09-22T08:57:35.654Z",
-  "calls": 2895,
+  "recordedAt": "2026-09-22T14:04:47.733Z",
+  "calls": 3317,
   "parts": [
     {
       "name": "fixtures",
-      "calls": 1500,
-      "detail": "22 scenarios, 0 threw"
+      "calls": 1752,
+      "detail": "26 scenarios, 0 threw"
     },
     {
       "name": "oracle",
-      "calls": 1311,
-      "detail": "passed 56/56, failed 0, cannot run 0"
+      "calls": 1330,
+      "detail": "passed 61/61, failed 0, cannot run 0"
     },
     {
       "name": "scratch",
-      "calls": 84,
-      "detail": "9/9 scripts executed"
+      "calls": 235,
+      "detail": "9/10 scripts contributed calls"
     }
   ],
   "oracleSuites": [
@@ -54,6 +54,8 @@
     "edge/archive-collision.js",
     "edge/archive-hint-dependents.js",
     "edge/archive-rm-byte-identity.js",
+    "edge/cycle-parent-archived.js",
+    "edge/cycle-parent-shapes.js",
     "edge/discovery-message.js",
     "edge/done-open-children.js",
     "edge/duplicate-id-write-refusal.js",
@@ -69,6 +71,9 @@
     "edge/fix-duplicate-mtimes.js",
     "edge/fix-mtime-snapshot.js",
     "edge/frontmatter-grammar.js",
+    "edge/norm-tag-assignee-typos.js",
+    "edge/norm-title-nfc-nfd.js",
+    "edge/order-doctor-problems-severity.js",
     "edge/parent-refusals.js",
     "edge/rm-and-archive-refusals.js",
     "edge/rm-dependents.js",
@@ -80,9 +85,21 @@
     "edge/unreadable-stub-refusals.js",
     "edge/write-encoding.js"
   ],
+  "testDigest": "66891340eb58d83c8aa531c847a885c6b3a282182df858885af146008ebb3ed5",
+  "testDigestScope": [
+    "test/ac/",
+    "test/edge/",
+    "test/fault/",
+    "test/golden/",
+    "test/lib/",
+    "test/run-all.js",
+    "test/stress/"
+  ],
   "cannotRun": [],
   "notRecorded": [
-    "fault/det-id-retry.js (preload-instrumented: verdict taken directly, calls not in the corpus)"
+    "fault/det-id-retry.js (preload-instrumented: verdict taken directly, calls not in the corpus)",
+    "verify.js (white-box probe: reads nj's source, verdict taken directly, calls not in the corpus)"
   ],
-  "note": "Comparison key excludes per-file raw sha; nsha (normalised content) is normative."
+  "note": "Comparison key excludes per-file raw sha; nsha (normalised content) is normative.",
+  "corpusSha256": "231a1c795656e24ea5236616e7b411aafd62f05e14ab13b84da1d0dfd6006038"
 }

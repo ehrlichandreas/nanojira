@@ -61,6 +61,14 @@ function normalize(text, ctx) {
   if (c.projectRoot) s = s.split(c.projectRoot).join('<PROJ>');
   if (c.home) s = s.split(c.home).join('<HOME>');
 
+  // The fixture root gets its OWN token, and it gets it FIRST. Our fixture
+  // directories are deliberately named and live at a fixed path; foreign
+  // mkdtemp directories are random and live under a tmp root. After both
+  // collapse to <SCRATCH> they are indistinguishable, and any rule that then
+  // strips a random-looking tail also eats `fault-before-rename`. Marking our
+  // own root apart is what lets the mkdtemp rule below be bound to context.
+  if (c.fixtureRoot) s = s.split(c.fixtureRoot).join('<FIXTURES>');
+
   // Any first-level directory under a tmp root is scratch, whoever made it.
   for (const re of SCRATCH_RES) s = s.replace(re, '<SCRATCH>');
   // macOS per-user tmp, spelled generically so a baseline stays comparable
@@ -69,15 +77,31 @@ function normalize(text, ctx) {
 
   s = s.replace(/\.nj-tmp-\d+-[a-z0-9]+/g, '.nj-tmp-<PID>-<RAND>');
 
-  // mkdtemp nested inside an already-collapsed root, e.g. <SCRATCH>/r4-codes-5hRjDl
-  // or <SCRATCH>/r4-stub-38m50x. Only the six-character random tail is replaced,
-  // and only when it is not purely lowercase letters — every deliberate
-  // directory name in this corpus is (`fault-before-rename`, `disc-badcfg`), so
-  // those stay readable in the diff. A mkdtemp tail that happens to come out
-  // all-lowercase (~0.5%) is not recognised, and the run then goes red instead
-  // of quietly passing: the safe way to be wrong.
-  s = s.replace(/-([A-Za-z0-9]{6})(?![A-Za-z0-9])/g, (m, tail) =>
-    (/[^a-z]/.test(tail) ? '-<RAND>' : m));
+  // mkdtemp nested inside an already-collapsed scratch root, e.g.
+  // <SCRATCH>/r4-codes-5hRjDl or <SCRATCH>/r8-sreibx. Bound to CONTEXT, not to
+  // the character set: a segment directly under <SCRATCH> whose tail after a
+  // `-` is exactly six alphanumerics is a mkdtemp result, whatever its case.
+  //
+  // The earlier rule asked whether the tail looked random (not purely
+  // lowercase). That was wrong in both directions: `sreibx` is a real mkdtemp
+  // tail and reads as a word, so the gate went red at random, and a deliberate
+  // name that happened to contain a digit would have been eaten. Our own
+  // fixtures sit under <FIXTURES> and are never touched by this line.
+  // The prefix is GREEDY and the tail is anchored to the end of the path
+  // segment. A lazy prefix matched an earlier six-character component instead
+  // and left the real tail standing (`r4-<RAND>-mFeHhb`), which put the flake
+  // straight back. mkdtemp appends its randomness last, so that is where to
+  // look for it.
+  // The closing lookahead is `not alphanumeric`, not a list of delimiters. An
+  // earlier version accepted only `/`, whitespace and quotes, so a segment
+  // followed by `:`, `)`, `,` or `.` stayed raw. Unreachable today — nj prints
+  // scratch paths as `…/backlog` or quoted — but "unreachable today" is the
+  // kind of assumption a refactor overturns.
+  //
+  // Convention, checked against every script in scratch/: a mkdtemp prefix ends
+  // with `-`. A prefix without one is not recognised, and the run goes red
+  // rather than quiet.
+  s = s.replace(/<SCRATCH>\/([^/\s"'`\\]*)-([A-Za-z0-9]{6})(?![A-Za-z0-9])/g, '<SCRATCH>/$1-<RAND>');
 
   s = s.replace(ISO_RE, (m) => (m === FIXED_NOW || m === LATER_NOW ? m : '<TS>'));
 

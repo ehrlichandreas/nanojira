@@ -72,8 +72,8 @@ for (const mode of ['after-tmp-write', 'before-rename']) {
   /* The temp file is a doctor finding (warning) and --fix removes it. */
   const doc = H.runJson(['doctor'], { cwd: d });
   const p = ((doc.json && doc.json.problems) || []).filter(x => x.code === 'backlog:stray_tmp');
-  T.check('NJ_FAULT=' + mode + ': doctor reports backlog:stray_tmp', p.length >= 1,
-    JSON.stringify((doc.json && doc.json.problems) || []));
+  T.sameSet('NJ_FAULT=' + mode + ': the findings are exactly the stray temp warning',
+    H.doctorSet(doc) || ['<no problems array>'], ['backlog:stray_tmp:warning']);
   T.eq('NJ_FAULT=' + mode + ': backlog:stray_tmp severity is warning',
     p[0] && p[0].severity, 'warning');
 

@@ -50,8 +50,12 @@ T.check('doctor --json ok=false', doc.json && doc.json.ok === false,
 
 const problems = (doc.json && doc.json.problems) || [];
 const idsMissing = problems.filter(p => p.code === 'backlog:ids_missing');
-T.check('backlog:ids_missing is reported', idsMissing.length === 1,
-  'codes: ' + JSON.stringify(problems.map(p => p.code)));
+/* Set equality: one backlog-level error plus one warning per surviving
+ * element, and nothing else. The per-code counts below stay as the
+ * explanatory detail; this is the line that would catch an extra finding. */
+T.sameSet('the findings after losing .ids/ are exactly § 7\'s set',
+  H.doctorSet(doc) || ['<no problems array>'],
+  ['backlog:ids_missing:error', 'id:no_tombstone:warning', 'id:no_tombstone:warning']);
 T.eq('backlog:ids_missing has severity error', idsMissing[0] && idsMissing[0].severity, 'error');
 T.check('backlog:ids_missing carries no element field',
   idsMissing[0] && idsMissing[0].element === undefined,

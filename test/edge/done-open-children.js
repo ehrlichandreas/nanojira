@@ -95,8 +95,8 @@ const epicPath = d => path.join(d, 'backlog', 'epics', 'EPIC-001.md');
    * does not exit 2 on it alone. */
   const doc = H.runJson(['doctor'], { cwd: d });
   const p = ((doc.json && doc.json.problems) || []).filter(x => x.code === 'done:open_children');
-  T.check('doctor reports done:open_children', p.length === 1,
-    JSON.stringify((doc.json && doc.json.problems) || []));
+  T.sameSet('the findings are exactly the one done:open_children warning',
+    H.doctorSet(doc) || ['<no problems array>'], ['done:open_children:warning']);
   T.eq('done:open_children severity is warning', p[0] && p[0].severity, 'warning');
 }
 

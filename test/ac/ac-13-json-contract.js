@@ -82,7 +82,20 @@ function codesOf(entries) {
   return out;
 }
 
-function isReadShape(desc, json, r) {
+/** Sorted _problems of one entry by id, or null if the id is not present. */
+function problemsOf(entries, id) {
+  const e = (entries || []).find(x => x.id === id);
+  return e ? (e._problems || []).slice().sort() : null;
+}
+
+/**
+ * `expectedCounts`, when given, is {total, errors, incomplete} DERIVED FROM
+ * THE FIXTURE by applying § 7's completeness/error rules by hand — never read
+ * back from `json` itself. `typeof x === 'number'` is true for the right
+ * number and for a mutant that hard-codes 0; only a value comparison tells
+ * them apart, which is the whole point of hardening this suite.
+ */
+function isReadShape(desc, json, r, expectedCounts) {
   T.check(desc + ': {backlog, counts, entries[]}',
     !!json && typeof json.backlog === 'string' &&
     !!json.counts && typeof json.counts === 'object' && Array.isArray(json.entries),
@@ -91,6 +104,14 @@ function isReadShape(desc, json, r) {
     !!json && !!json.counts && ['total', 'errors', 'incomplete']
       .every(k => typeof json.counts[k] === 'number'),
     J(json && json.counts));
+  if (expectedCounts) {
+    T.eq(desc + ': counts.total is ' + expectedCounts.total + ' (fixture-derived)',
+      json && json.counts && json.counts.total, expectedCounts.total);
+    T.eq(desc + ': counts.errors is ' + expectedCounts.errors + ' (fixture-derived)',
+      json && json.counts && json.counts.errors, expectedCounts.errors);
+    T.eq(desc + ': counts.incomplete is ' + expectedCounts.incomplete + ' (fixture-derived)',
+      json && json.counts && json.counts.incomplete, expectedCounts.incomplete);
+  }
   T.check(desc + ': every entry carries _problems (§ 9)',
     !!json && Array.isArray(json.entries) && json.entries.every(e => Array.isArray(e._problems)),
     J(json && json.entries).slice(0, 300));
@@ -160,20 +181,29 @@ function write(desc, args, cwd, expectId) {
   T.check('nj note reports at least one changed name', Array.isArray(jn.changed) && jn.changed.length >= 1,
     J(jn.changed));
 
+  /* Backlog at this point: EPIC-001, TSK-001, TSK-002, SUB-001 — all four
+   * created via bare `new` with no --description/--acceptance, so all four
+   * are Incomplete (empty sections); the sets/note above touch only
+   * priority/assignee/title/status and never fill a section. No element has
+   * an Error-level code (every parent/type relationship above is valid).
+   * Hence total=4, errors=0, incomplete=4 — for `show` too: § 9 groups
+   * `list, show` under one JSON shape, and `counts` here is backlog-wide,
+   * not scoped to the one shown entry (verified: matches list's and tree's
+   * counts on the same unchanged backlog, moments apart, below). */
   const js = H.runJson(['show', '--id=TSK-001'], { cwd: d });
   T.exit('nj show --json exits 0', js, 0);
-  isReadShape('show', js.json, js);
+  isReadShape('show', js.json, js, { total: 4, errors: 0, incomplete: 4 });
   T.check('show returns exactly the addressed element',
     ids(js.json).join(',') === 'TSK-001', J(ids(js.json)));
 
   const jl = H.runJson(['list'], { cwd: d });
   T.exit('nj list --json exits 0', jl, 0);
-  isReadShape('list', jl.json, jl);
+  isReadShape('list', jl.json, jl, { total: 4, errors: 0, incomplete: 4 });
   T.check('list --json is not empty', ids(jl.json).length > 0, J(ids(jl.json)));
 
   const jtr = H.runJson(['tree'], { cwd: d });
   T.exit('nj tree --json exits 0', jtr, 0);
-  isReadShape('tree', jtr.json, jtr);
+  isReadShape('tree', jtr.json, jtr, { total: 4, errors: 0, incomplete: 4 });
   const tEntry = id => (jtr.json && jtr.json.entries || []).filter(e => e.id === id)[0];
   T.eq('tree: a child carries its parent (flat, § 9)', (tEntry('TSK-001') || {}).parent, 'EPIC-001');
   T.eq('tree: a subtask carries its parent', (tEntry('SUB-001') || {}).parent, 'TSK-001');
@@ -210,6 +240,18 @@ function write(desc, args, cwd, expectId) {
     J(aj.entries).slice(0, 300));
   T.check('archive: top-level _problems is an array', Array.isArray(aj._problems),
     J(aj._problems));
+  /* Exact, not "some valid code": none of the three were ever given a
+   * --description/--acceptance, so archiving (which never fills content)
+   * leaves them Incomplete. Epics need only description; task/subtask need
+   * both (§ 7). A mutant that added any other valid-but-wrong code to one of
+   * these entries — the finding this suite's old vocabulary-only check could
+   * not see — is caught by the exact-set comparison. */
+  T.eq('archive: EPIC-001 is exactly incomplete:description',
+    problemsOf(aj.entries, 'EPIC-001'), ['incomplete:description']);
+  T.eq('archive: TSK-001 is exactly incomplete:acceptance + incomplete:description',
+    problemsOf(aj.entries, 'TSK-001'), ['incomplete:acceptance', 'incomplete:description']);
+  T.eq('archive: SUB-001 is exactly incomplete:acceptance + incomplete:description',
+    problemsOf(aj.entries, 'SUB-001'), ['incomplete:acceptance', 'incomplete:description']);
 
   const jdoc = H.runJson(['doctor'], { cwd: d });
   // Everything is archived, done and tombstoned — by § 7/§ 11 that is a clean
@@ -229,6 +271,11 @@ function write(desc, args, cwd, expectId) {
     typeof bj.backlog === 'string' && !!bj.counts &&
     Array.isArray(bj.ready) && Array.isArray(bj.incomplete),
     (jbare.parseError || J(bj)).slice(0, 300));
+  /* Everything active was just archived above — the active backlog is
+   * genuinely empty (§ 11: archived elements are hidden by default). */
+  T.eq('bare nj: counts.total is 0 (everything just got archived)', bj.counts && bj.counts.total, 0);
+  T.eq('bare nj: counts.errors is 0', bj.counts && bj.counts.errors, 0);
+  T.eq('bare nj: counts.incomplete is 0', bj.counts && bj.counts.incomplete, 0);
   T.check('bare nj: ready carries at most 5 entries (§ 9)',
     Array.isArray(bj.ready) && bj.ready.length <= 5, J(bj.ready));
   T.check('bare nj: incomplete carries at most 5 entries (§ 9)',
@@ -313,6 +360,13 @@ function write(desc, args, cwd, expectId) {
   T.exit('doctor exits 2 on a duplicate id', doc, 2);
   const found = ((doc.json || {}).problems || []).map(p => p.code);
   T.check('doctor reports duplicate_id', found.includes('duplicate_id'), J(found));
+  /* Two codes, both § 7: the shared id (`duplicate_id`) and the second file's
+   * name disagreeing with the id it carries (`id:mismatch`) — the same pair
+   * every duplicate fixture in the suite produces. Code-set equality, so the
+   * per-file cardinality stays open. */
+  T.sameSet('exactly the two § 7 codes are reported for this fixture',
+    [...new Set(H.doctorSet(doc) || ['<no problems array>'])].sort(),
+    ['duplicate_id:error', 'id:mismatch:error']);
   for (const c of found) SEEN.add(c);
 }
 
@@ -360,7 +414,53 @@ function write(desc, args, cwd, expectId) {
 
   const jl = H.runJson(['list', '--all'], { cwd: d });
   T.exit('list --all on the problem fixture', jl, 0);
-  for (const c of codesOf(jl.json && jl.json.entries)) SEEN.add(c);
+  const codeEntries = jl.json && jl.json.entries;
+  for (const c of codesOf(codeEntries)) SEEN.add(c);
+
+  /* counts, derived from the fixture by hand via § 7's rules — Error and
+   * Incomplete are mutually exclusive completeness levels, so an element
+   * counts in at most one bucket:
+   *   Error:      TSK-005 (parent:dangling), TSK-006 (depends_on:dangling),
+   *               TSK-020 (archive:not_done) — 3
+   *   Incomplete: TSK-002, TSK-003 (no Error code on either) — 2
+   *   Complete:   EPIC-001, TSK-001, TSK-004, TSK-007, TSK-008 — 5
+   *   Total: 10 (the stray .nj-tmp-* file is not an element and is not counted)
+   * None of the three Error elements carries a second error code, so the
+   * element-count and finding-count readings of AMBIGUITIES.md #11 coincide
+   * here — the exact number does not depend on resolving that ambiguity. */
+  T.eq('list --all: counts.total is 10 (9 active + 1 archived, fixture-derived)',
+    jl.json && jl.json.counts && jl.json.counts.total, 10);
+  T.eq('list --all: counts.errors is 3 (TSK-005, TSK-006, TSK-020, fixture-derived)',
+    jl.json && jl.json.counts && jl.json.counts.errors, 3);
+  T.eq('list --all: counts.incomplete is 2 (TSK-002, TSK-003, fixture-derived)',
+    jl.json && jl.json.counts && jl.json.counts.incomplete, 2);
+
+  /* _problems EXACT per entry, not "somewhere in the closed vocabulary" — a
+   * mutant that adds a valid-but-wrong code to one entry's _problems passes
+   * a membership check but fails an exact-set comparison. TSK-020 sitting in
+   * archive/ with parent: EPIC-001 (an ACTIVE element) also exercises the
+   * *other* direction of archive:split (AMBIGUITIES.md #7, unpinned by § 11's
+   * prose) — asserting the exact set here, rather than mere membership, means
+   * a future implementation that started emitting archive:split for this
+   * direction would turn this check red, which is the correct outcome: that
+   * reading is a real decision to escalate, not one this suite should absorb
+   * silently either way. */
+  const EXPECTED_PROBLEMS = {
+    'EPIC-001': [],
+    'TSK-001': [],
+    'TSK-002': ['incomplete:acceptance'],
+    'TSK-003': ['incomplete:description'],
+    'TSK-004': ['unknown:status'],
+    'TSK-005': ['parent:dangling'],
+    'TSK-006': ['depends_on:dangling'],
+    'TSK-007': ['title:h1_mismatch'],
+    'TSK-008': ['id:no_tombstone'],
+    'TSK-020': ['archive:not_done'],
+  };
+  for (const id of Object.keys(EXPECTED_PROBLEMS)) {
+    T.eq('list --all: exact _problems for ' + id,
+      problemsOf(codeEntries, id), EXPECTED_PROBLEMS[id].slice().sort());
+  }
 
   const js = H.runJson(['show', '--id=TSK-001'], { cwd: d });
   T.exit('show on the problem fixture', js, 0);
@@ -429,6 +529,11 @@ function write(desc, args, cwd, expectId) {
   const r = H.runJson([], { cwd: d });
   T.exit('bare nj --json on a backlog with eight ready elements', r, 0);
   const j = r.json || {};
+  /* 1 epic + 7 tasks, all built with H.completeBody and valid parents/status
+   * — every element is Complete, none Incomplete, none Error. */
+  T.eq('bare nj: counts.total is 8 (fixture-derived)', j.counts && j.counts.total, 8);
+  T.eq('bare nj: counts.errors is 0 (fixture-derived)', j.counts && j.counts.errors, 0);
+  T.eq('bare nj: counts.incomplete is 0 (fixture-derived)', j.counts && j.counts.incomplete, 0);
   T.check('bare nj: ready is an array', Array.isArray(j.ready), J(j.ready));
   T.check('bare nj: the ready list is capped at 5 (§ 9)',
     Array.isArray(j.ready) && j.ready.length <= 5, 'length ' + (j.ready || []).length);
