@@ -245,7 +245,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 function startNj(args, opts) {
   const env = Object.assign({}, process.env, { NJ_NOW: H.LATER_NOW }, opts.env || {});
-  const child = spawn(H.NODE, [H.NJ].concat(args), { cwd: opts.cwd, env });
+  const inv = H.njCommand(H.NJ, args);
+  const child = spawn(inv.cmd, inv.args, { cwd: opts.cwd, env });
   let out = '', err = '';
   child.stdout.on('data', d => { out += d; });
   child.stderr.on('data', d => { err += d; });

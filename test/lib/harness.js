@@ -30,6 +30,22 @@ const NJ = (() => {
 })();
 const NODE = process.env.NJ_NODE || process.execPath;
 
+/* How to invoke a given nj-or-nj-mcp path (§ 18, DECISIONS 187): a `.mjs`/
+ * `.cjs`/`.js` file (the gate's own frozen `dist/nj.mjs`/old extensionless
+ * `dist/nj` steps included) is run as `<NODE> <path> <args>`, so NJ_NODE
+ * still pins exactly which node runs it (that file has no shebang logic of
+ * its own to honour NJ_NODE); a launcher with no such extension (`bin/nj`,
+ * a POSIX sh script) is run directly -- `node bin/nj` is not valid
+ * JavaScript for node to parse, and the launcher already reads NJ_NODE
+ * itself (§ 18's wrapper contract). Every suite driving nj or nj-mcp
+ * through a raw spawn (not just runNj/runJson below) uses this, so a
+ * caller does not have to special-case `bin/nj` at every call site. */
+function isDirectExec(p) { return !/\.(mjs|cjs|js)$/.test(p); }
+function njCommand(njPath, args) {
+  if (!isDirectExec(njPath)) return { cmd: NODE, args: [njPath].concat(args) };
+  return { cmd: njPath, args };
+}
+
 /* `dist/nj-mcp.mjs` (§ 17 "MCP Interface"), resolved the same way NJ is:
  * NJ_MCP wins if set, otherwise the sibling `nj-mcp` next to whatever NJ
  * resolved to, with NJ's own extension (both ship from the same `dist/`
@@ -40,6 +56,19 @@ const NJ_MCP = (() => {
   const given = process.env.NJ_MCP || null;
   if (given) return path.resolve(given);
   return NJ ? path.join(path.dirname(NJ), 'nj-mcp' + path.extname(NJ)) : null;
+})();
+
+/* The bundle itself, always a `dist/*.mjs` path, regardless of which shape
+ * (bin/ launcher or bare bundle) NJ resolves to (D187 addendum, 81cd90a): a
+ * few tests need to run `dist/nj.mjs` directly even when NJ under test is
+ * `bin/nj` — e.g. a NODE_OPTIONS-preloaded shim (fault/det-id-retry.js),
+ * since `bin/nj`'s wrapper deliberately strips NODE_OPTIONS before exec'ing
+ * node (§ 18) and would silently defeat the shim rather than fail loudly.
+ * When NJ is already a bundle path, NJ_BUNDLE is simply NJ itself. */
+const NJ_BUNDLE = (() => {
+  if (!NJ) return null;
+  if (!isDirectExec(NJ)) return NJ;
+  return path.join(path.dirname(NJ), '..', 'dist', path.basename(NJ) + '.mjs');
 })();
 
 /* Fixed clock for every run (§ 12). Timestamps are the only non-deterministic
@@ -418,13 +447,14 @@ function goldenPath(name) {
  * Run `nj`. Returns {status, stdout, stderr, signal}. Never throws on a
  * non-zero exit — that is data, not an error.
  */
-function runNj(args, opts) {
+function runPath(njPath, args, opts) {
   const o = opts || {};
-  if (!NJ) return abortNoImplementation('no nj path given (pass it as argv[2] or set NJ)');
-  if (!fs.existsSync(NJ)) return abortNoImplementation('nj not found at ' + NJ);
+  if (!njPath) return abortNoImplementation('no nj path given (pass it as argv[2] or set NJ)');
+  if (!fs.existsSync(njPath)) return abortNoImplementation('nj not found at ' + njPath);
   const env = Object.assign({}, process.env, { NJ_NOW: FIXED_NOW }, o.env || {});
   for (const k of o.unsetEnv || []) delete env[k];
-  const r = spawnSync(NODE, [NJ].concat(args), {
+  const inv = njCommand(njPath, args);
+  const r = spawnSync(inv.cmd, inv.args, {
     cwd: o.cwd,
     env,
     input: o.input,
@@ -437,6 +467,7 @@ function runNj(args, opts) {
   }
   return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '', signal: r.signal };
 }
+function runNj(args, opts) { return runPath(NJ, args, opts); }
 
 /** Run nj and parse stdout as JSON, asserting the exit code is as expected. */
 function runJson(args, opts) {
@@ -632,17 +663,61 @@ function cleanup() {
   }
 }
 
+/**
+ * Copies the actual shipped unit nj/nj-mcp are part of (§ 18) into destDir —
+ * nothing more, nothing less — so a "no dependency outside what's shipped"
+ * test means the same thing whichever shape is under test:
+ *
+ *   - a `bin/` launcher (no .mjs/.cjs/.js extension, e.g. `bin/nj`) ships
+ *     together with the rest of its release tree, `SKILL.md` + `bin/` +
+ *     `dist/` (its own relative sibling lookup depends on sitting next to
+ *     `dist/`) — copied whole, via fs.cpSync, from the launcher's own
+ *     grandparent directory (works the same for the repo root and for an
+ *     exported skill folder, since both have this same three-entry shape).
+ *   - a bare `dist/*.mjs` path ships alone next to its one sibling .mjs
+ *     (§ 17's sibling lookup is same-directory only there) — copied as the
+ *     two files, flat, as before.
+ *
+ * Returns the entry points a caller should spawn ({nj, njMcp}) and the
+ * actual module files nj-mcp's sibling lookup cares about ({njModule,
+ * njMcpModule}) — distinct from the entry points in bin/ mode — so a test
+ * can delete just the "missing sibling" module without touching the
+ * launcher itself.
+ */
+function copyShippedUnit(destDir) {
+  requireNj();
+  requireNjMcp();
+  if (isDirectExec(NJ)) {
+    const srcRoot = path.resolve(path.dirname(NJ), '..');
+    fs.copyFileSync(path.join(srcRoot, 'SKILL.md'), path.join(destDir, 'SKILL.md'));
+    fs.cpSync(path.join(srcRoot, 'bin'), path.join(destDir, 'bin'), { recursive: true });
+    fs.cpSync(path.join(srcRoot, 'dist'), path.join(destDir, 'dist'), { recursive: true });
+    return {
+      nj: path.join(destDir, 'bin', path.basename(NJ)),
+      njMcp: path.join(destDir, 'bin', path.basename(NJ_MCP)),
+      njModule: path.join(destDir, 'dist', 'nj.mjs'),
+      njMcpModule: path.join(destDir, 'dist', 'nj-mcp.mjs'),
+    };
+  }
+  const njDest = path.join(destDir, path.basename(NJ));
+  const njMcpDest = path.join(destDir, path.basename(NJ_MCP));
+  fs.copyFileSync(NJ, njDest); fs.chmodSync(njDest, 0o755);
+  fs.copyFileSync(NJ_MCP, njMcpDest); fs.chmodSync(njMcpDest, 0o755);
+  return { nj: njDest, njMcp: njMcpDest, njModule: njDest, njMcpModule: njMcpDest };
+}
+
 module.exports = {
-  NJ, NJ_MCP, NODE, FIXED_NOW, LATER_NOW, DEFAULT_CONFIG,
+  NJ, NJ_MCP, NJ_BUNDLE, NODE, njCommand, FIXED_NOW, LATER_NOW, DEFAULT_CONFIG,
   CONFIG_REL, IDS_REL, INDEX_REL, GITIGNORE,
   TMP_ROOT,
   T,
   renderStatus, statusFor, writeStatus, configValidForStatus,
   freshDir, mkBacklog, writeRaw, readInBacklog, existsInBacklog, listFiles, lsOrEmpty, readOrNull,
   requireNj, requireNjMcp,
+  isDirectExec, copyShippedUnit,
   element, mkElement, completeBody, doneBody,
   doctorSet, summaryLine,
   sha256, golden, goldenPath,
-  runNj, runJson,
+  runNj, runPath, runJson,
   fetchJson: runJson,
 };

@@ -1,0 +1,23 @@
+name=$(basename -- "$0")
+dir=$(CDPATH='' cd -P -- "$(dirname -- "$0")" >/dev/null 2>&1 && pwd -P) || {
+  echo "$name: cannot resolve the directory of $0" >&2
+  exit 127
+}
+node=${NJ_NODE:-node}
+if ! command -v "$node" >/dev/null 2>&1; then
+  echo "$name: node not found (looked for '$node')" >&2
+  exit 127
+fi
+version=$("$node" --version 2>/dev/null)
+major=$(printf '%s' "$version" | sed -n 's/^v\([0-9][0-9]*\)\..*/\1/p')
+if [ -z "$major" ] || [ "$major" -lt 24 ] 2>/dev/null; then
+  echo "$name: node too old (requires Node.js >= 24)" >&2
+  exit 127
+fi
+unset NODE_OPTIONS
+entry="$dir/../dist/$name.mjs"
+if [ ! -f "$entry" ]; then
+  echo "$name: $entry not found" >&2
+  exit 127
+fi
+exec "$node" "$entry" "$@"

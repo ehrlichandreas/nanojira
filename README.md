@@ -9,8 +9,9 @@ for a project's `AGENTS.md` in `docs/AGENT-INSTRUCTIONS.md`.
 Upgrading from an earlier nj release: `docs/CHANGES.md`.
 
 `dist/nj.mjs` (the CLI) and `dist/nj-mcp.mjs` (an MCP server exposing the same
-commands as tools over stdio, § 17) implement spec v3 through **v3.9**
-(`docs/SPECIFICATION.md`): backlog location via `--backlog`, `NJ_BACKLOG` or
+commands as tools over stdio, § 17) implement spec v3 (`docs/SPECIFICATION.md`;
+current version: see `package.json` / `docs/CHANGES.md`): backlog
+location via `--backlog`, `NJ_BACKLOG` or
 `.njrc`, accepted before the command word as well as after; configurable
 layout (`type`, `hierarchy`, `flat`, folder names); a generated `STATUS.md`
 (switchable off per backlog, `layout.statusFile: false`, for several
@@ -52,6 +53,11 @@ doctor --fix` (`docs/MIGRATION-v3.md`). Decisions behind it:
 ## Layout
 
 ```
+SKILL.md        the skill, at the repo root (§ 18) — this repo IS the skill folder
+bin/nj          generated launcher (sh), checked into git
+bin/nj-mcp      generated launcher (sh), checked into git
+bin/nj.cmd      generated launcher (Windows), checked into git
+bin/nj-mcp.cmd  generated launcher (Windows), checked into git
 src/nj.ts       entry point: the CLI (real ES module)
 src/nj-mcp.ts   entry point: the MCP server (§ 17), stdio
 src/commands/   one module per verb (cmd-*.ts)
@@ -61,14 +67,16 @@ dist/nj.mjs     built, single-file artefact (ESM) — what ships, checked into g
 dist/nj-mcp.mjs built, single-file artefact (ESM) — the MCP server, checked into git
 docs/           SPECIFICATION.md, ARCHITECTURE.md, DECISIONS.md
 test/           black-box oracle against the CLI and the MCP server
-tools/          build, perf, export, and refactor-safety tooling
+tools/          build (incl. bin/'s wrapper.sh/wrapper.cmd templates), perf,
+                export, and refactor-safety tooling
 ```
 
 `docs/ARCHITECTURE.md` has the module map and build graph in detail. A
-consuming team does not install from this layout directly — it exports a
-self-contained skill folder from a signed tag (`node
-tools/export-skill.mts <tag> <dest>`) and copies that folder wherever it is
-needed; see `docs/SPECIFICATION.md` § 18 and `docs/GUIDE.md` § 1.
+consuming team that does not work in this repo directly exports a
+self-contained copy of just `SKILL.md`, `bin/` and `dist/` from a signed
+tag (`node tools/export-skill.mts <tag> <dest>`) and copies that folder
+wherever it is needed; see `docs/SPECIFICATION.md` § 18 and
+`docs/GUIDE.md` § 1.
 
 ## Commands
 

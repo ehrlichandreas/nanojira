@@ -45,7 +45,8 @@ const HOME = H.freshDir('njswap-home');
 function startNj(args, o) {
   const env = Object.assign({}, process.env, o.env || {});
   delete env.NJ_BACKLOG;
-  const child = spawn(H.NODE, [H.NJ].concat(args), { cwd: o.cwd, env });
+  const inv = H.njCommand(H.NJ, args);
+  const child = spawn(inv.cmd, inv.args, { cwd: o.cwd, env });
   let out = '', err = '';
   child.stdout.on('data', d => { out += d; });
   child.stderr.on('data', d => { err += d; });

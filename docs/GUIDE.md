@@ -23,21 +23,22 @@ alias nj="$PWD/dist/nj.mjs"       # or: <runtime-node> dist/nj.mjs  (§ 4)
 
 ## 1. Install
 
-`nj` ships as a self-contained **exported skill folder**, not a shared
-machine-wide install (§ 18 of the spec). A consuming team vendors its own
-copy:
+This repository **is** the skill folder (§ 18 of the spec) — `SKILL.md`,
+`bin/` and `dist/` live at its root, committed, alongside `src/` and
+`test/`. There is no separate, shared machine-wide install. A consuming
+team vendors its own copy, exported from a signed tag:
 
 ```sh
 $ node tools/export-skill.mts <signed-tag> <dest>
 ```
 
-This reads every shipped file from `<signed-tag>`'s own tree — never the
-working tree — and writes `<dest>/` as one atomic unit:
+This reads `SKILL.md`, `bin/` and `dist/` from `<signed-tag>`'s own tree —
+never the working tree, and nothing else (no `src/`, `test/`, `tools/` or
+`package.json`) — and writes `<dest>/` as one atomic unit:
 
 ```
 <dest>/
   SKILL.md
-  VERSION
   bin/nj         bin/nj-mcp         (sh launchers)
   bin/nj.cmd     bin/nj-mcp.cmd     (Windows launchers)
   dist/nj.mjs    dist/nj-mcp.mjs    (the bundles)
@@ -45,26 +46,30 @@ working tree — and writes `<dest>/` as one atomic unit:
 
 **No symlinks anywhere in this folder, and none pointing into or out of
 it.** To move or share it, `cp -R` the whole folder — it keeps working from
-the copy, since nothing in it depends on where it sits.
+the copy, since nothing in it depends on where it sits. There is no
+`VERSION` file: the version lives in `SKILL.md`'s own `metadata.version`
+and in `nj --version`, both read from `package.json` at build time and
+checked equal to it directly.
 
-- Per project: run `<dest>/bin/nj init` once (§ 2) to create that project's
-  `backlog/`.
-- Per project, if the project uses `nj-mcp`: add one `nj-mcp` entry to that
-  project's MCP client config, pointed at `<dest>/bin/nj-mcp` with that
-  project's own `--backlog=` (§ 4, below, and § 19's client-config shape) —
-  never a single shared entry meant to serve several projects.
-- Verify the export with `<dest>/bin/nj --version`, which prints
-  `nj <version>` and exits 0 from anywhere, without needing a backlog (§ 9
-  of the spec).
+- Working directly in this repo (no export needed): run `bin/nj init`
+  once (§ 2) to create a project's `backlog/`.
+- Per project, if the project uses `nj-mcp`: add one `nj-mcp` entry to
+  that project's MCP client config, pointed at `<dest>/bin/nj-mcp` (or
+  this repo's own `bin/nj-mcp`) with that project's own `--backlog=`
+  (§ 4, below, and § 19's client-config shape) — never a single shared
+  entry meant to serve several projects.
+- Verify with `bin/nj --version` (or `<dest>/bin/nj --version` after an
+  export), which prints `nj <version>` and exits 0 from anywhere, without
+  needing a backlog (§ 9 of the spec).
 - `NJ_NODE` picks a specific `node` binary when more than one is on `PATH`.
   The minimum supported version is Node 24; an inherited `NODE_OPTIONS` is
   unset before `node` starts. Any startup failure (`node` missing, `node`
   too old, a missing bundle) exits 127 with exactly one line on stderr
   naming the cause — never a stack trace.
 - **Migrating off an earlier release?** Replace a vendored
-  `nj.cjs`/`nj-mcp.cjs`, or a `bin/nanojira/current/nj` wrapper, with a
-  freshly exported folder, and call `<dest>/bin/nj` in its place —
-  `docs/CHANGES.md` 3.11.0.
+  `nj.cjs`/`nj-mcp.cjs`, a `bin/nanojira/current/nj` wrapper, or a v3.11
+  export that still has a `VERSION` file, with a freshly exported folder,
+  and call `<dest>/bin/nj` in its place — `docs/CHANGES.md` 3.12.0.
 
 ## 2. Start a backlog
 

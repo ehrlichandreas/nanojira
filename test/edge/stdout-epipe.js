@@ -32,8 +32,9 @@ const T = H.T;
 /** Runs `nj <args> | head -1` in a real shell, discarding stdout past the
  * first line. Resolves {exit, stderr} for `nj` itself. */
 function runPiped(d, args, stderrFile) {
-  const argStr = args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
-  const cmd = `'${H.NODE}' '${H.NJ}' ${argStr} 2>'${stderrFile}' | head -1 >/dev/null; echo "\${PIPESTATUS[0]}"`;
+  const inv = H.njCommand(H.NJ, args);
+  const argStr = inv.args.map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
+  const cmd = `'${inv.cmd}' ${argStr} 2>'${stderrFile}' | head -1 >/dev/null; echo "\${PIPESTATUS[0]}"`;
   const r = spawnSync('/bin/bash', ['-c', cmd], { cwd: d, encoding: 'utf8' });
   const exit = parseInt(String(r.stdout || '').trim(), 10);
   const stderr = fs.readFileSync(stderrFile, 'utf8');

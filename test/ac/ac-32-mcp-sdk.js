@@ -66,9 +66,13 @@ function model(label) {
 
 /** A fresh SDK client, connected over stdio to a freshly spawned `nj-mcp`. */
 async function connect(x, extraArgs) {
+  /* H.NJ_MCP may be `dist/nj-mcp.mjs` (run via node) or `bin/nj-mcp` (a
+   * POSIX sh launcher, run directly — § 18, DECISIONS 187), the same
+   * dispatch runNj/mcp-stdio.js already use. */
+  const inv = H.njCommand(H.NJ_MCP, ['--backlog=' + x.bl].concat(extraArgs || []));
   const transport = new StdioClientTransport({
-    command: process.execPath,
-    args: [H.NJ_MCP, '--backlog=' + x.bl].concat(extraArgs || []),
+    command: inv.cmd,
+    args: inv.args,
     cwd: x.dir,
     env: Object.assign({}, process.env, { NJ_NOW: NOW }),
   });

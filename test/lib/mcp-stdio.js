@@ -14,6 +14,7 @@
  * assumptions could paper over.
  */
 const { spawn } = require('child_process');
+const { njCommand } = require('./harness.js');
 
 const MODERN_VERSION = '2026-07-28';
 const LEGACY_VERSION = '2025-11-25';
@@ -34,7 +35,11 @@ const LEGACY_VERSION = '2025-11-25';
 function spawnServer(njMcpPath, args, opts) {
   const o = opts || {};
   const env = Object.assign({}, process.env, o.env || {});
-  const child = spawn(process.execPath, [njMcpPath].concat(args || []), { cwd: o.cwd, env });
+  /* `njMcpPath` may be `dist/nj-mcp.mjs` (run via node, so NJ_NODE still
+   * picks which one) or `bin/nj-mcp` (a POSIX sh launcher, run directly --
+   * § 18, DECISIONS 187; the same dispatch runNj itself uses). */
+  const inv = njCommand(njMcpPath, args || []);
+  const child = spawn(inv.cmd, inv.args, { cwd: o.cwd, env });
 
   let buf = '';
   let errBuf = '';

@@ -415,7 +415,8 @@ function topKeys(json) { return json ? Object.keys(json).sort() : null; }
   function startNj(args, o) {
     const env = Object.assign({}, process.env, o.env || {});
     for (const k of ['NJ_AUTHOR', 'NJ_BACKLOG']) delete env[k];
-    const child = spawn(H.NODE, [H.NJ].concat(args), { cwd: o.cwd, env });
+    const inv = H.njCommand(H.NJ, args);
+    const child = spawn(inv.cmd, inv.args, { cwd: o.cwd, env });
     let out = '', err = '';
     child.stdout.on('data', d => { out += d; });
     child.stderr.on('data', d => { err += d; });
