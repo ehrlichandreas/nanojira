@@ -5,6 +5,7 @@
 import type { Flags, Element } from '../core/types.ts';
 
 import { checkFlags, flagString } from '../core/args.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireActive } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
@@ -81,7 +82,7 @@ function prepareCheck(el: Element, text: string | undefined, item: string | unde
 }
 
 function cmdCheck(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', 'force', 'id', 'file', 'text', 'item', 'on', 'off']), true);
+  checkFlags(flags, [], new Set(['json', 'force', ...cliFieldNames('check')]), true);
   const json = flags.has('json');
   const ctx = context(flags);
 

@@ -86,6 +86,21 @@ the moment an agent runs `nj`.
 Python is ruled out: the tool tree ships Node for both platforms and only
 macOS system Python.
 
+**`dist/nj-mcp`** (§ 17 "MCP Interface") is a second, independent entry
+point, built and shipped the same way: one committed file, built by
+`npm run build` alongside `dist/nj`, byte-identical on a fresh build.
+**It carries no dependency of any kind — not at runtime, and not at
+build time either**: unlike `dist/nj` (whose build-time tooling, esbuild
+and TypeScript, are themselves `devDependencies`), `nj-mcp`'s own MCP
+protocol handling is hand-rolled, so there is nothing third-party to
+bundle away in the first place. The official MCP SDK's **client** is a
+`devDependency` used **only** by the test suite's conformance leg (§ 17),
+never bundled into `dist/nj-mcp`, never required to build or run it —
+the same "build tooling may use libraries the runtime may not" reading
+this section already gives `esbuild`/`typescript`, applied here to a
+dependency that is not even build tooling for the shipped artifact, only
+for its tests.
+
 ---
 
 ## 4. Storage and Layout
@@ -1898,10 +1913,16 @@ comfort bar (median ≤ 250 ms, worst ≤ 500 ms) is crossed at roughly
 list per node, and `descendants()` — used by `rm --cascade` and `archive` —
 shared the pattern. That was fixed with a prebuilt children map
 (`childMap`, DECISIONS 81) instead of building the index for it, and `tree`
-is now in line with the scan path, not a separate case: `npm run perf`
-(TSK-003), 10 000 elements, quiet machine — `list` 188/211 ms, `list --json`
-188/192 ms, `tree` 192/194 ms, `doctor` 195/204 ms (median/max), all inside
-the comfort bar above. The 12 000–15 000 trigger below now applies to `tree`
+is now in line with the scan path, not a separate case. **Re-measured on a
+genuinely quiet machine as of v3.3** (DECISIONS 150, `075dbb1`; Node
+24.21.0, darwin-arm64, 10 000 elements, median/max of 5 runs) — `list`
+185/220 ms, `list --json` 186/187 ms, `tree` 189/192 ms, `doctor`
+188/191 ms, and the writes `new` 230/237 ms, `set --title` 221/223 ms,
+`note` 215/218 ms — all inside the comfort bar above. These supersede the
+earlier "quiet machine" figures this paragraph previously gave (`npm run
+perf`, TSK-003: `list` 188/211 ms, `list --json` 188/192 ms, `tree`
+192/194 ms, `doctor` 195/204 ms), which were not from a run confirmed quiet
+in the same sense. The 12 000–15 000 trigger below now applies to `tree`
 as well.
 
 **Writes, with `STATUS.md` (V3-3, DECISIONS 103).** Every successful write
@@ -1924,7 +1945,11 @@ numbers, the paired deltas are):
 
 Reads are unchanged (paired −1.0 … +3.6 %). A write therefore costs about one
 extra `stat` scan (≈ 55 ms here at 10 000 elements). With `layout.statusFile:
-false` there is none.
+false` there is none. This table's own absolute numbers stay as they are,
+under-load artifacts kept only for the **relative** cost they establish —
+they are not superseded by the quiet-machine write figures above, which
+answer a different question (the absolute comfort-bar check) than this
+table does (the relative cost `STATUS.md` adds).
 
 The index is therefore still deferred, with a measured trigger: implement it
 when backlogs approach ~12 000–15 000 elements, or ~9 000 if `list --json` is
@@ -2331,13 +2356,55 @@ reported, not guessed at.
     failed. A single `--id=A` (no comma) is unaffected and keeps today's
     unwrapped shape.
 
+32. **MCP tool surface.** `nj-mcp`'s `tools/list` names exactly `list`,
+    `show`, `find`, `tree`, `new`, `set`, `note`, `check`, `claim`,
+    `release`, `archive`, `unarchive`, `doctor`; `rm` is never present;
+    `doctor --fix` is present only when the server was launched with
+    `--allow-destructive`, absent otherwise.
+33. **Result fidelity.** For every exposed tool, a `tools/call` result's
+    content is byte-identical to `dist/nj --json`'s own output for the
+    equivalent CLI invocation against the same fixture — success and
+    failure alike, including `isError` reflecting exit 1/2 and the
+    untouched `{ok, error, hint?}` body on failure.
+34. **Backlog resolution and confinement.** `nj-mcp` resolves its backlog
+    at startup by the same rules as the CLI (§ 4), serves only that
+    backlog for its whole life, and takes no per-call backlog override.
+    Every spawned `dist/nj` child is given `--backlog=<that resolved
+    path>` explicitly. No generated tool schema names a `backlog` field.
+35. **Batch and acting-name parity.** A tool call with a comma-joined `id`
+    produces the same `{ok, results}` wrapper a CLI batch write would; an
+    `as` parameter on `note`/`claim`/`release` outranks the server's own
+    `NJ_AUTHOR`, validated exactly as `--as` is (DECISIONS 119), exactly
+    as `--as` outranks it on the CLI.
+36. **CLI behaviour is unchanged by moving its parser onto the shared
+    flag table § 17's schemas are also generated from.** Replayed against
+    `c7-baseline`, the CLI produces byte-identical output, call for call,
+    before and after the move — proven by the existing replay gate, not
+    a new mechanism.
+37. **Dual-era protocol handshake.** `server/discover` returns a
+    `DiscoverResult` naming `supportedVersions: ["2026-07-28",
+    "2025-11-25"]` and `capabilities: {tools: {}}`; `initialize`'s
+    response declares `2025-11-25` and the same `capabilities` object. A
+    request on the modern path naming an unsupported version gets
+    `UnsupportedProtocolVersionError` (`-32022`) listing both supported
+    versions. A malformed `tools/call` argument (fails the tool's own
+    schema) is rejected `-32602` before any `dist/nj` child is spawned; a
+    schema-valid call the CLI itself then rejects surfaces as a tool
+    result, `isError: true`, the unmodified `{ok, error, hint?}` body
+    (never `-32602`). An unknown method, in either era, is `-32601`.
+38. **`dist/nj-mcp` ships with zero runtime dependencies, mirroring
+    AC-15.** Copied alone into a bare directory with no `node_modules`,
+    `dist/nj-mcp` starts and completes both an `initialize`/`tools/list`
+    round trip (legacy) and a `server/discover`/`tools/list` round trip
+    (modern).
+
 ---
 
 ## 16. Not in Round One
 
 Terminal board (`nj board`), Obsidian Dataview snippet, import/export of
 foreign backlogs, attachments, the search index's implementation (§ 13),
-an MCP wrapper, Windows.
+Windows.
 
 A language migration (Go as the candidate; Rust considered and set aside) is
 deliberately deferred: round one ships on Node to gather real experience. The
@@ -2348,3 +2415,176 @@ measured problems, not on principle.
 All of them can be added later without rework: the parser preserves the
 unknown, the problem vocabulary only grows, and the data model is additively
 extensible.
+
+---
+
+## 17. MCP Interface
+
+`dist/nj-mcp` is a second, separate entry point (§ 3) that exposes `nj`'s
+existing commands as MCP tools over stdio, for an MCP-speaking agent that
+would otherwise shell out to `dist/nj` and parse `--json` by hand. It
+consumes the CLI's own contract (§ 9); it does not extend it. No existing
+command, flag, JSON shape or exit code changes meaning anywhere in this
+document.
+
+### Shape and backlog confinement
+
+```
+dist/nj-mcp [--backlog=<path>]
+```
+
+`nj-mcp` resolves its backlog exactly once, at startup, by the same rules
+as every command (§ 4: `--backlog`, then `NJ_BACKLOG`, then the nearest
+`.njrc`, then a `backlog/` folder, searched upward from the process's
+cwd) and serves **that one backlog** for the life of the process. There
+is no per-call backlog override on any tool.
+
+Confinement is mechanical, not incidental: **every `dist/nj` child
+`nj-mcp` spawns is given `--backlog=<the server's own resolved path>`
+explicitly** — the one flag that already stops § 4's search before it
+starts — rather than inheriting `nj-mcp`'s cwd/environment and
+re-running that search itself. A child that re-resolved from scratch
+could in principle land on a different backlog than the one `nj-mcp`
+itself resolved, if anything in the search path changed in between; the
+explicit flag removes that possibility entirely.
+
+The MCP client spawns `nj-mcp` as a child process and communicates over
+newline-delimited JSON-RPC on stdin/stdout, per the MCP stdio transport.
+stdout carries protocol frames only — never human prose, never a startup
+banner — the same purity § 9 already holds for `--json`'s stdout.
+
+### Protocol: a dual-era server
+
+`nj-mcp` speaks both eras the MCP specification defines, pinned to one
+named revision on each side:
+
+- **Modern** (`2026-07-28`): every request declares its protocol version
+  in its own `_meta`; there is no session-wide handshake.
+- **Legacy** (`2025-11-25`): the `initialize` handshake establishes the
+  session once, scoped to the stdio process.
+
+Era detection needs no separate step: a request (`server/discover`,
+`tools/list`, `tools/call`) whose `_meta` carries
+`io.modelcontextprotocol/protocolVersion` is modern; a literal
+`initialize` request (no such `_meta` key) is legacy. A single running
+`nj-mcp` process may answer requests of either shape across its
+lifetime.
+
+**Methods, in total:** `server/discover`, `initialize`, `tools/list`,
+`tools/call`. Nothing else — no `resources/*`, `prompts/*`,
+`completion/*`, `logging/*`.
+
+- **`server/discover`** (mandatory on the modern/dual-era side) returns
+  `{resultType: "complete", supportedVersions: ["2026-07-28",
+  "2025-11-25"], capabilities: {tools: {}}, _meta:
+  {"io.modelcontextprotocol/serverInfo": {name: "nj-mcp", version:
+  "<nj-mcp's own version>"}}}`. This is what lets a dual-era client's own
+  stdio backward-compatibility probe succeed against `nj-mcp` directly,
+  rather than falling through an unknown-method error.
+- **`initialize`** (legacy) responds declaring `2025-11-25` and the same
+  `capabilities: {tools: {}}` object. A version mismatch on this path is
+  the client's decision: it sees the declared revision and disconnects
+  if it cannot work with it; `nj-mcp` does not special-case a mismatch.
+- **An unsupported version on the modern path** (a request whose `_meta`
+  names a version other than `2026-07-28`) gets
+  `UnsupportedProtocolVersionError`, JSON-RPC code **`-32022`**, `data:
+  {supported: ["2026-07-28", "2025-11-25"], requested: "<the
+  requested value>"}`.
+- **Legacy notifications**, accepted and never answered:
+  `notifications/initialized` (post-handshake, fire-and-forget; `nj-mcp`
+  holds no session state that depends on it, since every tool call is
+  already a fresh `dist/nj` process) and `notifications/cancelled`
+  (a no-op — the spawned child is not killed mid-call; cancelling a
+  write mid-flight is exactly the half-done state § 12's
+  compare-before-write exists to prevent).
+- **An unknown method, in either era** (anything outside the four named
+  above), or a malformed JSON-RPC envelope, gets the standard JSON-RPC
+  error: `-32601` ("Method not found") for an unknown method,
+  `-32700`/`-32600` for a parse/invalid-request failure.
+- **`-32602` (Invalid params) vs. a tool result with `isError`.** A
+  `tools/call` whose `arguments` fail the tool's own declared JSON
+  Schema (a required field missing, the wrong type) is rejected
+  `-32602`, **before any `dist/nj` child is spawned** — this is
+  structural malformation of the call itself, answered at the same
+  protocol level `-32700`/`-32600` already answer for the envelope one
+  level up. A call whose `arguments` **pass** schema validation but
+  whose content the CLI itself then rejects (`invalid_value`,
+  `refused:archived`, `not_found`, …) is never a protocol-level error —
+  it is a normal tool result, `isError: true`, below.
+
+### Tool surface
+
+`tools/list` names exactly: `list`, `show`, `find`, `tree`, `new`, `set`,
+`note`, `check`, `claim`, `release`, `archive`, `unarchive`, `doctor`.
+
+- **`rm` (including `--cascade`) is never present** — omitted
+  unconditionally, not merely gated: a cascading, hard-to-undo-by-
+  inspection deletion is not the kind of operation a tool call should
+  reach for without the visible, deliberate CLI step a human can see in
+  a terminal.
+- **`archive`/`unarchive` are present, ungated**: both are reversible
+  (§ 11a exists precisely because an archive is not a one-way door).
+- **`doctor --fix` is present only when `nj-mcp` was launched with
+  `--allow-destructive`**, absent from `tools/list` otherwise — the gate
+  is schema-level: with the flag off, there is no schema entry a client
+  could even construct a call against. The flag is a launch-time
+  decision the operator's MCP client configuration makes; no tool call
+  can toggle it.
+
+**Input schemas** are generated from the same per-command flag table
+`dist/nj`'s own argument parser validates against (§ 9) — the per-command
+table only, never the separate table of global controls (`--backlog`,
+`--json`, and the rest of § 9's control-flag list) a command's own flags
+are checked against. **No generated tool schema names a `backlog`
+field.** `--file`, where a command already has one, remains in that
+tool's schema unchanged — it is already confined to the backlog by the
+same addressing rule that confines it on the CLI (§ 9: `--file` resolves
+only against already-scanned elements, never an arbitrary path).
+
+**The acting name.** `note`, `claim` and `release` each take an `as`
+input, defaulting to the server's own `NJ_AUTHOR` (from the launching
+environment) when omitted — the same `--as`-outranks-`NJ_AUTHOR`
+precedence § 9 "The acting name" already has, exposed per call instead
+of per process. `as` is validated exactly as `--as` is (DECISIONS 119):
+an invalid value is `invalid_value`, nothing written.
+
+**Batch writes.** `--id=A,B,C` is a single string-typed `id` input,
+accepting a comma-joined list exactly as the CLI does, never a JSON
+array. The result shape is `{ok, results: […]}` exactly as a CLI batch
+write already returns (§ 9 "Batch writes").
+
+### Results and errors
+
+A tool call's result **is** the object `dist/nj --json` already returns
+for the equivalent CLI invocation, placed in the MCP result's
+`structuredContent` field, with a JSON-stringified text block as the
+accompanying human-readable fallback. Nothing is renamed, nothing is
+re-shaped.
+
+A command failure (`refused:claimed`, `invalid_value`, …) is an MCP tool
+error, `isError: true`, carrying the **same** `{ok: false, error,
+hint?}` body as content — the code is never lost, never folded into a
+generic protocol-level message.
+
+### Architecture
+
+**One `dist/nj` process per tool call.** A tool call becomes exactly the
+argument list the equivalent CLI invocation would have, plus the
+explicit `--backlog` above, run as a child process with `--json`; its
+parsed stdout becomes the tool result. This buys zero duplicated logic
+(the result *is* `dist/nj --json`'s own output, because it is the same
+binary), zero new concurrency model (every call goes through § 12's
+compare-before-write and § 12a's claim CAS exactly as any other
+concurrent CLI invocation already does), and contract fidelity by
+construction. The per-call overhead this adds over a direct CLI
+invocation is budgeted at p50 ≤ 50 ms, measured against `dist/nj
+--json`'s own wall-clock time for the identical invocation.
+
+### What is out of scope
+
+MCP resources and prompts (only tools); any transport but stdio (no
+HTTP/SSE — this project's trust model, § 6's "names are labels, not
+identities" and § 9's "no registry, no authentication," was never built
+for a network-reachable, multi-tenant transport); authentication (the
+process that spawns `nj-mcp` is the trust boundary, exactly as it already
+is for the plain CLI).

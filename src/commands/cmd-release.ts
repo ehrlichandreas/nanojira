@@ -6,6 +6,7 @@ import type { Flags, Element, Context } from '../core/types.ts';
 
 import { resolveActingName } from '../core/actor.ts';
 import { checkFlags } from '../core/args.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import type { Entry } from '../core/claims.ts';
 import { transition } from '../core/claims.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
@@ -39,7 +40,7 @@ function releaseOne(ctx: Context, el: Element, name: string, ts: string) {
 }
 
 function cmdRelease(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', 'id', 'file', 'as']), true);
+  checkFlags(flags, [], new Set(['json', ...cliFieldNames('release')]), true);
   const json = flags.has('json');
   const ctx = context(flags);
 

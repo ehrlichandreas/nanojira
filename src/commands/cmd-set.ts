@@ -6,7 +6,8 @@ import type { Flags, Element, Context } from '../core/types.ts';
 
 import { checkFlags, flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
-import { PRIORITIES, SETTABLE_FIELDS } from '../core/constants.ts';
+import { PRIORITIES } from '../core/constants.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import { context, resolveTarget, resolveById, requireWritable, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
@@ -23,7 +24,11 @@ type SetField = keyof Element | SectionRole;
 interface SetItem { el: Element; overrides: Map<string, string | string[] | undefined>; changed: SetField[]; newBody: string | undefined }
 
 function cmdSet(flags: Flags) {
-  checkFlags(flags, SETTABLE_FIELDS, new Set(['json', 'force', 'allow-open-children', 'id', 'file']), true);
+  // `id`/`file` stay out of the "Known fields:" list (as before this was
+  // moved onto the shared table): they are the addressing mechanism, not
+  // a settable field, and the original error text never named them here.
+  checkFlags(flags, cliFieldNames('set').filter((f) => f !== 'id' && f !== 'file'),
+    new Set(['json', 'force', 'allow-open-children', 'id', 'file']), true);
   const json = flags.has('json');
   const force = flags.has('force');
   const allowOpen = flags.has('allow-open-children');

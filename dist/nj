@@ -995,6 +995,44 @@ function readSectionFlags(flags) {
 var fs9 = __toESM(require("fs"), 1);
 var path8 = __toESM(require("path"), 1);
 
+// src/core/flag-table.ts
+var str = (name) => ({ name, kind: "string" });
+var bool = (name) => ({ name, kind: "boolean" });
+var FLAG_TABLE = {
+  list: { fields: [str("status"), str("type"), str("tag"), str("parent"), str("assignee")] },
+  find: { fields: [
+    str("status"),
+    str("type"),
+    str("tag"),
+    str("parent"),
+    str("assignee"),
+    bool("case-sensitive"),
+    { name: "text", kind: "string", positional: true }
+  ] },
+  show: { fields: [str("id"), str("file")] },
+  tree: { fields: [str("id")] },
+  // Built from the same NEW_FIELDS/SETTABLE_FIELDS constants.ts and
+  // cmd-new.ts/cmd-set.ts already validate against — one list, not two
+  // hand-kept-in-sync copies.
+  new: { fields: NEW_FIELDS.map(str) },
+  set: { fields: [str("id"), str("file")].concat(SETTABLE_FIELDS.map(str)) },
+  note: { fields: [str("id"), str("file"), str("as"), { name: "text", kind: "string", positional: true }] },
+  check: { fields: [str("id"), str("file"), str("text"), str("item"), bool("on"), bool("off")] },
+  claim: { fields: [str("id"), str("file"), str("as"), str("steal"), str("status")] },
+  release: { fields: [str("id"), str("file"), str("as")] },
+  archive: { fields: [str("id"), str("file")] },
+  unarchive: { fields: [str("id"), str("file")] },
+  doctor: { fields: [bool("fix")] }
+};
+function spec(command) {
+  const s = FLAG_TABLE[command];
+  if (!s) throw new Error(`flag-table: unknown command '${command}'`);
+  return s;
+}
+function cliFieldNames(command) {
+  return spec(command).fields.filter((f) => !f.positional).map((f) => f.name);
+}
+
 // src/core/context.ts
 var fs7 = __toESM(require("fs"), 1);
 var path6 = __toESM(require("path"), 1);
@@ -2024,7 +2062,7 @@ function archiveHierarchy(ctx, el, subtree, ts) {
   return subtree.map((e) => loadElement(path8.join(dst, path8.relative(src, e.file)), ctx.backlog, ctx.cfg));
 }
 function cmdArchive(flags) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "id", "file"]), true);
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("archive")]), true);
   const json = flags.has("json");
   const ctx = context(flags);
   requireNoStubs(ctx, "archive");
@@ -2158,7 +2196,7 @@ function prepareCheck(el, text, item, wantOn) {
   return { el, newBody: lines.join("\n") };
 }
 function cmdCheck(flags) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "force", "id", "file", "text", "item", "on", "off"]), true);
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "force", ...cliFieldNames("check")]), true);
   const json = flags.has("json");
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
@@ -2294,7 +2332,7 @@ function claimOne(ctx, el, name, status, steal, ts) {
   );
 }
 function cmdClaim(flags) {
-  checkFlags(flags, ["status"], /* @__PURE__ */ new Set(["json", "id", "file", "as", "steal"]), true);
+  checkFlags(flags, ["status"], /* @__PURE__ */ new Set(["json", ...cliFieldNames("claim").filter((f) => f !== "status")]), true);
   const json = flags.has("json");
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
@@ -2371,7 +2409,7 @@ function applyFilters(elements, flags, cfg) {
   return list.sort(compareElements);
 }
 function cmdList(flags) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "ready", "all", "status", "type", "tag", "parent", "assignee"]), false);
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "ready", "all", ...cliFieldNames("list")]), false);
   const ctx = context(flags);
   const scope = ctx.elements.filter((e) => flags.has("all") || !e.archived);
   const filtered = applyFilters(ctx.elements, flags, ctx.cfg);
@@ -2420,7 +2458,7 @@ function matchContext(el, needle, fold) {
   return null;
 }
 function cmdFind(flags, positional) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "all", "status", "type", "tag", "parent", "assignee", "case-sensitive"]), false);
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "all", ...cliFieldNames("find")]), false);
   if (positional.length === 0) fail("missing_argument", "nj find needs the search text as an argument", 'nj find "<text>"');
   const text = positional.join(" ");
   if (text === "") fail("invalid_value", "<text> must not be empty");
@@ -2696,7 +2734,7 @@ function describeFinding(code, el, dupGroups) {
   }
 }
 function cmdDoctor(flags) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "fix"]), false);
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("doctor")]), false);
   const json = flags.has("json");
   if (flags.has("fix")) return doctorFix(flags, json);
   const ctx = context(flags, { lenient: true, tolerateConfig: true });
@@ -3169,7 +3207,7 @@ function newPlace(ctx, type, id, parent) {
   return [at === null ? folderOf(ctx.backlog, p.file) : at].concat(own).filter((s) => s !== "").join("/");
 }
 function cmdNew(flags) {
-  checkFlags(flags, NEW_FIELDS, /* @__PURE__ */ new Set(["json"]), true);
+  checkFlags(flags, cliFieldNames("new"), /* @__PURE__ */ new Set(["json"]), true);
   const json = flags.has("json");
   const ctx = context(flags);
   const { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections } = validateNewFlags(ctx, flags);
@@ -3246,7 +3284,7 @@ ${line}
   return lines.join("\n");
 }
 function cmdNote(flags, positional) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "force", "id", "file", "as"]), true);
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "force", ...cliFieldNames("note")]), true);
   const json = flags.has("json");
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
@@ -3318,7 +3356,7 @@ function releaseOne(ctx, el, name, ts) {
   return { ok: true, changed, entry, _problems: entry._problems, claim: null };
 }
 function cmdRelease(flags) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "id", "file", "as"]), true);
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("release")]), true);
   const json = flags.has("json");
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
@@ -3414,7 +3452,12 @@ ${archivedVictims.map((v) => "  " + v.id).join("\n")}`,
 
 // src/commands/cmd-set.ts
 function cmdSet(flags) {
-  checkFlags(flags, SETTABLE_FIELDS, /* @__PURE__ */ new Set(["json", "force", "allow-open-children", "id", "file"]), true);
+  checkFlags(
+    flags,
+    cliFieldNames("set").filter((f) => f !== "id" && f !== "file"),
+    /* @__PURE__ */ new Set(["json", "force", "allow-open-children", "id", "file"]),
+    true
+  );
   const json = flags.has("json");
   const force = flags.has("force");
   const allowOpen = flags.has("allow-open-children");
@@ -3565,7 +3608,7 @@ function describeField(el, field) {
 
 // src/commands/cmd-show.ts
 function cmdShow(flags) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "id", "file"]), false);
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("show")]), false);
   const ctx = context(flags);
   const el = resolveTarget(ctx, flags, false);
   const scope = ctx.elements;
@@ -3644,7 +3687,7 @@ function cmdStatus(flags) {
 
 // src/commands/cmd-tree.ts
 function cmdTree(flags) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "all", "id"]), false);
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "all", ...cliFieldNames("tree")]), false);
   const ctx = context(flags);
   const all = flags.has("all");
   const scope = ctx.elements.filter((e) => all || !e.archived);
@@ -3731,7 +3774,7 @@ function unitTarget(backlog, byId, layout, u) {
   return u.dir ? dir : path12.join(dir, path12.basename(u.e.file));
 }
 function cmdUnarchive(flags) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "id", "file"]), true);
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("unarchive")]), true);
   const json = flags.has("json");
   const ctx = context(flags);
   requireNoStubs(ctx, "unarchive");

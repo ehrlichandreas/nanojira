@@ -6,6 +6,7 @@ import type { Flags, Element, Context } from '../core/types.ts';
 
 import { resolveActingName } from '../core/actor.ts';
 import { checkFlags, flagString } from '../core/args.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import type { Entry } from '../core/claims.ts';
 import { rollback, transition } from '../core/claims.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
@@ -79,7 +80,10 @@ function claimOne(ctx: Context, el: Element, name: string, status: string | unde
 }
 
 function cmdClaim(flags: Flags) {
-  checkFlags(flags, ['status'], new Set(['json', 'id', 'file', 'as', 'steal']), true);
+  // `status` stays in `allowedFields`, not `commandControls` (as before
+  // this was moved onto the shared table): the original "Known fields:"
+  // error text named only `status`, never the other claim flags.
+  checkFlags(flags, ['status'], new Set(['json', ...cliFieldNames('claim').filter((f) => f !== 'status')]), true);
   const json = flags.has('json');
   const ctx = context(flags);
 

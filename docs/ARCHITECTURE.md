@@ -1,11 +1,13 @@
 # Architecture
 
 For someone opening this repository for the first time. Every claim below was
-measured against the code on 2026-09-23 (exports, import edges, commands) —
-not recalled from memory or from the task history that produced this code.
+measured against the code — originally on 2026-09-23, with every "imported
+by" count in § 2 re-walked mechanically again for v3.3 (DECISIONS 148,
+exports, import edges, commands) — not recalled from memory or from the
+task history that produced this code.
 
-It describes the code as built, which implements spec **v3** in full
-(DECISIONS 86–107): V3-1, the backlog location (`--backlog`, `NJ_BACKLOG`,
+It describes the code as built, which implements spec **v3 through v3.3**
+(DECISIONS 86–148): V3-1, the backlog location (`--backlog`, `NJ_BACKLOG`,
 `.njrc`, in `core/config.ts`); V3-2, the layout (groups `type`, `hierarchy`
 and `flat`, configurable folder names, the recursive element scan,
 `layout:misplaced`, and moves in `archive`, `rm` and `doctor --fix`; in
@@ -18,16 +20,34 @@ backlog is `legacy_layout` to every command but `doctor`). The two
 intermediate follow-up commits (V3-2/TSK-029 findings, DECISIONS 102/105/106)
 are folded into the module descriptions below rather than listed separately.
 
+**v3.1–v3.3** added, on top of that round-one core: `NJ_AUTHOR`/`--as` (the
+acting name, `core/actor.ts`), `nj claim`/`nj release`/`nj unarchive`
+(`core/claims.ts`, `cmd-claim.ts`, `cmd-release.ts`, `cmd-unarchive.ts`),
+`nj check`/`nj find` (`cmd-check.ts`, `cmd-find.ts`), batch writes,
+`--id=A,B,C` (`core/batch.ts`), and the MCP wrapper, `dist/nj-mcp`
+(`src/nj-mcp.ts`, `core/flag-table.ts`). Each is described in its own place
+below rather than repeated here.
+
 ## 1. Build
 
 ```
-src/nj.ts  (entry, ES module)
- └─ import()s src/commands/*.ts + src/core/*.ts  (25 modules, native TypeScript, ES modules)
-                              │
-                              │  esbuild --bundle --format=cjs
-                              ▼
-                         dist/nj  (one file, checked into git, what ships)
+src/nj.ts      (entry, ES module)              src/nj-mcp.ts  (entry, ES module)
+ └─ imports src/commands/*.ts + src/core/*.ts     └─ imports src/core/{args,config,output,flag-table}.ts
+                              │                                       │  — never src/commands/*, § 17:
+                              │  esbuild --bundle --format=cjs        │    one dist/nj child process per tool call
+                              ▼                                       ▼
+                         dist/nj                                 dist/nj-mcp
+                 (one file, checked into git, what ships, each built the same way)
 ```
+
+`tools/bundle.js` builds **two targets** from the one `src/` tree: `dist/nj`
+(round one's CLI, importing everything under `src/commands/` and
+`src/core/`) and `dist/nj-mcp` (§ 17, importing only the handful of
+`src/core/` modules it needs to resolve a backlog, parse its own flags and
+generate MCP tool schemas — `dist/nj-mcp` never imports a `cmd-*.ts` module
+directly; a tool call spawns `dist/nj --json` as a child process instead).
+Both are esbuild `--bundle --format=cjs` outputs, both committed, both
+checked for staleness by `build:check`.
 
 `src/nj.ts` is a real ES module like every other file under `src/`, which a
 single `src/package.json` (`{"type": "module"}`) marks for the whole
@@ -61,9 +81,9 @@ decision).
 | Command | What it checks |
 |---|---|
 | `npm run typecheck` (`tsc --noEmit`) | `strict: true` + `erasableSyntaxOnly` over all of `src/**/*.ts`, `src/nj.ts` included directly (it carries a real `.ts` extension, so tsc needs no shadow copy) |
-| `npm run build` (`node tools/bundle.js`) | writes `dist/nj` from `src/nj.ts` + `src/commands/` + `src/core/`; refuses to bundle a source file missing its own `'use strict'` |
-| `npm run build:check` (`node tools/bundle.js --check`) | rebuilds in memory, exits 1 unless byte-identical to the committed `dist/nj` — catches a stale bundle |
-| `npm test` (`build:check && node test/run-all.js dist/nj`) | the oracle (§ 5) against the shipped bundle |
+| `npm run build` (`node tools/bundle.js`) | writes both `dist/nj` (from `src/nj.ts` + `src/commands/` + `src/core/`) and `dist/nj-mcp` (from `src/nj-mcp.ts` + the handful of `src/core/` modules it needs); refuses to bundle a source file missing its own `'use strict'` |
+| `npm run build:check` (`node tools/bundle.js --check`) | rebuilds both targets in memory, exits 1 unless each is byte-identical to its committed file — catches a stale bundle of either |
+| `npm test` (`build:check && node test/run-all.js dist/nj`) | the oracle (§ 5) against the shipped `dist/nj`; the MCP suites (`test/ac/ac-32-mcp*.js`, `ac-38-*`) additionally drive `dist/nj-mcp` |
 | `npm run perf` (`build:check && node tools/perf.js`) | TSK-003: builds a 10 000-element backlog under `/tmp` and measures `dist/nj list`/`list --json`/`tree`/`doctor` against SPECIFICATION.md:849's comfort bar (median ≤ 250 ms, worst ≤ 500 ms); aborts instead of measuring if another `node` process is running, so machine load is never reported as an `nj` regression |
 
 `tools/refactor-harness/baseline.js` (record/verify) and
@@ -78,26 +98,38 @@ would actually reach for, not every name; "imported by" is exact.
 
 | Module | Purpose | Key exports | Imported by |
 |---|---|---|---|
-| `core/types.ts` | Every shared interface/type (`Element`, `Context`, `Flags`, the nine-stage `Skeleton→…→Element` chain, `NonEmptyString`) — never `require()`d, only `import type` | `Element`, `Context`, `Flags`, `Config`, `Finding`, `EntryJson`, staged-builder types | all 24 other modules (type-only) |
-| `core/constants.ts` | Field tables, status/priority vocab, the closed `SEVERITY` map | `TYPE_DIR`, `PARENT_TYPE`, `SEVERITY`, `DEFAULT_CONFIG`, `SETTABLE_FIELDS`, `NEW_FIELDS` | 11 modules: `args`, `config`, `derive`, `load`, `parse`, `store`, 5×`cmd-*` |
+| `core/types.ts` | Every shared interface/type (`Element`, `Context`, `Flags`, the nine-stage `Skeleton→…→Element` chain, `NonEmptyString`) — never `require()`d, only `import type` | `Element`, `Context`, `Flags`, `Config`, `Finding`, `EntryJson`, staged-builder types | all 30 other modules (type-only) |
+| `core/constants.ts` | Field tables, status/priority vocab, the closed `SEVERITY` map | `TYPE_DIR`, `PARENT_TYPE`, `SEVERITY`, `DEFAULT_CONFIG`, `SETTABLE_FIELDS`, `NEW_FIELDS` | 14 modules: `args`, `config`, `context`, `derive`, `flag-table`, `layout`, `load`, `parse`, `store`, 5×`cmd-*` |
 | `core/help.ts` | The `nj help` text, nothing else | `HELP` | `nj` |
-| `core/derive.ts` | Read-only views over a loaded `Element`: sort order, readiness, JSON entry shape | `elementProblems`, `isReady`, `compareElements`, `entryJson`, `countsOf` | `context`, `output`, `status`, 7×`cmd-*` |
+| `core/derive.ts` | Read-only views over a loaded `Element`: sort order, readiness, JSON entry shape | `elementProblems`, `isReady`, `compareElements`, `entryJson`, `countsOf` | 17 modules: `context`, `output`, `status`, 14×`cmd-*` |
 | `core/parse.ts` | Frontmatter grammar and body-section editing, no `Element` knowledge | `parseFile`, `serialize`, `syncH1`, `applySections` | `args`, `load`, `store`, 3×`cmd-*` |
-| `core/output.ts` | The `Fail` error type, `--json` state, all printing — and the one module with a real load-time side effect (below) | `fail`, `hardExit`, `out`, `writeFeedback`, `emitWriteResult`, `emitFailure` | 16 modules: `args`, `config`, `context`, `nj`, `store`, every `cmd-*` |
-| `core/args.ts` | CLI flag parsing and validation, no filesystem access; `--backlog` is accepted by every command here, in `checkFlags` | `parseArgs`, `checkFlags`, `flagString`, `readSectionFlags` | `config`, `context`, `nj`, every `cmd-*` |
-| `core/config.ts` | The v3 configuration at `.nanojira/config.json` (including the `layout` block, § 5) — or, on a legacy backlog, the v2 one at the top level; backlog location (`--backlog` > `NJ_BACKLOG` > upward search, `.njrc` before `backlog/` per directory, either place holding a backlog), the strict `.njrc` parser (ownership re-checked unconditionally through the same fd it reads, not only for a symlink) | `loadConfig`, `findBacklog`, `initLocation`, `holdsBacklog`, `isLegacyBacklog` | `context`, `cmd-init` |
-| `core/layout.ts` | Where element files lie (§ 4): the one recursive scan (configured folders first, so a v2 backlog scans in v2's order; never into dot-directories or through directory symlinks), and the place each group gives an element — derived from the frontmatter, never the reverse | `scanBacklog`, `folderOf`, `expectedPlace`, `moveTarget`, `misplacedCode`, `ownFolder` | `load`, `status`, `cmd-archive`, `cmd-doctor`, `cmd-new`, `cmd-rm` |
-| `core/store.ts` | Clock, tombstones (keyed by an explicit `idsDir` — `.nanojira/ids`, or a legacy backlog's `.ids`, never assumed), atomic file writes, the write-time compare guard, and the move planner that `archive` and `doctor --fix` share: every target is checked before the first `rename` (ENOENT only, not any other `lstat` failure); existing folders are merged into, a same-file (same dev+ino) target is no move, and existing files are never overwritten (DECISIONS 94, 105 F2, TSK-029 T2) | `nowIso`, `atomicWrite`, `atomicReplace`, `compareGuard`, `guardedWrite`, `planMove`, `runMove`, `renderElement` | `load`, `status`, 5×`cmd-*` |
-| `core/load.ts` | `loadElement` (nine derivers), `deriveGraph` (eleven steps, `markPlaces` among them), `loadBacklog` | `loadElement`, `deriveGraph`, `childMap`, `descendants`, `loadBacklog` | `context`, `status`, 6×`cmd-*` |
-| `core/status.ts` | The status overview `STATUS.md` (§ 4): the byte-exact renderer, the freshness check `doctor` reports as `backlog:status_stale`, and the post-write refresh — one full scan, an atomic replace without fault hooks, a failure only ever a `Warning:` on stderr | `renderStatus`, `statusIsFresh`, `refreshStatus` | `cmd-doctor`, `cmd-init`, `cmd-new`, `cmd-set`, `cmd-note`, `cmd-rm`, `cmd-archive` |
+| `core/output.ts` | The `Fail` error type, `--json` state, all printing — and the one module with a real load-time side effect (below) | `fail`, `hardExit`, `out`, `writeFeedback`, `emitWriteResult`, `emitFailure` | 24 modules: `actor`, `args`, `batch`, `config`, `context`, `nj`, `nj-mcp`, `store`, every `cmd-*` |
+| `core/args.ts` | CLI flag parsing and validation, no filesystem access; `--backlog` is accepted by every command here, in `checkFlags` | `parseArgs`, `checkFlags`, `flagString`, `readSectionFlags` | `actor`, `batch`, `config`, `context`, `nj`, `nj-mcp`, every `cmd-*` |
+| `core/config.ts` | The v3 configuration at `.nanojira/config.json` (including the `layout` block, § 5) — or, on a legacy backlog, the v2 one at the top level; backlog location (`--backlog` > `NJ_BACKLOG` > upward search, `.njrc` before `backlog/` per directory, either place holding a backlog), the strict `.njrc` parser (ownership re-checked unconditionally through the same fd it reads, not only for a symlink) | `loadConfig`, `findBacklog`, `initLocation`, `holdsBacklog`, `isLegacyBacklog` | `context`, `nj-mcp`, `cmd-init`, `cmd-doctor` |
+| `core/layout.ts` | Where element files lie (§ 4): the one recursive scan (configured folders first, so a v2 backlog scans in v2's order; never into dot-directories or through directory symlinks), and the place each group gives an element — derived from the frontmatter, never the reverse | `scanBacklog`, `folderOf`, `expectedPlace`, `moveTarget`, `misplacedCode`, `ownFolder` | `load`, `status`, `cmd-archive`, `cmd-doctor`, `cmd-new`, `cmd-rm`, `cmd-unarchive` |
+| `core/store.ts` | Clock, tombstones (keyed by an explicit `idsDir` — `.nanojira/ids`, or a legacy backlog's `.ids`, never assumed), atomic file writes, the write-time compare guard, and the move planner that `archive` and `doctor --fix` share: every target is checked before the first `rename` (ENOENT only, not any other `lstat` failure); existing folders are merged into, a same-file (same dev+ino) target is no move, and existing files are never overwritten (DECISIONS 94, 105 F2, TSK-029 T2) | `nowIso`, `atomicWrite`, `atomicReplace`, `compareGuard`, `guardedWrite`, `planMove`, `runMove`, `renderElement` | 13 modules: `config`, `derive`, `load`, `status`, 9×`cmd-*` |
+| `core/load.ts` | `loadElement` (nine derivers), `deriveGraph` (eleven steps, `markPlaces` among them), `loadBacklog` | `loadElement`, `deriveGraph`, `childMap`, `descendants`, `loadBacklog` | 11 modules: `context`, `status`, 9×`cmd-*` |
+| `core/status.ts` | The status overview `STATUS.md` (§ 4): the byte-exact renderer, the freshness check `doctor` reports as `backlog:status_stale`, and the post-write refresh — one full scan, an atomic replace without fault hooks, a failure only ever a `Warning:` on stderr | `renderStatus`, `statusIsFresh`, `refreshStatus` | `cmd-doctor`, `cmd-init`, `cmd-new`, `cmd-set`, `cmd-note`, `cmd-rm`, `cmd-archive`, `cmd-check`, `cmd-claim`, `cmd-unarchive` |
 | `core/readme-texts.ts` | The two `README.md` texts, kept in one place so they cannot drift apart: the v3 text `init` writes, and the exact v2 text (frozen at `5318888`) step 0 compares a legacy backlog's README against before replacing it — a user's own edit is left alone either way | `V2_README`, `V3_README` | `cmd-init`, `cmd-doctor` |
-| `core/context.ts` | Per-command setup: backlog+config+elements (refusing a legacy backlog with `legacy_layout`, except for `doctor`'s own `lenient`), target resolution, the five `require*` guards | `context`, `resolveTarget`, `requireWritable`, `requireNoStubs`, `requireNoUnreadableDirs`, `requireActive` | all 10 `cmd-*` modules |
-| `commands/cmd-init.ts` … `commands/cmd-tree.ts` (11 modules) | One per verb (`init new set note show list tree rm archive doctor status`); `init` writes the full `layout` block and the v3 README; `doctor --fix`'s step 0 migrates a legacy layout (unless both places exist, which is ambiguous and moves nothing) | one `cmdX` function each | `nj` only |
+| `core/context.ts` | Per-command setup: backlog+config+elements (refusing a legacy backlog with `legacy_layout`, except for `doctor`'s own `lenient`), target resolution, the five `require*` guards | `context`, `resolveTarget`, `requireWritable`, `requireNoStubs`, `requireNoUnreadableDirs`, `requireActive` | every `cmd-*` module except `cmd-init` (which creates the backlog, so there is nothing yet to load a context from) |
+| `core/actor.ts` (v3.1, § 9 "The acting name") | Who is acting, for `note`/`claim`/`release`: `--as` outranks `NJ_AUTHOR`; a name is valid when non-empty after trimming spaces/tabs, one line, no `:` | `validActorName`, `resolveActingName`, `actingNameForRead` | `cmd-note`, `cmd-claim`, `cmd-release`, `cmd-list` |
+| `core/claims.ts` (v3.1, § 12 "Claims"/§ 12a) | The append-only CAS sequence behind `claim`/`release`: no live pruning, rollback only if this invocation appended, a landed steal is never rolled back; also computes `claim:stale` (v3.2, § 5 `claims.staleAfterHours`) | `claimsRootDir`, `claimsDir`, `allClaimDirs`, `highestEntry`, `readClaim`, `isClaimStale`, `transition`, `rollback`, `removeClaimDirWholesale` | `cmd-claim`, `cmd-release`, `cmd-rm`, `cmd-archive`, `cmd-doctor`, `cmd-unarchive`, `cmd-list`, `core/derive.ts` |
+| `core/batch.ts` (v3.2, § 9 "Batch writes") | `--id=A,B,C` on `set`/`note`/`check`/`claim`/`release`: preflight every ID before any write, then write independently, `STATUS.md` once, `NJ_FAULT` spent after its first firing — one shared orchestration, each command supplies its own single-element logic as two callbacks | `parseBatchIds`, `runBatch` | `cmd-set`, `cmd-note`, `cmd-check`, `cmd-claim`, `cmd-release` |
+| `core/flag-table.ts` (v3.2 D144 C-2, v3.3 § 17) | The one per-command flag table both the CLI's own `checkFlags` and `nj-mcp`'s MCP schema generator read — the global `--backlog`/`--json` controls are a separate table, never part of a command's own, so a schema built from this table excludes `backlog` by construction (§ 17) | `FLAG_TABLE`, `cliFieldNames`, `commandFields`, `commandFieldNames` | `nj-mcp.ts` and 13 `cmd-*` modules (every one except `cmd-init`, `cmd-rm`, `cmd-status`, which take no settable fields) |
+| `commands/cmd-init.ts` … `commands/cmd-unarchive.ts` (16 modules) | One per verb (`init new set note check find show list tree rm archive unarchive claim release doctor status`); `init` writes the full `layout` block and the v3 README; `doctor --fix`'s step 0 migrates a legacy layout (unless both places exist, which is ambiguous and moves nothing); `check`/`find` are v3.2 (§ 10a, § 9a), `claim`/`release`/`unarchive` are v3.1 (§ 12a, § 11a) | one `cmdX` function each | `nj` only |
+| `src/nj-mcp.ts` (v3.3, § 17 "MCP Interface") | A second, separate entry point: the dual-era MCP stdio server. Imports only `core/args.ts`, `core/config.ts`, `core/output.ts` and `core/flag-table.ts` — never a `cmd-*` module directly; a tool call spawns `dist/nj --json` as a child process instead (process-per-call, § 17), so there is no duplicated command logic to keep in sync | (an entry point, not a library — nothing else imports it) | — |
 
 Nothing above `context.ts`/`args.ts`/`output.ts` is imported by anything
 below it — a `cmd-*` module may use CLI helpers and printing, but no CLI
 helper or printer calls back into a command (TSK-006's rule, checked against
 every import edge above, not assumed).
+
+Every "imported by" count in the table above, including the rows that
+predate v3.3, was re-walked mechanically for this revision (a small script
+reading every `from '....ts'` import line under `src/`, deduplicated per
+file, matched against each target module) rather than left at its 2026-09-23
+measurement — `core/constants.ts`'s count, for one example, moved from 11
+to 14 once `flag-table.ts` and the new `context`/`args` edges were counted.
 
 ## 3. Data flow of one call
 
@@ -142,14 +174,15 @@ an independent check — read them there for the reasoning, not here.
 Three independent nets; the team refers to them as the Oracle, the Corpus,
 and the Blindness matrix (Orakel/Korpus/Blindheits-Matrix in team shorthand).
 
-**Oracle** (`test/`, 62 files derived only from `SPECIFICATION.md`, run via
-`npm test`): black-box, spawns `nj`/`dist/nj`, asserts exit code/stdout/
-stderr/file bytes, never reads implementation source. Reach for it to answer
-"is this still spec-conformant" — it is what CI-equivalent gating runs by
-default.
+**Oracle** (`test/`, 84 files derived only from `SPECIFICATION.md` — `ac/`
+34, `edge/` 43, `fault/` 6, `stress/` 1 — run via `npm test`): black-box,
+spawns `nj`/`dist/nj` (and, for the MCP suites, `dist/nj-mcp`), asserts
+exit code/stdout/stderr/file bytes, never reads implementation source.
+Reach for it to answer "is this still spec-conformant" — it is what
+CI-equivalent gating runs by default.
 
 **Corpus** (`tools/refactor-harness`, `record`/`verify` against the frozen
-`c1-baseline` tag): answers a different question — "does this behave
+`c7-baseline` tag): answers a different question — "does this behave
 *exactly* like the pre-refactor revision", including things the spec never
 pins (byte order of `_problems`, the sequence `fixed[]` reports actions in).
 Run `verify` by hand after any change that is supposed to be behaviour-

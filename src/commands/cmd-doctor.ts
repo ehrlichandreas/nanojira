@@ -7,6 +7,7 @@ import type { Flags, Element, Context, Finding } from '../core/types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { checkFlags } from '../core/args.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import { allClaimDirs, claimsRootDir, highestEntry, isClaimStale, removeClaimDirWholesale } from '../core/claims.ts';
 import {
   PREFIX_TYPE, PARENT_TYPE, SEVERITY,
@@ -202,7 +203,7 @@ function describeFinding(code: string, el: Element, dupGroups: Map<string, Eleme
 }
 
 function cmdDoctor(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', 'fix']), false);
+  checkFlags(flags, [], new Set(['json', ...cliFieldNames('doctor')]), false);
   const json = flags.has('json');
   if (flags.has('fix')) return doctorFix(flags, json);
 

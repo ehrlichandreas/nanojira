@@ -1,30 +1,34 @@
 #!/usr/bin/env node
 'use strict';
 
-// Builds dist/nj, the one executable file that ships (§ 3), from src/nj.ts
-// and src/commands/ + src/core/, using esbuild (DECISIONS 83: build-time
-// tooling may choose its own libraries; run time still has no dependency and
-// no `node_modules`). esbuild is a devDependency, required only here --
-// never by anything under src/, so it is not part of what ships.
+// Builds the two executable files that ship (§ 3): dist/nj from src/nj.ts,
+// and dist/nj-mcp from src/nj-mcp.ts (§ 17 "MCP Interface") -- each one
+// everything it `require`s under src/commands/ and src/core/, bundled by
+// esbuild (DECISIONS 83: build-time tooling may choose its own libraries;
+// run time still has no dependency and no `node_modules`). esbuild is a
+// devDependency, required only here -- never by anything under src/, so it
+// is not part of what ships.
 //
-//   node tools/bundle.js           write dist/nj
-//   node tools/bundle.js --check   build in memory; exit 1 unless dist/nj is
-//                                  byte-identical (a stale bundle is caught)
+//   node tools/bundle.js           write dist/nj and dist/nj-mcp
+//   node tools/bundle.js --check   build both in memory; exit 1 unless BOTH
+//                                  are byte-identical (a stale bundle is caught)
 //
-// esbuild bundles `src/nj.ts` -- the entry point, unmodified, with its
-// shebang -- and everything it `require`s under src/commands/ and src/core/,
-// into one CommonJS file. `platform: 'node'` externalises Node built-ins (`fs`, `path`, …)
-// instead of trying to bundle them. Output is deterministic: no absolute
-// paths, no timestamps (checked below, and by `--check` itself, which is
-// exactly a determinism check run against the committed file).
+// esbuild bundles each entry point -- unmodified, with its shebang -- and
+// everything it `require`s under src/commands/ and src/core/, into one
+// CommonJS file. `platform: 'node'` externalises Node built-ins (`fs`,
+// `path`, …) instead of trying to bundle them. Output is deterministic: no
+// absolute paths, no timestamps (checked below, and by `--check` itself,
+// which is exactly a determinism check run against the committed file).
 
 const fs = require('fs');
 const path = require('path');
 const esbuild = require('esbuild');
 
 const ROOT = path.resolve(__dirname, '..');
-const ENTRY = path.join(ROOT, 'src', 'nj.ts');
-const OUT = path.join(ROOT, 'dist', 'nj');
+const TARGETS = [
+  { entry: path.join(ROOT, 'src', 'nj.ts'), out: path.join(ROOT, 'dist', 'nj') },
+  { entry: path.join(ROOT, 'src', 'nj-mcp.ts'), out: path.join(ROOT, 'dist', 'nj-mcp') },
+];
 
 // esbuild only emits a file-wide 'use strict' when the ENTRY has one, and
 // having emitted it, it does not re-wrap each module in its own directive --
@@ -47,38 +51,46 @@ function checkStrict(files) {
   }
 }
 
-const result = esbuild.buildSync({
-  entryPoints: [ENTRY],
-  bundle: true,
-  platform: 'node',
-  format: 'cjs',
-  write: false,
-  logLevel: 'silent',
-  // Without this, esbuild writes its `// <path>` module comments relative to
-  // the invocation cwd -- three different callers (repo root, /, /tmp) built
-  // three different byte sequences from the same sources. Pinned so the
-  // output depends only on the sources, never on where `bundle.js` was run.
-  absWorkingDir: ROOT,
-  metafile: true, // gives the exact set of files actually bundled, for checkStrict
-});
-if (result.errors.length) {
-  for (const e of result.errors) process.stderr.write(`bundle: ${e.text}\n`);
-  process.exit(2);
-}
-checkStrict(Object.keys(result.metafile.inputs));
-const out = Buffer.from(result.outputFiles[0].contents);
+const checking = process.argv.includes('--check');
+let staleAny = false;
 
-if (process.argv.includes('--check')) {
-  let have = null;
-  try { have = fs.readFileSync(OUT); } catch { /* missing counts as stale */ }
-  if (!have || !have.equals(out)) {
-    process.stderr.write('bundle --check: dist/nj is STALE -- a fresh build differs. Run `node tools/bundle.js` and commit dist/nj.\n');
-    process.exit(1);
+for (const { entry, out: OUT } of TARGETS) {
+  const rel = path.relative(ROOT, OUT);
+  const result = esbuild.buildSync({
+    entryPoints: [entry],
+    bundle: true,
+    platform: 'node',
+    format: 'cjs',
+    write: false,
+    logLevel: 'silent',
+    // Without this, esbuild writes its `// <path>` module comments relative to
+    // the invocation cwd -- three different callers (repo root, /, /tmp) built
+    // three different byte sequences from the same sources. Pinned so the
+    // output depends only on the sources, never on where `bundle.js` was run.
+    absWorkingDir: ROOT,
+    metafile: true, // gives the exact set of files actually bundled, for checkStrict
+  });
+  if (result.errors.length) {
+    for (const e of result.errors) process.stderr.write(`bundle: ${e.text}\n`);
+    process.exit(2);
   }
-  process.stdout.write('bundle --check: dist/nj is byte-identical to a fresh build\n');
-} else {
-  fs.mkdirSync(path.dirname(OUT), { recursive: true });
-  fs.writeFileSync(OUT, out);
-  fs.chmodSync(OUT, 0o755);
-  process.stdout.write(`bundle: dist/nj written (${out.length} bytes)\n`);
+  checkStrict(Object.keys(result.metafile.inputs));
+  const out = Buffer.from(result.outputFiles[0].contents);
+
+  if (checking) {
+    let have = null;
+    try { have = fs.readFileSync(OUT); } catch { /* missing counts as stale */ }
+    if (!have || !have.equals(out)) {
+      process.stderr.write(`bundle --check: ${rel} is STALE -- a fresh build differs. Run \`node tools/bundle.js\` and commit ${rel}.\n`);
+      staleAny = true;
+      continue;
+    }
+    process.stdout.write(`bundle --check: ${rel} is byte-identical to a fresh build\n`);
+  } else {
+    fs.mkdirSync(path.dirname(OUT), { recursive: true });
+    fs.writeFileSync(OUT, out);
+    fs.chmodSync(OUT, 0o755);
+    process.stdout.write(`bundle: ${rel} written (${out.length} bytes)\n`);
+  }
 }
+if (staleAny) process.exit(1);

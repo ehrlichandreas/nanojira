@@ -6,6 +6,7 @@ import type { Flags, Element, Context } from '../core/types.ts';
 
 import * as path from 'path';
 import { checkFlags } from '../core/args.ts';
+import { cliFieldNames } from '../core/flag-table.ts';
 import { removeClaimDirWholesale } from '../core/claims.ts';
 import { context, resolveTarget, requireWritable, requireNoStubs } from '../core/context.ts';
 import { elementProblems, entryJson } from '../core/derive.ts';
@@ -71,7 +72,7 @@ function unitTarget(backlog: string, byId: Map<string, Element>, layout: Context
 }
 
 function cmdUnarchive(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', 'id', 'file']), true);
+  checkFlags(flags, [], new Set(['json', ...cliFieldNames('unarchive')]), true);
   const json = flags.has('json');
   const ctx = context(flags);
   // Backlog-wide, evaluated before the target is resolved (§ 11a, as `archive`).
