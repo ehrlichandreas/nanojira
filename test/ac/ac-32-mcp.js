@@ -1,6 +1,10 @@
 'use strict';
 /* AC-32…AC-37 — `nj-mcp`, docs/SPECIFICATION.md § 17 "MCP Interface"
- * (v3.3 proposal, promoted: DECISIONS 122/143/144/145/146, commit 05485ae).
+ * (v3.3 proposal, promoted: DECISIONS 122/143/144/145/146, commit 05485ae;
+ * `next` and `log` added to the tool surface in v3.5, DECISIONS 154/155,
+ * commits 1406a40/<pending> — AC-32's own text amended, so TOOLS below
+ * includes both. Their own MCP legs live in ac/ac-40-next.js and
+ * ac/ac-41-log.js, not here.)
  *
  * Hand-rolled stdio driver (test/lib/mcp-stdio.js), both eras. Covers
  * framing/ids, -32601/-32602/-32022, tools/list (exact set, the
@@ -10,8 +14,8 @@
  * --backlog confinement, concurrent pipelined calls, and cancellation.
  *
  * AC-32: tools/list names exactly list/show/find/tree/new/set/note/
- * check/claim/release/archive/unarchive/doctor; rm never present;
- * doctor --fix present only with --allow-destructive.
+ * check/claim/release/next/log/archive/unarchive/doctor; rm never
+ * present; doctor --fix present only with --allow-destructive.
  * AC-33: tools/call content is byte-identical to `dist/nj --json`.
  * AC-34: backlog resolved once at startup, every spawned child gets
  * --backlog explicitly, no schema names a backlog field.
@@ -36,7 +40,7 @@ const NOW = H.FIXED_NOW;
 function J(x) { return JSON.stringify(x === undefined ? null : x); }
 
 const TOOLS = ['list', 'show', 'find', 'tree', 'new', 'set', 'note', 'check',
-  'claim', 'release', 'archive', 'unarchive', 'doctor'];
+  'claim', 'release', 'next', 'log', 'archive', 'unarchive', 'doctor'];
 
 /* For a WRITE comparison, the CLI side and the MCP side must be two
  * independent fixtures (a write can't be applied once and then "read"

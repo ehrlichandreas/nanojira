@@ -18,7 +18,9 @@ import { cmdFind } from './commands/cmd-find.ts';
 import { cmdDoctor } from './commands/cmd-doctor.ts';
 import { cmdInit } from './commands/cmd-init.ts';
 import { cmdList } from './commands/cmd-list.ts';
+import { cmdLog } from './commands/cmd-log.ts';
 import { cmdNew } from './commands/cmd-new.ts';
+import { cmdNext } from './commands/cmd-next.ts';
 import { cmdNote } from './commands/cmd-note.ts';
 import { cmdRelease } from './commands/cmd-release.ts';
 import { cmdRm } from './commands/cmd-rm.ts';
@@ -64,6 +66,7 @@ function main(argv: string[]) {
     case 'note': return cmdNote(flags, positional);
     case 'check': return cmdCheck(flags);
     case 'show': return cmdShow(flags);
+    case 'log': return cmdLog(flags);
     case 'list': return cmdList(flags);
     case 'find': return cmdFind(flags, positional);
     case 'tree': return cmdTree(flags);
@@ -72,6 +75,7 @@ function main(argv: string[]) {
     case 'unarchive': return cmdUnarchive(flags);
     case 'claim': return cmdClaim(flags);
     case 'release': return cmdRelease(flags);
+    case 'next': return cmdNext(flags);
     case 'doctor': return cmdDoctor(flags);
     default:
       fail('unknown_command', `unknown command '${cmd}'`, 'run `nj help` for the command list');

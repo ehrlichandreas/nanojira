@@ -8,14 +8,15 @@ backlog: `docs/MIGRATION-v3.md`). Wiring an agent up to it: copy-paste block
 for a project's `AGENTS.md` in `docs/AGENT-INSTRUCTIONS.md`.
 
 `dist/nj` (the CLI) and `dist/nj-mcp` (an MCP server exposing the same
-commands as tools over stdio, § 17) implement spec v3 through **v3.3**
+commands as tools over stdio, § 17) implement spec v3 through **v3.5**
 (`docs/SPECIFICATION.md`): backlog location via `--backlog`, `NJ_BACKLOG` or
 `.njrc`; configurable layout (`type`, `hierarchy`, `flat`, folder names); a
 generated `STATUS.md`; internal files in `.nanojira/`; claims, `nj check`,
-`nj find`, batch writes (`--id=A,B,C`). A v2 backlog is migrated once with
-`nj doctor --fix` (`docs/MIGRATION-v3.md`). Decisions behind it:
-`docs/DECISIONS.md` 86–148; independent verification reports:
-`docs/verification/`.
+`nj find`, batch writes (`--id=A,B,C`), `nj --version`, `nj next` (claim the
+top `--ready` leaf in one call, § 12b) and `nj log` (derive-only change
+history, § 12c). A v2 backlog is migrated once with `nj doctor --fix`
+(`docs/MIGRATION-v3.md`). Decisions behind it: `docs/DECISIONS.md` 86–156;
+independent verification reports: `docs/verification/`.
 
 ## Layout
 
