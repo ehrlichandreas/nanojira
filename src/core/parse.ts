@@ -297,4 +297,38 @@ function applySections(body: string, wanted: Map<string, string>, cfg: Config) {
   return { body: result, changed };
 }
 
-export { parseFile, serialize, h1Of, syncH1, sectionPresent, normalizeTitle, normalizeSectionContent, applySections };
+// ----------------------------------------------------------------- notes
+
+interface NoteLine { at: string; actor: string; text: string }
+
+/**
+ * Every note line under `## Notes` (§ 10, `nj log` § 12c), in document
+ * order — the inverse of `withNote`'s own `- <ISO-8601> <author>: <text>`
+ * format. The author never contains `:` (§ 9 "the acting name"), so the
+ * first `: ` after it is an unambiguous boundary, exactly as § 12c states
+ * ("text everything after the first ': ' following the author").
+ * `## Notes` detection mirrors `cmd-check.ts`'s own `scanCheckboxes`.
+ */
+const NOTE_LINE_RE = /^-\ (\S+)\ (.*)$/;
+
+function parseNotes(body: string): NoteLine[] {
+  const notes: NoteLine[] = [];
+  let inNotes = false;
+  for (const line of body.split('\n')) {
+    if (/^#{1,2}[ \t]/.test(line)) {
+      const h2 = /^##[ \t]+(.*?)[ \t]*$/.exec(line);
+      inNotes = !!h2 && h2[1].replace(/:\s*$/, '').trim().toLowerCase() === 'notes';
+      continue;
+    }
+    if (!inNotes) continue;
+    const m = NOTE_LINE_RE.exec(line);
+    if (!m) continue;
+    const idx = m[2].indexOf(': ');
+    if (idx === -1) continue;
+    notes.push({ at: m[1], actor: m[2].slice(0, idx), text: m[2].slice(idx + 2) });
+  }
+  return notes;
+}
+
+export { parseFile, serialize, h1Of, syncH1, sectionPresent, normalizeTitle, normalizeSectionContent, applySections, parseNotes };
+export type { NoteLine };

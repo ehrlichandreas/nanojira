@@ -173,6 +173,29 @@ function highestEntry(dir) {
   }
   return null;
 }
+function allEntriesAscending(backlog, id) {
+  const dir = claimsDir(backlog, id);
+  let names;
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const gens = names.filter((n) => /^\d+$/.test(n)).map(Number).sort((a, b) => a - b);
+  const entries = [];
+  for (const g of gens) {
+    let raw;
+    try {
+      raw = fs.readFileSync(path.join(dir, String(g)), "utf8");
+    } catch {
+      continue;
+    }
+    const [kind, name, time] = raw.split("\n");
+    if (kind !== "claimed" && kind !== "released") continue;
+    entries.push({ gen: g, kind, name, time });
+  }
+  return entries;
+}
 var rootExistsCache = null;
 function claimsRootExists(backlog) {
   if (rootExistsCache && rootExistsCache.backlog === backlog) return rootExistsCache.exists;
@@ -536,6 +559,25 @@ function applySections(body, wanted, cfg) {
     }
   }
   return { body: result, changed };
+}
+var NOTE_LINE_RE = /^-\ (\S+)\ (.*)$/;
+function parseNotes(body) {
+  const notes = [];
+  let inNotes = false;
+  for (const line of body.split("\n")) {
+    if (/^#{1,2}[ \t]/.test(line)) {
+      const h2 = /^##[ \t]+(.*?)[ \t]*$/.exec(line);
+      inNotes = !!h2 && h2[1].replace(/:\s*$/, "").trim().toLowerCase() === "notes";
+      continue;
+    }
+    if (!inNotes) continue;
+    const m = NOTE_LINE_RE.exec(line);
+    if (!m) continue;
+    const idx = m[2].indexOf(": ");
+    if (idx === -1) continue;
+    notes.push({ at: m[1], actor: m[2].slice(0, idx), text: m[2].slice(idx + 2) });
+  }
+  return notes;
 }
 
 // src/core/store.ts
@@ -1010,6 +1052,7 @@ var FLAG_TABLE = {
     { name: "text", kind: "string", positional: true }
   ] },
   show: { fields: [str("id"), str("file")] },
+  log: { fields: [str("id"), str("file")] },
   tree: { fields: [str("id")] },
   // Built from the same NEW_FIELDS/SETTABLE_FIELDS constants.ts and
   // cmd-new.ts/cmd-set.ts already validate against — one list, not two
@@ -1020,6 +1063,9 @@ var FLAG_TABLE = {
   check: { fields: [str("id"), str("file"), str("text"), str("item"), bool("on"), bool("off")] },
   claim: { fields: [str("id"), str("file"), str("as"), str("steal"), str("status")] },
   release: { fields: [str("id"), str("file"), str("as")] },
+  // No id/file (§ 12b "Not applicable"): `next` picks its own target, the
+  // same reason `new` has neither.
+  next: { fields: [str("as"), str("status"), str("type"), str("tag"), str("parent"), str("assignee")] },
   archive: { fields: [str("id"), str("file")] },
   unarchive: { fields: [str("id"), str("file")] },
   doctor: { fields: [bool("fix")] }
@@ -3134,6 +3180,61 @@ function cmdInit(flags) {
   return 0;
 }
 
+// src/commands/cmd-log.ts
+var SOURCE_CREATED = 0;
+var SOURCE_CLAIM = 1;
+var SOURCE_NOTE = 2;
+function requireReadableForLog(el) {
+  if (el.problems.has("file:unreadable")) {
+    fail(
+      "refused:unreadable",
+      `${el.id} (${el.file}) cannot be read \u2014 refusing to log`,
+      "check the file and its permissions, then run `nj doctor`"
+    );
+  }
+  if (el.problems.has("frontmatter:unreadable")) {
+    fail(
+      "refused:unreadable",
+      `${el.id} (${el.file}) has unreadable frontmatter \u2014 refusing to log`,
+      "repair the file by hand, then run `nj doctor`"
+    );
+  }
+}
+function claimEvents(backlog, id) {
+  const events = [];
+  let prev = null;
+  for (const e of allEntriesAscending(backlog, id)) {
+    const kind = e.kind === "released" ? "released" : prev === null || prev.kind === "released" ? "claimed" : prev.name === e.name ? "reasserted" : "stolen";
+    events.push({ at: e.time, kind, actor: e.name, _source: SOURCE_CLAIM });
+    prev = { kind: e.kind, name: e.name };
+  }
+  return events;
+}
+function formatEvent(e) {
+  if (e.kind === "created") return `${e.at} created`;
+  if (e.kind === "note") return `${e.at} ${e.actor}: ${e.text}`;
+  const verb = e.kind === "reasserted" ? "re-asserted" : e.kind;
+  return `${e.at} ${verb} by ${e.actor}`;
+}
+function cmdLog(flags) {
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("log")]), false);
+  const json = flags.has("json");
+  const ctx = context(flags);
+  const el = resolveTarget(ctx, flags, true);
+  requireReadableForLog(el);
+  const events = [{ at: el.created, kind: "created", _source: SOURCE_CREATED }];
+  events.push(...claimEvents(ctx.backlog, el.id));
+  for (const n of parseNotes(el.body)) events.push({ at: n.at, kind: "note", actor: n.actor, text: n.text, _source: SOURCE_NOTE });
+  events.sort((a, b) => a.at !== b.at ? a.at < b.at ? -1 : 1 : a._source - b._source);
+  const merged = events.map(({ _source, ...rest }) => rest);
+  if (json) {
+    out(JSON.stringify({ ok: true, id: el.id, events: merged }, null, 2));
+    return 0;
+  }
+  for (const e of merged) out(formatEvent(e));
+  return 0;
+}
+
 // src/commands/cmd-new.ts
 var fs12 = __toESM(require("fs"), 1);
 var path11 = __toESM(require("path"), 1);
@@ -3250,6 +3351,51 @@ function cmdNew(flags) {
   if (json) emitWriteResult(true, el, changed, ctx.backlog, ctx.cfg);
   else writeFeedback(el, ctx.cfg, `${id} created \u2192 ${file}`);
   return 0;
+}
+
+// src/commands/cmd-next.ts
+function cmdNext(flags) {
+  checkFlags(flags, cliFieldNames("next"), /* @__PURE__ */ new Set(["json"]), true);
+  const json = flags.has("json");
+  const name = resolveActingName(flags, true);
+  const ctx = context(flags);
+  const status = flagString(flags, "status");
+  if (status !== void 0 && !ctx.cfg.statuses.includes(status)) {
+    fail("invalid_value", `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(", ")}`);
+  }
+  const filterFlags = new Map(flags);
+  filterFlags.delete("status");
+  const hasOpenChild = (e) => e.children.some((c) => !c.archived && c.status !== "done");
+  const candidates = applyFilters(ctx.elements, filterFlags, ctx.cfg).filter((e) => isReady(e, ctx.cfg) && availableToActor(ctx.backlog, e.id, name) && !hasOpenChild(e));
+  const skipped = [];
+  for (const candidate of candidates) {
+    const el = resolveById(ctx, candidate.id, true);
+    requireWritable(el);
+    requireActive(el, "claim");
+    let single;
+    try {
+      single = claimOne(ctx, el, name, status, void 0, nowIso());
+    } catch (e) {
+      if (e instanceof Fail && e.code === "refused:claimed") {
+        skipped.push(el.id);
+        continue;
+      }
+      throw e;
+    }
+    refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    if (json) {
+      out(JSON.stringify(Object.assign({ ok: single.ok, id: el.id }, single, { skipped }), null, 2));
+    } else {
+      out(`${el.id} claimed by ${name}${status !== void 0 ? ` (status: ${status})` : ""}`);
+      for (const code of single._problems) out(`\u26A0 ${el.id}: ${code}`);
+    }
+    return 0;
+  }
+  fail(
+    "none_ready",
+    `no --ready candidate is available for ${name}`,
+    skipped.length > 0 ? `${skipped.length} candidate${skipped.length === 1 ? "" : "s"} tried, all lost the race` : void 0
+  );
 }
 
 // src/commands/cmd-note.ts
@@ -3875,6 +4021,7 @@ Section writes replace the section; --<role>-file=- reads stdin.
   nj note  --id=TSK-009 "text" [--as=\u2026]
   nj check --id=TSK-009 [--text=<substring> | --item=<n>] [--on | --off] [--force]
   nj show  --id=TSK-009
+  nj log   --id=TSK-009
   nj list  [--status=\u2026] [--type=\u2026] [--tag=\u2026] [--parent=\u2026] [--assignee=\u2026] [--ready] [--all]
   nj find  "<text>" [--status=\u2026] [--type=\u2026] [--tag=\u2026] [--parent=\u2026] [--assignee=\u2026] [--all] [--case-sensitive]
   nj tree  [--id=EPIC-001] [--all]
@@ -3883,6 +4030,7 @@ Section writes replace the section; --<role>-file=- reads stdin.
   nj unarchive --id=EPIC-001
   nj claim   --id=TSK-009 [--as=\u2026] [--status=\u2026] [--steal=<holder>]
   nj release --id=TSK-009 [--as=\u2026]
+  nj next    [--as=\u2026] [--status=\u2026] [--type=\u2026] [--tag=\u2026] [--parent=\u2026] [--assignee=\u2026]
   nj doctor [--fix]
 
 Every command accepts --json. Write commands accept --file=<path> instead of
@@ -3894,7 +4042,7 @@ Exit codes: 0 success \xB7 1 command failed \xB7 2 doctor found at least one err
 `;
 
 // src/core/version.ts
-var VERSION = "3.4.0";
+var VERSION = "3.5.0";
 
 // src/nj.ts
 function main(argv) {
@@ -3930,6 +4078,8 @@ function main(argv) {
       return cmdCheck(flags);
     case "show":
       return cmdShow(flags);
+    case "log":
+      return cmdLog(flags);
     case "list":
       return cmdList(flags);
     case "find":
@@ -3946,6 +4096,8 @@ function main(argv) {
       return cmdClaim(flags);
     case "release":
       return cmdRelease(flags);
+    case "next":
+      return cmdNext(flags);
     case "doctor":
       return cmdDoctor(flags);
     default:

@@ -14,11 +14,12 @@
  * combined with any other flag or an explicit subcommand is
  * unknown_field."
  *
- * The expected version string is pinned to "3.4.0" (DECISIONS 151: "a
- * 'version' field in package.json, set to 3.4.0") — the same spec-named
- * value this whole criterion exists to check, not a looser pattern match.
- *
- * Written before --version exists: red everywhere until it is implemented.
+ * The expected version string is pinned to the package.json "version"
+ * field's current value — "3.5.0" as of v3.5's release docs round — the
+ * same spec-named value this whole criterion exists to check, not a
+ * looser pattern match. Bumping this pin is expected to go red until the
+ * Implementer bumps package.json to match (and rebuilds); that is the
+ * point of pinning an exact string rather than a pattern.
  */
 const path = require('path');
 const { spawnSync } = require('child_process');
@@ -29,7 +30,7 @@ const T = H.T;
 H.requireNj();
 H.requireNjMcp();
 
-const VERSION = '3.4.0';
+const VERSION = '3.5.0';
 function J(x) { return JSON.stringify(x === undefined ? null : x); }
 
 function envFor(o) {
@@ -45,7 +46,7 @@ function run(args, o) { return H.runNj(args, envFor(o)); }
   const d = H.freshDir('v39-bare');
   const r = run(['--version'], { cwd: d });
   T.exit('V1 nj --version: exit 0', r, 0);
-  T.eq('V1 nj --version: stdout is exactly "nj 3.4.0\\n"', r.stdout, 'nj ' + VERSION + '\n');
+  T.eq('V1 nj --version: stdout is exactly "nj 3.5.0\\n"', r.stdout, 'nj ' + VERSION + '\n');
   T.eq('V1 nj --version: nothing on stderr', r.stderr, '');
 }
 
@@ -56,7 +57,7 @@ function run(args, o) { return H.runNj(args, envFor(o)); }
   const d = H.freshDir('v39-json');
   const r = H.runJson(['--version'], envFor({ cwd: d }));
   T.exit('V2 nj --version --json: exit 0', r, 0);
-  T.eq('V2 the JSON is exactly {"version": "3.4.0"}', r.json, { version: VERSION });
+  T.eq('V2 the JSON is exactly {"version": "3.5.0"}', r.json, { version: VERSION });
   T.eq('V2 nothing extra in the object', r.json && Object.keys(r.json).sort(), ['version']);
 }
 
@@ -70,9 +71,9 @@ function run(args, o) { return H.runNj(args, envFor(o)); }
   T.exit('V3 fixture: bare `nj` in this empty directory fails (no_backlog)', bare, 1);
   const r = run(['--version'], { cwd: d });
   T.exit('V3 --version works in the exact directory where bare `nj` just failed', r, 0);
-  T.eq('V3 --version: still "nj 3.4.0"', r.stdout, 'nj ' + VERSION + '\n');
+  T.eq('V3 --version: still "nj 3.5.0"', r.stdout, 'nj ' + VERSION + '\n');
   const rj = H.runJson(['--version'], envFor({ cwd: d }));
-  T.eq('V3 --version --json: still exactly {"version": "3.4.0"}, no backlog field, no error', rj.json, { version: VERSION });
+  T.eq('V3 --version --json: still exactly {"version": "3.5.0"}, no backlog field, no error', rj.json, { version: VERSION });
 }
 
 /* ===================================================================== */
@@ -82,7 +83,7 @@ function run(args, o) { return H.runNj(args, envFor(o)); }
   const d = H.freshDir('v39-mcp-bare');
   const res = spawnSync(H.NODE, [H.NJ_MCP, '--version'], { cwd: d, encoding: 'utf8', timeout: 10000 });
   T.check('V4 nj-mcp --version: exit 0', res.status === 0, 'status=' + res.status + ' stderr=' + J(res.stderr));
-  T.eq('V4 nj-mcp --version: stdout is exactly "nj-mcp 3.4.0\\n"', res.stdout, 'nj-mcp ' + VERSION + '\n');
+  T.eq('V4 nj-mcp --version: stdout is exactly "nj-mcp 3.5.0\\n"', res.stdout, 'nj-mcp ' + VERSION + '\n');
 }
 
 /* ===================================================================== */

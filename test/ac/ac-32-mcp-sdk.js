@@ -104,8 +104,8 @@ async function connect(x, extraArgs) {
       const { tools } = await client.listTools();
       const names = (tools || []).map(t => t.name).sort();
       T.eq('C2 tools/list via the real SDK client: exact set, rm absent',
-        names, ['archive', 'check', 'claim', 'doctor', 'find', 'list', 'new',
-          'note', 'release', 'set', 'show', 'tree', 'unarchive'].sort());
+        names, ['archive', 'check', 'claim', 'doctor', 'find', 'list', 'log', 'new',
+          'next', 'note', 'release', 'set', 'show', 'tree', 'unarchive'].sort());
       T.check('C2 no tool schema names a "backlog" field',
         (tools || []).every(t => !(t.inputSchema && t.inputSchema.properties && 'backlog' in t.inputSchema.properties)),
         J(tools));

@@ -138,4 +138,4 @@ function cmdClaim(flags: Flags) {
   return 0;
 }
 
-export { cmdClaim };
+export { cmdClaim, claimOne };

@@ -1,7 +1,7 @@
 {
   "name": "nanojira",
   "private": true,
-  "version": "3.4.0",
+  "version": "3.5.0",
   "description": "NanoJira: a local, file-based task tool for agents.",
   "bin": {
     "nj": "dist/nj",

@@ -23,6 +23,7 @@ Section writes replace the section; --<role>-file=- reads stdin.
   nj note  --id=TSK-009 "text" [--as=…]
   nj check --id=TSK-009 [--text=<substring> | --item=<n>] [--on | --off] [--force]
   nj show  --id=TSK-009
+  nj log   --id=TSK-009
   nj list  [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…] [--ready] [--all]
   nj find  "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…] [--all] [--case-sensitive]
   nj tree  [--id=EPIC-001] [--all]
@@ -31,6 +32,7 @@ Section writes replace the section; --<role>-file=- reads stdin.
   nj unarchive --id=EPIC-001
   nj claim   --id=TSK-009 [--as=…] [--status=…] [--steal=<holder>]
   nj release --id=TSK-009 [--as=…]
+  nj next    [--as=…] [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
   nj doctor [--fix]
 
 Every command accepts --json. Write commands accept --file=<path> instead of

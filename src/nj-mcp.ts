@@ -37,7 +37,7 @@ const SERVER_VERSION = VERSION;
 // `tools/list`'s exact, fixed order (§ 17 "Tool surface"). `rm` is never
 // present — omitted unconditionally, not merely gated.
 const TOOL_NAMES = ['list', 'show', 'find', 'tree', 'new', 'set', 'note',
-  'check', 'claim', 'release', 'archive', 'unarchive', 'doctor'];
+  'check', 'claim', 'release', 'next', 'log', 'archive', 'unarchive', 'doctor'];
 
 /** `doctor`'s `fix` field exists in its schema only when the server was
  * launched with `--allow-destructive` (§ 17): the gate is schema-level,

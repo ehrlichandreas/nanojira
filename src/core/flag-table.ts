@@ -39,6 +39,7 @@ const FLAG_TABLE: Record<string, CommandSpec> = {
   find: { fields: [str('status'), str('type'), str('tag'), str('parent'), str('assignee'), bool('case-sensitive'),
     { name: 'text', kind: 'string', positional: true }] },
   show: { fields: [str('id'), str('file')] },
+  log: { fields: [str('id'), str('file')] },
   tree: { fields: [str('id')] },
   // Built from the same NEW_FIELDS/SETTABLE_FIELDS constants.ts and
   // cmd-new.ts/cmd-set.ts already validate against — one list, not two
@@ -49,6 +50,9 @@ const FLAG_TABLE: Record<string, CommandSpec> = {
   check: { fields: [str('id'), str('file'), str('text'), str('item'), bool('on'), bool('off')] },
   claim: { fields: [str('id'), str('file'), str('as'), str('steal'), str('status')] },
   release: { fields: [str('id'), str('file'), str('as')] },
+  // No id/file (§ 12b "Not applicable"): `next` picks its own target, the
+  // same reason `new` has neither.
+  next: { fields: [str('as'), str('status'), str('type'), str('tag'), str('parent'), str('assignee')] },
   archive: { fields: [str('id'), str('file')] },
   unarchive: { fields: [str('id'), str('file')] },
   doctor: { fields: [bool('fix')] },

@@ -2063,6 +2063,118 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      TSK-040 and EPIC-010 are done; tag `v3.4`. Out of scope by the user's
      decision: a minimum Node version, and distribution (no remote).
 
+154. **v3.5 released by the user: `nj next` and `nj log`, plus dogfooding**
+     (2026-10-05, "Gut. Arbeitet autonom an der Lösung. Ihr dürft nanojira
+     selbst nutzen …"). The Lead proposed three items. The third, "detect
+     orphaned claims", already exists: `claim:stale` since v3.2 (D131),
+     advisory by design, with no auto-release (§ 12). It is withdrawn, so no
+     work is done on it. Scope:
+     - *`nj next`:* one call that picks the highest-ranked `--ready`
+       element (the ranking `nj` and `list --ready` already use), honouring
+       the `list` filters, and claims it with the acting name. If it loses a
+       race (`refused:claimed`), it moves on to the next candidate. If none
+       is left, it fails with a closed-vocabulary code. `--status` is as in
+       `claim`. There is also an nj-mcp tool `next`. This removes the
+       list→claim gap where two agents pick the same element.
+     - *`nj log --id=…`:* the change history of one element: who did what
+       and when. Data that already exists is reused where possible: the
+       claim generations under `.nanojira/claims/` and the dated, signed
+       notes. Whether a new journal is needed for field changes
+       (status/assignee/…) is a design choice. The Oracle proposes the
+       options with their cost (write path, the replay gate, git noise)
+       before writing tests, and the Lead rules.
+     - *Dogfooding:* the team coordinates v3.5 in the project's own backlog
+       through `dist/nj` (claim, note `--as`, check, set status), with
+       EPIC-011. Friction is recorded as notes on a dedicated task, which
+       feeds later improvements.
+     Process as usual: Oracle (spec + AC) → Implementer → Verifier →
+     acceptance. Replay against c7: only help-class differences are
+     allowed.
+
+155. **`nj log` ruled: derive-only (option a); claims stay git-ignored.**
+     The Oracle's options proposal (2026-10-05) compared three designs:
+     (a) derive from what exists; (b) an append-only journal per element;
+     (c) the git log of the element file. Ruling: **(a)**. `nj log` shows
+     `created`, the claim generations (claim/re-assert/steal/release:
+     actor and time) and the dated, signed notes, merged in time order.
+     There are no new writes, so the write path, § 13 and the replay gate
+     are unaffected.
+     It does **not** show field-level history (status/priority changes),
+     and the spec says so plainly; agents who want a trail leave a note.
+     (b) is deferred until a concrete need appears; if it ever comes, it is
+     per-element, never a shared file. (c) stays a manual technique
+     (`git log -p -- <file>`), mentioned in the GUIDE, not built into nj
+     (§ 3: no git dependency).
+     Correction during dogfooding: the Oracle committed this backlog's
+     `.nanojira/claims/` to git, believing the Lead wanted it tracked for
+     `nj log`. The Lead never said that, and § 12a requires the
+     `.nanojira/claims/` ignore line. The Lead ran `doctor --fix`, which
+     appended the line, and untracked the two TSK-041 generations with
+     `git rm --cached` (the files stay on disk). Consequence for (a): claim
+     history is local to the working copy; a fresh clone shows notes and
+     `created` only. `nj log` states this.
+     `nj next` (§ 12b, AC-40 text, 1406a40) is reviewed and accepted as
+     written. One gap: the commit contains no AC-40 test code. The Oracle
+     adds it before the Implementer starts.
+
+156. **`nj next` takes leaf work only.** The Implementer found that an
+     epic and its own open task tie on priority, and the `id` tie-break
+     puts the epic first, so `next` would claim the container
+     (pre-existing `list --ready` order, first exposed by AC-40 N1).
+     Ruling: a `--ready` element that has at least one **open child** (a
+     child that is neither `done` nor archived) is **not a `next`
+     candidate**; its children are. This applies whatever the filters,
+     including `--type=epic`. An epic without children, or with all of
+     them done, stays a candidate, because closing it is real work. `list
+     --ready` and bare `nj` are **unchanged**, so neither the replay nor
+     existing ACs move. That bare `nj` lists a container among "ready to
+     work" is noted on TSK-043 as a candidate for later and is not changed
+     now. The Oracle amends § 12b and adds AC-40 legs: an epic with an open
+     task is skipped; a childless epic is picked; an epic whose children
+     are all done is picked; an archived child does not count as open.
+
+157. **v3.5 accepted: `nj next`, `nj log`; dogfooding findings.** Both
+     features pass verification: docs/verification/v3-5-next.md (c0ce838:
+     20 processes × 8 elements × 3 rounds, exactly one winner per element;
+     list/bare nj byte-unchanged) and v3-5-log.md (378a25d: never writes;
+     tricky note text; the mutation tests discriminate). The AC-40 coverage
+     gap the Verifier found (only 1/88 checks catches "any failure
+     advances") is closed by N13 (ba3ec74, 95 checks). Docs (60915b2) cover
+     § 12c clarifications, GUIDE § 14/15, AGENT-INSTRUCTIONS (pick work with
+     `nj next`) and README/ARCHITECTURE. Version 3.5.0 (e616b2c). The Lead
+     re-ran AC-32/39/40/41: all pass; build:check is byte-identical; the
+     replay against c7 differs only in the 6 help calls. TSK-041..043 and
+     EPIC-011 are done; tag `v3.5`.
+     **Dogfooding.** The whole round was coordinated through `dist/nj` on
+     this backlog (claim/note/check/release per role; `nj log --id=TSK-041`
+     now shows all 15 steps). Findings, candidates for later releases (none
+     ruled yet):
+     - *Bare `nj` lists containers as "ready to work"* (an epic next to its
+       own open task). `next` avoids this (D156); `list --ready` and bare
+       `nj` do not.
+     - *`claims_unignored` has no opt-out.* Withdrawn as a need: tracking
+       claims was a misunderstanding (D155), and the warning did its job.
+     - *`show --json` always returns the list shape* (`entries[0]`). This is
+       correct per spec, but scripts trip over it.
+     - *Batch text output is terse:* `set --id=A,B --status=done` prints
+       `A → status` without the value; the single form prints
+       `status=done`.
+     - *Notes repeat the author:* `nj note` adds the signature, so a habit of
+       writing "Lead: …" by hand duplicates it.
+     - *Own checkboxes are forgotten:* the Lead left "design ruled" unticked
+       until acceptance, which `nj log` made visible. A check item cannot be
+       tied to an owner.
+     - *Process:* a "same as X" rule must be checked against X's real
+       behaviour, not a paraphrase (the Oracle's note on `show`);
+       long-running gates look stuck because the parent is idle (check the
+       process tree first).
+     - *Team tooling:* messages sent to a busy teammate arrive late but do
+       arrive. A duplicate task was avoidable.
+     - *Correction to D155:* the untracking of `.nanojira/claims/` never
+       landed. `git commit -- <path>` takes the path from the working tree,
+       so the files on disk were re-added. Fixed in 5e1fe80 with a plain
+       commit of the staged removal.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

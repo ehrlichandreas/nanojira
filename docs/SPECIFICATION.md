@@ -722,6 +722,9 @@ nj archive --id=EPIC-001 (§ 11)
 nj unarchive --id=EPIC-001 (§ 11a)
 nj claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] (§ 12 "Claims")
 nj release --id=TSK-007 [--as=<name>] (§ 12 "Claims")
+nj next    [--as=<name>] [--status=<s>] [--type=…] [--tag=…] [--parent=…]
+           [--assignee=…] [--json] (§ 12b)
+nj log     --id=TSK-009 [--json] (§ 12c)
 nj doctor [--fix] [--json]
 ```
 
@@ -1144,6 +1147,7 @@ unknown_command       missing_argument         missing_value
 invalid_value         invalid_target           not_found
 duplicate_id          exists                   changed_in_parallel
 id_allocation_failed  internal_error           ambiguous_target
+none_ready
 refused:<reason>      reason ∈ unreadable | archived | children_open |
                                has_children | not_done | parent_archived |
                                misplaced | not_archived | claimed
@@ -1203,6 +1207,11 @@ its code. These mappings are normative:
 | `claim` on an archived element | `refused:archived` | § 9 |
 | `claim` on an unreadable stub | `refused:unreadable` | § 12 Claims |
 | the claim decision loop exhausts its 100 rounds | `changed_in_parallel` | § 12 Claims |
+| `next` without an acting name | `missing_argument` | § 12b |
+| `next`'s candidate list is exhausted — none `--ready`, or every candidate lost its race | `none_ready` | § 12b |
+| `log --id` names a duplicate id, without `--file` | `duplicate_id` | § 12c |
+| `log --id` names nothing | `not_found` | § 12c |
+| `log` on an unreadable stub | `refused:unreadable` | § 12c |
 | `check` on an archived element | `refused:archived` | § 9 |
 | `check` on an unreadable stub | `refused:unreadable` | § 10a |
 | `check --text`/`--item` matches no countable checkbox, or `--item` is out of range | `not_found` | § 10a |
@@ -1923,6 +1932,226 @@ until cleanup, the same-named re-assertion audit-trail residual).
 
 ---
 
+## 12b. `nj next`
+
+```
+nj next  [--as=<name>] [--status=<s>] [--type=…] [--tag=…] [--parent=…]
+         [--assignee=…] [--json]
+```
+
+One call that picks the highest-ranked `--ready` element and claims it —
+closing the gap between a separate `list --ready` and `claim`, where two
+callers can read the same top candidate before either claims it
+(DECISIONS 154).
+
+**Candidates** are the `--ready` set (§ 9 "`--ready`") for the given
+acting name, in `list`'s own order: priority descending, then `id`
+ascending — the same order `list --ready` and bare `nj` already print
+their top-ready elements in — **narrowed to leaf work** (DECISIONS 156):
+a `--ready` element with at least one **open child** (a child that is
+neither `done` nor archived) is **not a candidate**, whatever the
+filters, including `--type=epic`. Its open children are themselves
+`--ready` (or not) independently, and are candidates on their own
+merits. An epic with **no** children, or whose children are **all**
+`done` or archived, stays a candidate — closing it is real work `next`
+may still hand out. This rule is specific to `next`: `list --ready` and
+bare `nj` are **unchanged**, so a container can still appear there as
+"ready to work" exactly as before (tracked for later on TSK-043, not
+changed now) — only `next`'s own candidate set excludes it. The filters
+are `list`'s own: `--type`, `--tag`, `--parent`, and **`--assignee`** —
+included for the same reason `list --ready --assignee=…` already exists:
+a backlog that pre-partitions work by `assignee` (a plain field, not a
+claim) can ask `next` to pick only from one slice, without that
+pre-partitioning having to be encoded as claims. Condition 5 of
+`--ready` already means an element the acting name **currently holds**
+is itself ready — so it is a legitimate candidate (once the leaf-work
+rule above also passes), and claiming it is the ordinary re-assertion
+`claim` itself defines (§ 12a step 2), not a race.
+
+**The acting name is required.** Omit it and the call fails
+`missing_argument` — the same rule `claim`/`release` already have (§ 9
+"The acting name"); "the next ready element" means nothing without
+someone to claim it for.
+
+**`--status=<s>`** behaves exactly as on `claim` (§ 12a): optional,
+validated the same way (`invalid_value`, checked once, before any
+candidate is resolved — it does not depend on which one succeeds); when
+given, it is written in the same guarded write as the claim; omitted, the
+claimed element's status is untouched (and stays `statuses[0]`, since
+every candidate is `--ready`).
+
+**Mechanism.** `next` reads the candidate list exactly once, then
+attempts `claim --id=<candidate> --as=<name> [--status=<s>]` against each
+candidate in order:
+
+1. **Success** → `next` succeeds with that element. Done.
+2. **`refused:claimed`** (another acting name won the race for this
+   candidate since the list was read) → that id is recorded as skipped,
+   and `next` moves to the next candidate.
+3. **Any other claim failure** (`refused:unreadable`, `refused:archived`,
+   `duplicate_id`, `invalid_value`, `io_error`, `changed_in_parallel` past
+   the retry budget, `fault:<hook>`) → `next` fails immediately with that
+   same code, rather than trying another candidate. These are not races:
+   `--ready` does not let an archived or unreadable element through in
+   the first place, so meeting one of these here means the backlog
+   changed in a way `refused:claimed` does not cover, or is already in a
+   state `nj doctor` should be run against — `next` surfaces that rather
+   than silently skipping past it.
+4. **The candidate list is exhausted** — every candidate lost its race,
+   or there were none to begin with — → **`none_ready`**, exit 1 (new
+   closed-vocabulary code, § 9).
+
+`next` never re-scans the backlog mid-loop: the candidate list is one
+snapshot, read once. A dependency that becomes ready *during* the loop (a
+sibling finishing concurrently) is not picked up by this call; the next
+call to `next` sees it.
+
+**JSON shape.** Success is `claim`'s own shape (§ 9 "JSON shapes per
+command"), with one addition: **`skipped`** — the ids that lost their
+race before the one that succeeded, in attempt order; always present,
+`[]` when none were skipped. Failure, including `none_ready`, stays the
+generic `{ok: false, error, hint?}` — no extra field there, the same
+discipline every other failure in this document holds (§ 9); the hint
+text for `none_ready` may say how many candidates were tried.
+
+Human output is one line on success — the claimed element's id and title,
+the same line `claim` itself prints — or the `none_ready` message on
+stderr.
+
+**Not applicable:** `--id=A,B,C` (batch writes, § 9) and `--file` — `next`
+picks its own target; there is nothing for either to name.
+
+**Rollback** is exactly `claim`'s own (§ 12a step 3): the mirror write
+for whichever candidate succeeded rolls back the same way a plain
+`claim`'s would, by the same rules. Candidates that only ever lost a race
+were never written to by this call, so there is nothing of theirs to
+roll back.
+
+---
+
+## 12c. `nj log`
+
+```
+nj log  --id=TSK-007 [--json]
+nj log  --file=<path> [--json]
+```
+
+The change history of one element: who did what and when, derived
+**entirely** from data this specification already requires `nj` to keep
+— `created`, the claim generations (`.nanojira/claims/<id>/`, § 12), and
+the body's dated, signed notes (§ 10). **There are no new writes**: no
+write command's output or the bytes it touches change because `log`
+exists, so § 12's atomicity rules, § 13's cost and the replay gate are
+all unaffected by this section (DECISIONS 155).
+
+**This derivation has two plain limits, stated here because they are
+easy to miss:**
+
+1. **No field-level history.** A `set --status=doing`, a priority
+   change, a retitling — none of these leave a trace `log` can show;
+   only `created`, claims and notes do. An agent that wants a durable
+   record of *why* a field changed should leave one with `nj note`.
+2. **Claim history is local to the working copy.** `nj init` writes
+   `.nanojira/claims/` into `.gitignore` (§ 12a) — it is never committed.
+   A fresh clone, or any machine that has not itself run `nj claim` on
+   this copy, shows **notes and `created` only**: the claim events
+   happened, but their record did not travel with the repository.
+   Archiving an element compounds this a different way: `archive`
+   deletes `.nanojira/claims/<id>/` outright (§ 12a) as part of the move,
+   so `log` on an archived element shows no claim events even on the
+   machine that made them — not a locality limit this time, but the
+   same underlying fact (claims are not part of the committed record)
+   reaching a different conclusion.
+
+**Candidates for merging**, each read in its own natural order:
+
+- **`created`** — exactly one event, timestamped at the element's own
+  `created` field. No actor: nothing signs a creation today.
+- **Claim generations**, read in numeric order (the same discipline
+  claim's own highest-generation lookup already requires, § 12 "Claims"
+  — non-numeric entries, stray temp files included, are not generations
+  and are ignored here too). Each generation's stored line is `claimed`
+  or `released` (§ 12), classified into one of four event kinds by
+  comparing it with the generation immediately before it:
+  - `released` → kind **`released`**, actor the stored name.
+  - `claimed`, with no earlier generation, or the earlier one `released`
+    → kind **`claimed`** (a plain claim).
+  - `claimed`, the earlier one also `claimed` by the **same** name → kind
+    **`reasserted`**.
+  - `claimed`, the earlier one `claimed` by a **different** name → kind
+    **`stolen`** (the only way this shape arises is `--steal`, § 12a); the
+    previous holder is not repeated as a field — it is the actor of the
+    event immediately before this one in the merged list.
+- **Notes**, read in document order (§ 10): each `- <ISO-8601> <author>:
+  <text>` line becomes one event, kind **`note`**, actor the author,
+  text everything after the first `: ` following the author. A line
+  under `## Notes` that does **not** match this shape — a hand edit, most
+  often — is **silently skipped**, not an error and not a degraded
+  event: the same tolerance this specification already has elsewhere for
+  a hand-edited body that doesn't match a parsing rule it depends on.
+
+**Merging.** Every event from every source above is merged into one list
+by `at` ascending. **Tie-break**, for two events sharing the exact same
+timestamp (a fixed `NJ_NOW` makes this routine, not rare): `created`
+first, then claim-derived events in generation order, then notes in
+document order — a fixed source precedence, not alphabetical and not by
+kind, so the merge is deterministic from the same bytes every time.
+
+**JSON shape**: `{ok: true, id, events: [{at, kind, actor?, text?}]}`.
+`kind` is one of `created | claimed | reasserted | stolen | released |
+note` — a closed vocabulary scoped to this one field, the same way § 7's
+problem codes are their own closed vocabulary distinct from § 9's
+failure codes. `actor` is absent only for `created`; `text` is present
+only for `note`. Events are always in the merged order above — `log`
+does not accept a sort flag.
+
+**Human output** is one line per event, in the same merged order:
+
+```
+$ nj log --id=TSK-007
+2026-09-21T18:00:00Z created
+2026-09-21T18:05:00Z claimed by alice
+2026-09-21T18:10:00Z alice: wired the route
+2026-09-21T18:20:00Z released by alice
+```
+
+A note line reuses its own `<author>: <text>` shape; a claim-derived
+line reads `<verb> by <actor>` — `claimed`, `re-asserted`, `stolen` or
+`released`.
+
+**Addressing.** `log` is a read — no acting name, no `--all` (there is
+nothing to filter; it addresses exactly one element) — but it is a
+read that must resolve to **exactly one** file, the same reason every
+*write* command accepts `--file`: unlike `list`/`show`, which answer a
+duplicate `id` by showing both entries marked `duplicate_id`, `log`
+cannot show two merged histories under one `id` and call it one answer.
+So `log` is the first read to behave like a write for addressing
+purposes only: `--id` naming a duplicate is `duplicate_id` (nothing is
+written, because `log` never writes anything); `--file=<path>` (absolute,
+or relative to the backlog) disambiguates, exactly as it does for a
+write; `--id` and `--file` together is `invalid_target`; `--id` naming
+nothing at all is `not_found`, matching `show`'s own unknown-`--id`
+behaviour.
+
+**Archived elements.** `log` reads an archived element exactly as `show`
+does — archived is a write-time restriction (§ 9), never a read-time
+one, so there is no special case here beyond the claims-are-gone
+consequence already stated above.
+
+An element addressed directly by `log` that `show` would mark
+`file:unreadable` **or** `frontmatter:unreadable` (§ 7 — a file that
+cannot be opened, or one that opens but doesn't parse) is
+`refused:unreadable` either way: unlike `show`, which tolerates one such
+entry among many (reporting the problem in `_problems`, exit 0), `log`
+has nothing to derive a history from without reading the element itself
+(there is no `created` to read) in either case, so it cannot degrade the
+way `show`'s per-entry shape can; this is the same code `claim` already
+uses for the identical reason (§ 12a).
+
+`nj help` lists `log`.
+
+---
+
 ## 13. Search Index (design now, implementation round two)
 
 **Measured, not estimated** (darwin-arm64, local APFS SSD, Node 24.21.0,
@@ -2386,9 +2615,9 @@ reported, not guessed at.
 
 32. **MCP tool surface.** `nj-mcp`'s `tools/list` names exactly `list`,
     `show`, `find`, `tree`, `new`, `set`, `note`, `check`, `claim`,
-    `release`, `archive`, `unarchive`, `doctor`; `rm` is never present;
-    `doctor --fix` is present only when the server was launched with
-    `--allow-destructive`, absent otherwise.
+    `release`, `next`, `log`, `archive`, `unarchive`, `doctor`; `rm` is
+    never present; `doctor --fix` is present only when the server was
+    launched with `--allow-destructive`, absent otherwise.
 33. **Result fidelity.** For every exposed tool, a `tools/call` result's
     content is byte-identical to `dist/nj --json`'s own output for the
     equivalent CLI invocation against the same fixture — success and
@@ -2401,9 +2630,9 @@ reported, not guessed at.
     path>` explicitly. No generated tool schema names a `backlog` field.
 35. **Batch and acting-name parity.** A tool call with a comma-joined `id`
     produces the same `{ok, results}` wrapper a CLI batch write would; an
-    `as` parameter on `note`/`claim`/`release` outranks the server's own
-    `NJ_AUTHOR`, validated exactly as `--as` is (DECISIONS 119), exactly
-    as `--as` outranks it on the CLI.
+    `as` parameter on `note`/`claim`/`release`/`next` outranks the
+    server's own `NJ_AUTHOR`, validated exactly as `--as` is (DECISIONS
+    119), exactly as `--as` outranks it on the CLI.
 36. **CLI behaviour is unchanged by moving its parser onto the shared
     flag table § 17's schemas are also generated from.** Replayed against
     `c7-baseline`, the CLI produces byte-identical output, call for call,
@@ -2435,6 +2664,59 @@ reported, not guessed at.
     value is what `nj-mcp`'s `server/discover`/`initialize` responses
     declare as `serverInfo`'s version. `--version` combined with any
     other flag or an explicit subcommand is `unknown_field`.
+40. **`nj next`.** Given `N` **leaf** `--ready` elements and `M`
+    concurrent `nj next --as=<distinct name each>` calls with `M <= N`,
+    every call exits 0 and claims a distinct element; with `M > N`,
+    exactly `N` calls succeed and the rest exit 1 `none_ready`. A single
+    `nj next --as=a` claims the highest-priority, lowest-`id` `--ready`
+    element among the leaves — the same order `list --ready`/bare `nj`
+    print, narrowed to exclude any `--ready` element with an open child
+    (DECISIONS 156): an epic with an open task is skipped in favour of
+    that task (or whatever else qualifies); a childless epic, and an
+    epic whose children are all `done` or archived, remain candidates;
+    an archived child never counts as open; the same holds for a task
+    with an open subtask. `--type`, `--tag`, `--parent` and `--assignee`
+    narrow the candidate set exactly as they narrow `list --ready`'s,
+    applied after the leaf-work rule, including `--type=epic`. An
+    element already claimed by the acting name is itself `--ready`
+    (§ 9 condition 5) and a valid, re-assertable candidate — `next
+    --as=a` on a backlog where `a` already holds the top candidate
+    re-asserts it, exit 0, `changed` empty unless `--status` changes
+    the status. `--status=<s>` claims and sets status in the one write,
+    exactly as on `claim`; omitted, status is untouched. No acting name
+    is `missing_argument`. Nothing `--ready` at all, or every candidate
+    losing its race, is `none_ready`, exit 1, `{ok: false, error,
+    hint?}` — no extra field. A successful claim's
+    result is `claim`'s own shape plus `skipped`, the ids raced away
+    before it, in attempt order, always present (`[]` when none). An
+    element that becomes unreadable, archived, or turns out to be a
+    `duplicate_id` after being read as `--ready` but before `next`
+    reaches it is surfaced as that failure, not silently skipped — only
+    `refused:claimed` advances to the next candidate. `--id=A,B,C` and
+    `--file` are not accepted. A failed mirror write on the winning claim
+    rolls back exactly as a plain `claim`'s would (§ 12a).
+41. **`nj log`.** For an element with a `created` timestamp, N claim
+    generations and M notes, `nj log --id=…` returns exactly N+M+1
+    events merged by `at` ascending, each `kind` one of `created |
+    claimed | reasserted | stolen | released | note`: a plain claim
+    after `unclaimed`/`released` is `claimed`; the same name claiming
+    again is `reasserted`; a different name landing via `--steal` is
+    `stolen`; `release` is `released`; each note line is one `note`
+    event with its own actor and text. No write command's output or
+    bytes change — replayed against a pre-`log` baseline, nothing
+    differs. Two events sharing one timestamp (a fixed `NJ_NOW`) sort
+    `created`, then claims in generation order, then notes in document
+    order, every time. `--id` naming a duplicate is `duplicate_id`;
+    `--file=<path>` disambiguates it, the same as a write's escape
+    hatch, even though `log` writes nothing; `--id` naming nothing is
+    `not_found`, matching `show`. `log` reads an archived element same
+    as `show` does; its claim events are gone because `archive` already
+    deletes the claims directory, leaving only `created` and notes. A
+    fresh clone with no local claims shows `created` and notes only,
+    never claim events, because `.nanojira/claims/` is git-ignored
+    (§ 12a) — a field-level change (`status`, `priority`, …) is not
+    shown at all, by design, and the spec states both limits plainly.
+    An unreadable stub addressed directly is `refused:unreadable`.
 
 ---
 
@@ -2578,7 +2860,8 @@ lifetime.
 ### Tool surface
 
 `tools/list` names exactly: `list`, `show`, `find`, `tree`, `new`, `set`,
-`note`, `check`, `claim`, `release`, `archive`, `unarchive`, `doctor`.
+`note`, `check`, `claim`, `release`, `next`, `log`, `archive`,
+`unarchive`, `doctor`.
 
 - **`rm` (including `--cascade`) is never present** — omitted
   unconditionally, not merely gated: a cascading, hard-to-undo-by-
@@ -2604,9 +2887,9 @@ tool's schema unchanged — it is already confined to the backlog by the
 same addressing rule that confines it on the CLI (§ 9: `--file` resolves
 only against already-scanned elements, never an arbitrary path).
 
-**The acting name.** `note`, `claim` and `release` each take an `as`
-input, defaulting to the server's own `NJ_AUTHOR` (from the launching
-environment) when omitted — the same `--as`-outranks-`NJ_AUTHOR`
+**The acting name.** `note`, `claim`, `release` and `next` each take an
+`as` input, defaulting to the server's own `NJ_AUTHOR` (from the
+launching environment) when omitted — the same `--as`-outranks-`NJ_AUTHOR`
 precedence § 9 "The acting name" already has, exposed per call instead
 of per process. `as` is validated exactly as `--as` is (DECISIONS 119):
 an invalid value is `invalid_value`, nothing written.

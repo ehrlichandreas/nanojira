@@ -54,6 +54,30 @@ function highestEntry(dir: string): Entry | null {
   return null;
 }
 
+/**
+ * Every generation, oldest first (`nj log`, § 12c) — the same filtering
+ * `highestEntry` applies (numeric names only, a stored kind of `claimed` or
+ * `released`), just every one of them instead of only the highest, and
+ * ascending instead of descending: `log`'s merge classifies each entry by
+ * comparing it with the one immediately before it, so it needs them in the
+ * order they actually happened.
+ */
+function allEntriesAscending(backlog: string, id: string): Entry[] {
+  const dir = claimsDir(backlog, id);
+  let names: string[];
+  try { names = fs.readdirSync(dir); } catch { return []; }
+  const gens = names.filter((n) => /^\d+$/.test(n)).map(Number).sort((a, b) => a - b);
+  const entries: Entry[] = [];
+  for (const g of gens) {
+    let raw: string;
+    try { raw = fs.readFileSync(path.join(dir, String(g)), 'utf8'); } catch { continue; } // vanished: skip it
+    const [kind, name, time] = raw.split('\n');
+    if (kind !== 'claimed' && kind !== 'released') continue;
+    entries.push({ gen: g, kind, name, time });
+  }
+  return entries;
+}
+
 /** The current holder for display (`_claim`, § 9), or null when unclaimed. */
 // A per-process cache, not per-call: one `nj` invocation targets exactly one
 // backlog, and `.nanojira/claims/` — once it exists — is never removed by nj
@@ -187,5 +211,5 @@ function removeClaimDirWholesale(backlog: string, id: string): void {
   try { fs.rmdirSync(dir); } catch { /* not empty: left for doctor */ }
 }
 
-export { claimsRootDir, claimsDir, allClaimDirs, highestEntry, readClaim, isClaimStale, transition, rollback, removeClaimDirWholesale };
+export { claimsRootDir, claimsDir, allClaimDirs, highestEntry, allEntriesAscending, readClaim, isClaimStale, transition, rollback, removeClaimDirWholesale };
 export type { Entry };

@@ -33,7 +33,7 @@ on the machine that runs them.
 - Per project: run `nj init` once (§ 2) to create that project's `backlog/`.
 - Per project, if the project uses `nj-mcp`: add one `nj-mcp` entry to that
   project's MCP client config, pointed at that project with its own
-  `--backlog=` (§ 4, below, and § 17's client-config shape) — never a single
+  `--backlog=` (§ 4, below, and § 19's client-config shape) — never a single
   shared entry meant to serve several projects.
 - Verify the install with `nj --version`, which prints `nj <version>` and
   exits 0 from anywhere, without needing a backlog (§ 9 of the spec).
@@ -141,7 +141,7 @@ by several projects on purpose — the same way `repo/.njrc` redirecting to
 `../shared/backlog` already works in § 3's example.
 
 **`nj-mcp`, differently: one server process is fixed to one backlog for its
-whole life**, resolved once at startup (§ 17 below, § 17 of the spec) —
+whole life**, resolved once at startup (§ 19 below, § 17 of the spec) —
 there is no per-call backlog switch. With several projects, configure one
 `nj-mcp` entry **per project** (each with its own `--backlog=`, or each
 started with that project as its working directory), not one shared entry
@@ -194,7 +194,7 @@ TSK-001 → status=done
   written — `--statuss=done` does not "almost work".
 - Reads: bare `nj` (short status), `nj list [--status --type --tag --parent
   --assignee --ready --all]`, `nj tree`, `nj show --id=…`, `nj find "<text>"`
-  (§ 15 below).
+  (§ 17 below).
 
 **For agents: add `--json` to every call.** Reads return `{backlog, counts,
 entries}`, writes `{ok, id, changed, entry, _problems}`, and **every** failure
@@ -421,8 +421,134 @@ changed hands, not to whom it previously belonged.
   `claim:stale` warning on every read once a claim is older than that.
   Nothing is ever auto-released or auto-stolen — it's a signal for a human
   or agent to act on with `--steal`, never something `nj` acts on itself.
+- **History.** These claim events feed into `nj log` (§ 15, below).
 
-## 14. `nj check`
+## 14. `nj next`
+
+`list --ready` then `claim` by hand leaves a gap: two callers can read the
+same top candidate before either claims it. `nj next` closes it — one
+call picks the highest-ranked `--ready` element and claims it:
+
+```sh
+$ nj next --as=alice --status=doing
+TSK-001 claimed by alice (status: doing)
+```
+
+- **Ranking** is `list --ready`'s own order (priority, then `id`) —
+  `next` just claims the top of it instead of printing it.
+- **`--status=<s>`** claims and sets status in the same write, exactly
+  as `claim --status=` does; omit it and status is left alone.
+- **Filters** are `list`'s own: `--type`, `--tag`, `--parent`,
+  `--assignee` — narrow which candidates `next` will even consider.
+- **Leaf work only.** A container with an open child (neither `done` nor
+  archived) is never a candidate — its child is, instead:
+
+  ```sh
+  $ nj next --as=alice
+  TSK-001 claimed by alice
+  ```
+
+  (claimed the one open task under `EPIC-001`, not the epic itself — an
+  epic is only ever picked once it has no open child left: no children
+  at all, or every one of them `done`/archived.)
+- **Nothing to claim** is `none_ready`, exit 1 — a normal outcome, not a
+  bug:
+
+  ```sh
+  $ nj next --as=carol --json
+  {
+    "ok": false,
+    "error": "none_ready"
+  }
+  ```
+- **`skipped`** (in the `--json` result) names any id that lost a race
+  for a higher-ranked candidate before this one succeeded — empty when
+  nothing was raced away. From a real run where two calls landed at the
+  same instant (the `entry` field, unrelated to this, is cut below for
+  length):
+
+  ```json
+  {
+    "ok": true,
+    "id": "TSK-002",
+    "claim": { "by": "bob", "since": "2026-10-05T22:43:12Z" },
+    "skipped": ["TSK-001"]
+  }
+  ```
+
+  (`bob` lost the race for `TSK-001` — someone else claimed it a moment
+  earlier — and `next` moved on to `TSK-002` instead of giving up.)
+
+## 15. `nj log`
+
+The change history of one element — what already exists, merged into one
+timeline: when it was created, every claim/re-claim/steal/release, and
+its notes.
+
+```sh
+$ nj log --id=TSK-001
+2026-10-05T22:43:37Z created
+2026-10-05T22:43:38Z claimed by alice
+2026-10-05T22:43:40Z alice: Parser splits at the first colon
+2026-10-05T22:43:41Z released by alice
+```
+
+```sh
+$ nj log --id=TSK-001 --json
+{
+  "ok": true,
+  "id": "TSK-001",
+  "events": [
+    { "at": "2026-10-05T22:43:37Z", "kind": "created" },
+    { "at": "2026-10-05T22:43:38Z", "kind": "claimed", "actor": "alice" },
+    { "at": "2026-10-05T22:43:40Z", "kind": "note", "actor": "alice",
+      "text": "Parser splits at the first colon" },
+    { "at": "2026-10-05T22:43:41Z", "kind": "released", "actor": "alice" }
+  ]
+}
+```
+
+**Two plain limits**, both worth knowing before you rely on it:
+
+- **No field-level history.** A `set --status=... --priority=...` leaves
+  no trace — `log` only ever shows `created`, claims and notes, nothing
+  else, even right after a field changes:
+
+  ```sh
+  $ nj set --id=TSK-001 --status=doing --priority=high
+  $ nj log --id=TSK-001
+  2026-10-05T22:43:37Z created
+  2026-10-05T22:43:38Z claimed by alice
+  2026-10-05T22:43:40Z alice: Parser splits at the first colon
+  2026-10-05T22:43:41Z released by alice
+  ```
+
+  (identical to the run above — the `set` changed nothing `log` can see.
+  Leave a `nj note` if a field change is worth remembering later.)
+- **Claim history is local, and archiving erases it outright.**
+  `.nanojira/claims/` is git-ignored (one of the lines `nj init` writes
+  into `.gitignore`, § 2 above; spec § 12a), so a fresh
+  clone shows `created` and notes only — the claims happened, but their
+  record never left the machine that made them. `archive` goes further:
+  it deletes `.nanojira/claims/<id>/` as part of the move, so `log`
+  loses the claim events even on the machine that made them:
+
+  ```sh
+  $ nj archive --id=TSK-001
+  $ nj log --id=TSK-001
+  2026-10-05T22:43:37Z created
+  2026-10-05T22:43:40Z alice: Parser splits at the first colon
+  ```
+
+  (the `claimed`/`released` pair is gone; `created` and the note
+  survive.)
+
+For a git-backed backlog, `git log -p -- backlog/tasks/TSK-001.md` is the
+manual complement for the one thing `log` doesn't show: field-level diffs,
+at the cost of only seeing whatever was actually committed, in whatever
+granularity your commits happen to have.
+
+## 16. `nj check`
 
 Ticks or unticks one Markdown checkbox in the body, without touching
 anything else:
@@ -440,7 +566,7 @@ TSK-001 checked
   matched. `--text` naming zero countable checkboxes is `not_found`; two or
   more is `ambiguous_target`.
 
-## 15. `nj find`
+## 17. `nj find`
 
 Full-text search over title, body and notes:
 
@@ -462,7 +588,7 @@ match each other; `--case-sensitive` for an exact match. Combines with
 `--assignee`) as an AND; `--all` includes the archive. The literal empty
 string is `invalid_value`.
 
-## 16. Batch writes: `--id=A,B,C`
+## 18. Batch writes: `--id=A,B,C`
 
 `set`, `note`, `check`, `claim` and `release` take a comma-separated `--id`
 to apply the same field map or action to several elements in one call:
@@ -479,7 +605,7 @@ competing claim) never stops the others. The result is `{ok, results:
 [{id, ok, …}]}` instead of one write's usual shape; a single `--id=A` (no
 comma) is unaffected.
 
-## 17. `nj-mcp` — the MCP wrapper
+## 19. `nj-mcp` — the MCP wrapper
 
 `dist/nj-mcp` is a second binary, built alongside `dist/nj`, that exposes
 the same commands as MCP tools over stdio instead of a CLI an agent has to
@@ -504,7 +630,7 @@ $ dist/nj-mcp --backlog=./backlog [--allow-destructive]
   { "command": "node", "args": ["/path/to/dist/nj-mcp", "--backlog=/path/to/backlog"] }
   ```
 
-## 18. Failure codes an agent should handle
+## 20. Failure codes an agent should handle
 
 With `--json`, `error` is one of a closed set. The ones an agent meets:
 

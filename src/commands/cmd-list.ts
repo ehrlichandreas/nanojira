@@ -90,4 +90,4 @@ function cmdList(flags: Flags) {
   return 0;
 }
 
-export { cmdList, applyFilters };
+export { cmdList, applyFilters, availableToActor };
