@@ -1037,6 +1037,34 @@ Written for adversarial review: if a line reads like a guess, challenge it.
       every group; `--fix` step 3 removes emptied hierarchy folders (names of
       ID shape only) with `rmdir`, never recursively.
 
+93. **V3-1 accepted; its verification findings ruled** (docs/verification/v3-1.md,
+    Verifier, commit d55db2d). Verdict *pass with findings*: every number
+    reproduced, the 19 replay diffs are exactly classes (a) (b) (d), and
+    `scratch/verify.js`'s one extra ✗ is class (e) of DECISIONS 90. Perf:
+    no regression against v2 in an interleaved A/B; absolute gate pending
+    (DECISIONS 90). **c3-baseline = `1e85263`** (V3-1 plus its D90 follow-up,
+    whose dangling-symlink fix the Verifier confirmed as F2).
+
+    - *F1 A planted `.njrc` steers other users* (`/tmp/.njrc` with
+      `backlog = ~/x` makes a victim's `nj init` create a backlog in their
+      HOME). Ruled: a reached `.njrc` must be owned by the current user or
+      root, else `invalid_njrc` — hard, like every other `.njrc` fault (§ 4).
+      A planted `backlog/` folder is not covered: it can only steer reads
+      and writes into the planter's own folder, as in v2.
+    - *F3 `doctor --fix` on a non-backlog* (`--backlog=.` one level too high)
+      wrote tombstones into a project directory. Ruled: `--fix` writes
+      nothing while `config:invalid` holds (§ 14).
+    - *F4 Stack traces on filesystem failures* (`init` into a read-only or
+      non-directory parent, deleted cwd). Ruled: new failure code
+      `io_error` (additive), one line naming the path and the OS reason,
+      never a stack.
+    - *F9 An unreadable folder is silently skipped* (`chmod 000 tasks/` →
+      `list` succeeds, `doctor` clean). Ruled: new backlog-level problem
+      code `backlog:unreadable_dir`, error — with V3-2, which rewrites the
+      scan anyway.
+    - *F6* (a repeated flag: the last wins) and *F7* (a relative `--backlog`
+      resolves against the physical cwd) are v2 behaviour, kept, not pinned.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now
