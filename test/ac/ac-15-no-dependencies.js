@@ -4,9 +4,21 @@
  * § 15 AC-15: "No dependencies. `nj` runs on the Node from `runtime/`, without
  * `node_modules`, without network."
  *
- * § 3 Runtime: Node.js ≥ 24, from workspace/portable/runtime/<platform>/bin/node.
- *   Dependencies: none — Node built-ins only. Entry point: one executable
- *   script `nj`.
+ * § 3 Runtime (current wording, DECISIONS 83): Dependencies — none at
+ *   runtime: no external service (not Jira, not any other), `dist/nj` runs
+ *   as one file without `node_modules` and without network; build-time
+ *   tooling may declare `devDependencies`. Entry point: one executable
+ *   script, `dist/nj`.
+ *
+ * "No dependencies" was misread once as "no npm packages at all" and
+ * tightened on that misreading (an earlier revision of this file scanned the
+ * WHOLE PROJECT for any `node_modules` directory and failed if one existed
+ * anywhere — which would have turned red the day build tooling first ships a
+ * `devDependencies` entry, § 3's own planned next step, TSK-021). That check
+ * is gone. What § 3 actually promises is narrower and is checked directly
+ * below: `dist/nj`, copied ALONE into a bare directory with nothing else
+ * beside it, still runs — the shipped file does not reach for a
+ * `node_modules` the project may have for its own build tooling.
  *
  * The harness reads NJ_NODE when it is loaded, so it is set before the require
  * below — otherwise `nj` would be driven by whatever Node runs this test and
@@ -15,7 +27,8 @@
  *
  * "Without network" is not observable from a spawned process without a
  * sandbox; what is observable is that no module outside the Node distribution
- * can be loaded, which is what NODE_PATH and the node_modules scan below pin.
+ * can be loaded, which is what NODE_PATH below pins, and which the lone-copy
+ * check below pins for `dist/nj` specifically.
  */
 const PORTABLE = '/home/dev/workspace/portable';
 const PLATFORM = process.platform === 'darwin' ? 'darwin-arm64' : 'linux-x64';
@@ -24,7 +37,7 @@ if (!process.env.NJ_NODE) process.env.NJ_NODE = RUNTIME_NODE;
 
 const fs = require('fs');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
 const H = require('../lib/harness.js');
 const T = H.T;
 
@@ -53,35 +66,52 @@ const PROJECT = path.resolve(__dirname, '..', '..');
   }
 }
 
-/* ---- no node_modules anywhere under the project ------------------------- */
+/* ---- dist/nj runs alone, without any node_modules beside it (§ 3) ------- */
 
 {
-  /* Symlinks are neither followed nor counted: a link into a shared store is
-   * not a dependency shipped with the project. */
-  function scanNodeModules(root) {
-    const hits = [];
-    let dirs = 0;
-    const stack = [root];
-    while (stack.length) {
-      const dir = stack.pop();
-      let entries;
-      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (e) { continue; }
-      dirs++;
-      for (const e of entries) {
-        if (!e.isDirectory()) continue;
-        const p = path.join(dir, e.name);
-        if (e.name === 'node_modules') { hits.push(p); continue; }
-        stack.push(p);
-      }
-    }
-    return { hits: hits.sort(), dirs: dirs };
-  }
+  const distNj = path.join(PROJECT, 'dist', 'nj');
+  const distExists = fs.existsSync(distNj);
+  T.check('dist/nj exists (§ 3: what ships)', distExists, distNj);
 
-  const res = scanNodeModules(PROJECT);
-  T.check('the project ships no node_modules directory', res.hits.length === 0,
-    res.hits.join(', '));
-  T.check('the scan really walked the project tree (the check above is not vacuous)',
-    res.dirs >= 3, 'directories visited: ' + res.dirs);
+  if (distExists) {
+    /* A bare directory: nothing else in it, not `lib/`, not `node_modules`,
+     * not `package.json`. If `dist/nj` were not genuinely self-contained —
+     * still `require`-ing a sibling `lib/` instead of carrying every module
+     * inline — this is where that would show up as MODULE_NOT_FOUND, not as
+     * a passing scan of the project root that never asked the file itself. */
+    const scratch = H.freshDir('ac15-dist-alone');
+    const lonelyNj = path.join(scratch, 'nj');
+    fs.copyFileSync(distNj, lonelyNj);
+    fs.chmodSync(lonelyNj, 0o755);
+    T.eq('nothing was copied alongside dist/nj — it runs on its own or not at all',
+      JSON.stringify(fs.readdirSync(scratch)), JSON.stringify(['nj']));
+
+    const runLonely = (args, opts) => {
+      const o = opts || {};
+      const r = spawnSync(RUNTIME_NODE, [lonelyNj].concat(args), {
+        cwd: scratch, env: Object.assign({}, process.env, { NJ_NOW: H.FIXED_NOW }, o.env),
+        encoding: 'utf8', timeout: 30000,
+      });
+      return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
+    };
+
+    const init = runLonely(['init']);
+    T.exit('the lone copy inits a backlog with no node_modules beside it', init, 0);
+
+    const newEpic = runLonely(['new', '--type=epic', '--title=Auth']);
+    T.exit('the lone copy creates an epic', newEpic, 0);
+
+    const json = runLonely(['list', '--json'], { env: { NODE_PATH: '' } });
+    T.exit('the lone copy reads its own backlog, NODE_PATH emptied', json, 0);
+    let parsed = null;
+    try { parsed = JSON.parse(json.stdout); } catch (e) { /* reported below */ }
+    T.check('the read works with nothing beside the file but the backlog it created',
+      !!(parsed && Array.isArray(parsed.entries) && parsed.entries.length === 1),
+      (json.stderr || J(parsed)).slice(0, 300));
+
+    T.check('still nothing else appeared beside it — no node_modules was pulled in',
+      JSON.stringify(fs.readdirSync(scratch).sort()), JSON.stringify(['backlog', 'nj']));
+  }
 }
 
 /* ---- the CLI works under that Node, with and without NODE_PATH ---------- */

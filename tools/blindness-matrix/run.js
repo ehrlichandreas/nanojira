@@ -1,13 +1,23 @@
 'use strict';
-// Blindness matrix: one-part mutants of nj (copies) × every oracle suite.
+// Blindness matrix: one-part mutants of the code under test (copies) × every oracle suite.
 // A suite is BLIND to a part when the mutant altered that part (hit logged) and the suite stayed green.
 //
 //   node run.js <repo> [--nj=<path>] [--compare=<before.json>] [mutant …]
 //
-// --nj       mutation base (default <repo>/nj). Before/after runs must share it.
-// --compare  a previous result file; aborts when its nj sha differs, then prints
-//            per-mutant regressions (blind gained, covering lost).
-// Result file: /tmp/blind/matrix-<testDigest8>-<njSha8>.json, header inside.
+// --nj       entry point of the mutation base (default <repo>/nj). The code
+//            under test is that file PLUS every lib/*.js beside it — the same
+//            set tools/refactor-harness/baseline.js hashes as codeSha. A base
+//            without lib/ (c1-baseline) is simply nj alone.
+//            Before/after runs must share the base.
+// --compare  a previous result file; aborts when its code identity differs,
+//            then prints per-mutant regressions (blind gained, covering lost).
+// Result file: /tmp/blind/matrix-<testDigest8>-<codeSha8>.json, header inside.
+//
+// Each mutant is a DIRECTORY copy (entry + lib/), because since the module
+// split a lone mutated nj dies on its first require(). A needle is looked up
+// in the entry and in every lib/*.js and mutated where it is found; a needle
+// that matches in more than one file is an error, not a hit — the mutant would
+// otherwise silently change two places, or the wrong one.
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -19,11 +29,28 @@ const REPO = args.find(a => !a.startsWith('--'));
 const ONLY = args.filter(a => !a.startsWith('--')).slice(1);
 const NODE = process.execPath;
 const ROOT = '/tmp/blind';
-const NJ_PATH = opt('nj') || path.join(REPO, 'nj');
+const NJ_PATH = path.resolve(opt('nj') || path.join(REPO, 'nj'));
 const COMPARE = opt('compare');
-const NJ_SRC = fs.readFileSync(NJ_PATH, 'utf8');
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');
+
+/* The code under test, keyed by its path inside a mutant directory: the entry
+ * is always written as `nj`, modules as `lib/<name>.js` — the layout the
+ * entry's `require('./lib/…')` expects. */
+const LIB_DIR = path.join(path.dirname(NJ_PATH), 'lib');
+const LIB_FILES = fs.existsSync(LIB_DIR)
+  ? fs.readdirSync(LIB_DIR).filter(n => n.endsWith('.js')).sort() : [];
+const SOURCES = Object.assign({ nj: fs.readFileSync(NJ_PATH, 'utf8') },
+  ...LIB_FILES.map(n => ({ ['lib/' + n]: fs.readFileSync(path.join(LIB_DIR, n), 'utf8') })));
+
+/* Byte-for-byte the identity baseline.js codeSha() computes: one line per
+ * file, entry first under its own basename, then lib/ sorted. Hashing nj
+ * alone would name a 56-line entry point and miss every change in lib/. */
+function codeSha() {
+  const lines = [`${sha256(fs.readFileSync(NJ_PATH))}  ${path.basename(NJ_PATH)}\n`]
+    .concat(LIB_FILES.map(n => `${sha256(fs.readFileSync(path.join(LIB_DIR, n)))}  lib/${n}\n`));
+  return sha256(lines.join(''));
+}
 
 // Same scope and folding as tools/refactor-harness/baseline.js testDigest().
 const DIGEST_SCOPE = ['ac', 'edge', 'fault', 'golden', 'lib', 'run-all.js', 'stress'];
@@ -85,17 +112,33 @@ const PROBES = {
   'probe-fix-notes-prose': ['for (const n of notes) out(`NOTE    ${n}`);', "for (const n of notes) { __hit('probe-fix-notes-prose'); }", 1],
 };
 
+/* Returns { nj: <path of the mutant's entry>, file: <file that was mutated> }. */
 function build(name) {
   const [needle, repl, n] = MUTANTS[name] || PROBES[name] || (() => { throw new Error('unknown mutant ' + name); })();
-  const count = NJ_SRC.split(needle).length - 1;
+  const matches = Object.entries(SOURCES)
+    .map(([rel, src]) => [rel, src.split(needle).length - 1]).filter(([, c]) => c > 0);
+  if (matches.length > 1) {
+    throw new Error(name + ': needle matches in more than one file (' +
+      matches.map(([rel, c]) => rel + '×' + c).join(', ') + ') — an error, not a hit');
+  }
+  const count = matches.length ? matches[0][1] : 0;
   if (count !== n) throw new Error(name + ': needle found ' + count + 'x, expected ' + n);
-  let src = NJ_SRC.split(needle).join(repl);
-  src = src.replace("'use strict';\n", "'use strict';\n" + HIT);
+  const target = matches[0][0];
+  const anchor = "'use strict';\n";
+  if (!SOURCES[target].includes(anchor)) throw new Error(name + ': ' + target + " has no 'use strict'; line to put __hit() after");
+
+  /* A fresh directory every time: a mutant dir left over from an earlier base
+   * could still hold modules this base does not have. */
   const dir = path.join(ROOT, 'mut', name);
-  fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, 'nj');
-  fs.writeFileSync(file, src);
-  return file;
+  fs.rmSync(dir, { recursive: true, force: true });
+  fs.mkdirSync(path.join(dir, 'lib'), { recursive: true });
+  for (const [rel, src] of Object.entries(SOURCES)) {
+    const out = rel === target
+      ? src.split(needle).join(repl).replace(anchor, anchor + HIT)   // __hit() lives in the mutated file
+      : src;
+    fs.writeFileSync(path.join(dir, rel), out);
+  }
+  return { nj: path.join(dir, 'nj'), file: target };
 }
 
 function suites() {
@@ -148,7 +191,9 @@ const classify = (row) => {
 (async () => {
   const header = {
     testDigest: testDigest(path.join(REPO, 'test')),
-    njSha256: sha256(NJ_SRC),
+    codeSha256: codeSha(),
+    codeFiles: Object.keys(SOURCES).length,
+    njSha256: sha256(SOURCES.nj),       // the entry alone — kept for older result files
     njPath: NJ_PATH,
     node: process.version,
     date: new Date().toISOString(),
@@ -157,21 +202,37 @@ const classify = (row) => {
   if (COMPARE) {
     before = JSON.parse(fs.readFileSync(COMPARE, 'utf8'));
     if (!before.header) { console.error('COMPARE ABORTED: ' + COMPARE + ' has no header — not a comparable run'); process.exit(2); }
-    if (before.header.njSha256 !== header.njSha256) {
-      console.error('COMPARE ABORTED: nj sha differs — before ' + before.header.njSha256.slice(0, 8) +
-        ', now ' + header.njSha256.slice(0, 8) + '. Before/after must mutate the same base nj (--nj=<path>).');
+    /* Identity is the whole code under test. A result file from before the
+     * split carries only njSha256; that identifies its base completely only
+     * when this base is single-file too, so it is accepted only then. */
+    const same = before.header.codeSha256
+      ? before.header.codeSha256 === header.codeSha256
+      : LIB_FILES.length === 0 && before.header.njSha256 === header.njSha256;
+    if (!same) {
+      const was = before.header.codeSha256 ? 'code ' + before.header.codeSha256.slice(0, 8)
+        : 'nj ' + before.header.njSha256.slice(0, 8) + ' (single-file, pre-split header)';
+      console.error('COMPARE ABORTED: code identity differs — before ' + was + ', now code ' +
+        header.codeSha256.slice(0, 8) + ' (' + header.codeFiles + ' files). Before/after must mutate the same base (--nj=<path>).');
       process.exit(2);
     }
   }
   const names = ONLY.length ? ONLY : Object.keys(MUTANTS);
   const all = suites();
-  const file = path.join(ROOT, 'matrix-' + header.testDigest.slice(0, 8) + '-' + header.njSha256.slice(0, 8) + '.json');
+  const file = path.join(ROOT, 'matrix-' + header.testDigest.slice(0, 8) + '-' + header.codeSha256.slice(0, 8) + '.json');
   const result = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : { header, mutants: {} };
   result.header = Object.assign({}, result.header, header, { suites: all.length });
-  console.log('test digest ' + header.testDigest.slice(0, 8) + '  nj ' + header.njSha256.slice(0, 8) + '  suites ' + all.length + '  → ' + file);
+  console.log('test digest ' + header.testDigest.slice(0, 8) + '  code ' + header.codeSha256.slice(0, 8) +
+    ' (' + header.codeFiles + ' files)  suites ' + all.length + '  → ' + file);
+
+  /* Build every mutant before running a single suite: a needle that no longer
+   * matches, or matches in two files, fails here in a second — not after half
+   * an hour of suites against the mutants that happened to come first. */
+  const built = {};
+  for (const name of names) built[name] = build(name);
+  for (const name of names) console.log('  built ' + name.padEnd(26) + '→ ' + built[name].file);
 
   for (const name of names) {
-    const nj = build(name);
+    const nj = built[name].nj;
     const res = await pool(all, 4, s => runSuite(nj, name, s));
     result.mutants[name] = {};
     const brokeUnhit = [];

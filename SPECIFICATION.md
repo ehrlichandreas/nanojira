@@ -50,9 +50,29 @@ allowed; only its *position* matters.
 | | |
 |---|---|
 | Language | Node.js ≥ 24, from `workspace/portable/runtime/<platform>/bin/node` |
-| Dependencies | **none** — Node built-ins only |
+| Dependencies | **none** at runtime — no external service, `dist/nj` runs as one file without `node_modules` and without network; build-time tooling may declare `devDependencies` |
 | Platforms | `darwin-arm64`, `linux-x64` (the portable tool tree's platforms) |
-| Entry point | one executable script `nj` (shebang `#!/usr/bin/env node`; where `PATH` may lack Node ≥ 24, invoke as `<runtime-node> nj`) |
+| Entry point | one executable script, `dist/nj` (shebang `#!/usr/bin/env node`; where `PATH` may lack Node ≥ 24, invoke as `<runtime-node> dist/nj`) |
+
+What ships is `dist/nj`, a single file. It is built by `node tools/build.js`
+from the sources — the entry `nj` and the modules in `lib/` — and it is
+committed: a fresh build must be byte-identical to the committed file
+(`node tools/build.js --check`), so a stale bundle fails at once. Whoever
+changes `nj` or `lib/` rebuilds and commits `dist/nj` in the same commit. The
+oracle and the recorded corpus run against `dist/nj`, and against the sources,
+which behave identically. `package.json` carries metadata, `bin`, the `build`
+and `test` scripts, and may carry `devDependencies` for build-time tooling
+(round one: none — TypeScript and esbuild are planned, after this revision);
+it carries no runtime `dependencies` and no `type` field.
+
+"Dependencies: none" names what `nj` depends on to run — not on Jira, not on
+any other external service, and not on a package fetched at runtime. It was
+misread once as "no npm packages at all" and tightened on that misreading
+(`dist/nj` briefly required no dependency "at build time" either); that
+reading is withdrawn (DECISIONS 83). Development tooling choosing its own
+libraries — a bundler, a type checker — does not compromise what round one
+actually promises: a single shipped file, no `node_modules`, no network, at
+the moment an agent runs `nj`.
 
 Python is ruled out: the tool tree ships Node for both platforms and only
 macOS system Python.

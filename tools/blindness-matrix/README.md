@@ -6,10 +6,19 @@ directory. It is the only thing that measures whether the oracle would
 
 ## What it does
 
-For each named mutant it copies `nj`, applies **one** textual change to a
-single behaviour, injects a `__hit()` probe at the mutated site, and runs
-every suite under `test/ac`, `test/fault` and `test/edge` against the copy.
-The repo's own `nj` is never touched.
+For each named mutant it copies the code under test — `nj` **plus every
+`lib/*.js` beside it** — into its own directory, applies **one** textual
+change to a single behaviour, injects a `__hit()` probe into the file it
+changed, and runs every suite under `test/ac`, `test/fault` and `test/edge`
+against the copy. The repo's own code is never touched.
+
+Since the module split (`ceb5dac`) `nj` is a 56-line entry point and the code
+lives in 21 modules, so a mutant has to be a directory: a lone mutated `nj`
+dies on its first `require('./lib/…')`. The needle is looked up in `nj` and in
+every module, and mutated where it is found. **A needle that matches in more
+than one file is an error, not a hit** — it would change two places, or the
+wrong one. A base without `lib/` (such as `c1-baseline`) is just `nj` alone,
+so pre-split bases still work unchanged.
 
 Each (mutant, suite) pair lands in one of three states:
 
@@ -31,17 +40,27 @@ $NODE tools/blindness-matrix/run.js /abs/path/to/repo            # every mutant
 $NODE tools/blindness-matrix/run.js /abs/path/to/repo doc-sum-warn
 # before/after around a test/ change — same base nj, compared automatically:
 $NODE tools/blindness-matrix/run.js $REPO --nj=/tmp/base-nj
-$NODE tools/blindness-matrix/run.js $REPO --nj=/tmp/base-nj --compare=/tmp/blind/matrix-<digest8>-<nj8>.json
+$NODE tools/blindness-matrix/run.js $REPO --nj=/tmp/base-nj --compare=/tmp/blind/matrix-<digest8>-<code8>.json
 ```
 
-The result file names what it measured: `/tmp/blind/matrix-<testDigest8>-<njSha8>.json`,
+`--nj=` names the **entry point**; `lib/` next to it belongs to the base. To
+pin a split base, extract both — `git archive <ref> nj lib | tar -x -C /tmp/base`
+and pass `--nj=/tmp/base/nj` — never `git checkout <ref> -- …`, which writes
+the shared index.
+
+The result file names what it measured: `/tmp/blind/matrix-<testDigest8>-<codeSha8>.json`,
 with the full `testDigest` (same scope and folding as the refactor harness),
-`njSha256`, node version and date in a `header`. Two runs are comparable only
-when their `njSha256` agree — `--compare` refuses otherwise, with its own
-message, because the mutants are textual edits of that one `nj` and a
-different base is a different mutant set. Prefer `--nj=` pointing at the
-baseline (`git show c1-baseline:nj > /tmp/base-nj`): the needles were written
-against it, and the oracle is green on it.
+`codeSha256` over `nj` + `lib/` (byte-identical to `codeSha()` in
+`tools/refactor-harness/baseline.js`), the entry-only `njSha256`, node version
+and date in a `header`. Two runs are comparable only when their code identity
+agrees — `--compare` refuses otherwise, with its own message, because the
+mutants are textual edits of that code and a different base is a different
+mutant set. Result files from before the split carry only `njSha256`; they
+are accepted only against a single-file base, because for a split base the
+entry alone no longer identifies the code.
+
+Every mutant is built **before** the first suite runs, so a needle that
+drifted fails in a second instead of after half an hour of runs.
 
 Per-suite hit logs land under `/tmp/blind/hits/<mutant>/`. A new mutant is a
 few lines in the `MUTANTS` table: `name → [needle, replacement, expectedNeedleCount]`.

@@ -865,7 +865,30 @@ the corpus held nothing either. It is the only gap of that kind found so far.
 The fixture closes the corpus half; the spec half is open.
 
 *Affects:* TSK-016's fixture (AC-2). AC-3, the mutant as counter-proof, is
-still outstanding.
+measured, not outstanding:
+
+**AC-3, measured.** A mutant of `lib/parse.js`'s `sectionPresent()` flipping
+the reading to the counter-reading above (only the FIRST matching heading
+decides completeness, mirroring the write side's own "first match wins")
+was run against both nets separately.
+
+- **The oracle (`test/`): BLIND.** All 62 suites pass unchanged — the same
+  result AMBIGUITIES predicted from § 7's silence, now measured rather than
+  assumed.
+- **The corpus (`verify`): CATCHES it.** `BEHAVIOUR CHANGED — 31 differing
+  call(s)`, exit 1, every one of them a `dblhead-*` scenario (and the
+  downstream `probe:*` re-reads after the mutating write) — no unrelated
+  drift. The fixture (TSK-016, AC-2) is what makes this possible: without
+  it, no recorded call would reach the state at all and this net would be
+  blind too.
+
+So today's net effect is one working detector, not two: the corpus holds
+this reading exactly because it was recorded, and stops working the moment
+the corpus goes stale relative to the code under test — the same condition
+`verify`'s own `ABORT` paths already guard (a stale `test/` digest, a
+changed oracle suite list, a mismatched header). The oracle stays blind
+until § 7's silence on the read-side tie-breaker is ruled on; nothing short
+of that reading closes it there.
 
 
 ## 45–46. Two prose forms the spec only shows for a neighbouring command — RULED: NOT PINNED
