@@ -5,6 +5,161 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nanojira --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 4.1.0
+
+Additive, except two breaks: `new --input=… --dry-run` returns a new
+shape (see the `--dry-run` entry below), and a backlog search that hits
+a directory it cannot look into now stops with `io_error` (see the last
+fix below).
+
+- **`nanojira tags` and a generated `TAGS.md`.** `TAGS.md` lists every tag
+  in use and how many elements carry it, regenerated the same way
+  `STATUS.md` is — gated by `layout.tagsFile` (default `true`), flagged
+  stale by `doctor` (`backlog:tags_stale`, a warning) and rewritten by
+  `doctor --fix`. The new read-only `nanojira tags [--json]` answers the
+  same question on demand, without depending on the generated file at
+  all. Introducing a tag that looks like a drifted spelling of one
+  already in use (`back-end` next to `backend`, `Bug` next to `bug`)
+  prints a non-blocking warning to stderr from `new` or `set --tags=`/
+  `--add-tags=` — never affects the exit code, never appears in
+  `--json`; there is still no closed tag vocabulary to enforce. See
+  `docs/GUIDE.md` § 24 for the batch recipe to heal a tag that already
+  drifted.
+
+- **Configurable `ids/` sharding for large backlogs.** A backlog can set
+  `ids.shardSize: <n>` (an optional top-level config key, default `0` =
+  today's flat layout) to bucket tombstones at
+  `ids/<TYPE>/<bucket>/<TYPE>-<n>` instead of the flat `ids/<TYPE>-<n>`,
+  bounding how many files sit in any one directory as a backlog grows. Switching `shardSize` on a backlog whose tombstones already
+  exist in the other layout is `backlog:ids_layout_mismatch` (error)
+  until `nanojira doctor --fix` migrates them in place. See
+  `docs/SPECIFICATION.md` § 5.
+
+- **`--fields=<a,b,...>` and `--quiet` on write commands; `nanojira note
+  --text=`/`--text-file=`.** `new`, `set`, `note`, `check`, `claim` and
+  `release` accept `--quiet` (always `{ok, id}`, plus `_problems` when
+  non-empty) or `--fields=<a,b,...>` (the `entry` cut down to just those
+  names, in the order given) to shrink a `--json` write result — both
+  require `--json`, are mutually exclusive with each other and with
+  `--input`, and never shrink a failed result; without either flag the
+  output is byte-identical to before. `nanojira note` now also accepts its
+  text as `--text=<t>` or `--text-file=<path|->`, not only positionally;
+  giving more than one source is `invalid_value`. See `docs/GUIDE.md`
+  § 25. (scans-team, TSK-004 and TSK-006)
+
+- **`SKILL.md` is slimmer; `references/*.md` ships in every export.**
+  `SKILL.md` is loaded on every use, so it now carries only what an
+  agent needs daily; packaging detail, the no-symlink rationale and the
+  bug-report process moved to `references/packaging-and-feedback.md`,
+  which `SKILL.md` names by path and `node tools/export-skill.mts` now
+  copies alongside `bin/`/`dist/`/`LICENSE`. See `docs/GUIDE.md` § 26 for
+  the new umbrella-ticket recipe — parent a ticket's parts so the
+  existing `refused:children_open` protects it from closing early
+  (that refusal itself is not new, only the recipe for using it).
+  (scans-team, TSK-009, TSK-010 and TSK-012)
+
+- **`NJ_NOW` is now documented as what it has always been: a
+  verification/testing hook, not a feature for daily use.** See
+  `docs/GUIDE.md` § 29. (scans-team, TSK-008)
+
+- **An invalid `NJ_NOW` is refused up front, by every command.** It exits
+  1 with `invalid_env` before anything is read or written. This covers
+  reads, writes, `--dry-run` and bare `nanojira`. `--version`, `--help`
+  and `help` are unaffected. See `docs/SPECIFICATION.md` § 12.
+  - Before, the check ran only at the first clock read. So `list` passed on
+    a backlog without claims but failed once an element was claimed.
+  - A `new` checked that late could also burn an ID before refusing.
+
+- **Agent guidance: update `nanojira` first, report externally
+  second.** No command, flag or output change: `docs/AGENT-INSTRUCTIONS.md`
+  now tells an agent running `nanojira`
+  alongside an external coordination system (a team board, chat, ticket
+  tracker) to update `nanojira` first and report completion externally
+  second, never the other way around — `nanojira` has no daemon and never
+  notices the external side on its own.
+
+- **`nanojira show --notes=none|all|last:N` and `nanojira log
+  --last=N`.** `show --notes=` narrows how many notes the body prints —
+  `none` hides them all, `last:N` keeps the `N` newest — behind a
+  one-line placeholder naming how many are hidden; it works with or
+  without `--json`. `log --last=N` keeps the newest `N` events of any
+  kind. With `--json`, giving either flag adds the visible subset plus
+  the real count (`notes`/`notes_total` on each entry, `events_total` on the
+  `log` result); leaving the flag off keeps the output byte-identical to
+  before. An unknown value or a non-positive `N` is `invalid_value`. See
+  `docs/GUIDE.md` § 27. (scans-team, TSK-005)
+
+- **`--dry-run` on every write command.** `init`, `new`, `set`, `note`,
+  `check`, `claim`, `release`, `next`, `archive`, `unarchive`, `rm` and
+  `doctor --fix` take `--dry-run`: the unchanged command runs against a
+  scratch copy of the backlog, so the result, refusal code, exit code and
+  any id are exactly those of the real call, and nothing in the real
+  backlog is written. The result gains `dry_run: true` and `changes` —
+  every path the call would touch, with its full content before and
+  after. Ids a dry run shows are not reserved. Read-only commands reject
+  `--dry-run` as `unknown_field`; plain `doctor` as `invalid_value`. See
+  `docs/GUIDE.md` § 28. (scans-team, TSK-007)
+
+  **Breaking for `new --input=… --dry-run`:** it used to return a
+  preview of its own (`{ok, dry_run, entries}` with JSON-path parents
+  such as `"[0]"` and unresolved `@ref`s, D172). It now returns the real
+  call's result shape plus `dry_run`/`changes`: `parent` is the
+  would-be id, `@ref`s are resolved, and `ids`/`refs` are present.
+  `new --dry-run` without `--input` and `set --dry-run`, previously
+  rejected, now succeed. Check any script that parses the old preview.
+  DECISIONS 197.
+
+- **`NJ_ON_CHANGE`: push every write outward.** When the environment
+  variable `NJ_ON_CHANGE=<command>` is set, nanojira runs it with
+  `/bin/sh -c` in the backlog root after every successful write (`init`,
+  `new`, `set`, `note`, `check`, `claim`, `release`, `next` when it
+  claims, `archive`, `unarchive`, `rm`, `doctor --fix` when it fixed
+  something): the full `--json` result on stdin, `NJ_HOOK_COMMAND`,
+  `NJ_HOOK_IDS` and `NJ_BACKLOG` in its environment, once per call. It
+  never fires after a refusal, a read, a `--dry-run` or from inside a
+  hook. A failing or hung hook (`NJ_ON_CHANGE_TIMEOUT`, default 10 s)
+  only prints a warning on stderr: the write stands, the exit code and
+  stdout are unchanged. It is armed by the environment only — there is
+  no config key, so a cloned backlog can never make nanojira run code.
+  Without the variable nothing changes. nanojira still opens no network
+  connection itself. See `docs/GUIDE.md` § 30. (scans-team, TSK-011)
+
+- **Fix: `nanojira <command> --help` lists every flag the command
+  accepts.** It used to show only the field flags — `set --help` had no
+  `--json`, `--dry-run`, `--force`, `--input`, `--quiet`; `note --help`
+  only `--id`/`--file`/`--as` — and showed `--depends_on` where the docs
+  say `--depends-on`. Now every flag is listed, control flags included,
+  each with a one-line description, in its documented spelling; the
+  allowed values for `--type`/`--status`/`--priority` are shown as
+  before. The list comes from the same table the command validates its
+  flags against, so a flag `--help` shows is never `unknown_field`.
+  What each command accepts is unchanged.
+
+- **Fix (breaking): a backlog search that cannot look into a directory
+  says so.** Run below a directory you may not enter (or past a
+  `backlog` symlink loop), `list`, `doctor`, a bare `nanojira` and
+  `init` used to skip it and keep walking up — reporting `no_backlog`
+  with a hint to run `init`, or quietly using a backlog found further
+  up. They now stop there with `io_error` and one line naming the
+  directory and the OS reason, as `docs/SPECIFICATION.md` § 4 always
+  required, even when a backlog sits above it; `--backlog=` or
+  `NJ_BACKLOG` skips the search. A dangling `backlog` symlink is still
+  skipped.
+
+- Building from source only: every tool under `tools/` is TypeScript
+  now, run directly by Node 24 with no build step — `tools/bundle.mjs`
+  is `tools/bundle.ts` (`node tools/bundle.ts`), `tools/perf.mjs` is
+  `tools/perf.ts`. The exported skill folder is unaffected.
+
+- **The exported skill folder names the new features and points at the
+  full docs.** `SKILL.md` gains one line each for `--dry-run`,
+  `show --notes=last:N`/`log --last=N` and `NJ_ON_CHANGE` (environment
+  only, never config), still within its ~1000-token budget. The new
+  `references/full-docs.md` gives the GUIDE, SPECIFICATION and CHANGES
+  URLs at the release's own tag (`v<version>`, `<version>` being
+  `SKILL.md`'s `metadata.version`) and a map of every GUIDE section; the
+  docs themselves are not copied into the export.
+
 ## 4.0.0
 
 **Breaking: the CLI binary is renamed from `nj`/`nj-mcp` to

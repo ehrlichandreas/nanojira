@@ -17,7 +17,7 @@ import { FOLDER_ROLES, TYPE_FOLDER_ROLE } from './constants.ts';
 const INTERNAL_DIRS = ['.ids', '.nanojira'];
 // Human-facing files at the top of the backlog; everywhere else a `*.md` is
 // an element file (DECISIONS 91 B12).
-const TOP_LEVEL_DOCS = new Set(['README.md', 'STATUS.md']);
+const TOP_LEVEL_DOCS = new Set(['README.md', 'STATUS.md', 'TAGS.md']);
 
 /** A folder named like an element ID — the folders group `hierarchy` creates. */
 const ID_FOLDER = /^(EPIC|TSK|SUB)-\d+$/;

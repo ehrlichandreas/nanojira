@@ -5,14 +5,15 @@
 import type { Flags, Element, Context } from '../core/types.ts';
 
 import { resolveActingName } from '../core/actor.ts';
-import { checkFlags } from '../core/args.ts';
-import { cliFieldNames } from '../core/flag-table.ts';
+import { checkCommandFlags } from '../core/cli-flags.ts';
 import type { Entry } from '../core/claims.ts';
 import { transition } from '../core/claims.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { context, requireTargetFlagSyntax, resolveTarget, resolveById } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
 import { fail, out } from '../core/output.ts';
+import { recordChange } from '../core/on-change.ts';
+import { parseOutputOpts, trimResult } from '../core/result-opts.ts';
 import { nowIso } from '../core/store.ts';
 
 /** The release CAS loop for one element — never touches the file (§ 12a), so nothing here needs a catchable write; the single and batch paths share it unchanged. */
@@ -40,8 +41,9 @@ function releaseOne(ctx: Context, el: Element, name: string, ts: string) {
 }
 
 function cmdRelease(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', ...cliFieldNames('release')]), true);
+  checkCommandFlags(flags, 'release');
   const json = flags.has('json');
+  const opts = parseOutputOpts(flags, json);
   const ctx = context(flags);
 
   requireTargetFlagSyntax(flags);
@@ -56,7 +58,11 @@ function cmdRelease(flags: Flags) {
       (id) => resolveById(ctx, id, true),
       (el) => releaseOne(ctx, el, name, nowIso()),
     );
-    const wrapper = { ok: result.ok, results: result.results };
+    const results = opts.quiet || opts.fields !== undefined
+      ? result.results.map((r: any) => (r.ok ? trimResult(r, opts) : r))
+      : result.results;
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
+    const wrapper = { ok: result.ok, results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else {
       for (const r of result.results as any[]) {
@@ -70,10 +76,13 @@ function cmdRelease(flags: Flags) {
   const ts = nowIso();
   const single = releaseOne(ctx, el, name, ts);
 
+  // Field order: `ok` then `id` — see cmd-claim.ts's cmdClaim for why both
+  // keys are pre-seeded.
+  const built = Object.assign({ ok: (single as any).ok, id: el.id }, single);
+  recordChange(ctx.backlog, () => built);
   if (json) {
-    // Field order: `ok` then `id` — see cmd-claim.ts's cmdClaim for why both
-    // keys are pre-seeded.
-    out(JSON.stringify(Object.assign({ ok: (single as any).ok, id: el.id }, single), null, 2));
+    const final = opts.quiet || opts.fields !== undefined ? trimResult(built, opts) : built;
+    out(JSON.stringify(final, null, 2));
   } else {
     out(single.changed.length > 0 ? `${el.id} released by ${name}` : `${el.id} is already unclaimed`);
   }

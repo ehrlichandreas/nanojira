@@ -56,6 +56,16 @@ and subtasks, one Markdown file per element, committed alongside the code.
   "<your-name>"`; there's no separate `nanojira release` to remember afterward.
   If you're stopping *without* finishing, release explicitly instead:
   `nanojira release --id=<id> --as=<your-name>`, so someone else can claim it.
+- Running nanojira alongside an external coordination system (a team/chat
+  board, ticket tracker, anything outside nanojira itself)? Update nanojira
+  first — status, acceptance, notes — and only report completion on the
+  external system afterward, never the other way around. nanojira has no
+  daemon and no network (`next` is pull-only — docs/GUIDE.md § 14); an
+  optional `NJ_ON_CHANGE` hook (env only — docs/GUIDE.md § 30) can push
+  changes outward, but unless your environment sets one, nothing keeps it
+  in sync with an external system automatically, so if the external side
+  is marked done first, nanojira can only stay stale until someone
+  remembers to go back and fix it by hand.
 - Never hand-edit files under `backlog/` — always go through `nanojira`.
 - Tick acceptance criteria with `nanojira check --id=<id> --text="<substring>"`,
   never by editing the checkbox text yourself — and tick every box
@@ -68,7 +78,31 @@ and subtasks, one Markdown file per element, committed alongside the code.
   Never `nanojira rm` and recreate just to change where something sits; that
   loses the id, the history and any claim on it. The new parent must
   already exist, be live and be the right type, same as `new --parent`.
-- Sign notes with `nanojira note --id=<id> "..." --as=<your-name>`.
+- Sign notes with `nanojira note --id=<id> "..." --as=<your-name>` — or
+  `--text="..."` / `--text-file=<path|->` instead of the positional
+  argument, same content, same validation; exactly one of the three.
+- Only need to confirm a write happened, or just a couple of fields back?
+  `new`/`set`/`note`/`check`/`claim`/`release --json` accept `--quiet`
+  (`{ok, id}`, plus `_problems` when one is open) and
+  `--fields=<a,b,...>` (keeps `entry` only, cut down to those names, in
+  that order) instead of the full ~600-byte result — cheaper than piping
+  through `head`/`grep`, which risks silently parsing the wrong thing.
+  Both require `--json`, are mutually exclusive with each other and with
+  `--input`, and apply the same way to each successful member of a batch
+  `--id=A,B,C` result; a failed member is never shrunk.
+- A ticket with 20+ notes? Don't grep the `.md` file for the latest one —
+  `nanojira show --id=<id> --notes=last:1` (or `last:N`, or `none` to hide
+  them entirely) and `nanojira log --id=<id> --last=N` both narrow to the
+  newest `N` instead, with `--json` adding `notes_total`/`events_total` so
+  you still know how much you aren't seeing. Leaving either flag off is
+  the unchanged default (everything).
+- Need to see what a write would do before doing it? Add `--dry-run` to
+  any write command (`new`, `set`, `note`, `check`, `claim`, `release`,
+  `next`, `archive`, `unarchive`, `rm`, `init`, `doctor --fix`): nothing is
+  written, the result is the real call's own (same `error` code on a
+  refusal) plus `"dry_run": true` and `"changes"`, the files it would
+  create/modify/delete with their full contents. An id it shows is not
+  reserved, so read the id off the real call's result.
 - Picking up someone else's work, or just confused about an element?
   `nanojira log --id=<id> --json` shows what happened to it: when it was
   created, every claim/release (if made on this machine — that history

@@ -6,7 +6,8 @@ import type { Flags, Context, Element, EntryJson } from '../core/types.ts';
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { checkFlags, flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
+import { flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
+import { checkCommandFlags } from '../core/cli-flags.ts';
 import { TYPE_FOLDER_ROLE, TYPES, PARENT_TYPE, PRIORITIES, FIELD_ORDER, SECTION_ROLES, NEW_FIELDS, TYPE_PREFIX } from '../core/constants.ts';
 import { cliFieldNames } from '../core/flag-table.ts';
 import { readInputText, parseInputJson } from '../core/input.ts';
@@ -14,10 +15,13 @@ import { context } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
 import { folderOf, expectedPlace } from '../core/layout.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
-import { Fail, fail, hardExit, out, writeFeedback, emitWriteResult, output } from '../core/output.ts';
-import { serialize, normalizeTitle, normalizeSectionContent, sectionPresent, sectionHasCheckbox, applySections } from '../core/parse.ts';
+import { Fail, fail, hardExit, out, writeFeedback, buildWriteResult, emitWriteResult, output } from '../core/output.ts';
+import { recordChange } from '../core/on-change.ts';
+import { serialize, normalizeTitle, normalizeSectionContent, applySections } from '../core/parse.ts';
 import { valueHint } from '../core/suggest.ts';
+import { parseOutputOpts, emitWriteResultOpts } from '../core/result-opts.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags, warnTagNearMatches } from '../core/tags.ts';
 import { nowIso, allocateId, atomicWrite } from '../core/store.ts';
 
 /** Whether `dir` already holds a file named `name`, comparing case-insensitively. */
@@ -164,20 +168,20 @@ function buildBody(ctx: Context, type: string, cleanTitle: string, sections: Map
 }
 
 function cmdNew(flags: Flags) {
-  checkFlags(flags, cliFieldNames('new'), new Set(['json', 'input', 'dry-run']), true);
+  checkCommandFlags(flags, 'new');
   const json = flags.has('json');
+  const opts = parseOutputOpts(flags, json);
   const ctx = context(flags);
 
   const inputValue = flagString(flags, 'input');
-  const dryRun = flags.has('dry-run');
 
   if (inputValue !== undefined) {
     for (const f of cliFieldNames('new')) {
       if (flags.has(f)) fail('invalid_value', '--input cannot be combined with field flags');
     }
-    return cmdNewInput(ctx, inputValue, dryRun);
+    if (opts.quiet || opts.fields !== undefined) fail('invalid_value', '--input cannot be combined with --quiet or --fields');
+    return cmdNewInput(ctx, inputValue);
   }
-  if (dryRun) fail('invalid_value', '--dry-run requires --input');
 
   const { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections } =
     validateNewFlags(ctx, flags);
@@ -191,7 +195,7 @@ function cmdNew(flags: Flags) {
   // value, so the retry is bounded exactly as allocation itself is (§ 8).
   let id: string, dir: string, file: string;
   for (let attempt = 0; ; attempt++) {
-    id = allocateId(ctx.idsDir, type, ctx.elements);
+    id = allocateId(ctx.idsDir, type, ctx.elements, ctx.cfg.ids.shardSize);
     dir = path.join(ctx.backlog, ...newPlace(ctx, type, id, parent).split('/'));
     file = path.join(dir, id + '.md');
     if (!collidesCaseInsensitively(dir, id + '.md')) break;
@@ -219,13 +223,17 @@ function cmdNew(flags: Flags) {
   fs.mkdirSync(dir, { recursive: true });
   atomicWrite(file, serialize(fields, Array.from(fields.keys()), body));
 
+  if (tags !== undefined && tags.length > 0) warnTagNearMatches(tags, ctx.elements.flatMap((e) => e.tags));
+
   const el = loadElement(file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.concat([el]), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.concat([el]), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
 
   const changed: string[] = FIELD_ORDER.filter((f: string) => fields.has(f) && f !== 'created' && f !== 'updated')
     .concat(SECTION_ROLES.filter((r: string) => sections.has(r)));
-  if (json) emitWriteResult(true, el, changed, ctx.backlog, ctx.cfg);
+  recordChange(ctx.backlog, () => buildWriteResult(el, changed, ctx.backlog, ctx.cfg));
+  if (json) emitWriteResultOpts(true, el, changed, ctx.backlog, ctx.cfg, undefined, opts);
   else writeFeedback(el, ctx.cfg, `${id} created → ${file}`);
   return 0;
 }
@@ -463,48 +471,21 @@ function validatePlanNode(ctx: Context, node: FlatNode, flat: FlatNode[], seenRe
  * mistaken for an expected, catchable failure mode like a permissions error. */
 class InternalInvariantBroken extends Error {}
 
-function emitPlanFailure(e: Fail, failedAt: string, extra?: { created: string[]; refs: Record<string, string> }): number {
+function emitPlanFailure(e: Fail, failedAt: string, extra?: { created: string[]; refs: Record<string, string> }, backlog?: string): number {
   process.stderr.write(`Error: ${e.message}\n`);
   if (e.hint) process.stderr.write(`${e.hint}\n`);
-  if (output.json) {
-    const res: Record<string, unknown> = { ok: false, error: e.code };
-    if (e.hint) res.hint = e.hint;
-    if (extra) { res.created = extra.created; res.refs = extra.refs; }
-    res.failed_at = failedAt;
-    out(JSON.stringify(res, null, 2));
-  }
+  const res: Record<string, unknown> = { ok: false, error: e.code };
+  if (e.hint) res.hint = e.hint;
+  if (extra) { res.created = extra.created; res.refs = extra.refs; }
+  res.failed_at = failedAt;
+  // A plan that stopped part way has still written `created` (§ 9
+  // "`NJ_ON_CHANGE`"): the hook hears about it, with this very result.
+  if (extra && backlog !== undefined) recordChange(backlog, () => res);
+  if (output.json) out(JSON.stringify(res, null, 2));
   return 1;
 }
 
-/** `--dry-run`'s would-be shape (§ 9, DECISIONS 172 item 5): exactly the
- * fields given (plus the resolved parent, a JSON path when implied), the
- * same "defaults never materialised" discipline real writes have — except
- * `tags`/`depends_on`, always present as arrays, matching `entryJson`'s own
- * convention for a real entry. */
-function dryRunEntry(ctx: Context, flat: FlatNode[], node: FlatNode, v: ValidatedNode): Record<string, unknown> {
-  const body = buildBody(ctx, v.type, v.cleanTitle, v.sections);
-  const e: Record<string, unknown> = { type: v.type };
-  const parent = v.parentMode === 'explicit' ? v.explicitParentId
-    : v.parentMode === 'implied' ? flat[v.parentIndex as number].path
-      : undefined;
-  if (parent !== undefined) e.parent = parent;
-  e.title = v.cleanTitle;
-  if (v.status !== undefined) e.status = v.status;
-  if (v.priority !== undefined) e.priority = v.priority;
-  if (v.assignee !== undefined && v.assignee !== '') e.assignee = v.assignee;
-  e.tags = v.tags || [];
-  e.depends_on = v.deps || [];
-  const probs: string[] = [];
-  if (!sectionPresent(body, ctx.cfg.sections.description)) probs.push('incomplete:description');
-  if (v.type !== 'epic') {
-    if (!sectionPresent(body, ctx.cfg.sections.acceptance)) probs.push('incomplete:acceptance');
-    else if (!sectionHasCheckbox(body, ctx.cfg.sections.acceptance)) probs.push('acceptance:no_checkbox');
-  }
-  e._problems = probs.sort();
-  return e;
-}
-
-function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
+function cmdNewInput(ctx: Context, inputValue: string) {
   const rawText = readInputText(inputValue);
   const parsed = parseInputJson(rawText);
   if (parsed === null || typeof parsed !== 'object') fail('invalid_value', '--input must be a JSON object or an array of objects');
@@ -547,13 +528,6 @@ function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
     }
   }
 
-  if (dryRun) {
-    const entries = flat.map((node, i) => dryRunEntry(ctx, flat, node, validated[i]));
-    if (output.json) out(JSON.stringify({ ok: true, dry_run: true, entries }, null, 2));
-    else for (const e of entries) out(`would create: ${(e as any).type} "${(e as any).title}"`);
-    return 0;
-  }
-
   let elements = ctx.elements.slice();
   const created: string[] = [];
   const realIdByIndex: (string | undefined)[] = [];
@@ -573,7 +547,7 @@ function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
 
       let id = '', dir = '', file = '';
       for (let attempt = 0; ; attempt++) {
-        id = allocateId(liveCtx.idsDir, v.type, liveCtx.elements);
+        id = allocateId(liveCtx.idsDir, v.type, liveCtx.elements, liveCtx.cfg.ids.shardSize);
         dir = path.join(liveCtx.backlog, ...newPlace(liveCtx, v.type, id, parentId).split('/'));
         file = path.join(dir, id + '.md');
         if (!collidesCaseInsensitively(dir, id + '.md')) break;
@@ -625,18 +599,21 @@ function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
       // to here changes nothing else.
       if (typeof node.raw.ref === 'string') refRealId.set(node.raw.ref, id);
 
+      if (v.tags !== undefined && v.tags.length > 0) warnTagNearMatches(v.tags, elements.flatMap((e) => e.tags));
+
       const el = loadElement(file, liveCtx.backlog, liveCtx.cfg);
       elements = elements.concat([el]);
-      deriveGraph(elements, liveCtx.idsDir, liveCtx.cfg.layout);
+      deriveGraph(elements, liveCtx.idsDir, liveCtx.cfg);
       entries.push(entryJson(el, ctx.backlog, ctx.cfg));
     } catch (e) {
       refreshStatus(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }) as Context);
+      refreshTags(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }) as Context);
       // A broken internal invariant (DECISIONS 174) must stay loud, not be
       // dressed up as a normal plan failure — it propagates uncaught, same
       // as any other `nanojira` bug.
       if (e instanceof InternalInvariantBroken) throw e;
       const extra = created.length > 0 ? { created, refs: Object.fromEntries(refRealId) } : undefined;
-      if (e instanceof Fail) return emitPlanFailure(e, labelOf(node), extra);
+      if (e instanceof Fail) return emitPlanFailure(e, labelOf(node), extra, ctx.backlog);
       // ANY other error — a raw OS error (EACCES, ENOSPC, …) from mkdirSync/
       // atomicWrite, not a `Fail` this command throws on purpose — is a
       // real, catchable mid-plan write failure (DECISIONS 174): reported as
@@ -647,11 +624,12 @@ function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
       // "anything that reaches here keeps its stack" convention.
       const err = e as { message?: string; stack?: string } | undefined;
       const wrapped = new Fail(err && err.stack ? err.stack : String(e), undefined, 'internal_error');
-      return emitPlanFailure(wrapped, labelOf(node), extra);
+      return emitPlanFailure(wrapped, labelOf(node), extra, ctx.backlog);
     }
   }
 
   refreshStatus(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }) as Context);
+  refreshTags(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }) as Context);
 
   if (isSingular && flat.length === 1) {
     const fields = lastFields as Map<string, string | string[]>;
@@ -659,14 +637,17 @@ function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
     const changed: string[] = FIELD_ORDER.filter((f: string) => fields.has(f) && f !== 'created' && f !== 'updated')
       .concat(SECTION_ROLES.filter((r: string) => sections.has(r)));
     const el = elements[elements.length - 1];
+    recordChange(ctx.backlog, () => buildWriteResult(el, changed, ctx.backlog, ctx.cfg));
     if (output.json) emitWriteResult(true, el, changed, ctx.backlog, ctx.cfg);
     else writeFeedback(el, ctx.cfg, `${created[0]} created → ${el.file}`);
     return 0;
   }
 
   const refsObj = Object.fromEntries(refRealId);
+  const built = { ok: true, ids: created, entries, refs: refsObj, _problems: [] };
+  recordChange(ctx.backlog, () => built);
   if (output.json) {
-    out(JSON.stringify({ ok: true, ids: created, entries, refs: refsObj, _problems: [] }, null, 2));
+    out(JSON.stringify(built, null, 2));
   } else {
     out(`created: ${created.join(', ')}`);
   }

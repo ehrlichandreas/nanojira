@@ -49,18 +49,17 @@ function osaDistance(a: string, b: string): number {
 }
 
 /**
- * The one suggestion, or null when none is unambiguous (§ 9, DECISIONS
- * 160): the synonym table first, verbatim; otherwise the allowed value(s)
- * at the smallest OSA distance, only when that distance is at or under
- * the length-dependent threshold — <= 1 for a value of <= 4 characters,
- * <= 2 otherwise, since for a short word distance 2 replaces half of it
- * (noise, not a hint) — AND exactly one allowed value reaches it. A tie,
- * or everything over the threshold, suggests nothing ("never guess wrong"
- * over "always say something").
+ * The allowed value(s) at the smallest OSA distance from `value`, only when
+ * that distance is at or under the length-dependent threshold — <= 1 for a
+ * value of <= 4 characters, <= 2 otherwise, since for a short word distance
+ * 2 replaces half of it (noise, not a hint) — AND exactly one allowed value
+ * reaches it. A tie, or everything over the threshold, suggests nothing
+ * ("never guess wrong" over "always say something"). The distance-only half
+ * of `suggestValue` below, factored out so a caller with no synonym table of
+ * its own (`--fields`, § 9 "`--fields` / `--quiet`") can reuse it without
+ * inventing one.
  */
-function suggestValue(field: VocabField, value: string, allowed: string[]): string | null {
-  const synonym = SYNONYMS[field][value];
-  if (synonym !== undefined && allowed.includes(synonym)) return synonym;
+function nearestMatch(value: string, allowed: string[]): string | null {
   const threshold = value.length <= 4 ? 1 : 2;
   let best: string[] = [];
   let bestDist = Infinity;
@@ -69,6 +68,16 @@ function suggestValue(field: VocabField, value: string, allowed: string[]): stri
     if (d < bestDist) { bestDist = d; best = [v]; } else if (d === bestDist) best.push(v);
   }
   return bestDist <= threshold && best.length === 1 ? best[0] : null;
+}
+
+/**
+ * The one suggestion, or null when none is unambiguous (§ 9, DECISIONS
+ * 160): the synonym table first, verbatim; otherwise `nearestMatch`.
+ */
+function suggestValue(field: VocabField, value: string, allowed: string[]): string | null {
+  const synonym = SYNONYMS[field][value];
+  if (synonym !== undefined && allowed.includes(synonym)) return synonym;
+  return nearestMatch(value, allowed);
 }
 
 /** The hint text every `unknown <field> '<value>'` failure already builds,
@@ -80,5 +89,17 @@ function valueHint(field: VocabField, value: string, allowed: string[]): string 
   return suggestion === null ? known : `did you mean '${suggestion}'? ${known}`;
 }
 
+/**
+ * `valueHint`'s twin for a closed vocabulary with no field-specific label or
+ * synonym table (`--fields=<name>,...`, § 9 "`--fields` / `--quiet`"):
+ * `label` fills the same slot `FIELD_LABEL[field]` does above (plural noun,
+ * e.g. "entry fields"), `nearestMatch` alone decides the suggestion.
+ */
+function listHint(label: string, value: string, allowed: string[]): string {
+  const known = `Known ${label}: ${allowed.join(', ')}`;
+  const suggestion = nearestMatch(value, allowed);
+  return suggestion === null ? known : `did you mean '${suggestion}'? ${known}`;
+}
+
 export type { VocabField };
-export { suggestValue, valueHint };
+export { suggestValue, valueHint, listHint, nearestMatch, osaDistance };

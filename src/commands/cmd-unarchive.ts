@@ -5,15 +5,16 @@
 import type { Flags, Element, Context } from '../core/types.ts';
 
 import * as path from 'path';
-import { checkFlags } from '../core/args.ts';
-import { cliFieldNames } from '../core/flag-table.ts';
+import { checkCommandFlags } from '../core/cli-flags.ts';
 import { removeClaimDirWholesale } from '../core/claims.ts';
 import { context, resolveTarget, requireWritable, requireNoStubs } from '../core/context.ts';
 import { elementProblems, entryJson } from '../core/derive.ts';
 import { ownFolder, placeOf, removeEmptiedIdFolders } from '../core/layout.ts';
 import { deriveGraph } from '../core/load.ts';
 import { fail, out } from '../core/output.ts';
+import { recordChange } from '../core/on-change.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 import { nowIso, atomicWrite, compareGuard, planMove, runMove, renderElement } from '../core/store.ts';
 import { loadElement } from '../core/load.ts';
 
@@ -72,7 +73,7 @@ function unitTarget(backlog: string, byId: Map<string, Element>, layout: Context
 }
 
 function cmdUnarchive(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', ...cliFieldNames('unarchive')]), true);
+  checkCommandFlags(flags, 'unarchive');
   const json = flags.has('json');
   const ctx = context(flags);
   // Backlog-wide, evaluated before the target is resolved (§ 11a, as `archive`).
@@ -157,15 +158,17 @@ function cmdUnarchive(flags: Flags) {
     return loadElement(file, ctx.backlog, ctx.cfg);
   });
 
-  deriveGraph(ctx.elements.filter((e: Element) => !stillArchived.includes(e)).concat(moved), ctx.idsDir, layout);
+  deriveGraph(ctx.elements.filter((e: Element) => !stillArchived.includes(e)).concat(moved), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
+  const built = {
+    ok: true, ids: moved.map((m) => m.id), changed: ['unarchived'],
+    entries: moved.map((m) => entryJson(m, ctx.backlog, ctx.cfg)),
+    _problems: Array.from(new Set(moved.flatMap((m) => elementProblems(m, ctx.cfg.problems.ignore)))).sort(),
+  };
+  recordChange(ctx.backlog, () => built);
   if (json) {
-    out(JSON.stringify({
-      ok: true, ids: moved.map((m) => m.id), changed: ['unarchived'],
-      entries: moved.map((m) => entryJson(m, ctx.backlog, ctx.cfg)),
-      _problems: Array.from(new Set(moved.flatMap((m) => elementProblems(m, ctx.cfg.problems.ignore)))).sort(),
-    }, null, 2));
+    out(JSON.stringify(built, null, 2));
   } else {
     for (const m of moved) out(`${m.id} unarchived → ${m.file}`);
   }

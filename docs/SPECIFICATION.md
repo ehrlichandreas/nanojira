@@ -57,7 +57,7 @@ allowed; only its *position* matters.
 | | |
 |---|---|
 | Language | Node.js ≥ 24, from `workspace/portable/runtime/<platform>/bin/node` |
-| Dependencies | **none** at runtime — no external service, the shipped `dist/*.mjs` bundles run without `node_modules` and without network; build-time tooling may declare `devDependencies` |
+| Dependencies | **none** at runtime — no external service, the shipped `dist/*.mjs` bundles run without `node_modules` and without network (an optional, environment-only `NJ_ON_CHANGE` hook, § 9, lets the caller push changes outward; nanojira itself opens no connection); build-time tooling may declare `devDependencies` |
 | Platforms | `darwin-arm64`, `linux-x64` (the portable tool tree's platforms) |
 | Entry point | `bin/nanojira` / `bin/nanojira-mcp` (POSIX sh, plus `.cmd` siblings for Windows) — generated wrapper scripts that locate and exec the ESM bundle beside them; see § 18 for the wrapper's own contract (node version check, `NJ_NODE`, exit 127 on failure to start) |
 
@@ -280,6 +280,19 @@ sources that is set:
    `backlog/`. So a `.njrc` in a repository root redirects the whole
    repository, while a project that has its own `backlog/` deeper down keeps
    it.
+   **"Not here" versus "could not look"** (DECISIONS 204, completing
+   DECISIONS 93 F4). Only a probe that fails with `ENOENT` or `ENOTDIR` —
+   nothing by that name in that directory — means "not here, go on to the
+   parent". Any other failure of a probe (`lstat` of the `.njrc`, `stat`
+   of `backlog/`) — `EACCES`/`EPERM` from an ancestor the user may not
+   search, `ELOOP` from a `backlog` symlink loop, an I/O error — means the
+   search could not look there: exit 1, `io_error`, exactly one stderr line
+   `cannot search <dir> for a backlog: <OS reason>`, never `no_backlog` and
+   never a walk on past it to a backlog further up. The search stops at the
+   first backlog or `.njrc` it finds, so nothing above that is ever probed.
+   A dangling `backlog` symlink is `ENOENT`: not here. `--backlog` and
+   `NJ_BACKLOG` skip the search entirely. `nanojira init`'s own upward
+   search for a `.njrc` (below) follows the same rule.
 4. **Nothing found: exit 1, `no_backlog`, hard error.** Never fall back to a
    relative path, never operate on an empty backlog, never auto-create
    outside `nanojira init`.
@@ -402,7 +415,8 @@ backlog = ../shared/backlog
       "subtasks": "subtasks",
       "archive": "archive"
     },
-    "statusFile": true
+    "statusFile": true,
+    "tagsFile": true
   }
 }
 ```
@@ -429,6 +443,9 @@ Rules:
   folder names under `hierarchy`). Under `hierarchy` and `flat` only
   `archive` is used; the other three are still validated.
 - `layout.statusFile`: `true` or `false` (§ 4, `STATUS.md`).
+- `layout.tagsFile`: `true` or `false` — same mechanism as `layout.statusFile`,
+  applied to `TAGS.md` (the tag vocabulary overview, § 7
+  `backlog:tags_stale`, `nanojira tags`).
 - While the configuration is invalid (`config:invalid`), no placement is
   judged: `type:folder` and `layout:misplaced` are not reported, because the
   layout they would be judged against is unknown (DECISIONS 102).
@@ -482,10 +499,24 @@ Rules:
   three dot-separated non-negative integers is `invalid_config` — a bad
   *value* for a recognised key, the same category `layout.statusFile: not
   a boolean` already is, not a version-skew question at all.
+- **`ids.shardSize`** (§ 8 "Identifiers"): an optional top-level
+  `"ids": {"shardSize": <n>}` block, not written by `init`. A non-negative
+  integer. Default when the key or the whole `ids` block is absent: **0**.
+  `0` (or the key absent) means today's flat `ids/<TYPE>-<n>` tombstone
+  layout — the same "`0` turns the feature off" reading
+  `claims.staleAfterHours: 0` already gets, never a literal divisor (that
+  would make the bucket arithmetic `Infinity`/`NaN`, not "one infinite
+  bucket"). A positive value buckets tombstones at
+  `ids/<TYPE>/<bucket>/<TYPE>-<n>`, `bucket = floor(n / shardSize)`, so no
+  single directory ever holds more than `shardSize` tombstones for a type.
+  A negative or non-integer value makes the configuration invalid
+  (`config:invalid`). Changing `shardSize` on a backlog whose tombstones
+  are already laid out the other way is `backlog:ids_layout_mismatch` (§ 7)
+  until `nanojira doctor --fix` moves them.
 - **Unknown keys are warnings, not errors** (DECISIONS 166, correcting
   165/163 D's own premise): an unknown **top-level** key (anything other
   than `schema`, `statuses`, `sections`, `layout`, `claims`, `problems`,
-  `minVersion`) — and, as of this same revision, an unknown key **inside**
+  `minVersion`, `ids`) — and, as of this same revision, an unknown key **inside**
   `layout`, `layout.folders`, `claims` or `problems` too — no longer makes
   the configuration invalid. Every command still succeeds; `doctor`
   reports the warning `config:unknown_key`, naming the key, so a typo
@@ -689,10 +720,12 @@ condition that produces it:
 | `id:no_tombstone` | element file has no tombstone (hand-created, or partial tombstone loss) | warning | no |
 | `backlog:stray_tmp` | stray `.nj-tmp-*` file (crashed write), backlog-level | warning | — |
 | `backlog:ids_missing` | `.nanojira/ids/` absent or empty while element files exist, backlog-level | error | — |
+| `backlog:ids_layout_mismatch` | `.nanojira/ids/` is laid out flat/sharded on disk but `ids.shardSize` (§ 5, § 8) asks for the other, or both are mixed together, backlog-level | error | — |
 | `config:invalid` | `.nanojira/config.json` violates § 5 (backlog-level) | error | — |
 | `backlog:legacy_layout` | v2 layout (`.nanojira.json`, `.ids/` at the top level), backlog-level | error | — |
 | `backlog:unreadable_dir` | a directory below the backlog cannot be listed (permissions), backlog-level | error | — |
 | `backlog:status_stale` | `STATUS.md` differs from a fresh rendering or is missing (§ 4), backlog-level | warning | — |
+| `backlog:tags_stale` | `TAGS.md` differs from a fresh rendering or is missing (§ 5 `layout.tagsFile`), backlog-level | warning | — |
 | `backlog:claims_unignored` | `.nanojira/claims/` exists and `.gitignore` has no line that is exactly `.nanojira/claims/`, backlog-level | warning | — |
 | `config:unknown_key` | an unrecognised top-level config key, or an unrecognised key inside `layout`/`layout.folders`/`claims`/`problems`, backlog-level (DECISIONS 166) | warning | — |
 | `config:unknown_code` | a code in `problems.ignore` outside § 7's closed vocabulary, backlog-level (DECISIONS 166) | warning | — |
@@ -961,6 +994,41 @@ deleted with `nanojira rm`, if their tombstones were lost with it — live and
 archived elements are always protected by the file-scan start value. A
 tombstone without an element is normal (deleted or archived).
 
+### Sharding `ids/` for large backlogs (`ids.shardSize`)
+
+A flat `ids/` directory accumulates one file **per ID ever allocated**,
+never shrinking (never-reuse, above) — at real scale this becomes a single
+unwieldy directory. `ids.shardSize` (§ 5), a positive integer `S`, buckets
+tombstones instead: `ids/<TYPE>/<bucket>/<TYPE>-<n>`, where
+`bucket = floor(n / S)`, the bucket directory name zero-padded to a fixed
+six digits so a plain sorted directory listing orders buckets numerically.
+Range-bucketed, not hash-sharded, by design: the live allocation frontier —
+where every new ID lands — always sits in one small, recently-written
+bucket, rather than scattered across the whole keyspace by a hash. `0` (or
+the key absent) keeps today's flat layout; this is the default, and an
+existing backlog is untouched unless it opts in.
+
+`O_CREAT|O_EXCL` on the tombstone file remains the **sole** claiming
+authority either way — sharding changes only the path depth, nothing about
+the atomicity guarantee. The start-value computation changes similarly:
+under sharding, the allocator finds the highest-numbered **bucket** via a
+sorted listing of `ids/<TYPE>/` (small and bounded, however large the
+backlog), then scans tombstone names only inside that one bucket — never
+the whole, unboundedly large `ids/<TYPE>/` tree. This is safe because
+tombstones are never removed and allocation only ever probes upward, so IDs
+are dense with no permanent gaps below the current maximum: the highest
+bucket that exists is always the one holding it. The element-file
+cross-check (hand-placed IDs raise the start value, above) is unchanged —
+it was never the expensive part.
+
+Changing `ids.shardSize` on a backlog whose tombstones already exist in the
+*other* layout is `backlog:ids_layout_mismatch`, an ERROR (same "no silent
+dual-layout support forever" rule as `backlog:legacy_layout`). `doctor
+--fix` moves every tombstone into whichever layout the configuration
+currently specifies, flat → sharded or sharded → flat, in one pass (§ 14).
+Only `ids/` tombstones move — element files and folders are untouched
+(`layout.folders` governs those, independently).
+
 ---
 
 ## 9. Interface
@@ -987,10 +1055,10 @@ nanojira set   --id=TSK-009 [--title=…] [--status=…] [--priority=…]
          [--description=… | --description-file=…]
          [--acceptance=…  | --acceptance-file=…]
          [--force] [--allow-open-children]
-nanojira note  --id=TSK-009 "text" [--as=<name>] (§ 10)
+nanojira note  --id=TSK-009 ["text" | --text=<t> | --text-file=<path|->] [--as=<name>] (§ 10)
 nanojira check --id=TSK-009 --text=<substring> [--on | --off] [--force] (§ 10a)
 nanojira check --id=TSK-009 --item=<n>         [--on | --off] [--force] (§ 10a)
-nanojira show  --id=TSK-009 [--json]
+nanojira show  --id=TSK-009 [--notes=none|all|last:N] [--json]
 nanojira list  [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
          [--ready] [--all] [--json]
 nanojira find  "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
@@ -1003,7 +1071,7 @@ nanojira claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] (�
 nanojira release --id=TSK-007 [--as=<name>] (§ 12 "Claims")
 nanojira next    [--as=<name>] [--status=<s>] [--type=…] [--tag=…] [--parent=…]
            [--assignee=…] [--json] (§ 12b)
-nanojira log     --id=TSK-009 [--json] (§ 12c)
+nanojira log     --id=TSK-009 [--last=N] [--json] (§ 12c)
 nanojira doctor [--fix] [--json]
 ```
 
@@ -1014,6 +1082,19 @@ known flags; `--backlog` without a value is `missing_value`.
 `set`, `note`, `check`, `claim` and `release` additionally accept
 `--id=A,B,C` (two or more comma-separated IDs) in place of a single `--id`
 — see "Batch writes" below.
+
+`new`, `set`, `note`, `check`, `claim` and `release` additionally accept
+`--fields=<a,b,...>` and `--quiet`, to shrink their `--json` write result —
+see "`--fields` / `--quiet`" below.
+
+`show` additionally accepts `--notes=none|all|last:N`, and `log` accepts
+`--last=N`, to narrow which notes (`show`) or events (`log`) they return —
+see "`--notes` / `--last`" below.
+
+Every command that writes — `init`, `new`, `set`, `note`, `check`, `claim`,
+`release`, `next`, `archive`, `unarchive`, `rm` and `doctor --fix` — accepts
+`--dry-run`: the whole call runs, nothing is written, and the result says
+what the real call would have changed — see "`--dry-run`" below.
 
 ### `--version`
 
@@ -1041,7 +1122,7 @@ tolerates being combined with anything; it recognises only itself and
 
 `nanojira help` lists `--version` in its command summary.
 
-### `--help` (per-command, DECISIONS 158 EV-2/EV-3, 163 A)
+### `--help` (per-command, DECISIONS 158 EV-2/EV-3, 163 A, 205)
 
 `nanojira <command> --help` prints **that command's own** synopsis and flags —
 not the general help every command used to fall back to. `nanojira help` and
@@ -1057,13 +1138,22 @@ A command's own `--help` text has, in order:
 1. Its synopsis line(s), exactly as `nanojira help`'s own command list already
    shows them (§ 9 "Commands (round one)") — one `--help` source, not a
    second copy to keep in sync.
-2. One line per flag the command accepts, from the same per-command flag
-   table `nanojira-mcp`'s own tool schemas already read (`core/flag-table.ts`,
-   § 17) — so this, `nanojira-mcp`'s schemas, and the CLI's own flag validation
-   can never drift apart from each other. A flag with a **closed
-   vocabulary** (`--type`, `--status`, `--priority`) names its allowed
-   values on the same line; any other flag is marked free-form, nothing
-   invented about it.
+2. One line per flag the command accepts — **every** one, control flags
+   included (`--json`, `--dry-run`, `--backlog`, `--quiet`, `--fields`,
+   `--force`, `--input`, `--text`, …, whatever the command takes;
+   DECISIONS 205) — read from the same per-command table the command's own
+   flag validation reads (`core/cli-flags.ts`, whose schema fields come
+   from `core/flag-table.ts`, the table `nanojira-mcp`'s tool schemas read,
+   § 17). So `--help`, the CLI's validation and `nanojira-mcp`'s schemas
+   cannot drift apart: a flag `--help` shows is never `unknown_field`, and
+   a flag the command accepts is never missing from its `--help`. Each
+   line is `--name`, then `=<value>` if the flag takes one, then a
+   one-line description. A flag with a **closed vocabulary** (`--type`,
+   `--status`, `--priority`) names its allowed values on the same line;
+   nothing else is invented about a free-form flag. A flag is shown in
+   its documented spelling: `--depends-on`, never `--depends_on`, though
+   both are accepted (§ 9 "Rules"). `--help` and `--version` themselves
+   are not listed: both are answered before any command runs.
 
 `nanojira rm --help` gets these same per-flag lines (`--id`, `--file`,
 `--cascade`) too (DECISIONS 163 A) — it had none before this, not because
@@ -1539,6 +1629,350 @@ In both wrapper forms (2 and 3):
 phase has finished** — never once per ID — and only if at least one ID was
 actually written.
 
+### `--fields` / `--quiet` (write commands)
+
+> TSK-004 (feedback/scans-team): the "scans" team's ten agents pipe every
+> `set`/`new` result through `head`/`grep` to shrink it, bypassing the
+> stable JSON contract. These two flags give them (and anyone else) a
+> supported way to shrink it instead. The shapes below are pinned
+> precisely because a second codebase (scans' own future CLI kernel) is
+> expected to adopt these flag names and shapes verbatim.
+
+`new`, `set`, `note`, `check`, `claim` and `release` accept `--fields=<a,b,...>`
+and `--quiet` on their `--json` write result — the single-ID shape and each
+successful member of a batch result (`--id=A,B,C`, above) alike. Neither
+flag has a meaning without `--json`: giving either without it is
+`invalid_value` ("`--quiet` requires `--json`" / "`--fields` requires
+`--json`"), rather than silently doing nothing to the human-readable
+output. `--fields` and `--quiet` are themselves mutually exclusive — two
+different ways to shrink the same result, never assumed to mean one or
+the other, the same discipline `--tags=` combined with
+`--add-tags=`/`--remove-tags=` already has (§ 9, DECISIONS 163 B). Neither
+composes with `new --input=`/`set --input=` (§ below): both are
+`invalid_value`, nothing written, when combined with `--input`.
+
+**`--quiet`** narrows a successful write result to exactly `{ok, id}`,
+**plus `_problems` when (and only when) it is non-empty.** A write with no
+open problems reports `{ok, id}`; one that leaves (or already carries) an
+open problem — `done:open_acceptance`, an `incomplete:*` code, anything
+from § 7's closed table — reports `{ok, id, _problems}`, same codes `entry`
+would have carried. Dropping an **empty** `_problems` is the entire point
+of `--quiet`; dropping a **non-empty** one would silently hide a warning
+an agent needs, which defeats it instead. Every other key the command
+would otherwise have added — `changed`, `entry`, and, on `claim`/`release`,
+`claim`, `stolen_from`, `previous_assignee`, `open_acceptance` — is
+dropped, unconditionally, regardless of command: `--quiet` on `claim` is
+still exactly `{ok, id[, _problems]}`, not `{ok, id, claim}`. An agent that
+needs claim state does not pass `--quiet`.
+
+**`--fields=<a,b,...>`** projects `entry` (and, in a batch result, each
+successful member's own `entry`) down to exactly the named keys, in the
+**order given** — `--fields=status,id` produces `{"status": "…", "id":
+"…"}`, not `{"id": "…", "status": "…"}`. The vocabulary is exactly
+`entryJson`'s own keys: `id, type, parent, title, status, priority,
+assignee, tags, depends_on, created, updated, archived, file, _problems,
+_claim` — the same set `nanojira show`/`nanojira list` entries already carry (§ 9
+"JSON interface"). A name the current entry does not carry (e.g. `parent`
+on an epic, `assignee` when unset) is simply **omitted**, not `null` —
+`entryJson` itself never materialises it, and `--fields` does not invent
+one. An unknown name is `invalid_value` ("unknown field '<name>' in
+--fields"), with a did-you-mean hint (`core/suggest.ts`'s OSA-distance
+machinery, § 9 "Did-you-mean", reused with no field-specific synonym
+table) when exactly one allowed name is close — the same rule, the same
+threshold, as `--type`/`--status`/`--priority`'s own hint. An empty
+`--fields=` is also `invalid_value` (`--fields` must not be empty) rather
+than a no-op. **Validated before anything is written**, for a single ID
+and, for a batch, as a batch-wide argument error (§ above) checked once
+before any per-ID preflight — the same "a bad value writes nothing" rule
+every other flag value check in this document already has.
+
+**`--fields` narrows `entry` only.** Every envelope-level signal —
+`changed`, `claim`, `stolen_from`, `previous_assignee`, `open_acceptance`,
+and the top-level `_problems` that mirrors `entry._problems` — is left
+exactly as the command already built it, whether or not its name was
+given to `--fields`: `--fields` is a projection of the entry snapshot, not
+of the call's own outcome. A caller that also wants a narrower envelope
+uses `--quiet` instead.
+
+In a batch result (`--id=A,B,C`, above), `--fields`/`--quiet` apply **only
+to members that succeeded** — each is the same single-ID write-result
+shape above (narrowed), plus its leading `id`. **A failed member's shape
+is never touched**: `{id, ok: false, error, hint?}`, byte-for-byte what it
+would be without either flag — "Error output is never trimmed" applies
+inside a batch exactly as it does to a whole-call failure.
+
+```json
+$ nanojira set --id=TSK-009 --status=doing --quiet --json
+{"ok": true, "id": "TSK-009"}
+
+$ nanojira set --id=TSK-009 --status=done --quiet --json
+{"ok": true, "id": "TSK-009", "_problems": ["done:open_acceptance"]}
+
+$ nanojira set --id=TSK-009 --priority=high --fields=id,priority --json
+{"ok": true, "id": "TSK-009", "changed": ["priority"],
+ "entry": {"id": "TSK-009", "priority": "high"}, "_problems": []}
+```
+
+### `--notes` / `--last`
+
+> TSK-005 (feedback/scans-team): a long-running ticket collects 20+ notes;
+> an agent usually only needs the latest one or two, and today greps the
+> `.md` file directly to get them — bypassing the tool the same way
+> TSK-004 found agents piping write results through `head`/`grep`.
+
+`nanojira show` accepts `--notes=none|all|last:N` (`N` a positive integer);
+`nanojira log` accepts `--last=N` (the same `N`). Unlike `--fields`/
+`--quiet`, both have a plain-text meaning and work identically with or
+without `--json`. Omitting either flag is the untouched **default**,
+`all` — unchanged, byte-identical output to before this round, in both
+`--json` and human form; passing `--notes=all` explicitly is **not** the
+same as omitting it (below).
+
+**`show --notes=`** controls how many of an entry's own notes (§ 10) its
+body shows:
+
+- **`all`** (the default, implicit or explicit) shows every note.
+- **`none`** shows none of them.
+- **`last:N`** shows only the `N` most recent (last in document order, §
+  10 — document order already is chronological for a body `nanojira` wrote).
+
+In `--json`, giving `--notes` at all (any of the three values) adds two
+keys to the entry — `notes`, the visible subset, each `{at, actor, text}`
+exactly as `log`'s own `events[].kind === 'note'` shape (§ 12c) already
+has it; and `notes_total`, the element's **real**, un-narrowed note count,
+always present whenever `--notes` is given regardless of whether `N`
+actually truncates anything — the hint a narrowed view needs to know how
+much it isn't seeing. **Omitting `--notes` adds neither key**: the default
+`entry`/`entries[]` shape is exactly what it was before this round, the
+same "additive, opt-in" discipline `--fields`/`--quiet` already has.
+`--notes=all` given explicitly is additive the same way `last:N`/`none`
+are — it also adds `notes`/`notes_total` (the full list, `notes_total ===
+notes.length`), which is why it is not byte-identical to the omitted
+default despite showing the same notes: "not given" and "given as `all`"
+answer different questions (whether an agent gets `notes_total` back at
+all), not just "how many notes."
+
+In the human-readable body, `none`/`last:N` replace the `## Notes` section's
+own content (never the file — `show` never writes) with one placeholder
+line naming how many notes are hidden, followed by the kept notes (if
+any), re-rendered byte-identical to their stored form:
+
+```
+$ nanojira show --id=TSK-009 --notes=last:1
+...
+## Notes
+(3 earlier notes hidden — pass --notes=all to see them)
+- 2026-09-21T19:30:00Z alice: wired the route
+```
+
+`--notes=none`'s placeholder instead names the total (`(N notes hidden —
+pass --notes=all or --notes=last:N to see them)`); `last:N` at or above
+the element's real count shows every note with **no** placeholder at all,
+identical to `all`. A hand-edited line under `## Notes` that is not a
+well-formed note (§ 10 "Multi-line text") — the same tolerance `log`
+already has — is silently dropped from a narrowed view the same way it is
+already dropped from `log`'s history; this never touches the file.
+
+An unknown `--notes` value is `invalid_value`, with a did-you-mean hint
+against `none`/`all`/`last:N` (`core/suggest.ts`'s OSA-distance machinery,
+§ 9 "Did-you-mean", the same generic reuse `--fields` already has for its
+own closed vocabulary, no field-specific synonym table). `last:0`, a
+negative `N`, or anything non-numeric after `last:` is `invalid_value` too
+— `N` must be a positive integer. Validated before the target is even
+resolved: a bad `--notes` value reports `invalid_value` even when `--id`
+also names nothing that exists, the same "a bad value first" ordering
+every other flag-value check in this document already has.
+
+**On a `duplicate_id` target** (two or more files sharing one `id`, § 9
+"JSON interface"), `--notes=` narrows each file's own entry independently
+— one file's own note count never affects another's `notes`/`notes_total`,
+and the human form's `--- <file> ---` sections each show their own body
+narrowed the same way a single result would be.
+
+**`log --last=N`** keeps the last `N` events of the fully merged list (§
+12c) — `created`, claims and notes together, in the same chronological-
+then-source-precedence order the unfiltered list already has; "last" is
+counted across every kind at once, not per kind. `--json` adds
+`events_total` (the real, unfiltered event count) whenever `--last` is
+given, the same additive-only-when-given rule `show --notes=` has;
+omitting `--last` keeps `log`'s existing `{ok, id, events}` shape exactly
+as before. The human form prints exactly the kept events' own lines,
+nothing more. `N` is validated the same way as `show --notes=last:N`'s own
+`N` — a positive integer, else `invalid_value` — but there is no
+vocabulary here to did-you-mean against.
+
+```json
+$ nanojira log --id=TSK-009 --last=2 --json
+{"ok": true, "id": "TSK-009",
+ "events": [{"at": "…", "kind": "claimed", "actor": "alice"},
+            {"at": "…", "kind": "note", "actor": "alice", "text": "wired the route"}],
+ "events_total": 5}
+```
+
+### `--dry-run` (write commands, DECISIONS 197)
+
+> TSK-007 (feedback/scans-team): the scans team's agents must probe every
+> tool before they apply it, and had no way to do that with `nanojira`.
+> As with `--fields`/`--quiet` above, the flag name and every shape below
+> are pinned precisely because scans will adopt them verbatim in a second
+> codebase.
+
+**Which commands.** Every command that writes takes `--dry-run`: `init`,
+`new` (with field flags or `--input=`), `set` (field flags or `--input=`),
+`note`, `check`, `claim`, `release`, `next`, `archive`, `unarchive`, `rm`
+and `doctor --fix`. A command that never writes — `list`, `show`, `find`,
+`tree`, `tags`, `log`, bare `nanojira` — does not know the flag: it is
+`unknown_field`, exactly like any other flag that command does not take,
+and that result carries no `dry_run` key, because no dry run took place.
+`nanojira doctor --dry-run` without `--fix` is `invalid_value` ("`--dry-run`
+requires `--fix`"): plain `doctor` never writes, so a dry run of it would
+be a silent no-op. `--dry-run` takes no value; `--dry-run=<anything>` is
+`invalid_value` ("`--dry-run` takes no value"). It is a control flag, not
+a schema field: like `--quiet`/`--fields`, it is not part of any
+`nanojira-mcp` tool schema (§ 17).
+
+**What runs.** The whole call, unchanged: every validation and every
+refusal, ID allocation, the claim compare-and-swap, `released`/
+`open_acceptance`, moves, the `STATUS.md`/`TAGS.md` refresh, every repair
+step of `doctor --fix`. It runs against a **scratch copy** of the backlog
+in the operating system's temporary directory (`$TMPDIR`, a folder named
+`nj-dry-run-*`), made when the call first opens the backlog and removed
+before the process exits. The backlog itself is only **read**. Nothing in
+it is created, changed, renamed or removed: no element file, no tombstone
+under `.nanojira/ids/`, no claim entry under `.nanojira/claims/`, no
+`STATUS.md`/`TAGS.md`, no folder, no temporary file. No file's or folder's
+mtime changes. Files the call only reads are read as usual: `--input=`,
+`--<role>-file=`, `--text-file=`, stdin. `--file=<path>` naming a file in
+the backlog addresses the same file in the copy, whether the path is
+absolute or relative.
+
+**Exit code and stderr** are exactly the real call's, with every path
+inside the copy written as the real backlog path.
+
+**No change hook.** A dry run never fires `NJ_ON_CHANGE` (§ 9
+"`NJ_ON_CHANGE`"), whether the real call would succeed, fail part way or
+be refused.
+
+**`--json` result.** The object the real call would print, with every path
+mapped back to the real backlog the same way (`entry.file`, `backlog`, a
+path quoted in `hint`), plus two keys appended **after** every key the real
+call has:
+
+- `dry_run`: always `true`.
+- `changes`: what the real call would have changed in the backlog, as an
+  array of `{path, kind, op, before, after}`:
+  - `path`: relative to the backlog folder, `/`-separated. The backlog
+    folder itself is `"."`, which only `init` creates.
+  - `kind`: `"file"`, `"dir"` or `"symlink"`.
+  - `op`: `"create"`, `"modify"` or `"delete"`.
+  - `before`/`after`: for a file, its **complete content** as UTF-8 text,
+    `null` on the side where it does not exist. For a directory, `null` on
+    both sides. For a symlink, the link's target.
+  - **Order:** ascending by `path`, compared as plain strings (code-unit
+    order; every path `nanojira` itself creates is ASCII). A path whose
+    kind changes appears twice: `delete`, then `create`.
+  - A move (`archive`, `unarchive`, `set --parent` under `hierarchy`,
+    `doctor --fix`) is a `delete` at the old path plus a `create` at the
+    new one. Removing a folder lists every path inside it as well.
+  - Only existence, kind and content count. A file rewritten with
+    identical bytes, or whose mode or mtime alone would change, is not
+    listed. A file `nanojira` cannot read is never listed as `modify`.
+
+The same two keys are appended to a **failure** too:
+`{ok: false, error, hint?, dry_run: true, changes: []}`. A refused call
+changes nothing, so its `changes` is empty. The error code is always the
+one the real call returns, for the same reason. Where the real call
+fails after writing part of its work, `changes` lists exactly that part:
+a batch member that succeeded before another failed, or the elements a
+`new --input=` plan created before its `failed_at`.
+
+`changes` carries full contents, not a diff. A unified diff is not
+canonical: two diff implementations legitimately produce different hunks
+for the same change. Full contents let a second implementation reproduce
+`changes` byte for byte, and let a caller apply them without `nanojira`.
+
+```json
+$ nanojira set --id=TSK-009 --status=doing --quiet --dry-run --json
+{
+  "ok": true,
+  "id": "TSK-009",
+  "dry_run": true,
+  "changes": [
+    { "path": "STATUS.md", "kind": "file", "op": "modify",
+      "before": "# Status\n\n## todo (1)\n…", "after": "# Status\n\n## todo (0)\n…" },
+    { "path": "tasks/TSK-009.md", "kind": "file", "op": "modify",
+      "before": "---\nid: TSK-009\n…status: todo\n…", "after": "---\nid: TSK-009\n…status: doing\n…" }
+  ]
+}
+```
+
+**IDs are reported, never reserved.** A dry run of `new` (or of a plan)
+allocates in the copy, so `id`, `ids`, `refs`, `entry.file` and the
+tombstone in `changes` name the IDs the real call would get **at that
+moment**. Nothing reserves them: a second dry run reports the same IDs
+again, and the real call may get different ones if anything allocated an
+ID in between. Timestamps (`created`, `updated`, a claim's `since`) are
+the dry run's own clock, unless `NJ_NOW` pins it. More generally, a dry
+run answers for the backlog as it was when the copy was made. A
+concurrent writer can make the real call's outcome differ.
+
+**`--quiet`/`--fields` compose.** They trim the would-be result exactly
+as they trim the real one (§ 9 "`--fields` / `--quiet`"). `dry_run` and
+`changes` are appended after the trimming and are never trimmed:
+`--quiet --dry-run --json` is `{ok, id[, _problems], dry_run, changes}`.
+Their own rules still apply under `--dry-run`: both require `--json`,
+they exclude each other, and neither combines with `--input`.
+`--id=A,B,C`, `--input=`, `--force`, `--steal=`, `--cascade` and
+`--allow-open-children` all combine with `--dry-run` and mean what they
+mean without it.
+
+**Without `--json`**, stdout is the real call's prose, then a summary:
+
+```
+$ nanojira set --id=TSK-009 --status=doing --dry-run
+TSK-009 → status=doing
+Dry run: nothing written. The real call would change 2 paths:
+  modify  STATUS.md
+  modify  tasks/TSK-009.md
+```
+
+Each line is two spaces, `op` padded to six characters, two spaces, then
+`path`. A directory's path carries a trailing `/`, except `"."`. When
+nothing would change, the summary is the single line `Dry run: nothing
+written. The real call would change nothing.`, also after a failure. The
+error itself stays on stderr, as in a real call.
+
+**`init --dry-run`** reports the backlog folder `"."` and everything in it
+as `create`. The real target is never created. The real call's `io_error`
+cases (a parent that is a file, or one this user may not write) are
+checked directly against the target's nearest existing ancestor. The
+code is the same; the OS message text may differ. Missing ancestors of
+the backlog folder, which a real `init` creates too, lie outside the
+backlog and are not listed.
+
+**Limits, disclosed.** A failure only the real filesystem would raise
+(a read-only mount, a full disk, a quota) is not predicted, because the
+copy lives elsewhere. If the copy itself cannot be made (`$TMPDIR`
+unwritable or full), the call fails with `io_error`, naming the temporary
+directory, before any of the command's own checks run. A file or folder `nanojira` cannot read is copied as
+an equally unreadable stand-in, so refusals such as
+`refused:unreadable_dir` still match. FIFOs, sockets and devices inside
+the backlog are not copied. Each dry run costs one copy of the backlog,
+time and space linear in its size. A dry run killed by a signal may leave
+its `nj-dry-run-*` folder in `$TMPDIR`, never anything in the backlog.
+Mapping the copy's path back to the real one is a plain text replacement
+over the output (`changes` excepted, whose contents are never touched), so
+any other string that happened to contain the copy's own path would be
+rewritten too. That path is random per call and exists only while the
+call runs, so no element text can contain it in practice.
+
+**Supersedes `new --input= --dry-run`'s earlier shape** (DECISIONS 172
+item 5). That shape was `{ok, dry_run, entries}`, with no IDs and implied
+parents given as JSON paths. A plan's dry run now returns the plan's real
+result shape (`{ok, ids, entries, refs, _problems}`, or the single-write
+shape for one object) with would-be IDs, plus `dry_run`/`changes`.
+`--dry-run` no longer requires `--input`, and `set` accepts it.
+
 ### `--input` — JSON plans for `new`/`set` (DECISIONS 171 A, 172, 173)
 
 > Amended after both outside leads reviewed the original draft (ecea716)
@@ -1943,46 +2377,10 @@ array rather than an empty string. `description` has no array form:
 there is no "one checkbox per array element" reading for it, and
 neither outside team asked for one.
 
-**`--dry-run` for `new --input=`** (DECISIONS 172, asked for by both
-outside leads independently): runs the **full** validation pass — every
-rule above, including every `ref`/`depends_on`/hierarchy check — and
-writes **nothing**: no file, no tombstone, no ID ever allocated. On
-success:
-
-```json
-{ "ok": true, "dry_run": true,
-  "entries": [
-    { "type": "epic", "title": "Login", "tags": [], "depends_on": [], "_problems": ["incomplete:description"] },
-    { "type": "task", "parent": "[0]", "title": "Login route", "tags": [], "depends_on": [], "_problems": [] }
-  ] }
-```
-
-Each `entries[i]` carries exactly the fields that object was given (the
-same "defaults never materialised" discipline § 6 already has for a real
-write) plus its **resolved** `parent` — a `children` entry's implied
-parent is shown as the **JSON path** of the parent object in the plan
-(`"[0]"` above: the first top-level object), since there is no real id
-yet for it to name — and its own `_problems`, computed from the given
-fields alone exactly as a real write's entry would carry them
-(`incomplete:description`/`incomplete:acceptance`/
-`acceptance:no_checkbox`, as applicable), so a dry run answers "would
-this be complete" as well as "would this be valid". **What a dry run
-never carries, because none of it exists yet:** `id`, `file`, `created`,
-`updated`, `_claim`, `ids`, `refs` — a `ref` stays exactly the `@`-name
-it was given in `depends_on`, never resolved to anything, since nothing
-was assigned an id to resolve it to. A dry run that fails validation
-uses the ordinary failure shape (`{ok: false, error, hint, failed_at}`,
-above) exactly as a real attempt would — only a **successful**
-validation looks different (`dry_run: true`, no write).
-
-`--dry-run` requires `--input`: given to `new` without it (field flags
-only, or no flags at all), it is `invalid_value` — there is no
-"validate only" reading for a plain `--title=…`/`--type=…` call, since
-nothing about that call is deferred or batched the way a plan's
-validate-then-write split is; `--dry-run` only has meaning as a question
-about a plan that has not run yet. `set` does not accept `--dry-run` at
-all (`unknown_field`) — `set` has no plan form (above) for a dry run to
-preview.
+**`--dry-run`** previews a plan like any other write: full validation,
+nothing written, the plan's real result plus `dry_run`/`changes` (§ 9
+"`--dry-run`", DECISIONS 197, which supersedes the plan-only shape D172
+item 5 introduced). `set --input=` takes it the same way.
 
 ### `--ready`
 
@@ -2067,7 +2465,7 @@ when claimed, `null` when not (§ 12 "Claims").
 
 | Command | JSON shape |
 |---|---|
-| `list`, `show`, `find` | `{backlog, counts, entries: [{…, _problems}]}` — `find`'s shape is identical to `list`'s, no `_match` field (§ 9a); **`show` additionally carries `entry: {…, _problems}`** (DECISIONS 171 C), identical to `entries[0]`, exactly when `entries` has **exactly one** element — never when it has several (a `duplicate_id` target, `entries.length > 1`) or, hypothetically, none; `list`/`find` never carry it, since returning many entries is their own point |
+| `list`, `show`, `find` | `{backlog, counts, entries: [{…, _problems}]}` — `find`'s shape is identical to `list`'s, no `_match` field (§ 9a); **`show` additionally carries `entry: {…, _problems}`** (DECISIONS 171 C), identical to `entries[0]`, exactly when `entries` has **exactly one** element — never when it has several (a `duplicate_id` target, `entries.length > 1`) or, hypothetically, none; `list`/`find` never carry it, since returning many entries is their own point; **`show --notes=<any value>` additionally carries `notes`/`notes_total`** on each entry (§ 9 "`--notes` / `--last`", TSK-005) — absent on every entry when `--notes` is not given, `list`/`find` never carry it either way |
 | `new`, `set`, `note`, `check`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nanojira new`/`nanojira set`, `changed` also names the section roles written (`description`, `acceptance`); for `nanojira check`, `changed` is `["body"]` or `[]` (a no-op); **`nanojira set` additionally carries `released?: "<holder>"`** (DECISIONS 171 B) when a write setting `status` to the last configured status released an existing claim — absent, not `null`, when there was no claim to release; **and `open_acceptance?: {unticked, total}`** (DECISIONS 176 B) when that same write leaves the element carrying `done:open_acceptance` — absent otherwise |
 | `archive`, `unarchive`, `rm --cascade` | `{ok, ids: […], changed: ["archived" \| "unarchived" \| "deleted"], entries: […], _problems: […]}` — for `rm --cascade` the top-level `_problems` is `[]`: the elements are gone, so their problems are too. `archive` and `unarchive` emit the union, because the elements still exist and can still carry findings. **`rm --cascade` additionally carries `dependents: […]`**, the remaining elements whose `depends_on` names a removed one — archived elements included, since they carry `depends_on:dangling` too and the agent must know it; `archive` and `unarchive` do **not** — a `depends_on` pointing into the archive is satisfied by definition (§ 11), so there is nothing to warn about and nothing an agent must act on. |
 | `claim`, `release` | `{ok, id, changed: […], entry: {…, _problems, _claim}, _problems, claim: {by, since}\|null, stolen_from?, previous_assignee?, released?}` (§ 12 "Claims") — the write-result shape plus `claim`, the element's claim state after the call; `stolen_from` names the previous holder after a `--steal`; `previous_assignee` when the claim overwrote a different `assignee`; `changed` names `assignee` and `status` when written, a `release` reports `changed: ["claim"]`; **`released?: "<holder>"`** (DECISIONS 171 B) on `claim` only, when `--status=<last>` released the very claim this same call just made — absent, not `null`, otherwise; `release` never carries it (a plain release is already reported via `claim: null`); **`open_acceptance?: {unticked, total}`** (DECISIONS 176 B) on `claim` only, same condition as `set`'s own — `release` never carries it, since `release` never writes `status` |
@@ -2075,6 +2473,14 @@ when claimed, `null` when not (§ 12 "Claims").
 | `doctor` | `{backlog, ok, problems: [{code, severity, element?, file?, line?, message}]}` — `severity` ∈ `error`\|`warning` (the Doctor column value; `—` codes never appear as findings); element-level findings carry `element`, backlog-level ones do not |
 | bare `nanojira` | `{backlog, counts, ready: [entries ≤ 5], incomplete: [entries ≤ 5]}` |
 | `set`, `note`, `check`, `claim`, `release` with `--id=A,B,C` (two or more IDs) | `{ok, results: [{id, ok, …}]}` — the "Batch writes" wrapper (§ 9 above): `results` names every ID once preflight passes for all of them, or only the ID(s) that failed preflight if it did not; a batch-wide argument error (`unknown_field`, a repeated ID, …) instead uses this table's generic single-write failure shape, no `results` at all; a single `--id=A` is unaffected and keeps the unwrapped success shape on this table's earlier row |
+
+Every row above is the **default** shape — unchanged by this round. `new`,
+`set`, `note`, `check`, `claim` and `release` additionally accept
+`--fields=<a,b,...>`/`--quiet` to shrink it (§ 9 "`--fields` / `--quiet`"),
+applied identically to a batch result's successful members.
+Every write command additionally accepts `--dry-run`, which appends
+`dry_run: true` and `changes: [...]` to whatever shape the call returns,
+success or failure (§ 9 "`--dry-run`").
 
 Every entry object always carries `_problems`; the codes come only from the
 closed table (§ 7). With `--json`, **every** exit path writes JSON to stdout:
@@ -2157,7 +2563,8 @@ just makes it a lookup instead of a re-read of the hint every time:
 | a `--description-file` / `--acceptance-file` path cannot be read | `not_found` | § 9 | — |
 | two files carry the same `id` | `duplicate_id` | § 9 | — (address one file directly with `--file=<path>` instead) |
 | `init` target already exists (even an empty directory) | `exists` | § 4 | — |
-| a filesystem call on a named target fails (`init` into a read-only or non-directory parent; a deleted working directory) | `io_error` | § 9 | — |
+| a filesystem call on a named target fails (`init` into a read-only or non-directory parent; a deleted working directory; a `--dry-run` whose scratch copy cannot be made in `$TMPDIR`) | `io_error` | § 9, § 9 "`--dry-run`" | — |
+| the upward search cannot examine a directory (a probe fails with anything but `ENOENT`/`ENOTDIR`, e.g. `EACCES` from an unsearchable ancestor) | `io_error` | § 4 "Backlog location", DECISIONS 204 | — (fix the permissions, or name the backlog with `--backlog`/`NJ_BACKLOG`) |
 | an `archive` target path is occupied | `exists` | § 11 | — |
 | `set`/`note`/`check`: the file changed between read and write | `changed_in_parallel` | § 12 | `--force` |
 | an archived element is written or removed | `refused:archived` | § 9 | — |
@@ -2194,6 +2601,18 @@ just makes it a lookup instead of a re-read of the hint every time:
 | `find` with the literal empty string as `<text>` | `invalid_value` | § 9a | — |
 | `--id=A,B,C` together with `--file` | `invalid_target` | § 9 "Batch writes" | — |
 | `--id=A,A` — the same ID named twice in a batch, after trimming | `invalid_value` | § 9 "Batch writes" | — |
+| `--quiet`/`--fields` given without `--json` | `invalid_value` | § 9 "`--fields` / `--quiet`" | — |
+| `--quiet` combined with `--fields` | `invalid_value` | § 9 "`--fields` / `--quiet`" | — |
+| `--quiet`/`--fields` combined with `--input` | `invalid_value` | § 9 "`--fields` / `--quiet`" | — |
+| `--fields` names an unknown entry field, or is empty | `invalid_value` | § 9 "`--fields` / `--quiet`" | — |
+| `show --notes=` names an unrecognised value, or `last:N` with `N` not a positive integer | `invalid_value` | § 9 "`--notes` / `--last`" | — |
+| `log --last=N` with `N` not a positive integer | `invalid_value` | § 9 "`--notes` / `--last`" | — |
+| `--dry-run` on a command that never writes (`list`, `show`, `find`, `tree`, `tags`, `log`, bare `nanojira`) | `unknown_field` | § 9 "`--dry-run`" | — |
+| `doctor --dry-run` without `--fix` | `invalid_value` | § 9 "`--dry-run`" | — |
+| `--dry-run=<value>` (the flag takes no value) | `invalid_value` | § 9 "`--dry-run`" | — |
+| `nanojira note`'s text given more than one way (positional, `--text`, `--text-file`) | `invalid_value` | § 10 | — |
+| `nanojira note --text-file` names a path that cannot be read | `not_found` | § 10 | — |
+| `NJ_ON_CHANGE_TIMEOUT` is not a whole number of seconds from 1 to 86400, while the hook is armed | `invalid_env` | § 9 "`NJ_ON_CHANGE`" | — (fix or unset the variable) |
 
 Codes of the closed set that no passage above names —
 `id_allocation_failed`, `internal_error` — are
@@ -2227,6 +2646,156 @@ deliberately not added: it would be a second name for exactly what
 | `0` | success — including reads that merely *report* data problems via `_problems` |
 | `1` | command failed — nothing or only partially written; hard errors (no backlog found, unknown field, refusal, retries exhausted) |
 | `2` | `nanojira doctor` only: at least one `error` finding |
+
+### `NJ_ON_CHANGE` — the change hook (DECISIONS 200)
+
+> TSK-011 (feedback/scans-team): a team that keeps both a nanojira backlog
+> and an outside board saw the two drift apart (done here, in progress
+> there). The hook lets the team's own environment push every change
+> outward; nanojira itself still opens no connection and runs no daemon.
+> The shapes below are pinned because a second codebase (scans' own CLI
+> kernel) adopts them verbatim.
+
+**Configured only through the environment.** `NJ_ON_CHANGE=<command>`
+arms the hook; unset or empty means no hook. There is no config key, no
+`.njrc` entry and no file anywhere in the backlog that can arm it, and
+none will be added: a hook read from the backlog would let any cloned or
+foreign backlog make nanojira execute code. A hook-like key in
+`.nanojira/config.json` (`onChange`, `hooks`, …) is an ordinary unknown
+key (§ 5, `config:unknown_key` warning) and is never executed. The value
+is trusted exactly as much as the rest of the caller's environment
+(`PATH`, `NJ_NODE`): whoever can set it can already run anything as that
+user.
+
+**When it fires.** After a write command has succeeded, exactly once per
+invocation:
+
+| Command | Fires when | `NJ_HOOK_IDS` |
+|---|---|---|
+| `init` | the backlog was created | empty |
+| `new` (flags, or `--input` with one or more objects) | the element(s) were created | the new id(s), in write order |
+| `new --input` that stops part way (DECISIONS 174) | at least one element was created before the failure | the `created` ids |
+| `set`, `note`, `check`, `claim`, `release` | the call succeeded — **including a no-op** (`changed: []`) | the element's id |
+| the same five with `--id=A,B,C` | at least one ID was written | the IDs whose `results[i].ok` is `true`, in `--id` order |
+| `next` | it claimed an element | that element's id |
+| `archive`, `unarchive` | the subtree moved | `ids` |
+| `rm`, `rm --cascade` | the element(s) were deleted | `id` / `ids` |
+| `doctor --fix` | `fixed` is non-empty | empty |
+
+It **never** fires:
+
+- after a refusal or any other failure that wrote nothing — every
+  `fail(...)` path, a batch's preflight abort (§ 9 "Batch writes"), a
+  `new --input` plan that fails validation or fails on its very first
+  write, `next`'s `none_ready`, an `invalid_env`; nor after an `NJ_FAULT`
+  hard exit (§ 12, test-only);
+- after a read: bare `nanojira`, `list`, `show`, `find`, `tree`, `tags`,
+  `log`, `doctor` without `--fix`, `help`/`--help`, `--version`;
+- after `doctor --fix` that fixed nothing;
+- after a dry run (§ 9 "`--dry-run`", DECISIONS 197) — on every write
+  command, whether it would succeed or ends in a refusal. A dry run runs
+  the real writer against a scratch copy (`nj-dry-run-*` in the OS temp
+  directory); that copy is never handed to a hook. Two independent guards
+  hold this: the hook is never armed when `--dry-run` is given, and a
+  change recorded while a dry run is active is dropped. A dry run's
+  stdout, stderr and exit code are the same with or without
+  `NJ_ON_CHANGE`;
+- inside a hook: when `NJ_HOOK_COMMAND` is set in nanojira's own
+  environment, nanojira does not fire, whatever `NJ_ON_CHANGE` says
+  (the recursion guard, below).
+
+A batch or a plan that partly succeeded fires even though nanojira exits
+`1`: something was written, and the outside board must hear about it. The
+hook tells the two cases apart by the result's own `ok` and `results[]`.
+
+**After everything is settled.** The hook starts only after the command
+has finished completely: every element file written or moved, every
+claim generation linked or unlinked, every temporary file of the write
+renamed into place, `STATUS.md`/`TAGS.md` regenerated, and the command's
+own result already written to stdout. A hook that runs `nanojira show`/`list`/`doctor` sees
+the backlog exactly as the write left it. Nothing is locked while it runs:
+another nanojira process may write in parallel, and two writers' hooks may
+run concurrently and finish in either order. A hook that must not miss an
+ordering re-reads the current state (`nanojira show --id=<id> --json`)
+rather than trusting the order in which its calls arrive.
+
+**How it runs.**
+
+- `/bin/sh -c "$NJ_ON_CHANGE"` — exactly the variable's value, no
+  quoting or expansion by nanojira; cwd = the backlog root (the directory
+  holding `.nanojira/`).
+- **stdin** = the command's full `--json` result, byte-for-byte what
+  `--json` prints for this call **without** `--quiet`/`--fields`
+  (pretty-printed, two-space indent, trailing newline) — regardless of
+  whether the caller passed `--json`, `--quiet` or `--fields`, which only
+  shape nanojira's own stdout. One call per invocation: a batch passes its
+  whole `{ok, results}` wrapper, a plan its whole `{ok, ids, entries,
+  refs, _problems}` result, never one call per element. A hook that does
+  not read stdin is fine.
+- **Environment** = nanojira's own environment, minus `NJ_ON_CHANGE` and
+  `NJ_ON_CHANGE_TIMEOUT`, plus:
+  - `NJ_HOOK_COMMAND=<command word>` (`set`, `claim`, `doctor`, …);
+  - `NJ_HOOK_IDS=<comma-separated ids>` per the table above (empty, not
+    absent, when there are none);
+  - `NJ_BACKLOG=<absolute backlog path>`, so a `nanojira` call inside the
+    hook addresses the same backlog without `--backlog`.
+- **stdout and stderr of the hook both go to nanojira's stderr.** Nothing
+  the hook prints can reach nanojira's stdout: a `--json` caller still
+  reads exactly one JSON document there.
+- nanojira **waits** for the hook (bounded by the timeout), so when
+  nanojira returns, the hook has finished or been killed. Work a hook
+  backgrounds (`cmd &`) outlives that wait only if it leaves the hook's
+  process group; it should redirect its own output.
+
+**Recursion guard.** Inside the hook `NJ_ON_CHANGE` is unset, and
+`NJ_HOOK_COMMAND` is set — a nanojira that finds `NJ_HOOK_COMMAND` in its
+environment never fires a hook, even if the hook exported a fresh
+`NJ_ON_CHANGE`. A hook can therefore call `nanojira note`/`set` itself
+without triggering itself again. (`NJ_HOOK_COMMAND`/`NJ_HOOK_IDS` are
+reserved for this; do not set them in a normal shell.)
+
+**Timeout.** `NJ_ON_CHANGE_TIMEOUT=<seconds>`, a whole number from `1` to
+`86400`, default `10`. When it expires, nanojira sends `SIGKILL` to the
+hook's whole process group (the hook runs as its own group leader), so
+everything the hook started dies with it. An `NJ_ON_CHANGE_TIMEOUT` that
+is not such a number is `invalid_env`, refused before anything is
+written — but only when the hook would be armed (`NJ_ON_CHANGE` set, a
+writer command, not a dry run, not inside a hook); otherwise the variable
+is not read at all. If nanojira itself receives `SIGINT`, `SIGTERM` or
+`SIGHUP` while waiting, it kills the hook's group the same way and then
+dies of that signal.
+
+**A hook failure never touches the backlog or the result.** Non-zero exit,
+timeout, death by a signal, a command that does not exist (`sh` exits
+`127`), a hook that cannot be started at all: in every case the write has
+already happened and stays exactly as it is — nanojira never undoes,
+retries or re-writes anything because of the hook — and nanojira's exit
+code and stdout are unchanged. The only trace is one line on stderr:
+
+```
+Warning: NJ_ON_CHANGE hook exited with status 3; the write itself succeeded and is unchanged
+Warning: NJ_ON_CHANGE hook exited with status 127 (command not found); the write itself succeeded and is unchanged
+Warning: NJ_ON_CHANGE hook timed out after 10s and was killed; the write itself succeeded and is unchanged
+Warning: NJ_ON_CHANGE hook was killed by SIGKILL; the write itself succeeded and is unchanged
+Warning: NJ_ON_CHANGE hook could not be started (<reason>); the write itself succeeded and is unchanged
+```
+
+A hook that succeeds prints nothing of nanojira's own. Without
+`NJ_ON_CHANGE` (unset or empty), every command's stdout, stderr, exit code
+and written bytes are identical to a nanojira without this feature.
+
+**`nanojira-mcp`** spawns `nanojira` with its own environment (§ 17), so an
+`NJ_ON_CHANGE` set for the MCP server fires for writes made through it,
+under the same rules; the hook's output lands on the child's stderr, which
+the server does not return as the tool result.
+
+```sh
+$ export NJ_ON_CHANGE='./tools/push-to-board.sh'
+$ nanojira set --id=TSK-009 --status=done --json
+{ "ok": true, "id": "TSK-009", ... }        # stdout: unchanged
+# push-to-board.sh ran with that same JSON on stdin,
+# NJ_HOOK_COMMAND=set NJ_HOOK_IDS=TSK-009 NJ_BACKLOG=/abs/backlog
+```
 
 ---
 
@@ -2294,6 +2863,23 @@ over text `nanojira` has already loaded, not a new read.
 
 `nanojira note --id=TSK-007 "Parser splits at the first colon"` appends a dated,
 signed line to the body:
+
+**The text, three ways (TSK-006).** The positional argument is one source;
+`--text=<t>` and `--text-file=<path|->` are the other two, mirroring
+`--description`/`--description-file`'s own shape (§ 9 "Section writes"):
+`--text-file=-` reads stdin, `--text-file=<path>` reads a file relative to
+the working directory (an unreadable path is `not_found`). **Exactly one**
+of the three may be given — positional text, `--text`, and `--text-file`
+are pairwise mutually exclusive, the same `invalid_value`, nothing-written
+discipline `--description`+`--description-file` already has (§ 9). Every
+other command's own content fields are already flags; this closes the one
+remaining inconsistency (an agent calling `note --text=…` previously got
+`unknown_field`). Whichever source is used, the resulting text is
+normalised and trimmed exactly the same way (DECISIONS 158 EV-7, "Multi-line
+text" below) before anything else in this section applies to it — one
+text-content rule, regardless of source. `--quiet`/`--fields` (§ 9
+"`--fields` / `--quiet`") apply to `nanojira note`'s own write result exactly as
+the other five write commands.
 
 ```markdown
 ## Notes
@@ -2697,7 +3283,15 @@ file untouched:
   poll for `<backlog>/.nj-fault-go` (timeout 10 s, then exit 1). The test
   changes the target file, then creates the marker: expect exit 1 with
   "changed in parallel", or exit 0 with `--force` where the command takes it
-  (`set`, `note`, `check` — not `archive` or `unarchive`)
+  (`set`, `note`, `check` — not `archive` or `unarchive`).
+  If `NJ_FAULT_READY=<path>` is also set, every time the hook starts holding
+  it first writes `<path>`, containing the held element's ID and a
+  newline. It writes before polling, and so before the 10 s starts. A test
+  waits for that file rather than guessing how long the first read takes,
+  then plants its change. If the file cannot be written, the command exits
+  1 with `fault:before-compare`, as on the timeout. Without
+  `NJ_FAULT_READY`, nothing is written and the hook behaves exactly as
+  above
 
 It exists so that criterion AC-9 is testable. The abandoned temp file is
 reported by `nanojira doctor` (`backlog:stray_tmp`) and removed by `doctor --fix`.
@@ -2714,6 +3308,23 @@ fixes the clock: if set, every timestamp the tool writes (`created`,
 value exits 1. It exists so that AC-2's byte-exact golden comparison needs no
 normalisation — normalising timestamps in the verifier would silently hide
 serializer defects (wrong format, missing `Z`).
+
+**An invalid `NJ_NOW` is refused up front, by every command.** "Invalid"
+means set and non-empty, but not `YYYY-MM-DDTHH:MM:SSZ` or not a real
+instant; an empty value means unset. Such a value makes every command —
+reads and writes alike, `--dry-run` and bare `nanojira` included, and an
+unknown command word too — exit 1 with `invalid_env` and a single stderr
+line naming `NJ_NOW`. The check happens once, at dispatch:
+
+- before the command's own argument checks;
+- before backlog resolution;
+- before `NJ_ON_CHANGE` is armed;
+- before anything is read or written.
+
+Whether a command would ever have read the clock plays no part.
+`--version`, `--help` and `help` are exempt and behave as without
+`NJ_NOW`: they resolve no backlog, read no clock, and must work in any
+environment, including one whose `NJ_NOW` is wrong.
 
 **Claims.** The exclusivity mechanism behind `nanojira claim`/`nanojira release`
 (§ 12a). **The claim of an element is an append-only sequence of immutable
@@ -3193,8 +3804,8 @@ roll back.
 ## 12c. `nanojira log`
 
 ```
-nanojira log  --id=TSK-007 [--json]
-nanojira log  --file=<path> [--json]
+nanojira log  --id=TSK-007 [--last=N] [--json]
+nanojira log  --file=<path> [--last=N] [--json]
 ```
 
 The change history of one element: who did what and when, derived
@@ -3269,7 +3880,10 @@ note` — a closed vocabulary scoped to this one field, the same way § 7's
 problem codes are their own closed vocabulary distinct from § 9's
 failure codes. `actor` is absent only for `created`; `text` is present
 only for `note`. Events are always in the merged order above — `log`
-does not accept a sort flag.
+does not accept a sort flag. `--last=N` (§ 9 "`--notes` / `--last`",
+TSK-005) narrows `events` to its own last `N` members and adds
+`events_total`, the real, unfiltered count — additive only when `--last`
+is given; omitting it keeps this shape exactly as above.
 
 **Human output** is one line per event, in the same merged order:
 
@@ -3423,7 +4037,9 @@ from their v2 places); configuration validity (§ 5); every condition whose
 Doctor column is not `—` (table in § 7); unreadable frontmatter lines;
 duplicate IDs; files outside their layout place (`type:folder`,
 `layout:misplaced`);
-a missing or empty `ids/` while elements exist (`backlog:ids_missing`);
+a missing or empty `ids/` while elements exist (`backlog:ids_missing`); the
+on-disk `ids/` layout disagreeing with `ids.shardSize`
+(`backlog:ids_layout_mismatch`, § 8 "Sharding `ids/`");
 element files without tombstones (`id:no_tombstone`); stray `.nj-tmp-*`
 files, including inside `.nanojira/claims/` (`backlog:stray_tmp`, § 12
 "Claims"); archive rules (§ 11); claim directories that are mismatched,
@@ -3471,6 +4087,15 @@ unprotected:
    `.nanojira/ids/` is left alone entirely. This is a `--fix` note only, no
    new problem code: the leftover is harmless one-time migration residue,
    not a current defect for `doctor` to name
+
+   **`backlog:ids_layout_mismatch`** (§ 8 "Sharding `ids/`") is repaired
+   here too, unconditionally like the gitignore/README fix-ups: every
+   tombstone moves into whichever of the flat or sharded layouts
+   `ids.shardSize` currently specifies, in one pass, before step 4 below
+   backfills any missing tombstones — those must land in the already-
+   correct layout, not get created in one and then have to move again. A
+   target already occupied (only reachable from a corrupted, mixed
+   on-disk state) is left alone and noted rather than overwritten.
 1. write the `id` from the file name, and the `type` from the ID prefix, when
    missing
 2. rename the file to match the `id` when frontmatter and file name disagree
@@ -3994,6 +4619,9 @@ reported, not guessed at.
     none before, only because `rm` is never an `nanojira-mcp` tool and so had
     never been added to the shared flag table; that table entry answers
     only this question, and does not make `rm` an `nanojira-mcp` tool.
+    Since 4.1.0 (DECISIONS 205) the per-flag lines cover every flag the
+    command accepts, control flags included, each with a one-line
+    description (`test/ac/ac-64-help-lists-every-flag.ts`, every command).
 47. **Did-you-mean.** `--priority=medium` is still `invalid_value`, its
     hint now `did you mean 'normal'? Known priorities: …` (the fixed
     synonym, checked first). A `--status`/`--type`/`--priority` value
@@ -4102,8 +4730,9 @@ reported, not guessed at.
     hint}`. Success is the existing single shape for one object, a new
     `{ok, ids, entries, refs}` otherwise. `acceptance` may be a JSON array
     of strings, one `- [ ] …` line each, so `acceptance:no_checkbox`
-    cannot happen through `--input`. `--dry-run` (`new` only, requires
-    `--input`) validates and reports the would-be shape, writing nothing.
+    cannot happen through `--input`. `--dry-run` previews a plan like any
+    other write (§ 9 "`--dry-run`", DECISIONS 197, superseding D172's
+    plan-only `--dry-run`).
 55. **`nanojira set --parent=<id>` reparents a task or subtask.** The id, body
     and claim log (keyed by id, § 12 "Claims") are unchanged; the type
     never changes. The new parent must exist, be live and be the correct
@@ -4156,9 +4785,9 @@ reported, not guessed at.
     `src/` and `test/` — there is no `VERSION` file; the version lives
     in `SKILL.md`'s `metadata.version` and `nanojira --version`, checked
     equal to `package.json`'s own `version` directly. `bin/{nanojira,nanojira-mcp}`
-    and `bin/{nanojira,nanojira-mcp}.cmd` are rendered by `tools/bundle.mjs` from
+    and `bin/{nanojira,nanojira-mcp}.cmd` are rendered by `tools/bundle.ts` from
     `tools/wrapper.sh`/`tools/wrapper.cmd`, each carrying a "Generated
-    by `tools/bundle.mjs` — do not edit" header; `bundle.mjs --check`
+    by `tools/bundle.ts` — do not edit" header; `bundle.ts --check`
     fails if any of the four differs from a fresh render, or if
     `SKILL.md`'s frontmatter is missing a required field, its
     `description` exceeds 1024 characters, or its `metadata.version`
@@ -4177,7 +4806,8 @@ reported, not guessed at.
     `"type": "module"` wherever `bin/` sits. `node
     tools/export-skill.mts <tag> <dest>` (TypeScript, run directly — no
     build step, no shell; git invoked via `execFileSync`) now only
-    copies `SKILL.md`, `bin/` and `dist/` from `<tag>`'s own tree
+    copies `SKILL.md`, `LICENSE`, `bin/`, `dist/` and (from v4.1, when
+    the tag has it) `references/*.md` from `<tag>`'s own tree
     (never the working tree, never `src/`/`test/`/`tools/`), after
     verifying `<tag>` with `git tag -v` (refusing an unsigned or
     non-existent tag); builds beside `<dest>` and renames atomically
@@ -4426,13 +5056,26 @@ there directly, alongside `src/` and `test/`, and `bin/`/`dist/` are
 committed build output, generated and checked exactly like the rest of
 the build. Exporting an accepted release is now a **shrink**, not an
 assembly: `node tools/export-skill.mts <tag> <dest>` copies `SKILL.md`,
-`bin/` and `dist/` straight out of `<tag>`'s own tree, verbatim, and
-contains no wrapper template of its own any more.
+`LICENSE`, `bin/`, `dist/` and `references/*.md` straight out of
+`<tag>`'s own tree, verbatim, and contains no wrapper template of its own
+any more.
+
+**`references/` (v4.1, DECISIONS 195).** `SKILL.md` is loaded on every
+use, so it carries only what an agent needs daily and stays at or below
+80 lines. Rarely needed text (packaging, the no-symlink rule's rationale,
+how to report a bug in nanojira itself) lives in `references/*.md`, which
+`SKILL.md` names by path for on-demand reading. The export copies every
+`references/*.md` file of the tag (flat, `.md` only) as a regular 0644
+file; a tag without the folder exports without it (never an empty
+folder). AC-56 checks that the exported set equals the repo's own, byte
+for byte, and that `SKILL.md` names every file in it.
 
 ### The layout, at the repo root
 
 ```
 SKILL.md
+LICENSE
+references/*.md
 bin/nanojira
 bin/nanojira-mcp
 bin/nanojira.cmd
@@ -4455,16 +5098,16 @@ real diff, not an opaque binary swap.
 
 ### `bin/` is generated, not hand-written
 
-`tools/bundle.mjs` renders `bin/nanojira`, `bin/nanojira-mcp`, `bin/nanojira.cmd` and
+`tools/bundle.ts` renders `bin/nanojira`, `bin/nanojira-mcp`, `bin/nanojira.cmd` and
 `bin/nanojira-mcp.cmd` from two template files, `tools/wrapper.sh` and
 `tools/wrapper.cmd` — one template each, parameterised only by the
 generated file's own name (so `bin/nanojira` and `bin/nanojira-mcp` share identical
 logic, and so do the two `.cmd` siblings). Every generated file carries a
-header naming its own origin — **"Generated by `tools/bundle.mjs` — do
+header naming its own origin — **"Generated by `tools/bundle.ts` — do
 not edit."** — the same discipline `export-skill.mts`'s DECISIONS 185
 wrapper strings could not offer, since a string embedded in a `.mts` file
 cannot itself be diffed or hand-edited by mistake the way a committed
-`bin/nanojira` now can be (and now is checked for, below). `tools/bundle.mjs
+`bin/nanojira` now can be (and now is checked for, below). `tools/bundle.ts
 --check` fails if any of the four generated files differs from a fresh
 render of its template, or is not executable where it must be (`bin/nanojira`,
 `bin/nanojira-mcp`) — catching a hand-edit to a generated file the same way it
@@ -4473,7 +5116,7 @@ already catches a stale `dist/*.mjs`.
 ### The build also checks `SKILL.md`
 
 Matching `write-node-skills/scripts/build.mjs`'s own rule for every Node
-skill under `agent-skills`: `tools/bundle.mjs` (plain, not only
+skill under `agent-skills`: `tools/bundle.ts` (plain, not only
 `--check`) fails the build if `SKILL.md`'s frontmatter is missing `name`,
 `description`, `license` or `metadata.version`; if `description` is over
 1024 characters (the field a skill-discovery system reads without
@@ -4590,7 +5233,7 @@ not guaranteed of `bin/<name>` (D187 addendum, 81cd90a).
 
 ### The bundle is ESM, built only from `node:*` built-ins
 
-(Addendum 9b3d0de.) `tools/bundle.mjs` writes `dist/nanojira.mjs` and
+(Addendum 9b3d0de.) `tools/bundle.ts` writes `dist/nanojira.mjs` and
 `dist/nanojira-mcp.mjs` — in the repo, not only in an export — replacing the
 earlier extensionless CommonJS `dist/nanojira`/`dist/nanojira-mcp` entirely, old
 tags' own `dist/nanojira` included (a frozen oracle replay against an old tag
@@ -4609,7 +5252,7 @@ time, not merely by convention.
 
 Lives at the repo root (moved from `skill/SKILL.md`, v3.11), the
 committed source the export copies verbatim (never generated, never
-edited post-export) — checked by `tools/bundle.mjs` itself (above), not
+edited post-export) — checked by `tools/bundle.ts` itself (above), not
 only by the AC. Frontmatter: `name`, `description` (≤ 1024 characters —
 the field a skill-discovery system reads without opening the file),
 `license`, `metadata.version`. **`metadata.version` must equal

@@ -14,10 +14,10 @@ und trotzdem Bytes, `_problems`-Reihenfolge oder die Reihenfolge der
 NODE=…/runtime/darwin-arm64/bin/node
 
 # einmalig, auf der eingefrorenen Revision
-$NODE tools/refactor-harness/baseline.js record --nj="$PWD/src/nj.ts"
+$NODE tools/refactor-harness/baseline.ts record --nj="$PWD/src/nj.ts"
 
 # nach jedem Refactor-Schritt
-$NODE tools/refactor-harness/baseline.js verify --nj="$PWD/src/nj.ts"
+$NODE tools/refactor-harness/baseline.ts verify --nj="$PWD/src/nj.ts"
 ```
 
 Der nj-Pfad ist **immer** explizit. Kein Default, kein PATH-Lookup, keine
@@ -39,7 +39,7 @@ nicht mehr die einzige gültige Quelle — siehe „Aufzeichnungsquelle" unten,
 | `5` | Orakel war beim Aufzeichnen rot |
 | `6` | **Veraltete Baseline** — `test/` hat sich seit der Aufzeichnung geändert |
 | `7` | **Header und Korpus gehören nicht zusammen** — zwei Aufzeichnungen haben sich überlappt |
-| `8` | **Urteil rot** (`verify`) — eine Orakel-Suite ist durchgefallen oder `scratch/verify.js` meldet ein ✗; die Liste steht unter `RED VERDICTS` |
+| `8` | **Urteil rot** (`verify`) — eine Orakel-Suite ist durchgefallen oder `scratch/verify.ts` meldet ein ✗; die Liste steht unter `RED VERDICTS` |
 
 **Welcher rote Lauf bedeutet was.** „Rot heißt zurückrollen" gilt für **Exit 1
 und 8** und sonst für keinen Code:
@@ -72,7 +72,7 @@ gleichzeitig rote Suite ginge in diesem erwarteten Exit 1 unter. Bei einer
 Deckungslücke wird der Byte-Diff wie bisher nicht gezeigt; ein rotes Urteil
 schon.
 
-Code `4` ist der wichtigste. `test/run-all.js` meldet ohne gesetztes `NJ`
+Code `4` ist der wichtigste. `test/run-all.mjs` meldet ohne gesetztes `NJ`
 für jede Suite „cannot run" und endet trotzdem ohne Drama — korrekte Black-box-Disziplin
 für ein Orakel, das vor seiner Implementierung geschrieben wurde, aber im
 Refactor eine Falle: ein vergessenes Env würde eine echte Regression als
@@ -80,12 +80,12 @@ harmloses Überspringen tarnen. Deshalb trennt dieser Harness „cannot run" har
 von „failed" und bricht bei jeder Lücke selbst ab. **Ein Durchlauf, der nichts
 geprüft hat, darf nie wie ein bestandener aussehen.**
 
-**Erwartete Lücken: `expected-gaps.js`.** Manche Suiten sind hier
-**absichtlich** CANNOT RUN — `edge/hardening-njrc-foreign-link.js` (`400627f`)
+**Erwartete Lücken: `expected-gaps.ts`.** Manche Suiten sind hier
+**absichtlich** CANNOT RUN — `edge/hardening-njrc-foreign-link.mjs` (`400627f`)
 braucht root oder einen Symlink eines fremden uid, den ein normales Konto nicht
 hat. Eine dauerhafte, umgebungsbedingte Lücke darf nicht jedes Gate zu Exit 4
 machen — und nie stillschweigend übergangen werden. Deshalb eine explizite
-Liste, je Eintrag Suite und Grund. `baseline.js` und `gate.js` melden jede
+Liste, je Eintrag Suite und Grund. `baseline.ts` und `gate.ts` melden jede
 getroffene Lücke **mit Namen** („expected gaps … NOT a pass, not a stop"),
 jede Lücke **nicht** auf der Liste bleibt Exit 4. Eine Suite auf der Liste ist
 zugleich verdict-only: ihre Aufrufe kommen nie in den Korpus, sonst hinge der
@@ -97,12 +97,12 @@ Commit, der die Suite umgebungsabhängig gemacht hat.
 
 | Datei | Zweck |
 |---|---|
-| `nj-shim` | steht überall dort, wo ein nj-Pfad erwartet wird; leitet weiter und zeichnet auf |
-| `lib/record.js` | Normalisierung, Backlog-Snapshot, mtime-Pinning |
-| `fixtures.js` | 29 Szenarien: alle Kommandos, alle erreichbaren Fehlercodes, die Liste aus review-verifier.md §3 |
-| `baseline.js` | Treiber: Korpus fahren, aufzeichnen, vergleichen |
-| `expected-gaps.js` | Suiten, die hier absichtlich CANNOT RUN sind, je mit Grund (siehe Exit-Codes) |
-| `gate.js` | das DECISIONS-90-B1-Gate in einem Befehl: Wegwerf-Worktree, eingefrorenes `test/`, Replay, dann `run-all.js` (siehe unten) |
+| `nj-shim.ts` | steht überall dort, wo ein nj-Pfad erwartet wird; leitet weiter und zeichnet auf |
+| `lib/record.ts` | Normalisierung, Backlog-Snapshot, mtime-Pinning |
+| `fixtures.ts` | 29 Szenarien: alle Kommandos, alle erreichbaren Fehlercodes, die Liste aus review-verifier.md §3 |
+| `baseline.ts` | Treiber: Korpus fahren, aufzeichnen, vergleichen |
+| `expected-gaps.ts` | Suiten, die hier absichtlich CANNOT RUN sind, je mit Grund (siehe Exit-Codes) |
+| `gate.ts` | das DECISIONS-90-B1-Gate in einem Befehl: Wegwerf-Worktree, eingefrorenes `test/`, Replay, dann `run-all.mjs` (siehe unten) |
 | `scratch/` | die Ad-hoc-Sonden des Verifiers, aus `/tmp` gerettet — dort waren sie nach einem Neustart weg und `record` brach mit Code 4 ab |
 
 Eine Sonde zählt nur, wenn sie **Aufrufe beiträgt**. „Ohne Fehler gestartet"
@@ -113,15 +113,15 @@ Zusammenfassung „11/11 scripts executed" meldete. Wer 0 Aufrufe liefert, mit
 Status ≠ 0 endet oder gar nicht lädt, landet jetzt unter „cannot run" und damit
 im harten Abbruch.
 
-`verify.js` ist davon ausgenommen und steht in `DIRECT_ONLY_SCRIPTS`: die Sonde
+`verify.ts` ist davon ausgenommen und steht in `DIRECT_ONLY_SCRIPTS`: die Sonde
 liest nj's **Quelltext** und zerlegt dessen `SEVERITY`-Tabelle. Mit dem Shim
 findet sie die Tabelle nicht, stirbt mittendrin und hinterlässt eine
 abgeschnittene Spur im Korpus — schlimmer als gar keine. Sie läuft direkt, ihr
 Urteil zählt, und sie steht als `notRecorded` im Header.
 
-**Wie ihr Urteil zählt.** `verify.js` druckt als letzte Zeile
+**Wie ihr Urteil zählt.** `verify.ts` druckt als letzte Zeile
 `N/M checks passed, K failed` und endet bei jedem ✗ mit Exit 1 (vorher immer
-0, v3-preflight.md A4). `baseline.js` liest genau diese Zeile (`VERDICT_LINE`):
+0, v3-preflight.md A4). `baseline.ts` liest genau diese Zeile (`VERDICT_LINE`):
 Zeile da und K > 0 → **rotes Urteil** (`8`), **gleich mit welchem Exit** —
 die Zeile ist der Vertrag, der Exit nur die Rückversicherung (I1: mit
 `process.exitCode = 0` lief ein ✗ vorher als „ran and passed" durch); jede
@@ -150,7 +150,7 @@ Schritt noch nicht gelandet ist (`PENDING`, mit Schritt benannt:
 `backlog:status_stale` V3-3, `backlog:legacy_layout` V3-4). Gegenprobe: eine
 Spec-Kopie mit `id:derived` als `error` → ✗ „wrong level: id:derived".
 
-Die übrigen Sonden (`bc.js`, `r3.js`, `r3bc.js`, `r6.js` …) drucken zum Teil
+Die übrigen Sonden (`bc.ts`, `r3.ts`, `r3bc.ts`, `r6.ts` …) drucken zum Teil
 ebenfalls ✗ — Befunde früherer Runden, gegen v2 und V3-1 identisch (1, 2, 1,
 10). Das sind **keine** Urteile: ihre nj-Aufrufe laufen durch den Shim und
 werden byte-verglichen, das ist ihr Gate.
@@ -167,7 +167,7 @@ Der Digest läuft über **ausführbaren Testinhalt**, nicht über den ganzen Bau
 
 ```sh
 # aus der Projektwurzel, nicht aus test/
-find test/ac test/edge test/fault test/golden test/lib test/run-all.js \
+find test/ac test/edge test/fault test/golden test/lib test/run-all.mjs \
      test/stress -type f | sort | xargs shasum -a 256 | shasum -a 256
 ```
 
@@ -177,7 +177,7 @@ weil der Inhalt ein anderer wäre, sondern weil die Zeilen anders lauten. Die
 Implementierung normalisiert deshalb auf `test/<...>`; ein Digest über eine
 Kopie des Baums liefert denselben Wert wie über das Original.
 
-`run-all.js` ist mit drin, obwohl es im Wurzelverzeichnis liegt: es ist kein
+`run-all.mjs` ist mit drin, obwohl es im Wurzelverzeichnis liegt: es ist kein
 Dokument, sondern der **Treiber**. Es entscheidet, welche Suiten eingesammelt
 werden und was als `cannot run` gilt — und genau diese Klassifizierung war die
 Stelle, an der „gelaufen" dreimal mit „hat geprüft" verwechselt wurde.
@@ -212,19 +212,19 @@ Verfahren: **eingefrorenes Orakel replayen, neues Orakel getrennt laufen.**
 In einem Befehl:
 
 ```sh
-$NODE tools/refactor-harness/gate.js --step=<commit> --frozen=<letzter oracle-frozen-Tag>
+$NODE tools/refactor-harness/gate.ts --step=<commit> --frozen=<letzter oracle-frozen-Tag>
 # z. B. V3-1, gegen den c2-Korpus (bis c252ab5):
 $NODE tools/refactor-harness/gate.js --step=e5e5e3b --frozen=oracle-frozen-7
 ```
 
 `--frozen` muss zum Korpus passen, den der laufende Harness mitbringt (sein
 `header.json` nennt den Digest) — seit dem c3-Korpus ist das
-`oracle-frozen-8`. `gate.js` prüft das vorab (`baseline.js digest` druckt
+`oracle-frozen-8`. `gate.ts` prüft das vorab (`baseline.ts digest` druckt
 beide Digests) und bricht bei einer Fehlpaarung sofort mit Exit 2 ab, den
 passenden Tag benannt — statt nach dem Aufbau mit Exit 6 „veraltete
 Baseline, neu aufzeichnen", was hier der falsche Rat wäre.
 
-`gate.js` tut genau das Folgende und fasst den Hauptarbeitsbaum und dessen
+`gate.ts` tut genau das Folgende und fasst den Hauptarbeitsbaum und dessen
 Index nie an (nur git's eigene Buchführung unter `.git/worktrees/`, die es
 wieder entfernt):
 
@@ -240,48 +240,48 @@ wieder entfernt):
    unversionierte Extradatei sieht `git diff` nicht, I6), und ihr Inhalt ist
    der des Tags (`git diff --quiet`).
 3. **Dieser** Harness über den des Schritts kopiert: das Instrument ist das,
-   das `gate.js` gerade ausführt (Commit und „uncommitted" stehen im Kopf der
+   das `gate.ts` gerade ausführt (Commit und „uncommitted" stehen im Kopf der
    Ausgabe), nicht das, mit dem der Schritt ausgeliefert wurde — ein Schritt
    vor DECISIONS 90 B2 würde sonst nicht auf Urteile gaten. Mit
    `--harness=<rev>` stattdessen der Harness von `<rev>`, samt seinem Korpus:
    so läuft ein **altes** Gate (V3-1 gegen `oracle-frozen-7`) erneut, mit einem
    Commit, der den c2-Korpus noch trägt (etwa `dd35227`). Der laufende Harness
    allein kann das nicht, er bringt den **aktuellen** Korpus mit.
-4. `baseline.js verify --nj=<worktree>/dist/nj` — der Replay.
+4. `baseline.ts verify --nj=<worktree>/dist/nj` — der Replay.
 5. `test/` ebenso gegen `--tests=<rev>` getauscht (Standard: der Schritt
-   selbst) und `test/run-all.js <worktree>/dist/nj` — das Urteil der neuen
+   selbst) und `test/run-all.mjs <worktree>/dist/nj` — das Urteil der neuen
    Suiten. Übersprungen, wenn der Replay `2`, `6` oder `7` meldet: dann liegt
    der Fehler im Aufruf oder Instrument, und `run-all` änderte daran nichts (I5).
 6. Worktree entfernen (`--keep` lässt ihn samt `gate.log` stehen).
 
 **Aufräumen, auch wenn es schiefgeht** (I2, I3). Jeder Kindprozess läuft in
 **eigener Prozessgruppe**. SIGINT, SIGTERM und SIGHUP halten erst die ganze
-Gruppe an (`baseline.js`, seine Suiten, deren `nj`-Aufrufe; nach 10 s SIGKILL),
+Gruppe an (`baseline.ts`, seine Suiten, deren `nj`-Aufrufe; nach 10 s SIGKILL),
 warten auf ihr Ende, dann erst geht der Worktree — vorher lief der Replay nach
 SIGINT noch eine Minute weiter, in einen gelöschten Worktree, auf einer
-Maschine, auf der Perf gemessen wird. Ein Absturz von `gate.js` selbst räumt
+Maschine, auf der Perf gemessen wird. Ein Absturz von `gate.ts` selbst räumt
 über `uncaughtException` und `process.on('exit')` auf; ein Log, das nicht mehr
 schreibbar ist, wird abgeschaltet statt den Lauf mitzureißen. Was SIGKILL
 hinterlässt, räumt der **nächste Start**: jede Gate-Wurzel trägt `owner.pid`,
 und `nj-gate-*`-Wurzeln sowie `nj-s0-*`-Scratch, deren Besitzer tot ist,
 werden entfernt (samt `git worktree prune`); eine Wurzel ohne `owner.pid`
-(älteres `gate.js`) wird nur gemeldet. Das Scratch eines angehaltenen
-`baseline.js` (nach dessen pid benannt) entfernt `gate.js`, sobald die Gruppe
-weg ist. `baseline.js` selbst hat bewusst **keine** Signal-Handler: es läuft
+(älteres `gate.ts`) wird nur gemeldet. Das Scratch eines angehaltenen
+`baseline.ts` (nach dessen pid benannt) entfernt `gate.ts`, sobald die Gruppe
+weg ist. `baseline.ts` selbst hat bewusst **keine** Signal-Handler: es läuft
 als eine synchrone `spawnSync`-Schleife, ein JS-Handler käme nie dran — und
 schon sein Registrieren schaltet Nodes „bei SIGTERM sterben" ab; so eine
 Fassung lebte bis zum SIGKILL 10 s später weiter (beim Testen gefunden).
 Gemessen: SIGINT, SIGTERM, SIGHUP mitten im Replay → Gate weg nach ~2 s, keine
 Kindprozesse, keine Wurzel, keine Registrierung, kein `nj-s0-*`; ein
-erzwungener Absturz von `gate.js` 8 s nach dem Start ebenso (Exit 2).
+erzwungener Absturz von `gate.ts` 8 s nach dem Start ebenso (Exit 2).
 
 `--nj=<pfad>` legt eine andere Datei als `dist/nj` in den Worktree
 (Kandidat vor dem Commit, oder eine absichtlich kaputte Kopie als
 Gegenprobe); die Suiten, die `dist/nj` selbst suchen (AC-15), sehen dieselbe.
 
-Exit von `gate.js`: `8`, wenn der Replay `8` meldet oder eine `run-all`-Suite
+Exit von `gate.ts`: `8`, wenn der Replay `8` meldet oder eine `run-all`-Suite
 durchfällt; sonst `4` bei jeder Lücke in einem der beiden Läufe (erwartete
-Lücken aus `expected-gaps.js` ausgenommen, aber benannt); sonst der Exit des
+Lücken aus `expected-gaps.ts` ausgenommen, aber benannt); sonst der Exit des
 Replays (`0`, `1`, `6`, `7`). `2`: Aufruf- oder Einrichtungsfehler. `128+n`:
 durch Signal n angehalten, nach dem Aufräumen.
 **`1` ist für einen Schritt mit benannten Diffs das erwartete Ergebnis** —
@@ -338,7 +338,7 @@ die den vollständigen gebündelten Stand trägt.
 
 ```sh
 git show c2-baseline:dist/nj > /tmp/c2-dist-nj   # Kopie, NICHT den Arbeitsbaum umschalten
-$NODE tools/refactor-harness/baseline.js record --nj=/tmp/c2-dist-nj
+$NODE tools/refactor-harness/baseline.ts record --nj=/tmp/c2-dist-nj
 ```
 
 Der Arbeitsbaum bleibt dabei unangetastet — anders als beim `c1-baseline`-
@@ -348,7 +348,7 @@ Dateipfad nimmt, `nj` aber `lib/` relativ zu sich selbst nachlädt; `dist/nj`
 hat dieses Problem nicht, es ist bereits vollständig gebündelt, also reicht
 eine Kopie an beliebigem Pfad.
 
-`stdout-epipe.js` selbst ist als **verdict-only** in `baseline.js` eingetragen
+`stdout-epipe.mjs` selbst ist als **verdict-only** in `baseline.ts` eingetragen
 (`VERDICT_ONLY_SUITES`, analog zu den preload-instrumentierten Suiten): wie
 viel Ausgabe vor dem Schließen des Lesers ankommt, hängt vom Timing und lässt
 sich nicht byte-genau aufzeichnen. Das Urteil (bestanden/durchgefallen) zählt
@@ -460,7 +460,7 @@ nichts Last erzeugt. Was zählt, ist **Last, nicht Name oder Anwesenheit**:
 ps -A -o pid=,ppid=,pcpu=,comm=      # eigene Kindprozesse ausschliessen (ppid)
 ```
 
-`tools/perf.mjs` prüft genau das: ein fremder Prozess über 50 % oder die Summe
+`tools/perf.ts` prüft genau das: ein fremder Prozess über 50 % oder die Summe
 aller fremden Prozesse über 200 % bricht mit Exit 3 ab und nennt den
 Prozess. Die Zahlen sind auf dieser Maschine gemessen, nicht geschätzt: fünf
 Stichproben im Leerlauf summierten sich auf 70–114 % (WindowServer, ein
@@ -482,7 +482,7 @@ Rückrollvorgang wie ein echter.
 mit Stromsparmodus brauchte der Build, den DECISIONS 84 mit 206 ms gemessen
 hatte, ~390 ms — jeder andere Build ebenso —, während die CPU-Prüfung bestand
 und der Lauf OVER BAR auf unverändertem Code meldete (v3-preflight.md A5).
-`perf.js` liest deshalb auf darwin `pmset -g` (`lowpowermode 1`) und
+`perf.ts` liest deshalb auf darwin `pmset -g` (`lowpowermode 1`) und
 `pmset -g batt` (`'Battery Power'`) und bricht im absoluten Modus mit Exit 3
 ab: `perf: not a quiet machine (power): <Grund>`. Gelesen, nie verstellt —
 das ist die Einstellung des Nutzers.
@@ -491,7 +491,7 @@ das ist die Einstellung des Nutzers.
 (DECISIONS 90):
 
 ```sh
-$NODE tools/perf.mjs --ab=<nj A> --ab=<nj B> [--rounds=N] [--gate=all|reads]   # N Standard 7
+$NODE tools/perf.ts --ab=<nj A> --ab=<nj B> [--rounds=N] [--gate=all|reads]   # N Standard 7
 # z. B. v2 gegen V3-1:
 git show b65aa5f:dist/nj > /tmp/nj-A; git show e5e5e3b:dist/nj > /tmp/nj-B
 $NODE tools/perf.mjs --ab=/tmp/nj-A --ab=/tmp/nj-B
@@ -537,7 +537,7 @@ beide Prüfungen scheitern **geschlossen**: ohne lesbare Prozessliste gilt die
 Maschine nicht als ruhig (I7).
 
 **Schreibbefehle** (DECISIONS 95 B20). Ab V3-3 erzeugt jeder Schreibbefehl
-`STATUS.md` aus einem vollen Scan neu, also misst `perf.js` auch `new`,
+`STATUS.md` aus einem vollen Scan neu, also misst `perf.ts` auch `new`,
 `set --title` und `note` auf demselben 10k-Backlog, jeder Aufruf mit neuem
 Inhalt (sonst würde compare-before-write ihn zum No-op machen), alle nach den
 Lesebefehlen. § 13 hat noch keine Schreibschranke (TSK-027 trägt eine ein):
@@ -586,7 +586,7 @@ davon aufweicht, weicht das Netz auf.
 7. **`cwdHash`.** Gruppiert Aufrufe nach Backlog, ohne einen absoluten Pfad
    aufzunehmen. Wird nicht verglichen, nur zur Gruppierung benutzt.
 8. **Absichtlich nebenläufige Suiten**, aufgezählt in `CONCURRENT_SUITES`:
-   `ac/ac-07-concurrency.js` und `edge/tombstone-partial-loss.js`. Welcher
+   `ac/ac-07-concurrency.mjs` und `edge/tombstone-partial-loss.mjs`. Welcher
    Aufruf welche ID gewinnt und wie viele Temp-Dateien gerade fliegen, ist dort
    *die geprüfte Eigenschaft*. Die Markierung erbt jeder Aufruf auf demselben
    Backlog — nach 100 wettrennenden `nj new` ist auch jedes spätere `show`

@@ -29,21 +29,21 @@ NODE=/home/dev/workspace/portable/runtime/darwin-arm64/bin/node
 NJ=/path/to/nanojira          # absolute, or resolved against your shell's cwd
 
 # the whole oracle, with a summary
-$NODE run-all.mjs "$NJ"
+$NODE run-all.ts "$NJ"
 
 # one test
-$NODE ac/ac-01-basic-run.mjs "$NJ"
+$NODE ac/ac-01-basic-run.ts "$NJ"
 ```
 
-`ac/ac-15-no-dependencies.mjs` needs the runtime Node itself, not just any
+`ac/ac-15-no-dependencies.ts` needs the runtime Node itself, not just any
 Node: it takes `NJ_NODE` when set, otherwise the first
 `runtime/<platform>/bin/node` or `portable/runtime/<platform>/bin/node` found
 walking up from the project directory, and reports `CANNOT RUN` when there is
 none.
 
-Run these commands from this directory (`test/`): `run-all.mjs` and the test
+Run these commands from this directory (`test/`): `run-all.ts` and the test
 folders are addressed relative to it. From the project root the same invocation
-is `$NODE test/run-all.mjs "$NJ"`, and a relative `$NJ` then resolves against the
+is `$NODE test/run-all.ts "$NJ"`, and a relative `$NJ` then resolves against the
 project root, not `test/`.
 
 The path is resolved to an absolute one when the harness loads, because tests
@@ -51,17 +51,103 @@ run `nanojira` with a scratch directory as its cwd — a relative path handed to
 child would be re-resolved against that scratch directory and every test would
 report `CANNOT RUN`, blaming the suite for a missing argument.
 
-`run-all.mjs` runs the suite — every file under `ac/`, `fault/`, `edge/` and
-`stress/` — prints each result and then a summary that separates *failed* from
+`run-all.ts` runs the suite — every file under `ac/`, `fault/`, `edge/` and
+`tools/` — prints each result and then a summary that separates *failed* from
 *could not run* — those mean different things, and collapsing them would hide a
 missing prerequisite behind a green-ish number. One result line is the
-delegated pair: `ac/ac-07-concurrency.mjs` is executed as `stress/concurrency.mjs`
-(that is the `concurrency.mjs` line, reported in AC-7's slot), so there is one
+delegated pair: `ac/ac-07-concurrency.ts` is executed as `stress/concurrency.ts`
+(that is the `concurrency.ts` line, reported in AC-7's slot), so there is one
 fewer result line than test-bearing files. Nothing is skipped.
 
 Each test prints `PASS <file> (n checks)` and exits 0, or `FAIL <file> — k of n
 checks failed` with one line per failure and exits 1. Zero dependencies — the
 same constraint the product is under, so the oracle runs on the same runtime.
+
+### Parallel runs, `@serial` and `@slow`
+
+`run-all.ts` runs test files concurrently (DECISIONS 199): `--jobs=<n>`, else
+`NJ_TEST_JOBS`, else `min(os.availableParallelism(), 8)`. Anything else is a
+usage error (exit 2).
+
+```sh
+$NODE run-all.ts "$NJ"              # pooled, default width
+$NODE run-all.ts --jobs=1 "$NJ"     # the strictly serial run, as before
+NJ_TEST_JOBS=4 $NODE run-all.ts "$NJ"
+```
+
+- Each file's stdout+stderr is buffered and printed as **one block**, never
+  interleaved, in collected order: a block is printed as soon as every
+  earlier file in the pool has finished.
+- Files marked `@serial` are held back and run **alone, one at a time, after
+  the pool has drained**, in collected order. Their blocks therefore come
+  last. The summary lists `failed`/`cannot run` in collected order whatever
+  order files finished in, so it reads the same as a serial run's.
+- `--jobs=1` ignores the marker and is byte-for-byte the old serial loop:
+  same order, same output, same exit code.
+- Passed / failed / cannot-run are classified exactly as before. A file
+  killed by the 600 s per-file timeout, or by passing the 64 MiB output cap,
+  counts as failed in either mode.
+
+**The marker.** A file is `@serial` when a comment line in its header —
+before the first `import` — starts with `@serial`, followed by a one-line
+reason:
+
+```ts
+/* @serial: stress/concurrency.ts bursts 300 nj processes at once */
+/* AC-7 — ... the usual header ... */
+import ...
+```
+
+Mark a file `@serial` when the pool could change its verdict or another
+file's verdict. That means it:
+
+- races a fixed sleep or a wall-clock bound against a child process,
+- asserts on elapsed time, or
+- loads the machine hard enough to push a neighbour past such a bound.
+
+Prefer a fix where one exists. Each of these is a fix, not a reason to
+mark a file:
+
+- a generous timeout around a fixed hook wait;
+- an elapsed-time window that only needs widening;
+- a rendezvous instead of a sleep.
+
+Use the marker only when the race itself cannot be removed from the test
+side.
+
+The `NJ_FAULT=before-compare` legs used to be the usual case. They slept
+1 s and assumed nj had reached the hold by then; a late nj on a loaded
+machine missed the planted change. They now use `H.faultReady()`
+(DECISIONS 201), which needs no marker:
+
+```ts
+const ready = H.faultReady('label');                    // env + a ready file in a fresh dir
+const done = startNj([...], { env: ready.env });        // NJ_FAULT=before-compare, NJ_FAULT_READY=<file>
+T.check('nj reached the hold', await ready.wait(done), ready.file);
+// ... plant the parallel change, then write <backlog>/.nj-fault-go
+```
+
+nj writes `NJ_FAULT_READY` once its first read is done and it starts
+holding (spec § 12). Never go back to a fixed sleep there.
+
+**`@slow`.** Same header syntax: `/* @slow: <why> */`. In the pool, `@slow`
+files are dispatched first, so a long file does not start late and become
+the last one running. Only the start order changes; output order and
+verdicts do not, and `--jobs=1` ignores the marker.
+
+Mark roughly the `--jobs` longest pooled files. To find them, set
+`NJ_TEST_TIMES=<file>`: `run-all.ts` writes every file's wall time there
+(TSV, slowest first, with its phase and start offset). Stdout is
+unchanged. Re-check the list when a file's runtime changes a lot.
+
+Every file must also stay **isolated**:
+
+- write only under `H.freshDir()`/`H.mkBacklog()` (mkdtemp) or another
+  mkdtemp dir, never inside the repo tree, `node_modules` or a fixed path;
+- pin `HOME` to a fresh dir when the code under test reads it;
+- never list a shared directory such as `/tmp` and compare counts.
+
+Reading repo files, or cloning the repo into a fresh dir, is fine.
 
 Set `NJ_KEEP=1` to keep the scratch directories for inspection; otherwise each
 test cleans up after itself.
@@ -75,11 +161,11 @@ test ever fails with an unrelated `ENOENT` about a file that was never created.
 
 | Path | What it is |
 |---|---|
-| `lib/harness.mjs` | The shared contract: process runner, fixture builders, assertions |
+| `lib/harness.ts` | The shared contract: process runner, fixture builders, assertions |
 | `golden/` | Byte-exact expected file content, one fixture per write path |
 | `golden/MANIFEST.sha256` | Frozen hashes — see "Freezing" below |
-| `ac/ac-NN-*.mjs` | One executable test per acceptance criterion, AC-1 … AC-28 (AC-21–27 are derived from spec v3/v3.1, AC-28 from spec v3.2, each written ahead of its step) |
-| `proposed/` | Empty for now: proposal-v3.1 suites written ahead of spec acceptance live here until promoted into `ac/`; excluded from `run-all.mjs` discovery. Holds the still-unpromoted § C (`nanojira claim`) suite once it exists |
+| `ac/ac-NN-*.ts` | One executable test per acceptance criterion, AC-1 … AC-28 (AC-21–27 are derived from spec v3/v3.1, AC-28 from spec v3.2, each written ahead of its step) |
+| `proposed/` | Empty for now: proposal-v3.1 suites written ahead of spec acceptance live here until promoted into `ac/`; excluded from `run-all.ts` discovery. Holds the still-unpromoted § C (`nanojira claim`) suite once it exists |
 | `fault/` | `NJ_FAULT` and `NJ_NOW` verification hooks (§ 12) |
 | `stress/` | The 20-wide concurrency run that AC-7 needs |
 | `edge/` | Boundary cases the ACs name but do not fully pin |
@@ -101,6 +187,21 @@ silently hide exactly the serializer defects AC-2 exists to catch.
 **Ambiguity is declared, never smoothed over.** Where the spec does not pin a
 behaviour, the test carries an `// AMBIGUOUS:` comment naming what is unpinned,
 and the reading it took. No test asserts a value nobody decided.
+
+**A leg that cannot run here is `not covered`, not failed (DECISIONS 203).**
+Some legs need a prerequisite this environment cannot supply — root, a
+genuinely foreign-owned file, a case-folding filesystem, a macOS-only path
+— and that absence is a gap in this run's coverage, not a product defect.
+Call `T.notCovered(desc, reason)` instead of asserting; it is counted
+alongside real checks and listed by name in the summary, but it can never by
+itself turn a file red. A file whose only red legs are not-covered ones, with
+every real assertion passing, reports `PASS` with the gaps named underneath —
+honest both ways: a release gate that is red because of an environment this
+machine cannot build is exactly as misleading as one that is quietly green
+over a real defect. This is a different thing from the whole-file `CANNOT RUN`
+above the table in "Contexts the suite must survive": that is the
+implementation itself being absent, which must stay a hard failure, not a
+per-leg environment gap.
 
 ## Contexts the suite must survive
 

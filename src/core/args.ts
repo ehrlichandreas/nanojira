@@ -6,10 +6,22 @@ import type { Flags } from './types.ts';
 
 import * as fs from 'fs';
 import { SECTION_ROLES } from './constants.ts';
+import { armDryRun } from './dry-run.ts';
 import { fail } from './output.ts';
 import { normalizeSectionContent } from './parse.ts';
 
 // -------------------------------------------------------------- arg parsing
+
+// The documented spelling of a flag -> the name it is normalised to (§ 9:
+// "`--depends-on` and `--depends_on` are both accepted and normalised to
+// the schema field"). `displayFlagName` reverses it, so `--help` shows the
+// documented spelling, never the internal one (DECISIONS 205).
+const FLAG_ALIASES: Map<string, string> = new Map([['depends-on', 'depends_on']]);
+
+function displayFlagName(name: string): string {
+  for (const [shown, internal] of FLAG_ALIASES) if (internal === name) return shown;
+  return name;
+}
 
 function parseArgs(argv: string[]) {
   const flags: Flags = new Map();
@@ -20,7 +32,7 @@ function parseArgs(argv: string[]) {
       const eq = a.indexOf('=');
       let name = eq === -1 ? a.slice(2) : a.slice(2, eq);
       const value = eq === -1 ? true : a.slice(eq + 1);
-      if (name === 'depends-on') name = 'depends_on';
+      name = FLAG_ALIASES.get(name) ?? name;
       flags.set(name, value);
     } else {
       positional.push(a);
@@ -32,8 +44,18 @@ function parseArgs(argv: string[]) {
 // Controls every command takes, so no call site can forget one (§ 9).
 const GLOBAL_CONTROLS = ['backlog'];
 
+/** Every control flag a command takes: its own, plus the global ones, plus
+ * `--dry-run` for a write — what `checkFlags` accepts and, through
+ * `core/cli-flags.ts`, what `--help` lists (DECISIONS 205). `--dry-run`
+ * (§ 9 "`--dry-run`"): every write command takes it, so it is granted here
+ * from `isWrite` rather than listed per command; `init` and `doctor`
+ * (`--fix`), which pass `isWrite: false`, list it themselves. */
+function allowedControlSet(commandControls: Iterable<string>, isWrite: boolean): Set<string> {
+  return new Set([...commandControls, ...GLOBAL_CONTROLS, ...(isWrite ? ['dry-run'] : [])]);
+}
+
 function checkFlags(flags: Flags, allowedFields: string[], commandControls: Set<string>, isWrite: boolean) {
-  const allowedControls = new Set([...commandControls, ...GLOBAL_CONTROLS]);
+  const allowedControls = allowedControlSet(commandControls, isWrite);
   for (const name of flags.keys()) {
     if (allowedControls.has(name)) continue;
     if (allowedFields.includes(name)) continue;
@@ -42,6 +64,10 @@ function checkFlags(flags: Flags, allowedFields: string[], commandControls: Set<
       ? `Known fields: ${allowedFields.join(', ')}`
       : `Known flags: ${Array.from(allowedControls).sort().map((f) => '--' + f).join(', ')}`;
     fail('unknown_field', `unknown field '${name}'.${suffix}`, known);
+  }
+  if (flags.has('dry-run')) {
+    armDryRun();
+    if (flags.get('dry-run') !== true) fail('invalid_value', '--dry-run takes no value', 'pass --dry-run on its own');
   }
 }
 
@@ -106,4 +132,4 @@ function readSectionFlags(flags: Flags) {
   return wanted;
 }
 
-export { parseArgs, checkFlags, flagString, parseListFlag, readSectionFlags };
+export { parseArgs, displayFlagName, allowedControlSet, checkFlags, flagString, parseListFlag, readSectionFlags, readStdin };

@@ -6,21 +6,32 @@ import type { Element } from './types.ts';
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { TYPE_PREFIX } from './constants.ts';
+import { TYPE_PREFIX, IDS_BUCKET_PAD } from './constants.ts';
 import { fail, hardExit } from './output.ts';
 import { serialize } from './parse.ts';
 
 // -------------------------------------------------------------------- clock
 
-function nowIso(): string {
+// NJ_NOW when set (and not empty), validated; null when the wall clock applies.
+function pinnedNow(): string | null {
   const pinned = process.env.NJ_NOW;
-  if (pinned !== undefined && pinned !== '') {
-    if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(pinned) || Number.isNaN(Date.parse(pinned))) {
-      fail('invalid_env', `invalid NJ_NOW '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`);
-    }
-    return pinned;
+  if (pinned === undefined || pinned === '') return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(pinned) || Number.isNaN(Date.parse(pinned))) {
+    fail('invalid_env', `invalid NJ_NOW '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`);
   }
-  return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
+  return pinned;
+}
+
+/** Refuses an invalid NJ_NOW up front (§ 12, DECISIONS 207): called once at
+ * dispatch, so every command fails the same way whether or not it would ever
+ * have read the clock -- not only the ones that happen to reach nowIso()
+ * (a read over a backlog with a claim did, the same read without one did not). */
+function checkClockEnv(): void {
+  pinnedNow();
+}
+
+function nowIso(): string {
+  return pinnedNow() ?? new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
 /** The same clock as `nowIso()` (NJ_NOW when set, else the wall clock), as epoch ms — for `claim:stale`'s age arithmetic (§ 12 "Claims"). */
@@ -45,19 +56,111 @@ function sleepMs(ms: number) {
 
 // `dir` is the actual tombstone folder in use — `.nanojira/ids` or, on a
 // legacy backlog (`doctor` only), `.ids` — passed in, never assumed (§ 8,
-// DECISIONS 95 B22).
-function readTombstones(dir: string) {
+// DECISIONS 95 B22). `shardSize` falsy (0/undefined) means today's flat
+// layout; a legacy backlog is always flat (sharding is v3-only) and every
+// caller there passes `shardSize` undefined.
+//
+// Under sharding this still visits every tombstone that has ever been
+// allocated — same as the flat case — just walked as `ids/<TYPE>/<bucket>/*`
+// instead of one flat `readdirSync`. That is fine for every caller of this
+// function (doctor's checks, and the id:no_tombstone pass over the whole
+// element set): the one caller that must NOT do an O(total-ever-allocated)
+// scan is `allocateId`'s own start-value computation below, which never
+// calls this — it only ever looks at the single highest bucket.
+function readTombstones(dir: string, shardSize?: number): Set<string> {
   const out: Set<string> = new Set();
-  let names;
-  try { names = fs.readdirSync(dir); } catch { return out; }
-  for (const n of names) {
-    if (n.startsWith('.')) continue;
-    out.add(n);
+  if (!shardSize) {
+    let names;
+    try { names = fs.readdirSync(dir); } catch { return out; }
+    for (const n of names) {
+      if (n.startsWith('.')) continue;
+      out.add(n);
+    }
+    return out;
+  }
+  let types;
+  try { types = fs.readdirSync(dir); } catch { return out; }
+  for (const t of types) {
+    if (t.startsWith('.')) continue;
+    const typeDir = path.join(dir, t);
+    let buckets;
+    try { buckets = fs.readdirSync(typeDir); } catch { continue; }
+    for (const b of buckets) {
+      if (b.startsWith('.')) continue;
+      let names;
+      try { names = fs.readdirSync(path.join(typeDir, b)); } catch { continue; }
+      for (const n of names) if (!n.startsWith('.')) out.add(n);
+    }
   }
   return out;
 }
 
-function allocateId(idsDir: string, type: string, elements: Element[]): string {
+// Zero-padded bucket directory name for element-number `n` under
+// `shardSize` (§ 8). `IDS_BUCKET_PAD` is fixed forever — see its own comment
+// (constants.ts) — so a bucket number that would need more digits is a hard
+// error rather than a silently wrong sort order.
+function bucketName(n: number, shardSize: number): string {
+  const b = Math.floor(n / shardSize);
+  const s = String(b).padStart(IDS_BUCKET_PAD, '0');
+  if (s.length > IDS_BUCKET_PAD) {
+    return hardExit('id_allocation_failed',
+      `nanojira: bucket ${b} (for id number ${n}, ids.shardSize=${shardSize}) needs more than ${IDS_BUCKET_PAD} digits — this is a hard limit`);
+  }
+  return s;
+}
+
+const TOMBSTONE_ID_RE = /^(EPIC|TSK|SUB)-(\d+)$/;
+
+// Where tombstone `id` lives, both under flat and sharded layouts (§ 8).
+// `dir` is what `allocateId` must `mkdir(..., {recursive: true})` before
+// the `O_CREAT|O_EXCL` attempt; `file` is the tombstone itself. Flat:
+// `dir === idsDir` (already created by the caller once). The prefix and
+// number are read from `id` itself, never from a caller-supplied `type` --
+// a mismatched one (a hand-placed element whose `type:` disagrees with its
+// own ID prefix) must still land at the bucket its ID number actually
+// implies, not wherever a wrong type would put it.
+function tombstoneLocation(idsDir: string, id: string, shardSize: number): { dir: string; file: string } {
+  if (!shardSize) return { dir: idsDir, file: path.join(idsDir, id) };
+  const m = TOMBSTONE_ID_RE.exec(id);
+  const prefix = m ? m[1] : id;
+  const n = m ? parseInt(m[2], 10) : 0;
+  const dir = path.join(idsDir, prefix, bucketName(n, shardSize));
+  return { dir, file: path.join(dir, id) };
+}
+
+// The highest element-number already claimed for `prefix`, scanning only
+// the single highest-numbered bucket directory (§ 8) — never the whole
+// `ids/<prefix>/` tree. Tombstones are never removed (never-reuse), and
+// `allocateId` only ever probes upward from the current max, so numbers
+// are dense with no permanent gaps below it: the bucket holding the global
+// max for `prefix` is always the highest-numbered bucket that exists for
+// it. A directory this cannot list (gone, or deliberately unreadable, as
+// the regression test below simulates for an OLD bucket) is treated as
+// empty rather than failing the allocation.
+function highestShardedMax(idsDir: string, prefix: string): number {
+  const typeDir = path.join(idsDir, prefix);
+  let buckets;
+  try { buckets = fs.readdirSync(typeDir).filter((b) => !b.startsWith('.')); } catch { return 0; }
+  if (buckets.length === 0) return 0;
+  buckets.sort();
+  const hi = buckets[buckets.length - 1];
+  let names;
+  try { names = fs.readdirSync(path.join(typeDir, hi)); } catch { return 0; }
+  const re = new RegExp('^' + prefix + '-(\\d+)$');
+  let max = 0;
+  for (const n of names) {
+    const m = re.exec(n);
+    if (m) { const v = parseInt(m[1], 10); if (v > max) max = v; }
+  }
+  return max;
+}
+
+// `shardSize` falsy (0/undefined, § 5 "ids.shardSize") keeps today's flat
+// behaviour byte-for-byte. A positive value buckets tombstones at
+// `ids/<TYPE>/<bucket>/<TYPE>-<n>` (§ 8) — `O_CREAT|O_EXCL` on the tombstone
+// file remains the sole claiming authority either way; only the path depth
+// and the start-value scan change.
+function allocateId(idsDir: string, type: string, elements: Element[], shardSize: number): string {
   const prefix = TYPE_PREFIX[type];
   fs.mkdirSync(idsDir, { recursive: true });
 
@@ -69,14 +172,17 @@ function allocateId(idsDir: string, type: string, elements: Element[]): string {
       if (n > max) max = n;
     }
   };
-  for (const t of readTombstones(idsDir)) consider(t);
+  if (shardSize) max = highestShardedMax(idsDir, prefix);
+  else for (const t of readTombstones(idsDir)) consider(t);
   for (const el of elements) consider(el.id);
 
   let n = max + 1;
   for (let i = 0; i < 100; i++) {
     const id = prefix + '-' + String(n).padStart(3, '0');
+    const { dir, file } = tombstoneLocation(idsDir, id, shardSize);
+    if (dir !== idsDir) fs.mkdirSync(dir, { recursive: true });
     try {
-      fs.closeSync(fs.openSync(path.join(idsDir, id), 'wx'));
+      fs.closeSync(fs.openSync(file, 'wx'));
       return id;
     } catch (e: any) {
       if (e.code !== 'EEXIST') throw e;
@@ -173,6 +279,19 @@ function compareGuard(el: Element, force: boolean, backlog?: string, hint?: stri
   // can deterministically change the target underneath us (§ 12).
   if (process.env.NJ_FAULT === 'before-compare' && backlog) {
     const marker = path.join(backlog, '.nj-fault-go');
+    // NJ_FAULT_READY=<path>: say "holding now" before the poll starts, so a
+    // test plants its parallel change after the first read instead of
+    // guessing with a sleep (§ 12, DECISIONS 201). Unset: nothing written.
+    const ready = process.env.NJ_FAULT_READY;
+    if (ready) {
+      try {
+        fs.writeFileSync(ready, el.id + '\n');
+      } catch (e) {
+        const msg = `nanojira: before-compare could not write NJ_FAULT_READY ${ready}: ${(e as Error).message}`;
+        if (catchable) fail('fault:before-compare', msg);
+        hardExit('fault:before-compare', msg);
+      }
+    }
     const deadline = Date.now() + 10000;
     while (!fs.existsSync(marker)) {
       if (Date.now() >= deadline) {
@@ -281,4 +400,4 @@ function renderElement(el: Element, fieldOverrides: Map<string, string | string[
   return serialize(fields, order, bodyOverride === undefined ? el.body : bodyOverride);
 }
 
-export { nowIso, nowMs, mtimeIso, readTombstones, allocateId, atomicWrite, mirrorWrite, atomicReplace, compareGuard, guardedWrite, guardedWriteCatchable, planMove, runMove, renderElement, sleepMs };
+export { checkClockEnv, nowIso, nowMs, mtimeIso, readTombstones, allocateId, tombstoneLocation, atomicWrite, mirrorWrite, atomicReplace, compareGuard, guardedWrite, guardedWriteCatchable, planMove, runMove, renderElement, sleepMs };

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
 // src/nanojira-mcp.ts
-import * as path4 from "node:path";
+import * as path5 from "node:path";
 import { spawn } from "node:child_process";
 
 // src/core/args.ts
-import * as fs3 from "node:fs";
+import * as fs4 from "node:fs";
 
 // src/core/constants.ts
 var SECTION_FLAGS = ["description", "description-file", "acceptance", "acceptance-file"];
@@ -14,6 +14,11 @@ var NEW_FIELDS = ["type", "parent", "title", "status", "priority", "assignee", "
 var V3_DIR_REL = ".nanojira";
 var V3_CONFIG_REL = ".nanojira/config.json";
 var LEGACY_CONFIG_REL = ".nanojira.json";
+
+// src/core/dry-run.ts
+import * as fs3 from "node:fs";
+import * as os from "node:os";
+import * as path3 from "node:path";
 
 // src/core/claims.ts
 import * as fs from "node:fs";
@@ -45,6 +50,7 @@ process.stdout.on("error", (err) => {
 });
 
 // src/core/args.ts
+var FLAG_ALIASES = /* @__PURE__ */ new Map([["depends-on", "depends_on"]]);
 function parseArgs(argv) {
   const flags = /* @__PURE__ */ new Map();
   const positional = [];
@@ -54,7 +60,7 @@ function parseArgs(argv) {
       const eq = a.indexOf("=");
       let name = eq === -1 ? a.slice(2) : a.slice(2, eq);
       const value = eq === -1 ? true : a.slice(eq + 1);
-      if (name === "depends-on") name = "depends_on";
+      name = FLAG_ALIASES.get(name) ?? name;
       flags.set(name, value);
     } else {
       positional.push(a);
@@ -70,12 +76,12 @@ function flagString(flags, name) {
 }
 
 // src/core/config.ts
-import * as fs4 from "node:fs";
-import * as os from "node:os";
-import * as path3 from "node:path";
+import * as fs5 from "node:fs";
+import * as os2 from "node:os";
+import * as path4 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.0.0";
+var VERSION = "4.1.0";
 
 // src/core/config.ts
 var SOURCE_CODE = { flag: "invalid_backlog_flag", env: "invalid_backlog_env", njrc: "invalid_backlog_njrc" };
@@ -83,13 +89,13 @@ function sourceName(src) {
   return src.kind === "flag" ? "--backlog" : src.kind === "env" ? "NJ_BACKLOG" : src.file;
 }
 function holdsBacklog(dir) {
-  return fs4.existsSync(path3.join(dir, V3_CONFIG_REL)) || fs4.existsSync(path3.join(dir, LEGACY_CONFIG_REL));
+  return fs5.existsSync(path4.join(dir, V3_CONFIG_REL)) || fs5.existsSync(path4.join(dir, LEGACY_CONFIG_REL));
 }
 function claim(dir, src, lenient) {
   const shown = src.kind === "njrc" ? escapeInvisible(dir) : dir;
   if (!isDir(dir)) fail(SOURCE_CODE[src.kind], `no backlog at ${shown} (from ${sourceName(src)})`);
   if (lenient || holdsBacklog(dir)) return dir;
-  if (fs4.existsSync(path3.join(dir, V3_DIR_REL))) {
+  if (fs5.existsSync(path4.join(dir, V3_DIR_REL))) {
     fail(
       "backlog_without_config",
       `${shown} exists but has no ${V3_CONFIG_REL}`,
@@ -116,33 +122,33 @@ function explicitLocation(flags) {
   return null;
 }
 function njrcLocation(dir) {
-  const file = path3.join(dir, ".njrc");
+  const file = path4.join(dir, ".njrc");
   const raw = readNjrc(file);
   if (raw === null) return null;
   const value = parseNjrc(file, raw).get("backlog");
   if (value === void 0) return null;
-  const expanded = value.startsWith("~/") ? path3.join(os.homedir(), value.slice(2)) : value;
-  return { dir: path3.resolve(dir, expanded), src: { kind: "njrc", file } };
+  const expanded = value.startsWith("~/") ? path4.join(os2.homedir(), value.slice(2)) : value;
+  return { dir: path4.resolve(dir, expanded), src: { kind: "njrc", file } };
 }
 function readNjrc(file) {
   let link;
   try {
-    link = fs4.lstatSync(file);
-  } catch {
-    return null;
+    link = fs5.lstatSync(file);
+  } catch (e) {
+    return searchMiss(e, path4.dirname(file));
   }
   const bad = (reason, hint) => fail("invalid_njrc", `invalid .njrc at ${file}: ${reason}`, hint);
   checkOwner(link.uid, bad);
-  njrcSwapFaultHook(path3.dirname(file));
+  njrcSwapFaultHook(path4.dirname(file));
   let fd;
   try {
-    fd = fs4.openSync(file, fs4.constants.O_RDONLY | fs4.constants.O_NONBLOCK);
+    fd = fs5.openSync(file, fs5.constants.O_RDONLY | fs5.constants.O_NONBLOCK);
   } catch (e) {
     if (e.code === "ELOOP") return bad("it is a symlink loop (ELOOP)");
     if (e.code === "ENOENT") {
       let fresh;
       try {
-        fresh = fs4.lstatSync(file);
+        fresh = fs5.lstatSync(file);
       } catch {
         return null;
       }
@@ -153,7 +159,7 @@ function readNjrc(file) {
   try {
     let st;
     try {
-      st = fs4.fstatSync(fd);
+      st = fs5.fstatSync(fd);
     } catch (e) {
       return bad(`cannot stat it -- ${e.code || e.message}`);
     }
@@ -161,20 +167,20 @@ function readNjrc(file) {
     if (!st.isFile()) return bad(st.isDirectory() ? "it is a directory, not a file" : "it is not a regular file");
     let raw;
     try {
-      raw = fs4.readFileSync(fd, "utf8");
+      raw = fs5.readFileSync(fd, "utf8");
     } catch (e) {
       return bad(`cannot read it -- ${e.code || e.message}`);
     }
     return raw.startsWith("\uFEFF") ? raw.slice(1) : raw;
   } finally {
-    fs4.closeSync(fd);
+    fs5.closeSync(fd);
   }
 }
 function njrcSwapFaultHook(dir) {
   if (process.env.NJ_FAULT !== "njrc-swap") return;
-  const marker = path3.join(dir, ".nj-fault-go");
+  const marker = path4.join(dir, ".nj-fault-go");
   const deadline = Date.now() + 1e4;
-  while (!fs4.existsSync(marker)) {
+  while (!fs5.existsSync(marker)) {
     if (Date.now() >= deadline) return;
     sleepMs(50);
   }
@@ -221,7 +227,7 @@ function workingDir() {
   }
 }
 function fromCwd(p) {
-  return path3.isAbsolute(p) ? path3.resolve(p) : path3.resolve(workingDir(), p);
+  return path4.isAbsolute(p) ? path4.resolve(p) : path4.resolve(workingDir(), p);
 }
 function oneLine(e) {
   const msg = e && e.message ? String(e.message) : String(e);
@@ -230,11 +236,11 @@ function oneLine(e) {
 function findBacklog(flags, lenient) {
   const explicit = explicitLocation(flags);
   if (explicit !== null) return claim(explicit.dir, explicit.src, lenient);
-  for (let dir = workingDir(); ; dir = path3.dirname(dir)) {
+  for (let dir = workingDir(); ; dir = path4.dirname(dir)) {
     const rc = njrcLocation(dir);
     if (rc !== null) return claim(rc.dir, rc.src, lenient);
-    const candidate = path3.join(dir, "backlog");
-    if (isDir(candidate)) {
+    const candidate = path4.join(dir, "backlog");
+    if (searchIsDir(candidate)) {
       if (lenient || holdsBacklog(candidate)) return candidate;
       fail(
         "backlog_without_config",
@@ -242,7 +248,7 @@ function findBacklog(flags, lenient) {
         "run `nanojira doctor` \u2014 it tolerates the missing file and reports config:invalid"
       );
     }
-    if (path3.dirname(dir) === dir) break;
+    if (path4.dirname(dir) === dir) break;
   }
   return fail(
     "no_backlog",
@@ -252,9 +258,20 @@ function findBacklog(flags, lenient) {
 }
 function isDir(p) {
   try {
-    return fs4.statSync(p).isDirectory();
+    return fs5.statSync(p).isDirectory();
   } catch {
     return false;
+  }
+}
+function searchMiss(e, dir) {
+  if (e && (e.code === "ENOENT" || e.code === "ENOTDIR")) return null;
+  return fail("io_error", `cannot search ${dir} for a backlog: ${oneLine(e)}`);
+}
+function searchIsDir(p) {
+  try {
+    return fs5.statSync(p).isDirectory();
+  } catch (e) {
+    return searchMiss(e, path4.dirname(p)) ?? false;
   }
 }
 
@@ -272,8 +289,8 @@ var FLAG_TABLE = {
     bool("case-sensitive"),
     { name: "text", kind: "string", positional: true }
   ] },
-  show: { fields: [str("id"), str("file")] },
-  log: { fields: [str("id"), str("file")] },
+  show: { fields: [str("id"), str("file"), str("notes")] },
+  log: { fields: [str("id"), str("file"), str("last")] },
   tree: { fields: [str("id")] },
   // Built from the same NEW_FIELDS/SETTABLE_FIELDS constants.ts and
   // cmd-new.ts/cmd-set.ts already validate against — one list, not two
@@ -374,7 +391,7 @@ function main() {
 `);
     process.exit(1);
   }
-  const njPath = path4.join(path4.dirname(path4.resolve(process.argv[1])), "nanojira.mjs");
+  const njPath = path5.join(path5.dirname(path5.resolve(process.argv[1])), "nanojira.mjs");
   const liveChildren = /* @__PURE__ */ new Set();
   function send(obj) {
     process.stdout.write(JSON.stringify(obj) + "\n");

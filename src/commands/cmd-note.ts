@@ -4,35 +4,25 @@
 
 import type { Flags, Element } from '../core/types.ts';
 
+import * as fs from 'fs';
 import { resolveActingName } from '../core/actor.ts';
-import { checkFlags } from '../core/args.ts';
-import { cliFieldNames } from '../core/flag-table.ts';
+import { flagString, readStdin } from '../core/args.ts';
+import { checkCommandFlags } from '../core/cli-flags.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireActive } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
-import { fail, out, writeFeedback, emitWriteResult } from '../core/output.ts';
+import { buildWriteResult, fail, out, writeFeedback } from '../core/output.ts';
+import { recordChange } from '../core/on-change.ts';
+import { renderNoteLine } from '../core/parse.ts';
+import { parseOutputOpts, emitWriteResultOpts, trimResult } from '../core/result-opts.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement } from '../core/store.ts';
-
-/**
- * The note's own text, as literal lines (§ 10 "Multi-line text", DECISIONS
- * 158 EV-7): the first becomes `<text>` on the `- <ts> <author>: <text>`
- * line itself; every line after it is a Markdown list continuation,
- * indented by exactly two spaces — a blank line among them is written as
- * exactly two spaces (never truly empty), the one deliberate exception to
- * this project's "no trailing whitespace" rule, so a reader (and
- * `parseNotes`) can tell it apart from the blank line that would otherwise
- * end `## Notes`.
- */
-function noteLine(ts: string, signer: string, text: string): string {
-  const [first, ...rest] = text.split('\n');
-  return [`- ${ts} ${signer}: ${first}`, ...rest.map((l) => (l === '' ? '  ' : `  ${l}`))].join('\n');
-}
 
 /** The note line, and the body with it inserted (§ 10) — shared by the single and batch paths. */
 function withNote(el: Element, text: string, signer: string, ts: string): string {
-  const line = noteLine(ts, signer, text);
+  const line = renderNoteLine(ts, signer, text);
   let body = el.body;
   const lines = body.split('\n');
   let idx = -1;
@@ -62,17 +52,58 @@ function withNote(el: Element, text: string, signer: string, ts: string): string
   return lines.join('\n');
 }
 
+/**
+ * The note's own text, from whichever of the three sources was given —
+ * the positional argument (unchanged), `--text=<t>`, or
+ * `--text-file=<path|->` (TSK-006, mirroring `--description`/
+ * `--description-file`'s own stdin-via-`-`/file-path/mutual-exclusion
+ * shape, § 9 "Section writes"). Exactly one may be given; two or more is
+ * `invalid_value`, nothing written, the same code § 9 already uses for
+ * `--description`+`--description-file` together. Whichever source wins,
+ * the resulting raw text goes through the identical `\r\n`/`\r` → `\n`
+ * normalisation and trim DECISIONS 158 (§ 10 "Multi-line text") already
+ * pins for the positional form — one text-content rule, regardless of
+ * source.
+ */
+function resolveNoteText(flags: Flags, positional: string[]): string {
+  const textFlag = flagString(flags, 'text');
+  const textFile = flagString(flags, 'text-file');
+  const given = [positional.length > 0, textFlag !== undefined, textFile !== undefined].filter(Boolean).length;
+  if (given > 1) {
+    fail('invalid_value', 'the note text was given more than one way (positional, --text, --text-file). Nothing written.',
+      'pass it as a positional argument, with --text=…, or with --text-file=<path|->, not more than one');
+  }
+  let raw: string;
+  if (textFile !== undefined) {
+    raw = textFile === '-' ? readStdin() : readTextFile(textFile);
+  } else if (textFlag !== undefined) {
+    raw = textFlag;
+  } else {
+    raw = positional.join(' ');
+  }
+  const text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
+  if (text === '') {
+    fail('missing_argument', 'nanojira note needs the note text as an argument',
+      'nanojira note --id=TSK-007 "…" (or --text=…, --text-file=<path|->)');
+  }
+  return text;
+}
+
+function readTextFile(filePath: string): string {
+  try { return fs.readFileSync(filePath, 'utf8'); } catch (e: any) {
+    return fail('not_found', `--text-file: cannot read '${filePath}' — ${e.message}. Nothing written.`,
+      'give a readable path, or `-` to read stdin');
+  }
+}
+
 function cmdNote(flags: Flags, positional: string[]) {
-  checkFlags(flags, [], new Set(['json', 'force', ...cliFieldNames('note')]), true);
+  checkCommandFlags(flags, 'note');
   const json = flags.has('json');
+  const opts = parseOutputOpts(flags, json);
   const ctx = context(flags);
 
   requireTargetFlagSyntax(flags);
-  // \r\n and a lone \r normalise to \n first, the same as every other
-  // write path (§ 7); the overall text is then trimmed, exactly as before
-  // multi-line text existed (§ 10 "Multi-line text").
-  const text = positional.join(' ').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-  if (text === '') fail('missing_argument', 'nanojira note needs the note text as an argument', 'nanojira note --id=TSK-007 "…"');
+  const text = resolveNoteText(flags, positional);
 
   const author = resolveActingName(flags, false);
 
@@ -94,13 +125,17 @@ function cmdNote(flags: Flags, positional: string[]) {
         const newBody = withNote(el, text, signer, ts);
         guardedWriteCatchable(el, renderElement(el, new Map([['updated', ts]]), newBody), flags.has('force'), ctx.backlog);
         const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
-        deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+        deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
         const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
         return { ok: true, changed: ['body'], entry, _problems: entry._problems };
       },
     );
-    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
-    const wrapper = { ok: result.ok, results: result.results };
+    if (result.anyWritten) { refreshStatus(ctx.backlog, ctx.cfg, ctx); refreshTags(ctx.backlog, ctx.cfg, ctx); }
+    const results = opts.quiet || opts.fields !== undefined
+      ? result.results.map((r: any) => (r.ok ? trimResult(r, opts) : r))
+      : result.results;
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
+    const wrapper = { ok: result.ok, results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results as any[]) out(r.ok ? `${r.id} note added` : `${r.id}: Error: ${r.error}`);
     return result.ok ? 0 : 1;
@@ -118,9 +153,11 @@ function cmdNote(flags: Flags, positional: string[]) {
   guardedWrite(el, renderElement(el, overrides, newBody), flags.has('force'), ctx.backlog);
 
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-  if (json) emitWriteResult(true, fresh, ['body'], ctx.backlog, ctx.cfg);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
+  recordChange(ctx.backlog, () => buildWriteResult(fresh, ['body'], ctx.backlog, ctx.cfg));
+  if (json) emitWriteResultOpts(true, fresh, ['body'], ctx.backlog, ctx.cfg, undefined, opts);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} note added`);
   return 0;
 }

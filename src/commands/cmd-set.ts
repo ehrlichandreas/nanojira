@@ -5,7 +5,8 @@
 import type { Flags, Element, Context, NonEmptyString } from '../core/types.ts';
 
 import * as path from 'path';
-import { checkFlags, flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
+import { flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
+import { checkCommandFlags } from '../core/cli-flags.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { PRIORITIES } from '../core/constants.ts';
 import { cliFieldNames } from '../core/flag-table.ts';
@@ -14,9 +15,12 @@ import { context, resolveTarget, resolveById, requireWritable, requireNoUnreadab
 import { entryJson, openAcceptanceExtra } from '../core/derive.ts';
 import { ownFolder, expectedPlace } from '../core/layout.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
-import { fail, out, writeFeedback, emitWriteResult } from '../core/output.ts';
+import { buildWriteResult, fail, out, writeFeedback } from '../core/output.ts';
+import { parseOutputOpts, emitWriteResultOpts, trimResult } from '../core/result-opts.ts';
+import { recordChange } from '../core/on-change.ts';
 import { syncH1, normalizeTitle, applySections } from '../core/parse.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags, warnTagNearMatches } from '../core/tags.ts';
 import { valueHint } from '../core/suggest.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement, planMove, runMove } from '../core/store.ts';
 import { releaseUnconditional, undoRelease } from '../core/claims.ts';
@@ -95,12 +99,9 @@ function setsFinalStatus(ctx: Context, overrides: Map<string, string | string[] 
 }
 
 function cmdSet(flags: Flags) {
-  // `id`/`file` stay out of the "Known fields:" list (as before this was
-  // moved onto the shared table): they are the addressing mechanism, not
-  // a settable field, and the original error text never named them here.
-  checkFlags(flags, cliFieldNames('set').filter((f) => f !== 'id' && f !== 'file'),
-    new Set(['json', 'force', 'allow-open-children', 'id', 'file', 'input']), true);
+  checkCommandFlags(flags, 'set');
   const json = flags.has('json');
+  const opts = parseOutputOpts(flags, json);
   const force = flags.has('force');
   const allowOpen = flags.has('allow-open-children');
   const ctx = context(flags);
@@ -117,6 +118,7 @@ function cmdSet(flags: Flags) {
     for (const f of cliFieldNames('set').filter((x) => x !== 'id' && x !== 'file')) {
       if (flags.has(f)) fail('invalid_value', '--input cannot be combined with field flags');
     }
+    if (opts.quiet || opts.fields !== undefined) fail('invalid_value', '--input cannot be combined with --quiet or --fields');
     sourceFlags = buildSetInputFlags(inputValue);
   }
 
@@ -159,7 +161,7 @@ function cmdSet(flags: Flags) {
         // frontmatter write it depends on has actually landed.
         if (item.movePlan !== null) runMove(item.movePlan);
         const fresh = loadElement(item.moveDst ?? item.el.file, ctx.backlog, ctx.cfg);
-        deriveGraph(ctx.elements.map((e: Element) => (e.file === item.el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+        deriveGraph(ctx.elements.map((e: Element) => (e.file === item.el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
         const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
         return Object.assign(
           { ok: true, changed: item.changed, entry, _problems: entry._problems },
@@ -168,8 +170,12 @@ function cmdSet(flags: Flags) {
         );
       },
     );
-    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
-    const wrapper = { ok: result.ok, results: result.results };
+    if (result.anyWritten) { refreshStatus(ctx.backlog, ctx.cfg, ctx); refreshTags(ctx.backlog, ctx.cfg, ctx); }
+    const results = opts.quiet || opts.fields !== undefined
+      ? result.results.map((r: any) => (r.ok ? trimResult(r, opts) : r))
+      : result.results;
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
+    const wrapper = { ok: result.ok, results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results as any[]) out(r.ok ? `${r.id} → ${(r.changed || []).join(', ') || 'unchanged'}` : `${r.id}: Error: ${r.error}`);
     return result.ok ? 0 : 1;
@@ -182,7 +188,8 @@ function cmdSet(flags: Flags) {
   const { overrides, changed, newBody, movePlan, moveDst } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
 
   if (changed.length === 0) {
-    if (json) emitWriteResult(true, el, [], ctx.backlog, ctx.cfg);
+    recordChange(ctx.backlog, () => buildWriteResult(el, [], ctx.backlog, ctx.cfg));
+    if (json) emitWriteResultOpts(true, el, [], ctx.backlog, ctx.cfg, undefined, opts);
     else writeFeedback(el, ctx.cfg, `${el.id} unchanged`);
     return 0;
   }
@@ -211,12 +218,12 @@ function cmdSet(flags: Flags) {
   // frontmatter write it depends on has actually landed.
   if (movePlan !== null) runMove(movePlan);
   const fresh = loadElement(moveDst ?? el.file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-  if (json) {
-    const extra = Object.assign({}, released !== undefined ? { released: released.holder } : {}, openAcceptanceExtra(fresh, ctx.cfg, isFinal));
-    emitWriteResult(true, fresh, changed, ctx.backlog, ctx.cfg, extra);
-  }
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
+  const extra = Object.assign({}, released !== undefined ? { released: released.holder } : {}, openAcceptanceExtra(fresh, ctx.cfg, isFinal));
+  recordChange(ctx.backlog, () => buildWriteResult(fresh, changed, ctx.backlog, ctx.cfg, extra));
+  if (json) emitWriteResultOpts(true, fresh, changed, ctx.backlog, ctx.cfg, extra, opts);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} → ${changed.map((c: SetField) => `${c}=${describeField(fresh, c)}`).join(', ')}`);
   return 0;
 }
@@ -382,6 +389,8 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
     if (nextTags.length !== cur.length || nextTags.some((x, i) => x !== cur[i])) {
       overrides.set('tags', nextTags.length === 0 ? undefined : nextTags);
       changed.push('tags');
+      const added = nextTags.filter((t) => !cur.includes(t));
+      if (added.length > 0) warnTagNearMatches(added, ctx.elements.flatMap((e) => e.tags));
     }
   }
 

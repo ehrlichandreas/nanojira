@@ -7,8 +7,8 @@
 
 import type { Flags, Element } from '../core/types.ts';
 
-import { checkFlags } from '../core/args.ts';
-import { cliFieldNames } from '../core/flag-table.ts';
+import { flagString } from '../core/args.ts';
+import { checkCommandFlags } from '../core/cli-flags.ts';
 import { allEntriesAscending } from '../core/claims.ts';
 import { context, resolveTarget } from '../core/context.ts';
 import { parseNotes } from '../core/parse.ts';
@@ -77,10 +77,26 @@ function formatEvent(e: LogEvent): string {
   return `${e.at} ${verb} by ${e.actor}`;
 }
 
+/**
+ * `--last=N` (§ 12c "`--last`", TSK-005): `undefined` means the flag was
+ * not given at all, keeping `log`'s output byte-identical to before this
+ * flag existed. `N` must be a positive integer — `0`, a negative number
+ * or anything non-numeric is `invalid_value`; there is no vocabulary here
+ * to did-you-mean against, unlike `show --notes=`'s `none`/`all`.
+ */
+function parseLastFlag(flags: Flags): number | undefined {
+  const raw = flagString(flags, 'last');
+  if (raw === undefined) return undefined;
+  const n = /^-?\d+$/.test(raw) ? Number(raw) : NaN;
+  if (Number.isInteger(n) && n >= 1) return n;
+  fail('invalid_value', `--last=${raw} must be a positive integer`);
+}
+
 function cmdLog(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', ...cliFieldNames('log')]), false);
+  checkCommandFlags(flags, 'log');
   const json = flags.has('json');
   const ctx = context(flags);
+  const last = parseLastFlag(flags);
 
   // `--id` naming a duplicate must be `duplicate_id` (forWrite), not a
   // silent first-match pick, the same escape hatch a write has (§ 12c
@@ -98,11 +114,18 @@ function cmdLog(flags: Flags) {
   events.sort((a, b) => (a.at !== b.at ? (a.at < b.at ? -1 : 1) : a._source - b._source));
   const merged: LogEvent[] = events.map(({ _source, ...rest }) => rest);
 
+  // `--last=N` keeps the last N events of any kind, counted after the full
+  // merge above — the same chronological order the unfiltered list already
+  // has, just the tail of it (§ 12c "`--last`", TSK-005).
+  const visible = last === undefined ? merged : merged.slice(Math.max(0, merged.length - last));
+
   if (json) {
-    out(JSON.stringify({ ok: true, id: el.id, events: merged }, null, 2));
+    const result: Record<string, unknown> = { ok: true, id: el.id, events: visible };
+    if (last !== undefined) result.events_total = merged.length;
+    out(JSON.stringify(result, null, 2));
     return 0;
   }
-  for (const e of merged) out(formatEvent(e));
+  for (const e of visible) out(formatEvent(e));
   return 0;
 }
 

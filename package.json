@@ -2,7 +2,7 @@
   "name": "nanojira",
   "private": true,
   "type": "module",
-  "version": "4.0.0",
+  "version": "4.1.0",
   "description": "NanoJira: a local, file-based task tool for agents.",
   "engines": {
     "node": ">=24"
@@ -12,16 +12,17 @@
     "nanojira-mcp": "dist/nanojira-mcp.mjs"
   },
   "scripts": {
-    "build": "node tools/bundle.mjs",
-    "build:check": "node tools/bundle.mjs --check",
+    "build": "node tools/bundle.ts",
+    "build:check": "node tools/bundle.ts --check",
     "typecheck": "tsc --noEmit",
-    "test": "node tools/bundle.mjs --check && node test/run-all.mjs",
-    "perf": "node tools/bundle.mjs --check && node tools/perf.mjs"
+    "test": "node tools/bundle.ts --check && node test/run-all.ts",
+    "perf": "node tools/bundle.ts --check && node tools/perf.ts"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.32.0",
     "@types/node": "^22.0.0",
     "esbuild": "^0.25.0",
+    "git-history-tools": "github:ehrlichandreas/git-history-tools#2282aed",
     "typescript": "^5.6.0"
   }
 }

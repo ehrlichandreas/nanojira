@@ -3,88 +3,59 @@ name: nanojira
 description: "A local, file-based task tool for agents: read, claim, update, close and note backlog elements (epics/tasks/subtasks) under a plain-Markdown backlog/ folder, no server or database. Use whenever an agent needs to track its own work, pick up the next ready item, or report on backlog state. Not for a team's existing issue tracker (Jira, GitHub Issues, Linear, ...) - nanojira is its own, separate backlog; do not point it at one of those."
 license: MIT
 metadata:
-  version: "4.0.0"
+  version: "4.1.0"
 ---
 
 # nanojira (NanoJira)
 
-A local, file-based task tool: every element (epic, task or subtask) is one Markdown file under
-`backlog/`, with no server, no database and no network call. This skill is a self-contained,
-vendored copy of one accepted nanojira release — `dist/nanojira.mjs` and `dist/nanojira-mcp.mjs` — built by
-`node tools/export-skill.mts <tag> <dest>` from the NanoJira project's own signed git tag.
-
-**This folder contains no symlinks, anywhere.** To move or share it, `cp -R` the whole folder —
-never symlink into it, and never symlink one file out of it (`bin/nanojira` in particular): the wrapper
-resolves its own location with a plain `dirname "$0"` and does not follow a link.
-
-## When this skill fits — and when not
-
-- **Tracking an agent's own work against a local backlog**: creating tasks/subtasks, claiming
-  and releasing them, moving them through a status list, leaving notes, checking acceptance
-  criteria. This is what nanojira is for.
-- **An existing issue tracker** (Jira, GitHub Issues, Linear, a team's own ticket system): nanojira is
-  not a client for any of those and does not sync with them. Use the tracker's own tool or API.
-- **Anything needing concurrent access from many unrelated processes at scale, or a remote team
-  without shared filesystem access**: nanojira is a local, file-based tool for one backlog directory;
-  it is not a server and has no remote mode.
+Every element (epic, task, subtask) is one Markdown file under `backlog/` — no server, no
+database, no network. Not a client for Jira/GitHub Issues/Linear, and no remote mode.
+Packaging (no symlinks — copy with `cp -R`) and reporting bugs in nanojira itself:
+`references/packaging-and-feedback.md`. Full guide and spec, at this release's tag:
+`references/full-docs.md`.
 
 ## Usage
 
-`sh <skill>/bin/nanojira <command> [flags]` (relative to this skill's own folder; `<skill>/bin/nanojira-mcp`
-for the MCP server variant). Needs only Node.js ≥ 24 — no other dependency, no `node_modules`.
-Works from any directory; `--backlog=<path>` points it at a specific backlog, otherwise it
-searches upward from the current directory for one (`NJ_BACKLOG`, then the nearest `.njrc`, then
-a `backlog/` folder).
+`sh <skill>/bin/nanojira <command> [flags]` (`<skill>/bin/nanojira-mcp` for MCP). Needs only
+Node.js ≥ 24. Backlog: `--backlog=<path>`, else `NJ_BACKLOG`, else the nearest `.njrc` or
+`backlog/` upward from the current directory. Below, `nanojira` stands for `sh <skill>/bin/nanojira`.
 
-**Always pass `--json` and branch on the parsed result, never on the human-readable prose** — the
-prose is free to change; the JSON shape is the stable contract:
-
-```
-sh <skill>/bin/nanojira list --json
-sh <skill>/bin/nanojira show --id=<id> --json
-```
+**Always pass `--json` and branch on the parsed result, never on prose** — the JSON shape is
+the stable contract: `nanojira list --json`, `nanojira show --id=<id> --json`.
 
 ### The daily loop
 
-- **Pick up the next piece of work**: `sh <skill>/bin/nanojira next --as=<name> --status=<doing-like
-  status> --json` — claims the highest-priority ready item in the same call, so two agents never
-  grab the same one. `{"ok": false, "error": "none_ready"}` is a normal outcome (nothing is
-  ready), not a failure to react to with retries.
-- **Claim a specific, already-known element** instead: `sh <skill>/bin/nanojira claim --id=<id>
-  --as=<name>`.
-- **Read before writing**: `sh <skill>/bin/nanojira show --id=<id> --json`, then `sh <skill>/bin/nanojira set
-  --id=<id> --status=... [--title=... --priority=... --tags=... --assignee=...
-  --depends-on=... --description=... --acceptance=...]` — set only the fields actually meant to
-  change.
-- **Finish or step away**: `sh <skill>/bin/nanojira set --id=<id> --status=<final status>` finishing
-  releases the claim automatically in the same write; to step away without finishing, `sh
-  <skill>/bin/nanojira release --id=<id> --as=<name>` instead.
-- **Tick acceptance criteria** with `sh <skill>/bin/nanojira check --id=<id> --text="<substring>"` —
-  never by hand-editing the checkbox text.
-- **Sign actions** with `--as=<name>` on `claim`, `release`, `next` and `note`.
-- **History**: `sh <skill>/bin/nanojira log --id=<id> --json` — creation, every claim/release, every
-  note, in order. Field changes (status, priority, ...) are not logged this way; a note is the
-  way to record the reason behind one.
+- **Next work**: `nanojira next --as=<name> --status=<doing-like status> --json` claims the
+  highest-priority ready item in the same call. `{"ok": false, "error": "none_ready"}` is a
+  normal outcome, not a failure to retry.
+- **A specific element**: `nanojira claim --id=<id> --as=<name>`.
+- **Read before writing**: `show --id=<id> --json`, then `set --id=<id> --status=...
+  [--title= --priority= --tags= --assignee= --depends-on= --description= --acceptance=]` —
+  only the fields meant to change.
+- **Smaller write results**: `--quiet` (`{ok, id}` plus any `_problems`) or
+  `--fields=<a,b,...>` on `new`/`set`/`note`/`check`/`claim`/`release`, with `--json`.
+- **Probe first**: `--dry-run` on any write (`doctor --fix` too) returns the real result plus
+  `changes` (every file it would touch) and writes nothing; ids it shows are not reserved.
+- **Finish**: `set --id=<id> --status=<final status>` releases the claim in the same write;
+  to step away unfinished, `release --id=<id> --as=<name>`.
+- **Acceptance**: tick with `check --id=<id> --text="<substring>"`, never by hand.
+- **Notes**: `note --id=<id> --text="..." --as=<name>` (or `--text-file=<path|->`);
+  `show --id=<id> --notes=last:N` prints only the newest `N`.
+- **Sign** `claim`, `release`, `next` and `note` with `--as=<name>`.
+- **History**: `log --id=<id> --json` (`--last=N`: newest `N`) — creation, claims/releases,
+  notes. Field changes are not logged; leave a note with the reason.
+- **Outside board**: `NJ_ON_CHANGE=<cmd>` in the environment (never in config) runs `<cmd>`
+  after every successful write, to keep an external tracker in sync.
+- **Noisy warnings?** `"problems": {"ignore": [<codes>]}` in `.nanojira/config.json` silences
+  warning-level `_problems` codes (e.g. `incomplete:acceptance`) without changing the data.
 
 ### Rules for an agent using nanojira
 
-1. The backlog is the only task list for whatever work this skill is scoped to — do not keep a
-   second, parallel list elsewhere once nanojira is in use for it.
-2. Never hand-edit a file under `backlog/`. Every change goes through a command, so the claim
-   log, acceptance checks and file format all stay consistent.
-3. Branch on `error` (a stable code), never on hint or prose text, which may change between
-   releases.
-4. Run `sh <skill>/bin/nanojira doctor` before treating a batch of backlog changes as finished; it
-   reports structural problems (`_problems`, warnings, errors) across the whole backlog without
-   changing anything.
-5. On success, exit is always `0` — including a read that merely *reports* a data problem via
-   `_problems`. A command that failed outright (nothing or only partially written) exits `1`; `nanojira
-   doctor` alone also uses `2` for at least one `error`-level finding. Full vocabulary, exit codes
-   and JSON shapes: `sh <skill>/bin/nanojira --help`, `sh <skill>/bin/nanojira <command> --help`.
-
-## Problems with nanojira itself
-
-Report a bug or a gap in nanojira's own behaviour to the NanoJira project's feedback backlog, not into
-this repo's own tracker and not by patching the vendored files: `sh <skill>/bin/nanojira --version` names
-the exact release; include it, the command run, the actual result and the expected one in the
-report, per the NanoJira project's own feedback process.
+1. The backlog is the only task list for its scope — no second, parallel list elsewhere.
+2. Never hand-edit a file under `backlog/`; every change goes through a command.
+3. Branch on `error` (a stable code), never on hint or prose text.
+4. Run `nanojira doctor` before treating a batch of changes as finished; it reports
+   structural problems across the whole backlog without changing anything.
+5. Exit `0` on success, including a read that only *reports* `_problems`; `1` when a command
+   failed; `doctor` also uses `2` for an `error`-level finding. Full vocabulary, exit codes
+   and JSON shapes: `nanojira --help`, `nanojira <command> --help`.

@@ -77,13 +77,21 @@ function writeFeedback(el: Element, cfg: Config, headline: string) {
   }
 }
 
-function emitWriteResult(json: boolean, el: Element, changed: string[], backlog: string, cfg: Config, extra?: object) {
-  if (!json) return;
+/** The single-ID write-result object itself, with no `--json`/printing
+ * concerns — factored out of `emitWriteResult` so `core/result-opts.ts`'s
+ * `--fields`/`--quiet` trimming can build the exact same object and apply
+ * itself to it before printing, without duplicating this shape a second
+ * time (§ 9 "`--fields` / `--quiet`"). */
+function buildWriteResult(el: Element, changed: string[], backlog: string, cfg: Config, extra?: object) {
   const entry = entryJson(el, backlog, cfg);
   // The top-level `_problems` mirrors entry._problems so an agent can branch on
   // one well-known place regardless of the command (§ 9).
-  const res = Object.assign({ ok: true, id: el.id, changed, entry, _problems: entry._problems }, extra || {});
-  out(JSON.stringify(res, null, 2));
+  return Object.assign({ ok: true, id: el.id, changed, entry, _problems: entry._problems }, extra || {});
+}
+
+function emitWriteResult(json: boolean, el: Element, changed: string[], backlog: string, cfg: Config, extra?: object) {
+  if (!json) return;
+  out(JSON.stringify(buildWriteResult(el, changed, backlog, cfg, extra), null, 2));
 }
 
 /** With --json every exit path emits JSON on stdout; the prose stays on stderr (§ 9). */
@@ -98,4 +106,4 @@ function emitFailure(code: string, message: string, hint?: string) {
   process.exitCode = 1;
 }
 
-export { Fail, fail, output, hardExit, out, problemSuffix, printEntryLine, writeFeedback, emitWriteResult, emitFailure };
+export { Fail, fail, output, hardExit, out, problemSuffix, printEntryLine, writeFeedback, buildWriteResult, emitWriteResult, emitFailure };

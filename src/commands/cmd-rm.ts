@@ -5,21 +5,23 @@
 import type { Flags, Element, EntryJson } from '../core/types.ts';
 
 import * as fs from 'fs';
-import { checkFlags } from '../core/args.ts';
+import { checkCommandFlags } from '../core/cli-flags.ts';
 import { removeClaimDirWholesale } from '../core/claims.ts';
 import { context, resolveTarget, requireNoStubs, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
 import { compareElements, entryJson } from '../core/derive.ts';
 import { ownFolder } from '../core/layout.ts';
 import { descendants } from '../core/load.ts';
 import { fail, out } from '../core/output.ts';
+import { recordChange } from '../core/on-change.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 
 function removeIfEmpty(dir: string) {
   try { fs.rmdirSync(dir); } catch { /* not empty (or already gone): it stays */ }
 }
 
 function cmdRm(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', 'cascade', 'id', 'file']), true);
+  checkCommandFlags(flags, 'rm');
   const json = flags.has('json');
   const ctx = context(flags);
   requireNoStubs(ctx, 'rm');
@@ -58,13 +60,13 @@ function cmdRm(flags: Flags) {
     removeClaimDirWholesale(ctx.backlog, v.id);
   }
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
+  const built = flags.has('cascade') && kids.length > 0
+    ? { ok: true, ids: victims.map((v: Element) => v.id), changed: ['deleted'], entries, _problems: [], dependents: dependents.map((d: Element) => d.id) }
+    : { ok: true, id: el.id, changed: ['deleted'], entry: entries[0], _problems: entries[0]._problems, dependents: dependents.map((d: Element) => d.id) };
+  recordChange(ctx.backlog, () => built);
   if (json) {
-    if (flags.has('cascade') && kids.length > 0) {
-      out(JSON.stringify({ ok: true, ids: victims.map((v: Element) => v.id), changed: ['deleted'], entries, _problems: [], dependents: dependents.map((d: Element) => d.id) }, null, 2));
-    } else {
-      out(JSON.stringify({ ok: true, id: el.id, changed: ['deleted'], entry: entries[0], _problems: entries[0]._problems, dependents: dependents.map((d: Element) => d.id) }, null, 2));
-    }
+    out(JSON.stringify(built, null, 2));
   } else {
     for (const v of victims) out(`${v.id} deleted (${v.file})`);
     out(`Tombstone${victims.length > 1 ? 's' : ''} kept — the ID${victims.length > 1 ? 's stay' : ' stays'} claimed forever.`);

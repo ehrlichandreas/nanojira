@@ -247,10 +247,13 @@ TSK-001 → status=done
 ```
 
 - `nanojira note` appends `- <time> <author>: <text>` under `## Notes`; the author
-  is the element's `assignee`, else `?`. A multi-line `<text>` is kept, not
-  flattened: every line after the first is indented two spaces under the
-  `- <time> <author>:` line (a Markdown list continuation), and `nanojira log`
-  reads it back out the same way it went in:
+  is the element's `assignee`, else `?`. The text can be positional (as
+  above), `--text=<t>`, or `--text-file=<path|->` (a file, or `-` for
+  stdin) — exactly one of the three, mirroring `--description`/
+  `--description-file`'s own shape. A multi-line `<text>`, from any of the
+  three, is kept, not flattened: every line after the first is indented
+  two spaces under the `- <time> <author>:` line (a Markdown list
+  continuation), and `nanojira log` reads it back out the same way it went in:
 
   ```sh
   $ nanojira note --id=TSK-001 "$(printf 'First line\nSecond line')"
@@ -284,10 +287,13 @@ TSK-001 → status=done
   --assignee --ready --all]`, `nanojira tree`, `nanojira show --id=…`, `nanojira find "<text>"`
   (§ 17 below).
 
-**Don't guess which `--type`/`--status`/`--priority` values are allowed —
-ask.** `nanojira <command> --help` prints that command's own flags, including the
-allowed values for each (the backlog's own configured `statuses` when one
-resolves, else the defaults):
+**Don't guess which flags a command takes, or which `--type`/`--status`/
+`--priority` values are allowed — ask.** `nanojira <command> --help` prints
+every flag that command accepts, control flags (`--json`, `--dry-run`,
+`--force`, …) included, each with a one-line description and, for the
+closed vocabularies, the allowed values (the backlog's own configured
+`statuses` when one resolves, else the defaults). A flag it does not list
+is `unknown_field` on that command:
 
 ```sh
 $ nanojira set --help
@@ -295,12 +301,17 @@ $ nanojira set --help
                [--tags=…] [--assignee=…] [--depends-on=…] [--force] [--allow-open-children]
                [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=…]
 
-  --id
-  --file
-  --title
-  --status=<value>   allowed: todo, doing, blocked, review, done
-  --priority=<value>   allowed: low, normal, high, urgent
+  --id=<id>                     the element to act on; A,B,C applies the same write to each
+  --file=<path>                 address one file of a duplicated ID, instead of --id
+  --title=<text>                the title
+  --parent=<id>                 move the element under this parent
+  --status=<value>              the status to set; allowed: todo, doing, blocked, review, done
+  --priority=<value>            the priority; allowed: low, normal, high, urgent
   …
+  --json                        print the result as JSON
+  --force                       overwrite a parallel change
+  …
+  --dry-run                     run against a scratch copy; nothing is written
 ```
 
 and a typo'd value — one close enough to exactly one allowed value —
@@ -704,6 +715,18 @@ TSK-001 claimed by alice (status: doing)
   (`bob` lost the race for `TSK-001` — someone else claimed it a moment
   earlier — and `next` moved on to `TSK-002` instead of giving up.)
 
+**`next` is pull, never push.** `nanojira` is a local, file-based CLI with
+no daemon and no network; an optional `NJ_ON_CHANGE` hook (env only, § 30)
+can push changes outward, but it fires on a write, never on readiness. It
+cannot notify or wake anyone on its own when an element becomes `--ready`
+or a dependency clears; nothing happens until something calls
+`next`/`claim` and asks. Whatever "wake
+someone when X is ready" a team wants — a teammate polling `next` on an
+interval, a message when a dependency is satisfied, a scheduled check-in
+— has to come from that team's own orchestration layer (messages, a task
+board, a cron job), not from `nanojira` itself. That's deliberate, not a
+gap to fill.
+
 ## 15. `nanojira log`
 
 The change history of one element — what already exists, merged into one
@@ -828,7 +851,8 @@ give aborts the whole batch, nothing written for any ID. Past that point
 each ID writes independently: one ID's bad luck (a parallel edit, a
 competing claim) never stops the others. The result is `{ok, results:
 [{id, ok, …}]}` instead of one write's usual shape; a single `--id=A` (no
-comma) is unaffected.
+comma) is unaffected. `--fields`/`--quiet` (§ 25) narrow each successful
+member of `results` the same way they narrow a single write's result.
 
 ## 19. `nanojira-mcp` — the MCP wrapper
 
@@ -970,19 +994,9 @@ EOF
   one `- [ ] …` line, in order — content supplied this way can never
   accidentally trigger `acceptance:no_checkbox`. A plain string still
   works unchanged.
-- **`--dry-run`** (`new --input=` only): runs the full validation pass and
-  writes nothing — no id, no file, no `refs`, a `children` entry's implied
-  parent shown as a JSON path (`"[0]"`) instead of a real id, since none
-  was ever assigned. Use it to check a plan before committing to it:
-
-  ```sh
-  $ nanojira new --input=plan.json --dry-run --json
-  { "ok": true, "dry_run": true,
-    "entries": [
-      { "type": "epic", "title": "Login", "_problems": [] },
-      { "type": "task", "parent": "[0]", "title": "Login route", "_problems": [] }
-    ] }
-  ```
+- **`--dry-run`**: check a plan before committing to it. Nothing is
+  written; you get the plan's real result (would-be ids included) plus
+  the files it would create — see § 28.
 
 **Recovering from a mid-plan failure.** A failure's JSON always carries
 `failed_at` — the one object at fault, named by its own `ref` if it
@@ -1100,3 +1114,345 @@ it would otherwise appear:
 
 Any warning-severity code from `docs/SPECIFICATION.md` § 7 can be listed
 this way (§ 10 above); an error code or an `incomplete:*` code cannot.
+
+## 24. Tags: `TAGS.md`, `nanojira tags`, and healing drift
+
+`tags` is free-form text (§ 5) — nothing stops `backend`, `back-end` and
+`Backend` from all being in use at once, each looking unrelated to `list
+--tag=`. `TAGS.md` gives that drift "one place to look," generated the same
+way `STATUS.md` is (§ 8): every tag currently in use across every element,
+with how many elements carry it, sorted —
+
+```
+# Tags
+
+- `backend` (3)
+- `bug` (7)
+- `urgent` (1)
+```
+
+- Rewritten after every successful write that could touch `tags` (§ 8's
+  own list of write commands, unchanged); stale after a hand edit, and
+  `nanojira doctor --fix` regenerates it the same way it does `STATUS.md`
+  (`backlog:tags_stale`, a warning).
+- `layout.tagsFile: false` turns it off, same as `layout.statusFile: false`
+  — an existing file is then left alone, and `doctor` stops checking it.
+- `nanojira tags [--json]` answers the same question on demand, without
+  depending on the generated file at all (it reads straight from the
+  elements, the same way `nanojira list --json` does not need `STATUS.md`):
+
+```sh
+$ nanojira tags
+backend (3)
+bug (7)
+urgent (1)
+$ nanojira tags --json
+{"ok": true, "tags": [{"name": "backend", "count": 3}, {"name": "bug", "count": 7}, {"name": "urgent", "count": 1}]}
+```
+
+**Introducing a tag that looks like a drifted spelling of one already in
+use** — `back-end` when `backend` already exists, `Bug` when `bug`
+already exists — prints a non-blocking warning to stderr from `new` or
+`set --tags=`/`--add-tags=`. It never changes the exit code, never blocks
+the write, and never appears in `--json` output; it is a nudge, not a
+rule — there is deliberately no closed tag vocabulary to enforce.
+
+**Healing a tag that already drifted** has no dedicated rename command —
+renaming a tag is rare enough, and the two primitives already needed for
+anything else compose into it directly: find every carrier of the old
+spelling, then flip each one over in a single batch write.
+
+```sh
+$ nanojira list --tag=back-end --json                # every carrier of the old spelling
+$ nanojira set --id=TSK-003,TSK-011,TSK-014 --add-tags=backend --remove-tags=back-end
+```
+
+(`--id=` takes a comma-separated list — § 18 "Batch writes" — so every
+carrier is fixed in one call, each one's own other tags left untouched;
+`--remove-tags`/`--add-tags` edit the list incrementally, § 5 above, so
+nothing else about any of those elements' tags needs to be re-specified by
+hand.) `nanojira doctor --fix` (or the next successful write to any element)
+regenerates `TAGS.md` to match once the carriers are fixed.
+
+## 25. Shrinking write results: `--fields` / `--quiet`
+
+`new`, `set`, `note`, `check`, `claim` and `release` return the whole
+`entry` (~600 bytes) on every `--json` call. If you only need to confirm
+the write happened, or only need a couple of fields back, `--quiet` and
+`--fields=` shrink the result — without falling back to piping it through
+`head`/`grep`, which is a parsing gamble the stable JSON contract exists
+to avoid.
+
+```sh
+$ nanojira set --id=TSK-009 --status=doing --quiet --json
+{"ok": true, "id": "TSK-009"}
+
+$ nanojira set --id=TSK-009 --status=done --quiet --json
+{"ok": true, "id": "TSK-009", "_problems": ["done:open_acceptance"]}
+
+$ nanojira set --id=TSK-009 --priority=high --fields=id,priority --json
+{"ok": true, "id": "TSK-009", "changed": ["priority"],
+ "entry": {"id": "TSK-009", "priority": "high"}, "_problems": []}
+```
+
+- **`--quiet`** is always `{ok, id}`, plus `_problems` whenever it is
+  non-empty — a warning like `done:open_acceptance` is never silently
+  dropped by asking for less. Everything else (`entry`, `changed`,
+  `claim` and its siblings on `claim`/`release`) is gone; don't pass
+  `--quiet` on `claim` if you need the claim state back.
+- **`--fields=<a,b,...>`** keeps `entry` (only), cut down to the names
+  you gave, in the order you gave them. The names are `nanojira show`'s own
+  entry fields (`id, type, parent, title, status, priority, assignee,
+  tags, depends_on, created, updated, archived, file, _problems,
+  _claim`); a typo is rejected the same way an unknown `--status` is,
+  with a did-you-mean when one is close, and nothing is written.
+  `changed`/`claim`/etc. at the top level are untouched either way —
+  `--fields` only ever narrows `entry`.
+- Both require `--json` (there is nothing to narrow in the plain text
+  output) and are mutually exclusive with each other and with `--input`.
+- On a batch (`--id=A,B,C`, § 18), both apply to each **successful**
+  member of `results` the same way; a failed member keeps its full
+  `{id, ok: false, error, hint?}` regardless — errors are never shrunk.
+
+## 26. Umbrella tickets: make the parts children
+
+An umbrella ticket ("ship the login flow") that is only *done* once its
+parts are done should be the **parent** of those parts, not a sibling
+that mentions them. Then nanojira itself refuses to close it early:
+
+```sh
+$ nanojira set --id=TSK-040 --status=done --json
+{"ok": false, "error": "refused:children_open",
+ "hint": "finish them first, or pass --allow-open-children"}
+```
+
+`set --status=done` on an element whose children are not all done is
+refused with `refused:children_open`. Only an explicit
+`--allow-open-children` forces it, and that leaves a `done:open_children`
+warning behind for `doctor` to keep reporting. Separate tasks that merely
+reference each other get no such protection: a worker can mark the
+umbrella done while its flows are still open, and nothing notices.
+
+- **Umbrella is a task** → its parts are subtasks:
+  `nanojira new --type=subtask --parent=TSK-040 --title="..."`.
+- **Umbrella spans several tasks** → make it an epic and put the tasks
+  under it.
+- **Parts already exist as separate tasks?** Tasks can only sit under an
+  epic, and an element's type never changes, so the umbrella has to be
+  an epic: create one (or use an existing one) and move the tasks under
+  it in place with `nanojira set --id=<task> --parent=<epic>` (§ 22) — id,
+  notes and claim carry over. Never `rm` and recreate.
+- `depends_on` is the wrong tool for this: it orders work ("start B after
+  A is done"), it does not stop anyone from closing the umbrella.
+
+## 27. Fewer notes, fewer events: `show --notes=` / `log --last=`
+
+A long-running ticket can collect 20+ notes; most of the time you only
+want the newest one or two, not the whole history, and grepping the
+`.md` file directly to get them bypasses the tool the same way piping a
+write result through `head`/`grep` does (§ 25).
+
+```sh
+$ nanojira show --id=TSK-009 --notes=last:1
+...
+## Notes
+(3 earlier notes hidden — pass --notes=all to see them)
+- 2026-09-21T19:30:00Z alice: wired the route
+
+$ nanojira show --id=TSK-009 --notes=last:1 --json
+{"...": "...", "entry": {"...": "...",
+ "notes": [{"at": "2026-09-21T19:30:00Z", "actor": "alice", "text": "wired the route"}],
+ "notes_total": 4}}
+
+$ nanojira log --id=TSK-009 --last=1 --json
+{"ok": true, "id": "TSK-009",
+ "events": [{"at": "2026-09-21T19:30:00Z", "kind": "note", "actor": "alice", "text": "wired the route"}],
+ "events_total": 5}
+```
+
+- **`show --notes=none|all|last:N`** controls how many notes the body
+  shows. `all` is the untouched default — leave the flag off entirely and
+  nothing changes. `none` hides every note behind a one-line placeholder
+  naming how many there are; `last:N` keeps only the `N` most recent,
+  with a placeholder naming how many earlier ones are hidden (no
+  placeholder at all when `N` is at or above the real count — there is
+  nothing to hide). Unlike `--fields`/`--quiet`, `--notes` has a plain-text
+  meaning and works with or without `--json`.
+- In `--json`, giving `--notes` **at all** — `all` included — adds `notes`
+  (the visible notes, same `{at, actor, text}` shape `log`'s own events
+  use) and `notes_total` (the real, un-narrowed count) to `entry`.
+  Leaving `--notes` off adds neither key; that is the one difference
+  between the omitted default and `--notes=all` given explicitly, since
+  both show the same notes.
+- An unknown `--notes` value, or `last:N` with `N` not a positive integer,
+  is `invalid_value` (with a did-you-mean against `none`/`all`/`last:N`
+  when one fits) — checked before the target even resolves.
+- On a `duplicate_id` target (two files sharing one `id`), `--notes=`
+  narrows each file's own notes independently.
+- **`log --last=N`** keeps the last `N` events of any kind (created,
+  claimed/released/reasserted/stolen, note) from the already-merged,
+  already-ordered list `log` builds — not per kind, across all of them —
+  and adds `events_total`, the real count, the same additive-only-when-
+  given rule `--notes` has. Leaving `--last` off is the untouched default.
+
+## 28. Probe before you apply: `--dry-run`
+
+Every command that writes — `init`, `new`, `set`, `note`, `check`,
+`claim`, `release`, `next`, `archive`, `unarchive`, `rm`, `doctor --fix`
+— takes `--dry-run`. The call runs in full against a scratch copy of the
+backlog, and nothing in the real backlog is written: no file, no
+tombstone, no claim, no `STATUS.md`. You get back exactly what the real
+call would print, plus what it would change:
+
+```sh
+$ nanojira archive --id=EPIC-002 --dry-run --json
+{ "ok": true, "ids": ["EPIC-002", "TSK-003"], "changed": ["archived"], …,
+  "dry_run": true,
+  "changes": [
+    { "path": "STATUS.md", "kind": "file", "op": "modify", "before": "…", "after": "…" },
+    { "path": "archive/EPIC-002.md", "kind": "file", "op": "create", "before": null, "after": "…" },
+    …
+    { "path": "epics/EPIC-002.md", "kind": "file", "op": "delete", "before": "…", "after": null },
+    …
+  ] }
+```
+
+The recipe:
+
+1. Run the command with `--dry-run --json`.
+2. Branch on `ok`/`error` exactly as for the real call — a dry run
+   refuses with the same code (`refused:claimed`, `not_found`, …) and
+   the same exit code.
+3. If you like what `changes` shows, run the same command again without
+   `--dry-run`.
+
+Things to know:
+
+- `changes` lists each path with its **full** content before and after
+  (`null` where it doesn't exist), sorted by path. A move is a `delete`
+  plus a `create`. A refused call has `changes: []`.
+- An id the dry run shows (`new`, a plan, `next`'s pick) is **not
+  reserved**. The real call gets the same one unless something else
+  allocated in between, so read the id off the real call's result.
+- `--quiet`/`--fields` trim the would-be result as usual; `dry_run` and
+  `changes` are always kept.
+- Without `--json`, you get the real call's prose plus a summary:
+  `Dry run: nothing written. The real call would change 2 paths:`
+  followed by one `  modify  tasks/TSK-009.md`-style line per path.
+- Read-only commands (`list`, `show`, …) reject `--dry-run` as
+  `unknown_field`; plain `doctor` rejects it as `invalid_value`, since
+  only `doctor --fix` writes.
+- A dry run never fires an `NJ_ON_CHANGE` hook (§ 30): only the real
+  call pushes anything outward.
+
+## 29. `NJ_NOW` — a deterministic clock (verification/testing only)
+
+`NJ_NOW=<ISO-8601 UTC>` pins the clock: every timestamp `nanojira` writes
+(`created`, `updated`, `archived`, a `nanojira note` line's own time, a claim's
+`since`) uses exactly this value instead of the real wall clock, for as long
+as it is set.
+
+```sh
+$ NJ_NOW=2026-01-02T03:04:05Z nanojira new --type=epic --title=Auth
+$ grep created backlog/epics/EPIC-001.md
+created: 2026-01-02T03:04:05Z
+```
+
+This is not a feature for day-to-day use — it exists so that a scripted
+test can run the same sequence of commands twice and get byte-identical
+output, which a test comparing against a golden fixture (or against a
+second run of itself) needs and the real wall clock can never give it.
+Leave it unset for normal work.
+
+- The value must match `YYYY-MM-DDTHH:MM:SSZ` exactly (UTC, no fractional
+  seconds, no other offset) — anything else is `invalid_env`, refused
+  before anything is written, never a silent fall-back to the real clock.
+- A handful of clock reads are deliberately exempt and always use the real
+  wall clock regardless of `NJ_NOW`: internal timeouts on a test-only fault
+  hook (`NJ_FAULT`'s own rendezvous waits), and the internal bound used to
+  decide whether a file's own filesystem `ctime` predates the current
+  command (`STATUS.md`'s refresh) — neither is a timestamp `nanojira` ever
+  writes, so pinning either would either make a wait un-timeoutable or
+  compare a real filesystem clock against a fake one.
+- `claims.staleAfterHours`/`claim:stale` (§ 13) measures age against
+  `NJ_NOW` too, so a claim's staleness is exactly as reproducible as
+  everything else.
+
+## 30. `NJ_ON_CHANGE` — push changes to an outside board
+
+Keeping nanojira and some other board (a team task board, a ticket
+tracker) side by side means double bookkeeping, and the two drift: a
+ticket is `done` here and still "in progress" there. `NJ_ON_CHANGE` lets
+your own environment push every nanojira write outward. nanojira itself
+still has no daemon and opens no network connection — your command does
+the pushing.
+
+```sh
+$ export NJ_ON_CHANGE='./tools/push-to-board.sh'
+$ nanojira set --id=TSK-009 --status=done
+TSK-009 → status=done
+```
+
+After that `set` succeeded, nanojira ran
+`/bin/sh -c './tools/push-to-board.sh'` in the backlog root, with:
+
+- **stdin**: the full `--json` result of the write — exactly what
+  `nanojira set --id=TSK-009 --status=done --json` would have printed
+  (never trimmed by `--quiet`/`--fields`, whether or not you passed
+  `--json` yourself);
+- `NJ_HOOK_COMMAND=set`, `NJ_HOOK_IDS=TSK-009` (comma-separated when a
+  write touches several, empty for `init` and `doctor --fix`), and
+  `NJ_BACKLOG=<absolute backlog path>`.
+
+A minimal hook that mirrors status changes:
+
+```sh
+#!/bin/sh
+# tools/push-to-board.sh — runs inside the backlog root.
+# The --json result is on stdin if you want it; this one only needs the ids.
+for id in $(echo "$NJ_HOOK_IDS" | tr ',' ' '); do
+  status=$(nanojira show --id="$id" --json | jq -r '.entry.status')
+  board-cli update "$id" --status="$status"
+done
+```
+
+What to rely on:
+
+- **Only the environment arms it.** There is no config key for it and
+  never will be: a hook stored in the backlog would run code from every
+  backlog you clone. A hook-like key someone put into
+  `.nanojira/config.json` is ignored (`nanojira doctor` warns about it as
+  `config:unknown_key`).
+- **It fires after every successful write** — `init`, `new`, `set`,
+  `note`, `check`, `claim`, `release`, `next` (when it claims),
+  `archive`, `unarchive`, `rm`, `doctor --fix` (when it fixed
+  something) — once per call, a batch (`--id=A,B,C`) included: one call
+  with the whole batch result. A no-op `set`/`check`/`release` fires too;
+  check `changed` if you only care about real changes.
+- **It never fires** after a refusal or error, after a read, after a
+  `--dry-run`, or from inside a hook.
+- **The backlog is already consistent** when the hook starts: the files,
+  claims and `STATUS.md` are final, so `nanojira show`/`list` inside the
+  hook see the new state.
+- **A hook may call nanojira itself** (`nanojira note …`): inside the
+  hook `NJ_ON_CHANGE` is unset and `NJ_HOOK_COMMAND` is set, and nanojira
+  never fires from inside a hook, so it cannot loop.
+- **A failing hook changes nothing.** Non-zero exit, a typo'd command, a
+  hang: the write already happened and stays; nanojira's exit code and
+  stdout are exactly what they would have been without the hook. You get
+  one `Warning: NJ_ON_CHANGE hook …` line on stderr.
+- **Its output goes to stderr**, never stdout, so `--json` callers still
+  get clean JSON.
+- **It is bounded.** nanojira waits for it, at most
+  `NJ_ON_CHANGE_TIMEOUT` seconds (default `10`, whole seconds 1–86400),
+  then kills it and everything it started. An invalid value is refused
+  (`invalid_env`) before anything is written.
+- **Order across processes is not guaranteed.** Two agents writing at
+  the same time each run their own hook, possibly concurrently. If order
+  matters, re-read the element in the hook (as above) instead of trusting
+  the order the calls arrive in.
+
+The value is run by `sh` exactly as given, so treat it like anything else
+in your environment (`PATH`, aliases): whoever can set it can run
+commands as you. The exact rules are in the specification, § 9
+"`NJ_ON_CHANGE`".

@@ -5,8 +5,8 @@
 import type { Flags, Element, Context } from '../core/types.ts';
 
 import { resolveActingName } from '../core/actor.ts';
-import { checkFlags, flagString } from '../core/args.ts';
-import { cliFieldNames } from '../core/flag-table.ts';
+import { flagString } from '../core/args.ts';
+import { checkCommandFlags } from '../core/cli-flags.ts';
 import type { Entry } from '../core/claims.ts';
 import { rollback, transition, releaseUnconditional, undoRelease, highestEntry, claimsDir } from '../core/claims.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
@@ -14,7 +14,10 @@ import { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWr
 import { entryJson, openAcceptanceExtra } from '../core/derive.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, out } from '../core/output.ts';
+import { recordChange } from '../core/on-change.ts';
+import { parseOutputOpts, trimResult } from '../core/result-opts.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 import { compareGuard, mirrorWrite, nowIso, renderElement } from '../core/store.ts';
 import { valueHint } from '../core/suggest.ts';
 
@@ -79,7 +82,7 @@ function claimOne(ctx: Context, el: Element, name: string, status: string | unde
   }
 
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
   const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
   const claim = released !== undefined ? null : { by: name, since: ts };
   return Object.assign(
@@ -92,11 +95,9 @@ function claimOne(ctx: Context, el: Element, name: string, status: string | unde
 }
 
 function cmdClaim(flags: Flags) {
-  // `status` stays in `allowedFields`, not `commandControls` (as before
-  // this was moved onto the shared table): the original "Known fields:"
-  // error text named only `status`, never the other claim flags.
-  checkFlags(flags, ['status'], new Set(['json', ...cliFieldNames('claim').filter((f) => f !== 'status')]), true);
+  checkCommandFlags(flags, 'claim');
   const json = flags.has('json');
+  const opts = parseOutputOpts(flags, json);
   const ctx = context(flags);
 
   requireTargetFlagSyntax(flags);
@@ -122,8 +123,12 @@ function cmdClaim(flags: Flags) {
       },
       (el) => claimOne(ctx, el, name, status, steal, nowIso()),
     );
-    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
-    const wrapper = { ok: result.ok, results: result.results };
+    if (result.anyWritten) { refreshStatus(ctx.backlog, ctx.cfg, ctx); refreshTags(ctx.backlog, ctx.cfg, ctx); }
+    const results = opts.quiet || opts.fields !== undefined
+      ? result.results.map((r: any) => (r.ok ? trimResult(r, opts) : r))
+      : result.results;
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
+    const wrapper = { ok: result.ok, results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results as any[]) out(r.ok ? `${r.id} claimed by ${name}` : `${r.id}: Error: ${r.error}`);
     return result.ok ? 0 : 1;
@@ -136,13 +141,16 @@ function cmdClaim(flags: Flags) {
   const ts = nowIso();
   const single = claimOne(ctx, el, name, status, steal, ts);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
+  // Field order: `ok` then `id`, matching every other single-ID JSON
+  // shape (rm, set, note, check) — Object.assign keeps a key already in
+  // the target at its target position, so pre-seeding both here (not
+  // just `id`) is what keeps `ok` first.
+  const built = Object.assign({ ok: (single as any).ok, id: el.id }, single);
+  recordChange(ctx.backlog, () => built);
   if (json) {
-    // Field order: `ok` then `id`, matching every other single-ID JSON
-    // shape (rm, set, note, check) — Object.assign keeps a key already in
-    // the target at its target position, so pre-seeding both here (not
-    // just `id`) is what keeps `ok` first.
-    out(JSON.stringify(Object.assign({ ok: (single as any).ok, id: el.id }, single), null, 2));
+    const final = opts.quiet || opts.fields !== undefined ? trimResult(built, opts) : built;
+    out(JSON.stringify(final, null, 2));
   } else {
     out(`${el.id} claimed by ${name}${status !== undefined ? ` (status: ${status})` : ''}`);
     for (const code of (single as any)._problems as string[]) out(`⚠ ${el.id}: ${code}`);

@@ -12,6 +12,8 @@
 // `cascade` (its command, `rm`, is not exposed at all, § 17), `ready`,
 // `all`, `allow-open-children`. `id`/`file` are NOT control flags in this
 // sense — they address the call's target and are genuine per-tool fields.
+// `core/cli-flags.ts` adds the control flags back for the CLI's own
+// validation and `--help` (DECISIONS 205).
 //
 // `positional: true` marks a field that is a bare CLI argument (`nanojira note
 // --id=X "text"`), not a `--name=value` flag; nanojira-mcp appends it to argv
@@ -38,8 +40,8 @@ const FLAG_TABLE: Record<string, CommandSpec> = {
   list: { fields: [str('status'), str('type'), str('tag'), str('parent'), str('assignee')] },
   find: { fields: [str('status'), str('type'), str('tag'), str('parent'), str('assignee'), bool('case-sensitive'),
     { name: 'text', kind: 'string', positional: true }] },
-  show: { fields: [str('id'), str('file')] },
-  log: { fields: [str('id'), str('file')] },
+  show: { fields: [str('id'), str('file'), str('notes')] },
+  log: { fields: [str('id'), str('file'), str('last')] },
   tree: { fields: [str('id')] },
   // Built from the same NEW_FIELDS/SETTABLE_FIELDS constants.ts and
   // cmd-new.ts/cmd-set.ts already validate against — one list, not two

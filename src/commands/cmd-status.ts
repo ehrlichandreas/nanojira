@@ -4,13 +4,13 @@
 
 import type { Flags } from '../core/types.ts';
 
-import { checkFlags } from '../core/args.ts';
+import { checkCommandFlags } from '../core/cli-flags.ts';
 import { context } from '../core/context.ts';
 import { elementProblems, isIncomplete, isReady, hasOpenChild, compareElements, entryJson, countsOf } from '../core/derive.ts';
 import { out } from '../core/output.ts';
 
 function cmdStatus(flags: Flags) {
-  checkFlags(flags, [], new Set(['json']), false);
+  checkCommandFlags(flags, 'status');
   const ctx = context(flags);
   const scope = ctx.elements.filter((e) => !e.archived);
   const counts = countsOf(scope, ctx.scan.unreadable.length);

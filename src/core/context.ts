@@ -10,6 +10,7 @@ import { flagString } from './args.ts';
 import { loadConfig, findBacklog, isLegacyBacklog } from './config.ts';
 import { V3_CONFIG_REL, V3_IDS_REL, LEGACY_CONFIG_REL, LEGACY_IDS_REL } from './constants.ts';
 import { compareElements } from './derive.ts';
+import { intoSandbox, sandboxFor } from './dry-run.ts';
 import { loadBacklog } from './load.ts';
 import { fail } from './output.ts';
 
@@ -20,7 +21,9 @@ import { fail } from './output.ts';
 // other command refuses with `legacy_layout` before anything is loaded —
 // unconditionally, even an ambiguous one (DECISIONS 95 B21, AMBIGUITIES 71).
 function context(flags: Flags, opts?: { lenient?: boolean; tolerateConfig?: boolean }): Context {
-  const backlog = findBacklog(flags, Boolean(opts && opts.lenient));
+  // During a dry run, a scratch copy (§ 9 "`--dry-run`") — every command
+  // below this point reads and writes it, never the real backlog.
+  const backlog = sandboxFor(findBacklog(flags, Boolean(opts && opts.lenient)));
   const legacy = isLegacyBacklog(backlog);
   if (legacy && !(opts && opts.lenient)) {
     fail('legacy_layout', `${backlog} is a legacy (v2) backlog — every command but \`doctor\` refuses it`,
@@ -68,7 +71,7 @@ function resolveTarget(ctx: Context, flags: Flags, forWrite?: boolean): Element 
   const id = flagString(flags, 'id');
   if (file !== undefined && id !== undefined) fail('invalid_target', 'use either --id or --file, not both');
   if (file !== undefined) {
-    const abs = path.isAbsolute(file) ? file : path.resolve(ctx.backlog, file);
+    const abs = intoSandbox(path.isAbsolute(file) ? file : path.resolve(ctx.backlog, file));
     // Compare through symlinks: on macOS /tmp and /var are symlinked, so a
     // caller-supplied absolute path rarely matches the scanned path literally.
     // A dangling symlink (or an unreadable stub) makes realpath throw on both

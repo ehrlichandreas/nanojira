@@ -9,19 +9,21 @@
 import type { Flags } from '../core/types.ts';
 
 import { resolveActingName } from '../core/actor.ts';
-import { checkFlags, flagString } from '../core/args.ts';
-import { cliFieldNames } from '../core/flag-table.ts';
+import { flagString } from '../core/args.ts';
+import { checkCommandFlags } from '../core/cli-flags.ts';
 import { context, resolveById, requireWritable, requireActive } from '../core/context.ts';
 import { isReady, hasOpenChild } from '../core/derive.ts';
 import { Fail, fail, out } from '../core/output.ts';
+import { recordChange } from '../core/on-change.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 import { nowIso } from '../core/store.ts';
 import { valueHint } from '../core/suggest.ts';
 import { applyFilters, availableToActor } from './cmd-list.ts';
 import { claimOne } from './cmd-claim.ts';
 
 function cmdNext(flags: Flags) {
-  checkFlags(flags, cliFieldNames('next'), new Set(['json']), true);
+  checkCommandFlags(flags, 'next');
   const json = flags.has('json');
   const name = resolveActingName(flags, true) as string;
 
@@ -69,8 +71,11 @@ function cmdNext(flags: Flags) {
     }
 
     refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    refreshTags(ctx.backlog, ctx.cfg, ctx);
+    const built = Object.assign({ ok: (single as any).ok, id: el.id }, single, { skipped });
+    recordChange(ctx.backlog, () => built);
     if (json) {
-      out(JSON.stringify(Object.assign({ ok: (single as any).ok, id: el.id }, single, { skipped }), null, 2));
+      out(JSON.stringify(built, null, 2));
     } else {
       out(`${el.id} claimed by ${name}${status !== undefined ? ` (status: ${status})` : ''}`);
       for (const code of (single as any)._problems as string[]) out(`⚠ ${el.id}: ${code}`);

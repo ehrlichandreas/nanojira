@@ -10,5 +10,5 @@
     "erasableSyntaxOnly": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["src/**/*.ts", "tools/**/*.ts", "tools/**/*.mts"]
+  "include": ["src/**/*.ts", "tools/**/*.ts", "tools/**/*.mts", "test/**/*.ts"]
 }

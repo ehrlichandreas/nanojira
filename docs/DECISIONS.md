@@ -3068,6 +3068,782 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      synthetic test data or registry URLs.
      The release is squashed with `ght-squash tail --tag=v3.12.2`.
 
+195. **SKILL.md slimmed; rarely needed text moves to `references/`; GUIDE
+     gains umbrella tickets** (2026-10-18, scans feedback TSK-009, TSK-010,
+     TSK-012).
+     - SKILL.md is loaded on every use. At 90 lines / 5.6 KB (~1400
+       tokens) it cost every call; scans asked for about 1000 tokens. It
+       is now 55 lines / 3.4 KB. The daily loop and the rules stay; the
+       packaging details, the no-symlink rationale, "when it does not
+       fit" and the bug-report process move verbatim to
+       `references/packaging-and-feedback.md`, which SKILL.md names.
+     - `tools/export-skill.mts` ships `references/*.md` from the tag's
+       tree (spec § 18). AC-56 checks the exported set is byte-identical
+       to the repo's and that SKILL.md names every file; a mutation that
+       drops one file turns it red.
+     - SKILL.md mentions `--quiet`/`--fields`, `note --text=` and the
+       `"problems": {"ignore": [...]}` list (TSK-010: scans agents treated
+       `incomplete:acceptance` on every write as noise because they never
+       found the ignore list).
+     - GUIDE § 26 shows umbrella tickets as parents, so the existing
+       `refused:children_open` guard stops an umbrella from being closed
+       while its parts are open (TSK-012). No code change.
+
+196. **`show --notes=none|all|last:N` and `log --last=N`** (2026-10-18,
+     feedback/scans-team TSK-005). A long-running ticket collects 20+
+     notes; agents were grepping the `.md` file directly for the latest
+     one or two, bypassing the tool the same way TSK-004's agents piped
+     write results through `head`/`grep` (§ 9 "`--fields` / `--quiet`").
+     `show` and `log` gained a matching pair of flags instead (§ 9
+     "`--notes` / `--last`", § 12c):
+     - `show --notes=none|all|last:N` narrows how many notes the body
+       shows; `all` (omitted or given explicitly) shows every note.
+       `none`/`last:N` replace the `## Notes` section's *displayed*
+       content (never the file — `show` never writes) with a
+       placeholder line naming how many notes are hidden, followed by
+       the kept notes, re-rendered byte-identical to their stored form.
+     - In `--json`, giving `--notes` **at all** — `all` included — adds
+       `notes`/`notes_total` to `entry`; omitting the flag entirely keeps
+       the shape exactly as it was before this round. That is the one
+       deliberate difference between the omitted default and
+       `--notes=all` given explicitly: both show the same notes, but
+       only the latter also hands back `notes_total`.
+     - `log --last=N` keeps the last `N` events of the already-merged
+       list, any kind at once (not per kind), and adds `events_total` —
+       the real, unfiltered count — the same additive-only-when-given
+       rule.
+     - Both validate `N` as a positive integer *before* the target even
+       resolves — a bad value wins over an unresolved `--id`, the same
+       "a bad value first" ordering every other flag-value check in this
+       project already has. `show --notes=` additionally gets a
+       did-you-mean against `none`/`all`/`last:N`, reusing
+       `core/suggest.ts`'s existing OSA-distance machinery with no new
+       synonym table, the same way `--fields` already does for its own
+       closed vocabulary.
+     - On a `duplicate_id` target, `--notes=` narrows each file's own
+       entry independently — one file's note count never affects
+       another's.
+     New test: `test/ac/ac-60-show-notes-last.ts`.
+
+197. **`--dry-run` on every write command** (2026-10-18, scans TSK-007).
+     The scans team must probe every tool before applying it. The flag
+     and its shapes are pinned in § 9 "`--dry-run`", because scans will
+     copy them verbatim into a second codebase.
+     - **Design: a scratch copy, not a recording write layer.** The
+       obvious design is a write layer that records instead of writing.
+       It was rejected for two reasons:
+       - A call reads back what it wrote. The `STATUS.md`/`TAGS.md`
+         refresh rescans the tree. A plan allocates ID after ID.
+         `archive` plans its moves against folders it created.
+         `doctor --fix` reloads its context between ten steps. A
+         recording layer would need a read overlay as well, covering every
+         `fs` call in `load.ts`, `layout.ts`, `claims.ts`, `config.ts` and
+         `cmd-doctor.ts`, or its results would drift from the real call's.
+       - Its no-write guarantee holds only while every writer goes
+         through the switch. A raw `fs` call added later writes for real
+         without any error.
+       Instead, `context()` (and `init`) hand the command a copy of the
+       backlog in `$TMPDIR`, and the unchanged command runs against it.
+       Fidelity holds by construction: results, refusals, IDs and
+       `STATUS.md` are the real code's own output. The guarantee is
+       structural: no command code ever sees the real path. A future
+       writer would have to rebuild that path on purpose to escape.
+       `changes` is the difference between the two trees. stdout is held
+       back until the copy has been compared; then the copy's path is
+       mapped back to the real one, and `dry_run`/`changes` are appended.
+       Cost: one copy per dry run, linear in the backlog's size. That is
+       acceptable for an explicit probe; normal calls pay nothing.
+     - **Full contents, not a unified diff.** Two diff implementations
+       can produce different hunks for the same change, so a second
+       codebase could never match a diff byte for byte. `{path, kind, op,
+       before, after}` with complete text is canonical, and a caller can
+       apply it directly.
+     - **Every write command, including `init` and `doctor --fix`.** The
+       copy makes both cost nothing extra. Read commands reject the flag
+       as `unknown_field`, like any flag they do not take. Plain `doctor`
+       rejects it as `invalid_value`, because a dry run of a command that
+       never writes would be the silent no-op the task forbids.
+       `--dry-run=<value>` is `invalid_value`: `--dry-run=false` must not
+       quietly mean a dry run. `checkFlags` grants the flag to every
+       `isWrite` command, so a new write command gets it automatically.
+       `init` and `doctor` list it themselves.
+     - **`--quiet`/`--fields` compose; `dry_run`/`changes` are never
+       trimmed.** The two flags trim the real result. The dry-run keys
+       are appended afterwards, because a probe without its answer would
+       be useless.
+     - **IDs are reported, never reserved.** They are allocated in the
+       copy. The spec says the real call may get different ones.
+     - **Not an MCP field.** It is a control flag, as `--quiet`/`--fields`
+       are today. Exposing it in `nanojira-mcp` is a separate decision.
+     - **Supersedes D172 item 5.** `new --input= --dry-run` returned its
+       own id-less shape (`{ok, dry_run, entries}`, implied parents as
+       JSON paths), refused `--dry-run` without `--input`, and `set`
+       rejected the flag. All three are gone. A plan's dry run now returns
+       the plan's real result with would-be IDs. ac-52's F legs were
+       rewritten to match. This changes the output for anyone parsing the
+       old shape, which is why it is recorded here.
+     - **Tests (ac-61, 353 checks).** Every supported command runs twice
+       on identical fixtures: once as a dry run, once for real. The test
+       asserts:
+       - the dry-run backlog is byte-identical: file list, and for every
+         path its kind, mode, size, mtime and bytes, directories included;
+       - exit code, stderr and JSON equal the real call's;
+       - `changes` equals the real call's actual effect, derived
+         independently from the two trees;
+       - no scratch copy is left in `$TMPDIR`.
+       Mutation-tested: each of these makes ac-61 fail (M1–M11 in the
+       TSK-007 report):
+       - bypassing the copy in `context()`, in a second `context()` call
+         (doctor's reload), or in `init`;
+       - letting one writer (`STATUS.md` refresh, tombstone allocation,
+         claim append, element write) write through to the real path;
+       - leaving the copy behind;
+       - an always-empty `changes`;
+       - not mapping `--file`;
+       - a copy that does not keep mtimes (`doctor --fix` fills a missing
+         `created`/`updated` from the mtime).
+
+198. **TSK-008: `NJ_NOW` audit — one clock module, everything else named
+     explicitly** (2026-10-18).
+     - `NJ_NOW` (§ 12, D125/D130) already existed and was already the sole
+       path for every WRITTEN timestamp — `core/store.ts`'s `nowIso()`/
+       `nowMs()`, used by every command that writes `created`, `updated`,
+       `archived` or a claim entry. This round is an audit, not a new
+       feature: every `Date.now()`/`new Date(` in `src/` was found and
+       classified, not just the ones already known about.
+     - Two real-clock reads outside `core/store.ts` are correct as-is and
+       stay on the wall clock: `core/config.ts`'s `njrcSwapFaultHook`
+       (an `NJ_FAULT=njrc-swap` poll deadline — bounds a wait, writes
+       nothing) and `core/context.ts`'s `loadedAt` (STATUS.md's own
+       ctime-margin bound, DECISIONS 103 — compared only against a real
+       filesystem `ctime`, which `NJ_NOW` cannot touch). Pinning either to
+       `NJ_NOW` would be wrong, not merely unnecessary.
+     - New: `test/ac/ac-62-nj-now.ts`. Leg 1 runs a full command sequence
+       (init/new/set/note/claim/check/release/archive) twice from scratch
+       under the same `NJ_NOW` and asserts the two backlog trees are
+       byte-identical. Leg 2 is a static guard over `src/`: an exact,
+       named count of every raw `Date.now()`/`new Date(` outside
+       `core/store.ts` — a new one anywhere, or an old one's count
+       drifting either direction, fails loudly instead of blending in.
+       Mutation-tested both ways: a raw-clock bypass added to a command
+       file is caught by the guard even though the two runs still happen
+       to land in the same real second; a real-clock bypass planted
+       inside `store.ts` itself (so the guard can't see it) is caught by
+       leg 1 instead, landing in different real seconds and diverging in
+       `archive/*.md`'s `archived:` stamp.
+     - `docs/GUIDE.md` § 29 and a `help.ts` line document `NJ_NOW`
+       explicitly as a verification/testing hook, not a feature for daily
+       use — consistent with how § 12 of the spec already framed it.
+     - Worktree `nanojira-wt/tsk008-nj-now`; no change to `src/core/claims.ts`'s
+       staleness arithmetic, the ids allocator's retry loop, or sort-by-`updated`
+       ordering — none of them read the clock in a way this round needed to touch.
+
+199. **`test/run-all.ts` runs test files in a worker pool; `@serial` marks
+     the ones that must run alone** (2026-10-18).
+     - Why: the oracle ran its 107 files strictly one after another. A
+       full run took 17:44 on a 12-core machine, and several agents kept
+       waiting on it.
+     - `--jobs=<n>`, else `NJ_TEST_JOBS`, else
+       `min(os.availableParallelism(), 8)`. A bad value is exit 2. The
+       argv contract (`NJ` env or the first non-`--jobs=` argument), the
+       summary, the exit code and the passed / failed / cannot-run rule
+       are unchanged.
+     - `--jobs=1` is the old loop, byte for byte. This was checked against
+       main's runner with stub suites, including a timed-out one.
+     - Output: each file's stdout+stderr is buffered and printed as one
+       block, in collected order, as soon as every earlier file in the
+       pool is done. Pooled files use async `spawn` with `spawnSync`'s
+       observable contract: stdin closed, stdout then stderr, SIGTERM and
+       a null status on the 600 s timeout or past the 64 MiB cap. Which
+       phase ran a file therefore cannot change its verdict.
+     - `@serial`: a comment line in a file's header, before the first
+       `import`, starting with `@serial: <reason>`. Such files run after
+       the pool has drained, alone, in collected order, through the same
+       `spawnSync` as `--jobs=1`. The marker lives in the file, not in a
+       list in the runner. `test/README.md` documents the marker and the
+       isolation rules.
+     - Nine files are marked:
+       - Seven race a fixed 1 s sleep against nj reaching the
+         `NJ_FAULT=before-compare` hold: ac-26, ac-28, ac-31, ac-40,
+         `fault/nj-fault-before-compare`, `edge/archive-ac20-write-paths`
+         and `edge/failure-vocabulary`. The hook gives no "ready" signal,
+         so a test cannot know nj has reached it. Under load nj arrives
+         late, reads the already-planted change and exits 0, a false red.
+       - ac-07 (`stress/concurrency.ts`) starts 300 nj processes at once
+         and starves its neighbours.
+       - `edge/hardening-v3-1` runs a busy-loop swapper beside 500 nj
+         runs, each with a 5 s hang limit.
+     - Fixed instead of marked: a timeout too tight around a fixed hook
+       wait, or an elapsed-time window too narrow:
+       - ac-27 C4: 15 → 30 s around the 10 s hold.
+       - `fault/fault-hook-json`: 15 → 30 s.
+       - ac-32-mcp M12b: 5 → 15 s, which also covers the MCP server's
+         cold boot.
+       - `edge/hardening-njrc-swap` S2: upper bound 16 → 19 s, still
+         below a doubled wait.
+       - `edge/refactor-harness-scratch-cleanup`: 120 → 300 s per probe.
+     - Isolation audit of every collected file plus `stress/`: no file
+       writes into the repo, `node_modules` or a fixed path. None lists
+       `/tmp`, uses a port or touches global git config or the real
+       `$HOME`. Fixtures come from mkdtemp or clones, and `HOME` is pinned
+       wherever it is read. `tools/release-regression`'s two runs with
+       cwd in the repo exit before writing.
+     - Measured on 12 cores, with other agents keeping the load average
+       at 4–10:
+       - Serial: main's runner took 17:44; `--jobs=1` with the new runner
+         took 18:16.
+       - Pooled at 8 jobs: four runs of 8:27, 8:25, 7:36 and 7:48, about
+         2.2× faster. Each run is roughly 4:20 of pool plus 4:00 of
+         serial tail.
+       - All four pooled runs and the `--jobs=1` run gave the same
+         passed / failed / cannot-run sets as the baseline: 103 / 2 / 2.
+         The two failures are `edge/hardening-v3-1` and
+         `edge/v3-2-regressions`; the two cannot-runs are ac-15 and
+         `edge/hardening-njrc-foreign-link`.
+       - Classification check, in a scratch copy: a failing check planted
+         in ac-05 (pooled) and in `edge/failure-vocabulary` (serial)
+         turned both into "failed". Each output block stayed intact and in
+         its collected place.
+     - Follow-up, not done here: the serial tail is about half of a pooled
+       run. If the `before-compare` hook wrote a ready marker before it
+       starts polling (a § 12 change), the seven racing files could wait
+       for that marker instead of sleeping 1 s and join the pool.
+       Only ac-07 and hardening-v3-1 would stay serial.
+     - Worktree `nanojira-wt/test-parallel`.
+
+200. **TSK-011: `NJ_ON_CHANGE`, an environment-only change hook** (2026-10-18,
+     scans feedback TSK-011; owner decision).
+     - The problem: scans keeps nanojira and an outside board, and the two
+       drifted (done here, in progress there). They proposed `--on-change=`
+       or a config hook.
+     - **Owner decision (binding): environment only.** `NJ_ON_CHANGE=<cmd>`
+       is the sole way to arm it — no flag, no `.nanojira/config.json` key,
+       no `.njrc` entry, nothing in the backlog. A hook read from the
+       backlog would make every cloned or foreign backlog able to run code
+       on the machine of whoever runs `nanojira list` in it; the
+       environment belongs to the caller, so the value is trusted exactly
+       as much as `PATH`. A hook-like key in config stays an ordinary
+       `config:unknown_key` warning and is never executed (AC-63 I).
+       `core/on-change.ts` imports neither config nor fs (AC-63 J guards
+       that statically). No network inside nanojira: the hook does the
+       pushing.
+     - **Fires** after every successful write, once per invocation: `init`,
+       `new` (flags or `--input`), `set`, `note`, `check`, `claim`,
+       `release`, `next` (when it claims), `archive`, `unarchive`, `rm`
+       (and `--cascade`), `doctor --fix` (only when `fixed` is non-empty).
+       Found by grepping every command for a file write, not from memory;
+       reads write nothing (STATUS.md/TAGS.md are only refreshed by
+       writers). No-op results (`changed: []`) fire too: they are
+       successful write calls, and "fires on every `ok: true` result" is
+       easier to rely on than a second notion of "really changed"; the
+       hook can look at `changed`.
+     - **Partial success fires.** A batch with a runtime failure, or a
+       `new --input` plan that stopped part way (D174), has written
+       something, so the hook fires with that very result (`ok: false`
+       at the top) and `NJ_HOOK_IDS` names only what was written. Not
+       firing would leave exactly the drift this exists to prevent. A
+       batch preflight abort, a plan that fails validation or its first
+       write, and every `fail(...)` path wrote nothing and never fire.
+     - **Never fires** on a read, a refusal, `--dry-run`, or inside a hook.
+       `--dry-run` (TSK-007, D197) runs the real writer against a scratch
+       copy, so a writer under a dry run DOES reach `recordChange` — with
+       the copy's path, which is gone before a hook could start. Two
+       independent guards: `beginOnChange` never arms when the raw flags
+       carry `--dry-run` (the only way `checkFlags` arms a dry run), and
+       `recordChange` drops anything while `isDryRun()`. AC-63 K runs a
+       real dry run of every writer, prose and JSON, plus dry runs that end
+       in a refusal: no call, real tree unchanged, stdout/stderr identical
+       to the same dry run without a hook. Because the guards are
+       redundant, removing one alone is invisible to K (verified: a bundle
+       mutant of either alone passes K); each is pinned by a static check
+       in AC-63 J (each source mutant turns J red), and the bundle mutant
+       removing both turns K red (32 checks: the hook fires against the
+       vanished scratch copy and warns on stderr).
+     - **Shape.** `/bin/sh -c "$NJ_ON_CHANGE"`, cwd = backlog root; stdin =
+       the full `--json` result as `--json` prints it, never trimmed by
+       `--quiet`/`--fields`, whatever the caller passed. One call per
+       invocation, a batch passes its whole `{ok, results}`: the hook sees
+       exactly what a `--json` caller sees, and one call per element would
+       have needed a second, invented per-element shape. Env adds
+       `NJ_HOOK_COMMAND`, `NJ_HOOK_IDS`, `NJ_BACKLOG` (absolute), and
+       removes `NJ_ON_CHANGE`/`NJ_ON_CHANGE_TIMEOUT`.
+     - **Implementation: one result, built once.** Every writer now builds
+       its full result object unconditionally, records it with
+       `recordChange()`, and prints that same object for `--json` — so the
+       hook's stdin and `--json` stdout cannot drift apart (AC-63 A
+       compares them byte for byte for every writer). Where only a
+       `buildWriteResult` call existed under `if (json)`, the record call
+       passes a thunk, built only when the hook is armed. `main()` arms the
+       hook before dispatch; the top level fires it only if `main()`
+       returned — a thrown failure never reaches it.
+     - **Timing.** The hook runs after the command returned: every write,
+       claim generation, `STATUS.md`/`TAGS.md` refresh and the stdout result
+       are done, so nothing is locked and the backlog is consistent (AC-63
+       G runs `show`/`doctor` from inside a hook). nanojira waits for it,
+       so when nanojira returns the hook is done.
+     - **Failure: warning on stderr, exit code and stdout unchanged.** The
+       write did succeed; turning a hook failure into exit 1 would tell an
+       agent its write failed and invite a retry of something already
+       done. The hook's stdout and stderr both go to nanojira's stderr, so
+       a `--json` caller always gets one parseable document. Nothing is
+       ever undone or retried because of a hook.
+     - **Recursion guard: both mechanisms.** `NJ_ON_CHANGE` is removed from
+       the hook's environment, and a nanojira that sees `NJ_HOOK_COMMAND`
+       never fires, so even a hook that re-exports `NJ_ON_CHANGE` before
+       calling `nanojira note` cannot loop (AC-63 G, both variants).
+     - **Timeout.** `NJ_ON_CHANGE_TIMEOUT`, whole seconds 1–86400, default
+       10 (86400 keeps `setTimeout` well inside its 2^31 ms limit). The
+       hook runs detached as its own process-group leader and the timeout
+       sends SIGKILL to the whole group, so a grandchild (`sleep 60 &
+       wait`) dies too — otherwise it would hold the caller's stderr pipe
+       open long after nanojira returned. An invalid value is
+       `invalid_env` before anything is written, the NJ_NOW discipline,
+       but only when the hook would be armed: with no hook, nothing reads
+       the variable and output stays byte-identical. SIGINT/SIGTERM/SIGHUP
+       to nanojira while it waits kill the group first.
+     - The test harness (`runPath`) now strips `NJ_ON_CHANGE`,
+       `NJ_ON_CHANGE_TIMEOUT`, `NJ_HOOK_COMMAND` and `NJ_HOOK_IDS` from the
+       environment it inherits: a suite run from a shell that has a real
+       hook must not push fixtures to a real board, and one run from
+       inside a hook must not have every hook test silently disarmed.
+     - New: `test/ac/ac-63-on-change-hook.ts` (550 checks with the K
+       dry-run leg), marked `@serial` (D199): leg F asserts elapsed time
+       around a 1 s hook timeout. RED against the
+       pre-change bundle (66 of 212 checks failed; it then crashed reading
+       a capture file, now fixed to report). Ten mutants, all killed:
+       `doctor --fix` with no fix firing, batch preflight abort firing, a
+       plan's validation/first-write failure firing, firing after a thrown
+       failure, hook stdout routed to stdout, hook failure setting exit 1,
+       kill without the process group, no `NJ_HOOK_COMMAND` guard, a bad
+       timeout falling back to the default, compact JSON on stdin.
+     - Docs: SPECIFICATION § 9 "`NJ_ON_CHANGE`" (plus a failure-code row and
+       § 3's "no network" line), GUIDE § 30, a `help.ts` env line;
+       AGENT-INSTRUCTIONS and GUIDE § 14 no longer say "no hooks": no
+       daemon, no network; an optional env-only hook can push outward.
+
+201. **`NJ_FAULT_READY` for the `before-compare` hook; the racing suites
+     join the pool; `@slow` starts the longest files first** (2026-10-18,
+     the D199 follow-ups).
+     - Why: after D199, the serial tail (about 4 of a pooled run's 8
+       minutes) was mostly seven files that slept 1 s and assumed nj had
+       reached the `before-compare` hold by then. Nothing in the hook said
+       so.
+     - `src/core/store.ts` `compareGuard`: if `NJ_FAULT_READY=<path>` is
+       set, the hook writes `<path>` (the held element's ID and a newline)
+       before it starts polling, and so before the 10 s starts. If that
+       write fails, the command exits 1 with `fault:before-compare`, as on
+       the timeout.
+     - Without the variable nothing changes: the read happens only inside
+       the existing `NJ_FAULT === 'before-compare'` branch. Spec § 12
+       says so. It is still a verification hook, not a feature.
+     - Why a file and not a stderr line: a stderr line would change the
+       output of every existing `before-compare` run, the opposite of
+       opt-in. Why the file sits outside the backlog: tests snapshot the
+       backlog tree byte for byte. `H.faultReady()` creates the file in a
+       fresh directory.
+     - `H.faultReady(label)` returns `{ env, file, wait(done) }`. `wait`
+       polls every 10 ms. It returns false if the child exits first or 30 s
+       pass, so a broken hook fails a named check instead of hanging. The
+       seven files now use it instead of `sleep(1000)` and lose `@serial`:
+       ac-26 (2 legs), ac-28 (2), ac-31 H17, ac-40 N13,
+       `fault/nj-fault-before-compare` (2), `edge/archive-ac20-write-paths`
+       and `edge/failure-vocabulary`.
+     - `fault/nj-fault-before-compare` also pins the new contract: the
+       ready file holds the ID, and an unwritable `NJ_FAULT_READY` exits 1
+       with `fault:before-compare` at once, without the 10 s poll.
+     - ac-31 H18's elapsed bound goes from 16 to 19 s. It includes nj's own
+       start, and 19 s is still short of a doubled wait. Only ac-07 (a
+       300-process burst) and `edge/hardening-v3-1` (a busy-loop swapper)
+       stay `@serial`.
+     - Mutation checks:
+       - main's `nj-fault-before-compare` (1 s sleep) against an nj that
+         starts 2.5 s late, which is what load looks like: 5 of 10 checks
+         fail ("expected exit 1, got 0"). The new version passes against
+         the same nj.
+       - A mutant bundle that writes the ready file at process start,
+         before its first read, then pauses 1.5 s: the new test goes red,
+         5 of 17 checks.
+       - The same early marker without the pause is not reliably caught.
+         The real first read follows within milliseconds, faster than the
+         10 ms poll. This bounds what the test can see; it is not a gap in
+         the hook.
+     - `@slow` (`test/run-all.ts`): same header syntax as `@serial`. Marked
+       files are dispatched first within the pool. Print order, verdicts
+       and `--jobs=1` are unchanged.
+       - Marked: ac-26, ac-27, ac-17, ac-25, ac-22 and
+         `edge/refactor-harness-scratch-cleanup`, each 60–140 s pooled.
+         Before this, the pool's last file was always refactor-harness:
+         collected late, started at about 140 s.
+       - `NJ_TEST_TIMES=<file>` writes every file's wall time (TSV, slowest
+         first) so the list can be re-measured. Stdout is unchanged.
+       - Rejected: a committed timings file. It is a second artefact that
+         goes stale silently, and it does not live in the test file like
+         `@serial` does.
+     - Measured at 8 jobs on 12 cores. Several other worktrees were running
+       their own suites at the same time, so the load average was 8–27.
+       - D199's runner on this tree: about 8 min.
+       - With the ready marker and no `@slow`: 4:47 (pool 240 s, serial
+         tail 47 s).
+       - With `@slow`: 4:23 at load 16, 4:44 at load 12–14, and 6:54 at
+         load 22.
+       - All four runs gave 105 passed / 2 failed / 2 cannot-run, the same
+         as main's baseline. The failures are `edge/hardening-v3-1` and
+         `edge/v3-2-regressions`; the cannot-runs are ac-15 and
+         `edge/hardening-njrc-foreign-link`. Each log has 109 whole blocks.
+       - In the slowest run, ac-26 alone ran 275 s from t=0 and was the
+         whole critical path. No dispatch order beats that; splitting
+         ac-26 is the next lever if one is wanted.
+     - ac-63 (D200, merged meanwhile) loses `@serial` and gets `@slow`.
+       Its leg F times a 1 s `NJ_ON_CHANGE_TIMEOUT` against a hook that
+       sleeps 60 s. The lower bound (≥ 0.9 s) only gets safer under load;
+       the upper bound goes from 15 to 19 s, because nj's start counts
+       too. It needs no ready marker. At 130–210 s it was the largest
+       item in the serial tail.
+     - Worktree `nanojira-wt/test-speed-2`.
+
+202. **Release tooling fixes from the 4.1.0 release rehearsal** (2026-10-18,
+     Lead decisions on the rehearsal report; snags A, B, D–J).
+     - The rehearsal (a scratch clone, a throwaway signing key, never the
+       real repo) ran `tools/release.ts` for 4.1.0 end to end and found the
+       gate could not go green and `--apply` could fail after writing.
+       Snag C (hardening-v3-1 / v3-2-regressions needing root or a
+       case-folding filesystem) is handled separately.
+     - **A. The signing identity never reaches the test gate.** release.ts
+       is invoked with `GIT_CONFIG_COUNT/KEY_<n>/VALUE_<n>` (its own
+       recipe); env config outranks a repo's local config, so inherited by
+       `npm test` it overrode ac-56's fixture `user.signingkey` and the file
+       crashed. release.ts now strips those (and `GIT_CONFIG_PARAMETERS`,
+       what `git -c` exports) from the gate's environment, keeping them for
+       git-release-squash; the harness deletes the same variables from
+       `process.env` at load, so every git any test spawns sees only its
+       fixture's own config.
+     - **B. ac-15's lone copy is the bundle.** Under `npm test` the
+       nanojira under test is `bin/nanojira` (D187), an sh launcher that
+       `node <copy>` cannot run. ac-15 now copies `H.NJ_BUNDLE`, the
+       `dist/*.mjs` the launcher runs; the launcher is ac-56's.
+     - **D. ac-15 falls back to the running Node.** With no `NJ_NODE` and no
+       portable `runtime/` above the checkout (any clone outside the
+       workspace, the real repo included), it reported CANNOT RUN; it now
+       uses `process.execPath` when that is Node >= 24. An explicit
+       `NJ_NODE` that does not exist is still CANNOT RUN, never swapped.
+     - **E. Other local branches: `--apply` refuses, a dry run warns**, both
+       naming them, before the gate. git-release-squash's post-write verify
+       runs `verify-commit` on every commit of every branch, so an unsigned
+       WIP branch made it fail only after `main` and the tag were rewritten.
+       "Other" means other than the checked-out branch; an unborn repo has
+       none. The verify itself stays git-history-tools' business (off
+       limits while it is being changed); rollback is in RELEASING.md.
+     - **F. The release name is `package.json`'s `name`**, passed to
+       git-release-squash as `--name` — not the directory's basename (its
+       fallback), which gave a worktree or scratch clone a wrong subject
+       prefix. A missing or empty `name` is a usage error.
+     - **G. The test gate runs only with `--apply`.** A dry run writes
+       nothing; running the ~20-minute suite twice per release bought
+       nothing. It prints `test gate runs with --apply`.
+     - **H. Tag form: `<title>[\n\n<body>]`, the v3.12.2 form.** The
+       requested `nanojira vX.Y.Z\n\n<message>` (v4.0.0's hand-made form)
+       is not expressible: git-release-squash takes the commit subject's
+       title from the first line of the very text it writes as the tag
+       message. Re-tagging after the squash would bypass its signer and
+       verify; a separate tag-message option in git-history-tools is a
+       possible follow-up. `--message-file` gives a body; AC9 pins both
+       forms.
+     - **I.** `docs/RELEASING.md`: the procedure (four bump points, both
+       `package-lock.json` root entries and ac-39 included; bundle;
+       CHANGES; message; dry run; `--apply`; verify; export; push only
+       with the owner's go; rollback via reflog or the backup bundle),
+       linked from README and ARCHITECTURE § 1.
+     - **J.** `.gitignore`: `/node_modules`, not `/node_modules/`. The
+       trailing slash matched only a directory, never the node_modules
+       symlink every worktree and scratch clone carries.
+     - Tests: `test/tools/release-regression.ts` AC5–AC9 (61 checks; AC9
+       runs two real, signed `--apply` releases in a fixture repo built from
+       scratch, with a throwaway key and `GIT_CONFIG_GLOBAL=/dev/null`) and
+       the new `test/tools/release-gate-env.ts` (ac-56 under leaked
+       `GIT_CONFIG_*`, ac-15 against the launcher and without `NJ_NODE`, the
+       `.gitignore` symlink match). All RED before the change. Nine mutants,
+       all killed: gate env unscrubbed, `PARAMETERS` not scrubbed, harness
+       scrub removed, `--apply` not refused on other branches, branches
+       never seen, name from basename, no `--name` passed, no `name` check,
+       gate run in the dry run.
+
+203. **A leg the environment cannot build is `not covered`, not failed; the
+     release gate must not stay red over a missing prerequisite** (2026-10-18,
+     triage of `edge/hardening-v3-1` and `edge/v3-2-regressions`, the two
+     files D199 already named as the baseline's permanent failures).
+     - Why: both files have been red "forever" in this sandbox (uid 1000, no
+       root, a case-sensitive filesystem, no macOS-only paths), and
+       `tools/release-regression` refuses whenever `npm test` is not green.
+       4.1.0 is the first release meant to go through that gate for real, so
+       "always red here" had to stop meaning "the gate can never honestly
+       pass."
+     - Classified every one of the 22 + 3 failing checks into three buckets:
+       - **Environment prerequisite missing** (6 in hardening-v3-1: F1 × 2,
+         D98 × 3, T1-follow-up; 3 in v3-2-regressions: R2, R9, R10). Each
+         leg's own setup code already detects this and names the missing
+         thing (root, a genuinely foreign-owned file, a case-folding
+         filesystem) — it was simply recorded as a failed check, with
+         `CANNOT RUN:` as the only signal that it was not a real one.
+       - **A test bug** (1, hardening-v3-1's D96 bin/nj `init` leg):
+         compares the LAST stderr line against two *independent*
+         `H.freshDir()` roots. For `list`/`doctor`/bare `nj` the compared
+         line never names a path, so it happened to match; `init`'s
+         `io_error` names the absolute backlog path it failed to create,
+         which embeds each root's own random mkdtemp suffix — two
+         genuinely-correct runs can never produce byte-equal lines. Fixed by
+         stripping each side's own root out of its line before comparing.
+       - **A real product bug** (15, hardening-v3-1's D96 "unsearchable
+         ancestor of the cwd" legs — reported, not fixed, src untouched).
+         Repro: lock an ancestor directory (`chmod 000`) and run `list` /
+         bare `nj` / `doctor` with the cwd below it. Expected (DECISIONS 93
+         F4): exit 1, exactly one stderr line giving the OS reason, `io_error`
+         under `--json`. Actual: two lines — the generic "no backlog found
+         … run `nanojira init`" message — and `no_backlog` under `--json`.
+         Root cause: `findBacklog`'s upward walk (`src/core/config.ts`) calls
+         `isDir()` and, through `njrcLocation` → `readNjrc`, `fs.lstatSync`/
+         `fs.statSync` on each candidate, and both `isDir` (`catch { return
+         false }`) and `readNjrc`'s initial `lstatSync` (`catch { return null
+         }`) treat EVERY error alike — ENOENT (truly absent, keep walking)
+         and EACCES (a real permission fault on an ancestor, DECISIONS 93 F4)
+         both read as "not here, keep going," so the walk reaches the top
+         and reports the generic `no_backlog` instead of surfacing the
+         permission error it actually hit.
+     - **Harness**: `T.notCovered(desc, reason)` (`test/lib/harness.ts`).
+       Counted alongside real checks (`_checks`), listed by name with its
+       reason in `finish()`'s summary either way, but never itself makes
+       `_failures` non-empty — a file whose only red legs are not-covered
+       ones now reports `PASS <name> (<n> checks, <m> not covered)` with the
+       gaps named underneath, exit 0. A real failing assertion in the same
+       file still reports `FAIL`, not-covered legs listed separately
+       underneath — proven with a planted failing check beside a planted
+       not-covered leg in a scratch probe. Deliberately distinct from
+       `T.exit`'s existing `result.missing` → `CANNOT RUN:` path: that one
+       means the implementation itself is absent and must stay a hard
+       failure, never downgraded to not-covered. `run-all.ts` needed no
+       change: its `classify()` already reads a file's exit code and first
+       line, and a not-covered-only file's first line is `PASS …`, not
+       `— CANNOT RUN`, so it already lands in the `passed` bucket.
+     - Both suites' own `cannotRun()` helpers (and v3-2-regressions' one
+       inline R9 call) now delegate to `T.notCovered` instead of
+       `T.check(desc, false, 'CANNOT RUN: ' + reason)` — one-line change
+       each, every existing call site inherits the new behaviour.
+     - Result in this sandbox: `v3-2-regressions.ts` — PASS (105 checks, 3
+       not covered). `hardening-v3-1.ts` — FAIL, 15 of 481 checks failed, 6
+       not covered; all 15 are the one `findBacklog` defect above, reported
+       to Lead, src untouched pending a decision.
+     - Worktree `nanojira-wt/baseline-triage`.
+     - Addendum (2026-10-18, the 4.1.0 release gate): `edge/hardening-njrc-
+       foreign-link` still exited the whole file with `— CANNOT RUN` when
+       it found neither root nor a foreign-owned symlink, which `run-all`
+       counts against the gate (cannot run 1 / 112, exit 1, 0 failed). Its
+       `cannotRun()` now records one `T.notCovered` leg naming the missing
+       prerequisite and calls `T.finish()`: `PASS (1 checks, 1 not
+       covered)`. `run-all`'s whole-file `— CANNOT RUN` rule is unchanged,
+       so a missing implementation still blocks. Mutation: a planted
+       failing check before the prerequisite probe turns the file `FAIL`,
+       exit 1, with the not-covered leg listed under it. The real leg
+       (root, or a hard-linkable foreign symlink) did not run here; its
+       code is unchanged.
+
+204. **The upward search tells "nothing here" from "could not look"**
+     (2026-10-18; completes DECISIONS 93 F4; found by the D203 triage).
+     - The bug: with the cwd below an ancestor at mode 000 (non-root),
+       `list`, bare `nanojira` and `doctor` printed two lines ("no backlog
+       found" + the `nanojira init` hint) and `no_backlog` under `--json`,
+       where D93 F4 ruled one line, the OS reason, `io_error`. On Linux
+       `getcwd()` still succeeds there, so `workingDir()` never saw the
+       problem; the search then probed `<dir>/.njrc` (`readNjrc`'s `lstat`)
+       and `<dir>/backlog` (`isDir`'s `stat`), and both caught EVERY error
+       as "absent". EACCES looked like "not here", the walk went on up past
+       the locked directory and reported "nothing found". The D96 legs of
+       `edge/hardening-v3-1` (15 checks) were the last red ones once D203
+       had sorted out the environment-only legs.
+     - The rule (§ 4 "Backlog location"): only ENOENT and ENOTDIR mean "not
+       here, keep walking". Anything else is `io_error`, one stderr line,
+       `cannot search <dir> for a backlog: <OS reason>`, no hint (a hint
+       would be the second line D93 F4 forbids). `<dir>` is the directory
+       whose entry could not be examined; the OS reason carries the exact
+       path probed. Reporting `no_backlog` claims an answer the search
+       never got, and walking past the failure could select a different,
+       wrong backlog higher up — § 4's own "worst failure mode".
+     - Scope, deliberately narrow: two new helpers in `core/config.ts`,
+       `searchMiss()` and `searchIsDir()`, used only by the walk —
+       `findBacklog`'s `backlog/` probe and `readNjrc`'s first `lstat`
+       (`readNjrc` is reached only through `njrcLocation`, i.e. only from
+       the two walks). `isDir()` is unchanged for its other caller,
+       `claim()` (an explicit `--backlog`/`NJ_BACKLOG`/`.njrc` target keeps
+       its `invalid_backlog_*` answer). `holdsBacklog()`'s `existsSync`
+       checks inside an already-found `backlog/` are unchanged, as is
+       `readNjrc`'s post-open fresh `lstat` (the D142 swap race), which
+       still treats a vanished entry as absent.
+     - Decided, each pinned by `test/edge/discovery-search-errors.ts`:
+       - `--backlog`/`NJ_BACKLOG` skip the walk, so an unsearchable
+         ancestor of the cwd does not matter then (S1).
+       - The walk stops at the first `.njrc`/`backlog/`: nothing above is
+         probed. A failing probe ABOVE a found backlog can therefore never
+         surface (S4: a `backlog` symlink loop one level above a real
+         backlog). Note the inverse is unavoidable: an unsearchable
+         ancestor makes the very first probe at the cwd fail, because every
+         path below it needs search permission on it — so the cwd's own
+         backlog is not reachable by the search either, and naming it
+         explicitly is the way out (the table's hint).
+       - A `backlog` symlink loop (ELOOP) on the walk is now `io_error`
+         where it used to be skipped silently (S3); a dangling `backlog`
+         symlink is ENOENT and still skipped (S5). A `backlog` symlink whose
+         target path crosses a directory the user may not search is
+         `io_error` too: the search cannot tell whether it is a backlog.
+       - `init`: its own walk looks only for a `.njrc` and shares
+         `readNjrc`, so it follows the same rule. Under a locked ancestor it
+         now fails at the `.njrc` probe (`cannot search <cwd> for a
+         backlog: EACCES …`) instead of one step later at `mkdir`
+         (`cannot create the backlog at …`) — still exit 1, one line,
+         `io_error`; the D96 init legs assert exactly that and stay green.
+         Continuing past an unreadable `.njrc` position to create
+         `./backlog` would have been the same wrong answer as above.
+     - Tests: hardening-v3-1 goes from 15 failed to green (481 checks, 6
+       not covered per D203). Mutation: restoring "every error is absent"
+       inside `searchMiss` turns exactly those 15 red again (run through a
+       copied `bin/nanojira` so the bin-launcher legs count too) and 9 of
+       the 19 checks in discovery-search-errors; the pre-fix bundle gives
+       the same counts.
+
+205. **`--help` lists every flag the command accepts** (2026-10-18; amends
+     DECISIONS 158 EV-2 and 163 A; found by the v4.1.0 acceptance
+     pre-check, finding 3).
+     - The bug: `commandHelp` listed `core/flag-table.ts`'s fields only.
+       That table deliberately leaves out the control flags (it is also
+       `nanojira-mcp`'s schema source, § 17), so `set --help` showed no
+       `--json`/`--dry-run`/`--force`/`--allow-open-children`/`--input`/
+       `--quiet`/`--fields`, `note --help` no `--text`/`--text-file`/
+       `--force`, and no command showed `--backlog`. It also printed the
+       internal name `--depends_on`; § 9 documents `--depends-on`.
+     - The rule (§ 9 "`--help` (per-command)"): a command's `--help` lists
+       every flag its parser accepts — no more, no less — each with a
+       one-line description and `=<value>` when it takes one; closed
+       vocabularies keep their `allowed:` values. A flag accepted in two
+       spellings is shown in the documented one. `--help`/`--version` are
+       not listed (both are answered before any command runs).
+     - One source, not two lists: the per-command control lists that sat
+       in each `cmd-*`'s own `checkFlags(...)` call moved into
+       `core/cli-flags.ts` (`CLI_SPEC`, split into `fields`/`controls`
+       exactly as each call site had them, so every "Known fields:"/"Known
+       flags:" hint is byte-identical — verified against bfd25ed for all
+       19 commands, text and `--json`). Every command now calls
+       `checkCommandFlags(flags, '<command>')`; `commandHelp` reads
+       `acceptedFlagNames(command)` from the same entry. The `--backlog`/
+       `--dry-run` grants moved into `args.ts`'s `allowedControlSet`, used
+       by both `checkFlags` and `acceptedFlagNames`. The alias moved into
+       `args.ts`'s `FLAG_ALIASES` (a `Map`: a plain-object lookup would let
+       `--constructor` resolve to a prototype key), and `displayFlagName`
+       reverses it for `--help`.
+       `core/flag-table.ts` and the MCP schemas are unchanged.
+     - Descriptions live next to the table (`flagDoc`: a default per flag,
+       a per-command override where the meaning differs — `--status` is a
+       filter on `list`, a write on `set`/`claim`/`next`). A flag without
+       one still gets its line (`--help` never fails), but AC-64 D is red.
+     - Commands without a flag-table entry (`init`, `tags`) now list their
+       flags too. Bare `nanojira --help` stays the general help.
+     - Tests: new `test/ac/ac-64-help-lists-every-flag.ts` probes each of
+       43 candidate flags alone against every command (19, bare
+       `nanojira` included) and asserts: A accepted ⊆ shown, B shown ⊆
+       accepted, C the accepted set equals a pinned per-command oracle
+       (pinned from the bfd25ed build by the same probe), D a description
+       on every line, E `--depends-on` shown, `--depends_on` never; Z
+       calibrates the probe. ac-46 P7 now asserts rm's control flags ARE
+       listed (it asserted the opposite). Mutation, each red: dropping
+       `--quiet` from `note` in `CLI_SPEC` (C), help filtering out
+       `--force` (A), showing the internal spelling (A, E), dropping
+       `--quiet`'s description (D), help showing a `--force` that
+       `archive` rejects (B), help dropping the `--backlog`/`--dry-run`
+       grants (A).
+
+206. **The exported skill folder names the 4.1 features and points at the
+     full docs** (2026-10-18, Lead task from Implementer3's 4.1.0
+     acceptance pre-check).
+     - The gap: an exported folder ships `SKILL.md`, `references/`, `bin/`,
+       `dist/` and `LICENSE` — no GUIDE, no SPECIFICATION — and `SKILL.md`
+       mentioned none of `--dry-run` (scans TSK-007), `show --notes=` /
+       `log --last=` (TSK-005) or `NJ_ON_CHANGE` (TSK-011). A vendored
+       agent could not discover them, nor find the docs that explain them.
+     - **`SKILL.md`: one line each**, folded into the daily loop:
+       `--dry-run` as "probe first", `--notes=last:N` on the Notes line,
+       `--last=N` on the History line, and `NJ_ON_CHANGE` as "outside
+       board", stating environment-only, never config (D200). It grows from
+       55 to 61 lines and 3410 to 3914 characters (~700–980 tokens by the
+       usual words×1.3 and characters/4 estimates).
+     - **`references/full-docs.md`, pointers only.** It gives the GUIDE,
+       SPECIFICATION and CHANGES URLs as
+       `https://github.com/ehrlichandreas/nanojira/blob/v<version>/docs/…`,
+       with `<version>` being `SKILL.md`'s `metadata.version`. A template,
+       not a literal tag: a literal would be a fifth version bump point
+       (RELEASING § 1), and a pin to `main` would describe code the vendored
+       copy does not run. Then a map of every GUIDE section (`§ N — <title>`)
+       so an agent can jump to the right one. The docs are not copied: the
+       SPECIFICATION alone is ~5000 lines, and a copy in every export would
+       drift from nothing and be loaded by nobody.
+     - Tests: ac-56 W17 (47 checks; before the change, the 15 that could
+       run included 11 failures):
+       - `SKILL.md` names the four flags/variables, says `NJ_ON_CHANGE` is
+         environment-only, stays at or below 4000 characters as a hard proxy
+         for the token budget, and points at the new file.
+       - The export ships it, with both tag-pinned URLs and no `main` link.
+       - Every mapped `§ N — <title>` is still a `## N. <title>` heading of
+         `docs/GUIDE.md`, so renumbering or retitling a section turns the
+         suite red instead of leaving a dead pointer.
+       - No `references/*.md` is longer than 80 lines or carries the GUIDE's
+         or SPECIFICATION's title line.
+       W1 already compares the exported `references/` with the repo's own
+       list dynamically, so it needed no change.
+
+207. **An invalid `NJ_NOW` is refused at dispatch, not at the first
+     clock read** (2026-10-18, found by Implementer3).
+     - The defect: `nowIso()` validated `NJ_NOW` lazily, when a command
+       first asked for the time. Reads normally never do; only the
+       `claim:stale` arithmetic does, and it runs while the context loads.
+       So `NJ_NOW=bogus nanojira list` exited 0 on a backlog without
+       claims and 1 (`invalid_env`) on the same backlog once one element
+       was claimed. The same call's verdict depended on backlog content.
+     - Worse, found by the mutation check below: a late check is not
+       always "nothing written". `new` allocates its ID (writes the
+       tombstone) before it stamps `created`. Under a bogus `NJ_NOW` it
+       burned `EPIC-001`, then refused. § 9 says a failed write leaves
+       nothing behind.
+     - Fix (`src/core/store.ts` `checkClockEnv()`, called from
+       `src/nanojira.ts` `main()`): the validation `nowIso()` already did
+       now also runs once at dispatch. It runs after `--version`, `help`
+       and `--help`, and before `beginOnChange()` and the command switch.
+       `nowIso()` keeps its own check (the same function), so nothing can
+       reach a timestamp unvalidated.
+     - The rule is unchanged: empty means unset, otherwise exactly
+       `YYYY-MM-DDTHH:MM:SSZ` and a real instant. So is the message.
+     - Precedence: it runs before argument checks, backlog resolution and
+       the `NJ_ON_CHANGE_TIMEOUT` check (D200), so with both variables bad,
+       `NJ_NOW` wins. Even an unknown command word answers `invalid_env`.
+       A broken clock pin is a broken environment; no answer computed
+       under it can be trusted, the same reasoning that put D200's timeout
+       check at dispatch.
+     - Why `--version`, `--help` and `help` are exempt: they already sit
+       above every other check (§ 9: help "never fails"; `--version`
+       resolves no backlog). They read no clock and no backlog, and they
+       are what someone reaches for to diagnose a broken environment.
+       Refusing them would make a wrong `NJ_NOW` harder to fix and would
+       change nothing they print.
+     - Not changed: `nanojira-mcp` does not validate `NJ_NOW` itself. Each
+       tool call spawns the CLI, which now answers `invalid_env` per call.
+     - Tests: ac-62 gets leg 3. Two invalid values (`bogus`, and one
+       missing its `Z`) are tried against:
+       - `list` on an empty backlog;
+       - list / show / doctor / `set --dry-run` / bare / `new`, on an
+         unclaimed twin and on a claimed twin.
+
+       Every case must exit 1 with `invalid_env`, write exactly one stderr
+       line naming `NJ_NOW`, and leave the backlog snapshot byte-identical.
+       Also checked: `--version`, `--help`, `help` and `list --help` still
+       exit 0; a valid `NJ_NOW` gives exit 0 on every case.
+     - Mutation: a bundle with the dispatch call removed (lazy again) fails
+       34 of 157 checks. That covers every unclaimed read, list on the empty
+       backlog, and `new`'s "nothing written" on both twins.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

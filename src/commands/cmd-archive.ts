@@ -6,15 +6,16 @@ import type { Flags, Element, Context } from '../core/types.ts';
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { checkFlags } from '../core/args.ts';
-import { cliFieldNames } from '../core/flag-table.ts';
+import { checkCommandFlags } from '../core/cli-flags.ts';
 import { removeClaimDirWholesale } from '../core/claims.ts';
 import { context, resolveTarget, requireWritable, requireNoStubs, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
 import { elementProblems, entryJson } from '../core/derive.ts';
 import { ownFolder } from '../core/layout.ts';
 import { loadElement, deriveGraph, descendants } from '../core/load.ts';
 import { fail, out } from '../core/output.ts';
+import { recordChange } from '../core/on-change.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 import { nowIso, atomicWrite, compareGuard, planMove, runMove, renderElement } from '../core/store.ts';
 
 const STABLE_HINT = 'retry once the backlog is stable — archive takes no --force';
@@ -87,7 +88,7 @@ function archiveHierarchy(ctx: Context, el: Element, subtree: Element[], ts: str
 }
 
 function cmdArchive(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', ...cliFieldNames('archive')]), true);
+  checkCommandFlags(flags, 'archive');
   const json = flags.has('json');
   const ctx = context(flags);
   requireNoStubs(ctx, 'archive');
@@ -111,15 +112,17 @@ function cmdArchive(flags: Flags) {
   // archive ends every live claim relationship by design (§ 12a): the
   // elements it moves or deletes lose their claim directory wholesale.
   for (const e of subtree) removeClaimDirWholesale(ctx.backlog, e.id);
-  deriveGraph(ctx.elements.filter((e: Element) => !subtree.includes(e)).concat(moved), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.filter((e: Element) => !subtree.includes(e)).concat(moved), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
+  const built = {
+    ok: true, ids: moved.map((m) => m.id), changed: ['archived'],
+    entries: moved.map((m) => entryJson(m, ctx.backlog, ctx.cfg)),
+    _problems: Array.from(new Set(moved.flatMap((m) => elementProblems(m, ctx.cfg.problems.ignore)))).sort(),
+  };
+  recordChange(ctx.backlog, () => built);
   if (json) {
-    out(JSON.stringify({
-      ok: true, ids: moved.map((m) => m.id), changed: ['archived'],
-      entries: moved.map((m) => entryJson(m, ctx.backlog, ctx.cfg)),
-      _problems: Array.from(new Set(moved.flatMap((m) => elementProblems(m, ctx.cfg.problems.ignore)))).sort(),
-    }, null, 2));
+    out(JSON.stringify(built, null, 2));
   } else {
     for (const m of moved) out(`${m.id} archived → ${m.file}`);
   }

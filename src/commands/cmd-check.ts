@@ -4,15 +4,18 @@
 
 import type { Flags, Element } from '../core/types.ts';
 
-import { checkFlags, flagString } from '../core/args.ts';
-import { cliFieldNames } from '../core/flag-table.ts';
+import { flagString } from '../core/args.ts';
+import { checkCommandFlags } from '../core/cli-flags.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireActive } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
-import { fail, out, writeFeedback, emitWriteResult } from '../core/output.ts';
+import { buildWriteResult, fail, out, writeFeedback } from '../core/output.ts';
+import { recordChange } from '../core/on-change.ts';
+import { parseOutputOpts, emitWriteResultOpts, trimResult } from '../core/result-opts.ts';
 import { CHECKBOX_RE } from '../core/parse.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement } from '../core/store.ts';
 
 // CHECKBOX_RE (core/parse.ts): after optional leading whitespace, a list
@@ -84,8 +87,9 @@ function prepareCheck(el: Element, text: string | undefined, item: string | unde
 }
 
 function cmdCheck(flags: Flags) {
-  checkFlags(flags, [], new Set(['json', 'force', ...cliFieldNames('check')]), true);
+  checkCommandFlags(flags, 'check');
   const json = flags.has('json');
+  const opts = parseOutputOpts(flags, json);
   const ctx = context(flags);
 
   requireTargetFlagSyntax(flags);
@@ -121,13 +125,17 @@ function cmdCheck(flags: Flags) {
         }
         guardedWriteCatchable(prepared.el, renderElement(prepared.el, new Map([['updated', ts]]), prepared.newBody), flags.has('force'), ctx.backlog);
         const fresh = loadElement(prepared.el.file, ctx.backlog, ctx.cfg);
-        deriveGraph(ctx.elements.map((e: Element) => (e.file === prepared.el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+        deriveGraph(ctx.elements.map((e: Element) => (e.file === prepared.el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
         const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
         return { ok: true, changed: ['body'], entry, _problems: entry._problems };
       },
     );
-    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
-    const wrapper = { ok: result.ok, results: result.results };
+    if (result.anyWritten) { refreshStatus(ctx.backlog, ctx.cfg, ctx); refreshTags(ctx.backlog, ctx.cfg, ctx); }
+    const results = opts.quiet || opts.fields !== undefined
+      ? result.results.map((r: any) => (r.ok ? trimResult(r, opts) : r))
+      : result.results;
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
+    const wrapper = { ok: result.ok, results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results as any[]) out(r.ok ? `${r.id} ${wantOn ? 'checked' : 'unchecked'}` : `${r.id}: Error: ${r.error}`);
     return result.ok ? 0 : 1;
@@ -139,7 +147,8 @@ function cmdCheck(flags: Flags) {
 
   const prepared = prepareCheck(el, text, item, wantOn);
   if (prepared.newBody === null) {
-    if (json) emitWriteResult(true, el, [], ctx.backlog, ctx.cfg);
+    recordChange(ctx.backlog, () => buildWriteResult(el, [], ctx.backlog, ctx.cfg));
+    if (json) emitWriteResultOpts(true, el, [], ctx.backlog, ctx.cfg, undefined, opts);
     else writeFeedback(el, ctx.cfg, `${el.id} unchanged`);
     return 0;
   }
@@ -148,9 +157,11 @@ function cmdCheck(flags: Flags) {
   guardedWrite(el, renderElement(el, new Map([['updated', ts]]), prepared.newBody), flags.has('force'), ctx.backlog);
 
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-  if (json) emitWriteResult(true, fresh, ['body'], ctx.backlog, ctx.cfg);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
+  recordChange(ctx.backlog, () => buildWriteResult(fresh, ['body'], ctx.backlog, ctx.cfg));
+  if (json) emitWriteResultOpts(true, fresh, ['body'], ctx.backlog, ctx.cfg, undefined, opts);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} ${wantOn ? 'checked' : 'unchecked'}`);
   return 0;
 }

@@ -421,5 +421,46 @@ function parseNotes(body: string): NoteLine[] {
   return notes;
 }
 
-export { parseFile, serialize, h1Of, syncH1, sectionPresent, sectionHasCheckbox, sectionCheckboxCounts, CHECKBOX_RE, normalizeTitle, normalizeSectionContent, applySections, parseNotes };
+/**
+ * The literal `- <ts> <signer>: <text>` line, plus a two-space-indented
+ * continuation line for everything after the first `\n` in `text` (§ 10
+ * "Multi-line text") — the exact inverse of `parseNotes`'s own per-note
+ * extraction, so re-rendering a `NoteLine` already read back out
+ * reproduces the original bytes byte-for-byte. `cmd-note.ts` is the only
+ * writer; `cmd-show.ts`'s `--notes=` truncation (§ 9b, TSK-005) reuses it
+ * read-only, to redisplay a kept note exactly as stored without inventing
+ * its own copy of this format.
+ */
+function renderNoteLine(ts: string, signer: string, text: string): string {
+  const [first, ...rest] = text.split('\n');
+  return [`- ${ts} ${signer}: ${first}`, ...rest.map((l) => (l === '' ? '  ' : `  ${l}`))].join('\n');
+}
+
+/**
+ * The `## Notes` heading's own line index, and the exclusive index its
+ * section ends at (the next `#`/`##` heading, or EOF) — the same boundary
+ * `withNote` (cmd-note.ts) computes to know where to insert a fresh note,
+ * reused read-only by `cmd-show.ts`'s `--notes=` truncation (§ 9b) to know
+ * what to keep untouched before and after the section while only the
+ * notes themselves are narrowed. `null` when `lines` has no `## Notes`
+ * heading at all. When more than one line matches (a hand-edited body,
+ * never written by `nanojira` itself), the LAST one wins — the same choice
+ * `withNote` already makes, since that is the section a fresh note is
+ * appended to.
+ */
+function notesSectionBounds(lines: string[]): { headingLine: number; endLine: number } | null {
+  let headingLine = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const m = /^##[ \t]+(.*?)[ \t]*$/.exec(lines[i]);
+    if (m && m[1].replace(/:\s*$/, '').trim().toLowerCase() === 'notes') headingLine = i;
+  }
+  if (headingLine === -1) return null;
+  let endLine = lines.length;
+  for (let j = headingLine + 1; j < lines.length; j++) {
+    if (/^#{1,2}[ \t]/.test(lines[j])) { endLine = j; break; }
+  }
+  return { headingLine, endLine };
+}
+
+export { parseFile, serialize, h1Of, syncH1, sectionPresent, sectionHasCheckbox, sectionCheckboxCounts, CHECKBOX_RE, normalizeTitle, normalizeSectionContent, applySections, parseNotes, renderNoteLine, notesSectionBounds };
 export type { NoteLine };

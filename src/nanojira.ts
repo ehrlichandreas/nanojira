@@ -27,11 +27,15 @@ import { cmdRm } from './commands/cmd-rm.ts';
 import { cmdSet } from './commands/cmd-set.ts';
 import { cmdShow } from './commands/cmd-show.ts';
 import { cmdStatus } from './commands/cmd-status.ts';
+import { cmdTags } from './commands/cmd-tags.ts';
 import { cmdTree } from './commands/cmd-tree.ts';
 import { cmdUnarchive } from './commands/cmd-unarchive.ts';
 import { HELP, commandHelp } from './core/help.ts';
+import { finishDryRun } from './core/dry-run.ts';
+import { beginOnChange, fireRecordedChange } from './core/on-change.ts';
 import { Fail, fail, output, emitFailure } from './core/output.ts';
 import { VERSION } from './core/version.ts';
+import { checkClockEnv } from './core/store.ts';
 
 // ------------------------------------------------------------- global flags
 
@@ -88,6 +92,17 @@ function main(argv: string[]) {
   if (cmd === 'help') { process.stdout.write(HELP); return 0; }
   if (flags.has('help')) { process.stdout.write(cmd === null ? HELP : commandHelp(cmd, flags)); return 0; }
 
+  // NJ_NOW (§ 12, DECISIONS 207): an invalid value refuses every command
+  // here, before anything is read or written -- not lazily at the first
+  // clock read, which made the same read pass or fail depending on whether
+  // the backlog held a claim. `--version`/`--help`/`help` above stay exempt:
+  // they read no backlog and no clock, and must work in any environment.
+  checkClockEnv();
+
+  // NJ_ON_CHANGE (§ 9, DECISIONS 200): armed here, before anything is
+  // written, so a bad NJ_ON_CHANGE_TIMEOUT refuses the call up front.
+  beginOnChange(cmd, flags);
+
   switch (cmd) {
     case null: return cmdStatus(flags);
     case 'init': return cmdInit(flags);
@@ -100,6 +115,7 @@ function main(argv: string[]) {
     case 'list': return cmdList(flags);
     case 'find': return cmdFind(flags, positional);
     case 'tree': return cmdTree(flags);
+    case 'tags': return cmdTags(flags);
     case 'rm': return cmdRm(flags);
     case 'archive': return cmdArchive(flags);
     case 'unarchive': return cmdUnarchive(flags);
@@ -112,8 +128,12 @@ function main(argv: string[]) {
   }
 }
 
+// The hook fires only when main() returned normally: a thrown failure (a
+// refusal, a bad argument, a crash) never reaches fireRecordedChange().
+let returned = false;
 try {
   process.exitCode = main(process.argv.slice(2));
+  returned = true;
 } catch (e: any) {
   if (e instanceof Fail) {
     emitFailure(e.code, e.message, e.hint);
@@ -129,3 +149,6 @@ try {
     emitFailure('internal_error', e && e.stack ? e.stack : String(e));
   }
 }
+// A no-op unless this call was a dry run (§ 9 "`--dry-run`").
+finishDryRun();
+if (returned) fireRecordedChange();

@@ -700,7 +700,7 @@ same division).
 declaring the resolution target undefined while a `duplicate_id` finding stands,
 which is arguably the more honest contract.
 
-**Affects:** `tools/refactor-harness/fixtures.js` (scenario for the duplicate
+**Affects:** `tools/refactor-harness/fixtures.ts` (scenario for the duplicate
 shape), `nj` `indexById`.
 
 ## 37–39. Three orderings the spec does not decide
