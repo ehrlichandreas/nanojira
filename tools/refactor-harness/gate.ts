@@ -63,6 +63,7 @@ import crypto from 'crypto';
 import { spawnSync, spawn, type ChildProcess } from 'child_process';
 import { CANONICAL_TMP_ROOT } from './lib/record.ts';
 import type { ExpectedGap } from './expected-gaps.ts';
+import { GIT_GLOBAL_OPTIONS, gitEnv } from '../release-key.mts';
 
 const HERE = import.meta.dirname;
 const NODE = process.execPath;
@@ -100,7 +101,8 @@ function usage(msg: string): never {
   process.exit(2);
 }
 function git(cwd: string, args: string[], opts?: { quiet?: boolean }): string | null {
-  const r = spawnSync('git', ['-C', cwd].concat(args), Object.assign({ encoding: 'utf8' as const }, opts || {}));
+  // The same git environment as the release tools (DECISIONS 240, 241).
+  const r = spawnSync('git', [...GIT_GLOBAL_OPTIONS, '-C', cwd].concat(args), { encoding: 'utf8' as const, env: gitEnv() });
   if (r.status !== 0) {
     if (!(opts && opts.quiet)) process.stderr.write(`gate.ts: git ${args.join(' ')} failed:\n${r.stderr}`);
     return null;

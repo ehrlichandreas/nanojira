@@ -797,14 +797,22 @@ function listHint(label, value, allowed) {
   const suggestion = nearestMatch(value, allowed);
   return suggestion === null ? known : `did you mean '${suggestion}'? ${known}`;
 }
+var clockEnv = null;
+function setClockEnv(name) {
+  if (name !== null && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new TypeError(`setClockEnv: '${name}' is not an environment variable name`);
+  }
+  clockEnv = name;
+}
 function pinnedNow() {
-  const pinned = process.env.NJ_NOW;
+  if (clockEnv === null) return null;
+  const pinned = Object.hasOwn(process.env, clockEnv) ? process.env[clockEnv] : void 0;
   if (pinned === void 0 || pinned === "") return null;
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(pinned) || Number.isNaN(Date.parse(pinned))) {
     fail(
       "invalid_env",
-      `invalid NJ_NOW '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`,
-      "fix NJ_NOW, or unset it for the system clock"
+      `invalid ${clockEnv} '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`,
+      `fix ${clockEnv}, or unset it for the system clock`
     );
   }
   return pinned;
@@ -1340,6 +1348,9 @@ function notesSectionBounds(lines) {
 // src/core/store.ts
 import * as fs6 from "node:fs";
 import * as path4 from "node:path";
+
+// src/core/clock.ts
+setClockEnv("NJ_NOW");
 
 // src/core/touched.ts
 import * as fs5 from "node:fs";
@@ -2691,7 +2702,7 @@ import * as os2 from "node:os";
 import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.7.1";
+var VERSION = "4.8.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;

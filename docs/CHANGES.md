@@ -5,6 +5,58 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nanojira --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 4.8.0
+
+The CLI kernel now comes from its own project, cli-kernel, as a copy of
+its signed v1.0.0 tag, and the release tools can no longer be pointed at
+another repository or other objects by git's environment. A caller may
+notice: `tools/export-kernel.mts` is retired (it prints where the export
+moved and exits 2); `export-skill.mts` refuses a signed tag of a tree, of
+another tag, or of a commit that is not a nanojira release commit; and
+the release tools ignore `GIT_DIR` and its family,
+`GIT_REPLACE_REF_BASE`, replace refs and one-off `GIT_CONFIG_*` (a
+`gpg.program` for them goes in a config file). The launchers now follow
+a symlink and keep a `!` in the arguments. The CLI's own behaviour,
+`NJ_NOW` included, is unchanged.
+
+- **Changed: `src/core/kernel.ts` is cli-kernel v1.0.0's export.** One
+  provenance line (tag, commit, sha256) over the tagged bytes, never
+  edited here. `NJ_NOW` pins the clock exactly as before, including the
+  `invalid_env` text. A project that wants the kernel exports it from a
+  cli-kernel checkout (`node <cli-kernel>/tools/export.mts <tag>
+  <dest-file> [--check]`), not from nanojira. GUIDE § 31. (DECISIONS
+  239, TSK-062)
+- **Removed: `tools/export-kernel.mts`.** It is now a pointer to
+  cli-kernel's `tools/export.mts` that exits 2 for any arguments, so an
+  old script fails loudly instead of exporting a stale kernel. GUIDE
+  § 31. (DECISIONS 239, TSK-062)
+- **Fix: the release tools cannot be redirected by git's environment.**
+  `export-skill.mts`, `release.ts`, its preflight and its verify run
+  every git call without `GIT_DIR`, `GIT_WORK_TREE`,
+  `GIT_OBJECT_DIRECTORY` and their family, without one-off
+  `GIT_CONFIG_*`, and with replace objects off (`refs/replace/` and
+  `GIT_REPLACE_REF_BASE`), so a good signature can no longer be checked
+  on one object while the bytes come from another. `release.ts` still
+  hands the `GIT_CONFIG_*` signing identity to git-release-squash.
+  (DECISIONS 240, TSK-062)
+- **Fix: a release tag must point at a commit of this project.**
+  `export-skill.mts` refuses, with `tag_invalid`, a signed tag of a tree,
+  a signed tag of another tag, and a signed tag of a commit whose
+  `package.json` is not named `nanojira` or whose subject does not start
+  with `nanojira <tag>: `, as every release commit's does; `release.ts
+  --verify-only` checks the same. (DECISIONS 240, 241, TSK-062, TSK-063)
+- **Fix: `bin/nanojira` follows a symlink to itself.** A link from
+  another directory, under any name, runs the bundle next to the real
+  launcher instead of failing with 127 or running a `dist/` next to the
+  link. A loop (over 40 links) or a link `readlink` cannot read ends in
+  127 with one line. Its messages go out through `printf`, so dash's
+  `echo` no longer eats a backslash in a path. SPECIFICATION § 18.
+  (DECISIONS 242, TSK-065)
+- **Fix: `bin/nanojira.cmd` keeps every `!`.** Delayed expansion is off
+  throughout, so cmd.exe no longer eats a `!` in an argument or in the
+  install path, and the entry path in its "not found" message is
+  quoted. Checked by text only; cmd.exe was not run. (TSK-065)
+
 ## 4.7.1
 
 A plan `ref` of just `@` is now refused instead of silently accepted as

@@ -224,10 +224,20 @@ function nearestMatch(value, allowed) {
   }
   return bestDist <= threshold && best.length === 1 ? best[0] : null;
 }
+var clockEnv = null;
+function setClockEnv(name) {
+  if (name !== null && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new TypeError(`setClockEnv: '${name}' is not an environment variable name`);
+  }
+  clockEnv = name;
+}
 
 // src/core/store.ts
 import * as fs6 from "node:fs";
 import * as path4 from "node:path";
+
+// src/core/clock.ts
+setClockEnv("NJ_NOW");
 
 // src/core/touched.ts
 import * as fs5 from "node:fs";
@@ -483,7 +493,7 @@ import * as os2 from "node:os";
 import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.7.1";
+var VERSION = "4.8.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;

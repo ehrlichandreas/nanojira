@@ -117,6 +117,10 @@ tag (`node tools/export-skill.mts <tag> <dest>`) and copies that folder
 wherever it is needed; see `docs/SPECIFICATION.md` § 18 and
 `docs/GUIDE.md` § 1.
 
+Windows: not a target platform, and untested. `bin/*.cmd` are checked by
+reading only; the team has no Windows machine (`docs/SPECIFICATION.md`
+§§ 12, 16).
+
 ## Development
 
 Building and testing this repo (not to be confused with `nanojira`'s own

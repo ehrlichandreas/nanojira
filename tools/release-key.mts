@@ -16,11 +16,53 @@
 // at an old, validly signed tag. So a tag is resolved exactly once
 // (resolveTag): refs/tags/<tag>, no DWIM, must be a tag object whose own
 // "tag" header names <tag>; every later git call uses that object id, never
-// the name again.
+// the name again. The tag object must point at a commit (`type commit`):
+// a signed tag of a tree, or of another tag, is refused, so `<oid>^{commit}`
+// never has to peel through more than the one signed object.
+//
+// Every git call here runs with gitEnv() and GIT_GLOBAL_OPTIONS (DECISIONS
+// 240, ported from cli-kernel v1.0.0's tools/release-key.mts). Variables
+// that make git use another repository, object store, index or namespace
+// than the one `cwd` names, swap objects through replace refs
+// (GIT_REPLACE_REF_BASE), or inject configuration (gpg.program, say) for
+// this one process are dropped, so the repository checked is always the
+// one asked for. Replace objects are switched off as well
+// (GIT_NO_REPLACE_OBJECTS=1, and --no-replace-objects on every call): a
+// refs/replace/<commit> ref would otherwise make `git show <commit>:<path>`
+// read another, unsigned commit's bytes under the signed commit's id.
+// GIT_CONFIG_GLOBAL, GIT_CONFIG_SYSTEM and .git/config are deliberately
+// trusted: whoever can write them already runs code as the user.
 
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+
+const REDIRECTING_GIT_ENV = [
+  'GIT_DIR', 'GIT_WORK_TREE', 'GIT_COMMON_DIR', 'GIT_INDEX_FILE', 'GIT_OBJECT_DIRECTORY',
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_NAMESPACE', 'GIT_CEILING_DIRECTORIES',
+  'GIT_DISCOVERY_ACROSS_FILESYSTEM', 'GIT_REPLACE_REF_BASE', 'GIT_NO_REPLACE_OBJECTS',
+];
+const GIT_CONFIG_ENV = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)$/;
+
+/** Global options for every git call: never follow a replace ref. */
+const GIT_GLOBAL_OPTIONS: readonly string[] = ['--no-replace-objects'];
+
+/**
+ * `base` without the variables that redirect git, and with replace objects
+ * off. One-off config (GIT_CONFIG_COUNT/KEY_n/VALUE_n/PARAMETERS) is
+ * dropped too, unless `keepConfig`: tools/release.ts keeps it for
+ * git-release-squash, which signs with the identity it carries (DECISIONS
+ * 202, A), and nothing else.
+ */
+function gitEnv(base: NodeJS.ProcessEnv = process.env, opts: { keepConfig?: boolean } = {}): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const [name, value] of Object.entries(base)) {
+    if (REDIRECTING_GIT_ENV.includes(name) || (!opts.keepConfig && GIT_CONFIG_ENV.test(name))) continue;
+    env[name] = value;
+  }
+  env.GIT_NO_REPLACE_OBJECTS = '1';
+  return env;
+}
 
 type PinResult = { ok: true; pin: string } | { ok: false; error: 'release_key_invalid'; message: string };
 
@@ -43,11 +85,14 @@ function q(name: string): string {
   return JSON.stringify(name);
 }
 
-type TagResult = { ok: true; oid: string } | { ok: false; error: 'tag_invalid'; message: string };
+type TagResult = { ok: true; oid: string; commit: string } | { ok: false; error: 'tag_invalid'; message: string };
 
-/** refs/tags/<tag> resolved once: an annotated tag object that names <tag> itself. */
-function resolveTag(repo: string, tag: string, env: NodeJS.ProcessEnv = process.env): TagResult {
-  const git = (args: string[]) => spawnSync('git', args, { cwd: repo, env, encoding: 'utf8' });
+/**
+ * refs/tags/<tag> resolved once: an annotated tag object that names <tag>
+ * itself and points at a commit, returned as `commit`.
+ */
+function resolveTag(repo: string, tag: string, env: NodeJS.ProcessEnv = gitEnv()): TagResult {
+  const git = (args: string[]) => spawnSync('git', [...GIT_GLOBAL_OPTIONS, ...args], { cwd: repo, env, encoding: 'utf8' });
   const ref = git(['rev-parse', '--verify', '--quiet', '--end-of-options', 'refs/tags/' + tag]);
   const oid = String(ref.stdout || '').trim();
   if (ref.status !== 0 || !/^[0-9a-f]{40,64}$/.test(oid)) {
@@ -61,7 +106,12 @@ function resolveTag(repo: string, tag: string, env: NodeJS.ProcessEnv = process.
   if (named !== tag) {
     return { ok: false, error: 'tag_invalid', message: `tag object names ${q(named === undefined ? '' : named)}, not ${q(tag)} (${q('refs/tags/' + tag)} points at another tag's object)` };
   }
-  return { ok: true, oid };
+  const type = (/^type (.*)$/m.exec(header) || [])[1];
+  const commit = (/^object ([0-9a-f]{40,64})$/m.exec(header) || [])[1];
+  if (type !== 'commit' || commit === undefined) {
+    return { ok: false, error: 'tag_invalid', message: `tag ${q(tag)} points at a ${q(type === undefined ? 'unknown object' : type)}, not a commit` };
+  }
+  return { ok: true, oid, commit };
 }
 
 type SignerResult = { ok: true; found: string; created: string[] } | { ok: false; error: 'release_key_mismatch'; message: string };
@@ -76,7 +126,7 @@ const REFUSED_STATUS: Record<string, string> = {
 
 /** Whether the tag or commit object carries a signature at all. */
 function hasSignatureBlock(repo: string, kind: 'tag' | 'commit', oid: string, env: NodeJS.ProcessEnv): boolean {
-  const body = String(spawnSync('git', ['cat-file', kind, oid], { cwd: repo, env, encoding: 'utf8' }).stdout || '');
+  const body = String(spawnSync('git', [...GIT_GLOBAL_OPTIONS, 'cat-file', kind, oid], { cwd: repo, env, encoding: 'utf8' }).stdout || '');
   return kind === 'tag' ? /^-----BEGIN [A-Z ]*(SIGNATURE|SIGNED MESSAGE)-----$/m.test(body)
     : /^gpgsig(-sha256)? /m.test(body.split('\n\n')[0]);
 }
@@ -89,8 +139,8 @@ function hasSignatureBlock(repo: string, kind: 'tag' | 'commit', oid: string, en
  * the name the messages use. `created` is the signatures' creation times
  * (VALIDSIG's third field, seconds since the epoch).
  */
-function checkSigner(repo: string, kind: 'tag' | 'commit', oid: string, label: string, pin: string, env: NodeJS.ProcessEnv = process.env): SignerResult {
-  const r = spawnSync('git', [kind === 'tag' ? 'verify-tag' : 'verify-commit', '--raw', oid],
+function checkSigner(repo: string, kind: 'tag' | 'commit', oid: string, label: string, pin: string, env: NodeJS.ProcessEnv = gitEnv()): SignerResult {
+  const r = spawnSync('git', [...GIT_GLOBAL_OPTIONS, kind === 'tag' ? 'verify-tag' : 'verify-commit', '--raw', oid],
     { cwd: repo, env, encoding: 'utf8' });
   const status = String(r.stderr || '').split('\n')
     .filter((l) => l.startsWith('[GNUPG:] '))
@@ -119,4 +169,35 @@ function checkSigner(repo: string, kind: 'tag' | 'commit', oid: string, label: s
   };
 }
 
-export { readReleaseKey, resolveTag, checkSigner };
+type ProjectResult = { ok: true } | { ok: false; error: 'tag_invalid'; message: string };
+
+/**
+ * The project binding: `commit`'s own package.json is named `name` (the
+ * running checkout's package.json name), and its subject starts with
+ * `<name> <tag>: `, as every release commit's does (git-release-squash
+ * writes it; release-verify checks the whole subject). Release tag messages
+ * are the bare title (`git tag -n1`), so the tag message cannot carry the
+ * binding. The limit: another repository whose package is named `name`,
+ * with a commit whose subject follows the pattern, under a tag signed by
+ * the same key, still passes; the key, not this check, is what keeps it
+ * out (DECISIONS 241).
+ */
+function checkProject(repo: string, tag: string, commit: string, name: string, env: NodeJS.ProcessEnv = gitEnv()): ProjectResult {
+  const r = spawnSync('git', [...GIT_GLOBAL_OPTIONS, 'show', `${commit}:package.json`], { cwd: repo, env, encoding: 'utf8' });
+  let found: unknown;
+  try { found = r.status === 0 ? JSON.parse(String(r.stdout)).name : undefined; } catch { found = undefined; }
+  if (found !== name) {
+    return { ok: false, error: 'tag_invalid', message: `tag ${q(tag)} (commit ${commit}) is not a ${name} release: package.json name is ${J(found)}` };
+  }
+  const subject = String(spawnSync('git', [...GIT_GLOBAL_OPTIONS, 'show', '-s', '--format=%s', commit],
+    { cwd: repo, env, encoding: 'utf8' }).stdout || '').replace(/\n$/, '');
+  const prefix = `${name} ${tag}: `;
+  if (subject.startsWith(prefix)) return { ok: true };
+  return { ok: false, error: 'tag_invalid', message: `tag ${q(tag)} (commit ${commit}) is not a ${name} release: its subject ${J(subject)} does not start with ${J(prefix)}` };
+}
+
+function J(x: unknown): string {
+  return JSON.stringify(x === undefined ? null : x);
+}
+
+export { GIT_GLOBAL_OPTIONS, gitEnv, readReleaseKey, resolveTag, checkSigner, checkProject };

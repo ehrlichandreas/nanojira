@@ -7,10 +7,15 @@
 //
 // Every check runs, cheapest first, and every problem is returned: one
 // run names everything to fix. Each has its own stable code.
+//
+// Every git call runs with release-key.mts's gitEnv() and
+// --no-replace-objects (DECISIONS 240): the checks are about `root`'s own
+// repository, never one a GIT_DIR or replace ref points at.
 
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { GIT_GLOBAL_OPTIONS, gitEnv } from './release-key.mts';
 
 interface Problem { code: string; message: string; hint: string }
 
@@ -22,8 +27,9 @@ const RELEASE_TAG = /^v\d+\.\d+\.\d+$/;
 const DOC_PATHS = ['docs', 'SKILL.md', 'README.md', 'references'];
 
 function preflight(root: string, name: string, version: string): Problem[] {
+  const env = gitEnv();
   const git = (args: string[], input?: string) =>
-    spawnSync('git', args, { cwd: root, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024 });
+    spawnSync('git', [...GIT_GLOBAL_OPTIONS, ...args], { cwd: root, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024, env });
   const lines = (s: string | null) => String(s || '').split('\n').filter((l) => l !== '');
   const problems: Problem[] = [];
 

@@ -155,7 +155,8 @@ function buildFixtureRepo(label: string) {
     JSON.stringify({ name: 'nanojira-fixture', version: REAL_PKG_VERSION, releaseKey: FPR }, null, 2) + '\n');
 
   git(['add', '-A']);
-  const commit = gitSigned(['commit', '-q', '-m', 'fixture commit']);
+  // A release commit's subject, '<name> <tag>: <title>' (DECISIONS 241).
+  const commit = gitSigned(['commit', '-q', '-m', 'nanojira-fixture v-ac56-signed: fixture commit']);
   T.check('fixture: commit in the scratch repo', commit.status === 0, commit.stderr);
   return dir;
 }

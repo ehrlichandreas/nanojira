@@ -1,14 +1,19 @@
+// cli-kernel v1.0.0 commit 4e9e76c2e8de983125d3ae530fd8a57cec5a1d38 sha256 fc31033be3cc83ace5d00a73495fa3a193d2fea8439a52fcbca47140b36646e5
 'use strict';
+// SPDX-License-Identifier: MIT
+// Copyright (c) the cli-kernel authors
+// Copyright (c) the nanojira authors
 
 // CLI kernel — copy verbatim, project-neutral.
 //
 // The parts of a small JSON-first Node CLI that know nothing about the
 // project around them: the failure type and `--json` output state, flag
 // parsing and the unknown-flag check, did-you-mean, the pinnable clock and
-// `--fields`/`--quiet` validation (DECISIONS 231). Every project-specific
-// choice comes in as a parameter (flag aliases, the global controls, a
-// display name, a failure decorator, a hint label), so another project can
-// copy this file unchanged and keep its own domain code beside it.
+// `--fields`/`--quiet` validation. Every project-specific choice comes in
+// as a parameter (flag aliases, the global controls, a display name, a
+// failure decorator, a hint label, the clock's environment variable), so
+// another project can copy this file unchanged and keep its own domain code
+// beside it.
 //
 // Rules for this file: it imports only `node:*` built-ins, never another
 // module of this project, and names no project. A test pins both.
@@ -144,7 +149,7 @@ function parseArgs(argv: string[], kinds?: FlagKinds, opts?: ParseOpts) {
 }
 
 /** Every control flag a command takes: its own plus the global ones (the
- * caller's list, e.g. a backlog path every command accepts). */
+ * caller's list, e.g. a data path every command accepts). */
 function allowedControlSet(commandControls: Iterable<string>, globalControls: Iterable<string> = []): Set<string> {
   return new Set([...commandControls, ...globalControls]);
 }
@@ -235,20 +240,38 @@ function listHint(label: string, value: string, allowed: string[]): string {
 
 // -------------------------------------------------------------------- clock
 
-// NJ_NOW when set (and not empty), validated; null when the wall clock applies.
+// The environment variable that pins the clock, named by the project
+// (`setClockEnv`); null until then, which means the wall clock always applies.
+let clockEnv: string | null = null;
+
+/** Names the environment variable that pins the clock, e.g. `MYTOOL_NOW`;
+ * `null` turns pinning off. Call it once at startup, before `checkClockEnv`.
+ * A name that is not an environment variable name is a programming error
+ * and throws a TypeError, not a `Fail`. */
+function setClockEnv(name: string | null): void {
+  if (name !== null && !/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) {
+    throw new TypeError(`setClockEnv: '${name}' is not an environment variable name`);
+  }
+  clockEnv = name;
+}
+
+// The pinned time when the clock variable is set (and not empty), validated;
+// null when the wall clock applies.
 function pinnedNow(): string | null {
-  const pinned = process.env.NJ_NOW;
+  if (clockEnv === null) return null;
+  // Own variables only: a name like `toString` must not reach Object.prototype.
+  const pinned = Object.hasOwn(process.env, clockEnv) ? process.env[clockEnv] : undefined;
   if (pinned === undefined || pinned === '') return null;
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(pinned) || Number.isNaN(Date.parse(pinned))) {
-    fail('invalid_env', `invalid NJ_NOW '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`,
-      'fix NJ_NOW, or unset it for the system clock');
+    fail('invalid_env', `invalid ${clockEnv} '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`,
+      `fix ${clockEnv}, or unset it for the system clock`);
   }
   return pinned;
 }
 
-/** Refuses an invalid NJ_NOW up front: called once at dispatch, so every
- * command fails the same way whether or not it would ever have read the
- * clock. */
+/** Refuses an invalid clock variable up front: called once at dispatch, so
+ * every command fails the same way whether or not it would ever have read
+ * the clock. */
 function checkClockEnv(): void {
   pinnedNow();
 }
@@ -257,7 +280,7 @@ function nowIso(): string {
   return pinnedNow() ?? new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
-/** The same clock as `nowIso()` (NJ_NOW when set, else the wall clock), as epoch ms. */
+/** The same clock as `nowIso()` (the clock variable when set, else the wall clock), as epoch ms. */
 function nowMs(): number {
   return Date.parse(nowIso());
 }
@@ -298,6 +321,6 @@ export {
   Fail, fail, output, setFailureDecorator, hardExit, out, emitFailure,
   parseArgs, allowedControlSet, checkFlags, flagString, readStdin,
   osaDistance, nearestMatch, listHint,
-  checkClockEnv, nowIso, nowMs,
+  setClockEnv, checkClockEnv, nowIso, nowMs,
   parseOutputOpts,
 };

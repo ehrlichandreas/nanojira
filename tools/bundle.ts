@@ -106,12 +106,16 @@ const nodeOnlyImports: esbuild.Plugin = {
 // bare function's `this` becomes `undefined` instead of the global object,
 // among other differences) with nothing here to say so. Every source today
 // happens to start with 'use strict'; this makes that a checked contract
-// instead of an accident nobody would notice breaking.
+// instead of an accident nobody would notice breaking. Line comments may
+// precede it -- they are no statements, so the directive still opens the
+// prologue: the vendored core/kernel.ts starts with its provenance header
+// (DECISIONS 239).
 function checkStrict(files: string[], problems: string[]): void {
   for (const rel of files) {
     const abs = path.join(ROOT, rel);
     const lines = fs.readFileSync(abs, 'utf8').split('\n');
-    const start = lines[0].startsWith('#!') ? 1 : 0;
+    let start = lines[0].startsWith('#!') ? 1 : 0;
+    while (start < lines.length && lines[start].startsWith('//')) start++;
     const first = (lines[start] || '').trim();
     if (first !== "'use strict';" && first !== '"use strict";') {
       problems.push(`${rel} has no leading 'use strict' -- esbuild would fold it into the entry's strict scope instead of giving it its own, silently.`);

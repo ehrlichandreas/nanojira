@@ -38,13 +38,19 @@
 //      unsigned or merely-annotated tag, one signed by any other key, and
 //      one whose pinned key has expired or been revoked, and another name
 //      pointing at a signed tag object (tag_invalid), touching <dest> not
-//      at all;
+//      at all; the tag must point at a commit whose package.json is named
+//      like this checkout's own (tag_invalid, DECISIONS 240);
 //   2. read SKILL.md, bin/ and dist/ from the tag's own tree;
 //   3. build the folder at a temporary path beside <dest>, in the same
 //      parent directory (so the final step is a same-filesystem rename);
 //   4. refuse a foreign <dest> (exists, but holds no SKILL.md whose
 //      frontmatter parses with name: nanojira) -- untouched; replace an existing
 //      valid export (has one) wholesale.
+//
+// Every git call runs with release-key.mts's gitEnv() and
+// --no-replace-objects (DECISIONS 240): GIT_DIR and its family, one-off
+// GIT_CONFIG_* and replace refs cannot change which repository, objects or
+// gpg are used.
 //
 // No symlinks anywhere in the written folder -- every file below is a
 // plain `fs.writeFileSync`, never `fs.symlinkSync`.
@@ -53,7 +59,7 @@ import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readReleaseKey, resolveTag, checkSigner } from './release-key.mts';
+import { GIT_GLOBAL_OPTIONS, gitEnv, readReleaseKey, resolveTag, checkSigner, checkProject } from './release-key.mts';
 
 // The checkout this script runs from: its package.json holds the pin.
 const SCRIPT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -63,8 +69,22 @@ function fail(msg: string): never {
   process.exit(2);
 }
 
+const GIT_ENV = gitEnv();
+
 function git(args: string[], cwd: string): Buffer {
-  return execFileSync('git', args, { cwd });
+  return execFileSync('git', [...GIT_GLOBAL_OPTIONS, ...args], { cwd, env: GIT_ENV });
+}
+
+/** package.json's "name" beside this script: the project a tag must belong to. */
+function ownName(): string {
+  let name: unknown;
+  try {
+    name = JSON.parse(fs.readFileSync(path.join(SCRIPT_ROOT, 'package.json'), 'utf8')).name;
+  } catch (e) {
+    fail(`cannot read "name" from ${path.join(SCRIPT_ROOT, 'package.json')}: ${(e as Error).message}`);
+  }
+  if (typeof name !== 'string' || name === '') fail(`${path.join(SCRIPT_ROOT, 'package.json')} has no "name"`);
+  return name;
 }
 
 // A dest counts as "ours" (safe to replace wholesale) when it has its own
@@ -105,11 +125,13 @@ function main(): void {
   // and every git call below uses that object id, never the name again.
   const pin = readReleaseKey(SCRIPT_ROOT);
   if (!pin.ok) fail(`${pin.error}: ${pin.message}`);
-  const resolved = resolveTag(repo, tag);
+  const resolved = resolveTag(repo, tag, GIT_ENV);
   if (!resolved.ok) fail(`${resolved.error}: ${resolved.message}`);
   const oid = resolved.oid;
-  const signer = checkSigner(repo, 'tag', oid, tag, pin.pin);
+  const signer = checkSigner(repo, 'tag', oid, tag, pin.pin, GIT_ENV);
   if (!signer.ok) fail(`${signer.error}: ${signer.message}`);
+  const project = checkProject(repo, tag, resolved.commit, ownName(), GIT_ENV);
+  if (!project.ok) fail(`${project.error}: ${project.message}`);
 
   // Step 2: read every shipped file from the tag's own tree, never the
   // working tree: SKILL.md, bin/ and dist/, nothing else.

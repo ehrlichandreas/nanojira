@@ -75,7 +75,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
-import { readReleaseKey } from './release-key.mts';
+import { GIT_GLOBAL_OPTIONS, gitEnv, readReleaseKey } from './release-key.mts';
 import { preflight } from './release-preflight.mts';
 import { verifyRelease, formatLine } from './release-verify.mts';
 
@@ -194,15 +194,12 @@ if (problems.length > 0) {
 
 // One-off git config from the environment (DECISIONS 202, A): kept for
 // git-release-squash, which signs with it, but never handed to the gate.
-const GIT_CONFIG_ENV = /^GIT_CONFIG_(?:COUNT|KEY_\d+|VALUE_\d+|PARAMETERS)$/;
-function withoutGitConfigEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  return Object.fromEntries(Object.entries(env).filter(([k]) => !GIT_CONFIG_ENV.test(k)));
-}
+// The gate gets gitEnv(), like every git call here (DECISIONS 240, 241).
 
 // A release is not worth writing against a red tree. A dry run writes
 // nothing, so it skips the ~20-minute gate rather than run it twice.
 if (apply) {
-  const testResult = spawnSync(TEST_CMD, { cwd: ROOT, shell: true, stdio: 'inherit', env: withoutGitConfigEnv(process.env) });
+  const testResult = spawnSync(TEST_CMD, { cwd: ROOT, shell: true, stdio: 'inherit', env: gitEnv(process.env) });
   if (testResult.status !== 0) {
     refuse(`'${TEST_CMD}' did not pass (exit ${testResult.status}) -- fix the tree before releasing`);
   }
@@ -220,8 +217,11 @@ const squashArgs = ['tail', ROOT, '--name=' + NAME, '--tag=' + tag]
   .concat(message !== undefined ? ['--message=' + message] : ['--message-file=' + (messageFile as string)])
   .concat(apply ? ['--apply'] : []);
 
-const pre = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).stdout.trim();
-const r = spawnSync(bin, squashArgs, { cwd: ROOT, env: process.env, stdio: 'inherit' });
+// GIT_DIR and its family and replace objects never reach git or
+// git-release-squash (DECISIONS 240); the one-off GIT_CONFIG_* signing
+// identity does, since git-release-squash signs with it.
+const pre = spawnSync('git', [...GIT_GLOBAL_OPTIONS, 'rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8', env: gitEnv() }).stdout.trim();
+const r = spawnSync(bin, squashArgs, { cwd: ROOT, env: gitEnv(process.env, { keepConfig: true }), stdio: 'inherit' });
 if (r.status !== 0 || !apply) process.exit(r.status === null ? 1 : r.status);
 
 // The release git-release-squash just wrote, in seven sections

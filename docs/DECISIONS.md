@@ -6303,6 +6303,155 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        since the old code's `not_found` on an empty-ref lookup also exits 1
        and writes nothing — only the code/field/hint distinguish the two).
 
+239. **`src/core/kernel.ts` is a vendored copy of cli-kernel v1.0.0;
+     `tools/export-kernel.mts` is retired** (2026-10-29, TSK-062; owner
+     decision of 2026-10-29: shared code lives in core repositories and is
+     vendored from a signed tag).
+     - The kernel moved out into its own repository, cli-kernel, whose
+       v1.0.0 tag (signed by the release key) is nanojira v4.7.1's kernel
+       plus `setClockEnv`, an own-property clock read and license lines.
+       `src/core/kernel.ts` is now exactly what cli-kernel's
+       `tools/export.mts v1.0.0` writes: one provenance line
+       (`// cli-kernel <tag> commit <sha> sha256 <hex>`) over the tagged
+       bytes. It is never edited here; a fix goes to cli-kernel, gets a new
+       signed tag and is re-exported.
+     - The clock: cli-kernel reads no variable until the project names one.
+       `src/core/clock.ts` calls `setClockEnv('NJ_NOW')` when it is loaded
+       and re-exports `checkClockEnv`, `nowIso` and `nowMs`; `store.ts`
+       takes the clock from there, and no other module imports it from
+       `kernel.ts`. Naming it at module load rather than in each entry
+       point means no entry point can forget it and no clock read can come
+       first: the CLI reaches the clock only through `store.ts`, and the
+       MCP server spawns the CLI and never reads the clock itself. `NJ_NOW`
+       behaves byte for byte as before, including the `invalid_env` text
+       (ac-62 unchanged).
+     - `test/edge/kernel-neutral.ts` section A now checks the provenance
+       line against the body's sha256, runs cli-kernel's offline
+       `--check` and, where a cli-kernel checkout with the tag is at hand
+       (`NJ_CLI_KERNEL`, else `../cli-kernel`), the verified tagged
+       `--check`; without one that leg is `not covered`, not a failure. It
+       also pins that `clock.ts` is the only module naming the variable.
+     - `tools/bundle.ts`'s `'use strict'` check skips leading `//` comment
+       lines after the shebang, because the provenance line now comes
+       before `'use strict'`.
+     - `tools/export-kernel.mts` (GUIDE § 31 until 4.7.x) is
+       superseded by cli-kernel's `tools/export.mts`. It stays as a
+       pointer that names the new command and exits 2 for any arguments,
+       so an old script fails loudly instead of exporting a stale kernel;
+       `test/tools/export-kernel.ts` pins exactly that.
+
+240. **The release tools ignore git's redirecting environment and replace
+     objects; a release tag must point at a commit of this project**
+     (2026-10-29, TSK-062; ported from cli-kernel v1.0.0's review).
+     - The gap: `tools/release-key.mts`, `export-skill.mts`,
+       `release-verify.mts`, `release-preflight.mts` and `release.ts` ran
+       git with the caller's whole environment. `GIT_DIR` (or
+       `GIT_OBJECT_DIRECTORY`, `GIT_NAMESPACE`, …) pointed every check at
+       another repository; a `refs/replace/<commit>` ref, or the same
+       under `GIT_REPLACE_REF_BASE`, made `git show <signed tag>:<path>`
+       read an unsigned commit's bytes after a good signature check; and
+       one-off `GIT_CONFIG_*` swapped in another `gpg.program`. A signed
+       tag of a tree or of another tag passed `resolveTag` too, and
+       nothing tied a tag to this project but its signer.
+     - Settled: `release-key.mts` exports `gitEnv()` and
+       `GIT_GLOBAL_OPTIONS`, as cli-kernel's do. `gitEnv()` drops
+       `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`, `GIT_INDEX_FILE`,
+       `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES`,
+       `GIT_NAMESPACE`, `GIT_CEILING_DIRECTORIES`,
+       `GIT_DISCOVERY_ACROSS_FILESYSTEM`, `GIT_REPLACE_REF_BASE`,
+       `GIT_NO_REPLACE_OBJECTS` and the one-off config
+       (`GIT_CONFIG_PARAMETERS`, `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`), and
+       sets `GIT_NO_REPLACE_OBJECTS=1`; every git call in those five tools
+       also passes `--no-replace-objects`. Config files
+       (`GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `.git/config`) stay
+       trusted: whoever can write them already runs code as the user.
+     - One exception: `release.ts` hands git-release-squash
+       `gitEnv(process.env, { keepConfig: true })`, because the squash
+       signs with the one-off `GIT_CONFIG_*` identity RELEASING.md § 4
+       sets (DECISIONS 202, A). The redirecting variables and replace
+       objects are still dropped for it.
+     - `resolveTag` also requires the tag object's `type commit` and
+       returns that commit, so a signed tag of a tree or of another tag is
+       `tag_invalid`. `release-verify`'s release-tag section checks that
+       commit is the release commit.
+     - The project binding follows how nanojira's tags actually look:
+       release tag messages are the bare title (`git tag -n1`), unlike
+       cli-kernel's `cli-kernel <tag>`, so the message cannot carry it.
+       The binding is the tagged commit's `package.json` name, which must
+       equal the running checkout's (`checkProject`, used by
+       `export-skill`; `release-verify`'s content section checks it too,
+       next to the release commit subject `<name> <tag>: <title>` it
+       already checked). Every exportable tag in this repository's
+       history is named `nanojira`.
+     - Tests: K8 to K10 in `test/tools/export-skill-key.ts` (`GIT_DIR` at
+       a decoy repository, `refs/replace/<commit>`, `GIT_REPLACE_REF_BASE`,
+       injected `GIT_CONFIG_*`, signed tags of a tree, of a tag and of
+       another project's commit, `gitEnv` itself, and every git call in
+       the five tools passing `--no-replace-objects`). Red-proved: 21 of 52
+       checks fail with the 4.7.1 tools (a worktree at this entry's own
+       parent commit, removed after). K7's missing-gpg leg now sets
+       `gpg.program` through `GIT_CONFIG_GLOBAL`, since one-off config no
+       longer reaches git. `tools/refactor-harness/gate.ts` checks out
+       `oracle-frozen` tags for local refactor gating and verifies no
+       signature, so it was left as it was (DECISIONS 241 routes it
+       through `gitEnv()` all the same).
+
+241. **A release tag's commit subject binds it as well; the refactor gate and
+     the test gate use gitEnv too** (2026-10-29, TSK-063; Reviewer's LOW-2
+     and LOW-1 on DECISIONS 240).
+     - The gap: DECISIONS 240's binding was the package.json name alone, so
+       a second repository whose package is also named `nanojira`, under a
+       tag signed by the shared release key, still exported.
+     - Settled: `checkProject` also requires the tagged commit's subject to
+       start with `<name> <tag>: `, which git-release-squash writes on every
+       release commit and `release-verify` already checks in full. All 23
+       `v*` tags in this repository's history match; `test/tools/
+       export-skill-key.ts` K12 runs `resolveTag` and `checkProject` over
+       every real `v*` tag the checkout has (`not covered` without tags).
+     - The limit, stated plainly: a foreign commit whose package is named
+       `nanojira` and whose subject follows the pattern, under a tag signed
+       by the release key, still exports (K11 pins it). Only the key keeps
+       such a tag out; whoever holds it can sign anything.
+     - `tools/refactor-harness/gate.ts` runs git with `gitEnv()` and
+       `--no-replace-objects`, and `release.ts` hands the test gate
+       `gitEnv(process.env)` in place of its own `GIT_CONFIG_*` filter. No
+       security effect (neither verifies a signature); one git environment
+       for every tool. Because the gate now carries
+       `GIT_NO_REPLACE_OBJECTS=1`, `export-skill-key.ts` drops it from its
+       fixture's environment, where K8b needs plain git to follow a replace
+       ref.
+
+242. **The sh launcher follows a symlink to itself; the .cmd launcher
+     keeps delayed expansion off** (2026-10-30, TSK-065; the agent-gmail
+     TSK-036 review, ported from agent-gmail TSK-038 and TSK-042).
+     - The gap: `bin/nanojira` took its directory and name from `$0`. A
+       symlink to it from another directory (one on `PATH`, say) gave 127,
+       or ran a `dist/<link name>.mjs` that happened to sit next to the
+       link. `bin/nanojira.cmd` ran with delayed expansion on, so cmd.exe
+       ate every `!` in the arguments and in the install path.
+     - Settled: the sh launcher follows `$0` one link at a time with
+       `readlink` and takes the name and the directory from the real
+       file. It gives up with 127 after 40 links (a loop) and when
+       `readlink` fails or is missing, rather than fall back to the
+       link's directory. Those two messages name the launcher by the name
+       it was called by, `${0##*/}`: the real file is not known yet, and
+       one template serves both launchers (§ 18), so a fixed name is not
+       available. Every message goes out through `printf '%s\n'`: dash's
+       `echo` reads backslash escapes, so `\c` in a path cut the line.
+       The .cmd launcher parses the Node version with plain `%VAR%`
+       expansion on separate lines and never enables delayed expansion.
+     - Against DECISIONS 213: `readlink` is a process, and it runs only
+       when `$0` is a link, once per link. A direct call of
+       `bin/nanojira` still starts nothing but the `cd -P` subshell and
+       the `--version` probe; `printf` is a shell builtin.
+     - Rejected: `readlink -f` or `realpath` in one call (neither is in
+       POSIX, and macOS's `readlink` had no `-f` before 12.3); `cd -P` on
+       the link's directory alone (it resolves the directory, not a link
+       to the file).
+     - The .cmd launcher is checked by its text only
+       (`test/edge/launcher-links.ts`): the team has no Windows machine,
+       and Windows is not a target platform (SPECIFICATION § 12).
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

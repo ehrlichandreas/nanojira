@@ -5814,13 +5814,29 @@ touching this project's own history. Given `<tag>`:
    lightweight alias, a hand-written ref) cannot replay it. A pin that
    is not 40 hex digits fails with `release_key_invalid`; a tag that
    does not exist, is not a tag object (lightweight) or names another
-   tag fails with `tag_invalid`; a tag object that is unsigned, signed
+   tag fails with `tag_invalid`, and so does a tag object that points
+   at anything but a commit (a tree, another tag) or at a commit whose
+   `package.json` is not named like the running checkout's own or whose
+   subject does not start with `<name> <tag>: ` (from 4.8.0, DECISIONS
+   240, 241: release tag messages are the bare title, so the package name
+   and the release commit's subject are the binding); a tag object that
+   is unsigned, signed
    by any other key, or by the pinned key after it expired or was
    revoked fails with `release_key_mismatch`, naming the expected and
    the found fingerprint (`none` without a valid signature). Each: exit
    2, one stderr line `export-skill: <code>: …` with the reason, and
    `<dest>` untouched. `git tag -v` alone, before 4.4.0, accepted a
-   good signature from any key in the keyring.
+   good signature from any key in the keyring. Every git call runs
+   without `GIT_DIR`, `GIT_WORK_TREE`, `GIT_COMMON_DIR`,
+   `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`,
+   `GIT_ALTERNATE_OBJECT_DIRECTORIES`, `GIT_NAMESPACE`,
+   `GIT_CEILING_DIRECTORIES`, `GIT_DISCOVERY_ACROSS_FILESYSTEM`,
+   `GIT_REPLACE_REF_BASE` and one-off config (`GIT_CONFIG_PARAMETERS`,
+   `GIT_CONFIG_COUNT`/`KEY_n`/`VALUE_n`), and with replace objects off
+   (`GIT_NO_REPLACE_OBJECTS=1`, `--no-replace-objects`), so none of
+   them can change which repository, objects or gpg are used (4.8.0,
+   DECISIONS 240). Config files (`GIT_CONFIG_GLOBAL`, `.git/config`)
+   are trusted.
 2. **Read `SKILL.md`, `bin/` and `dist/` from the tag's tree** (`git show
    <tag object id>:<path>`), never from the working tree — a dirty or
    out-of-sync checkout must not change what gets exported, and must
@@ -5846,15 +5862,16 @@ touching this project's own history. Given `<tag>`:
 One template, parameterised only by its own filename (so both binaries
 share identical logic):
 
-- it resolves its own location from the directory part of `$0` — the
-  directory `dirname "$0"` names, taken by shell parameter expansion, not a
-  `dirname` process (DECISIONS 213) — and is
-  `CDPATH`-safe — **it does not follow symlinks**: since neither the
-  repo nor an exported folder ever contains one (above), there is
-  nothing to resolve, and a caller who does place a symlink elsewhere
-  pointing in at `bin/nanojira` is outside this contract (`cp -R` the folder
-  instead, which does keep working, unlike a symlink to one file
-  inside it);
+- it **follows `$0` through symlinks** to the real launcher, one link at
+  a time with `readlink`, which runs only for a link (from 4.8.0,
+  DECISIONS 242): a symlink elsewhere pointing in at `bin/nanojira` (say,
+  one on `PATH`, under any name) runs the bundle next to the real
+  launcher, never a `dist/` next to the link. Neither the repo nor an
+  exported folder contains a symlink itself (above);
+- it resolves its own location from the directory part of the real
+  launcher's path — the directory `dirname` would name, taken by shell
+  parameter expansion, not a `dirname` process (DECISIONS 213) — and is
+  `CDPATH`-safe; `<name>` below is the real launcher's own file name;
 - `NJ_NODE`, if set, names the node binary to run; otherwise `node` from
   `PATH`;
 - it confirms that binary exists (`command -v`) and runs `<node>
@@ -5865,8 +5882,9 @@ share identical logic):
   `workspace/bin/`'s removal, since it was never *where* the floor came
   from) the same way a missing binary is refused;
 - before the exec it starts no process other than one subshell (for
-  the directory) and the `--version` probe, and it writes nothing — no
-  temporary file either (DECISIONS 213);
+  the directory), the `--version` probe and, only when `$0` is a
+  symlink, one `readlink` per link followed, and it writes nothing — no
+  temporary file either (DECISIONS 213, 242);
 - it **unsets `NODE_OPTIONS`** before exec'ing node, so a caller's own
   `NODE_OPTIONS` (e.g. `--require`) cannot load foreign code into the
   tool;
@@ -5879,7 +5897,18 @@ share identical logic):
   - a binary that exists but fails the version check: `` `<name>: node
     too old (requires Node.js >= 24)` ``;
   - the (in principle, though every shipped export has it) missing
-    `../dist/<name>.mjs` entry: names that path directly.
+    `../dist/<name>.mjs` entry: names that path directly;
+  - a symlink chain longer than 40 links (a loop): `` `<called>: too
+    many symlinks from <$0>` ``;
+  - a link `readlink` cannot read (or no `readlink` at all): `` `<called>:
+    cannot follow the symlink <link> (readlink failed)` ``. It stops
+    rather than fall back to the link's own directory.
+
+  These two fail before the real launcher is known, so `<called>` is the
+  file name it was called by, `${0##*/}`: `nanojira` for `bin/nanojira`
+  itself, the link's own name for a link. Every line goes out through
+  `printf '%s\n'`, never `echo`, so a backslash in a path is printed as it
+  is.
 
   Nothing else is written anywhere;
 - otherwise it execs `node <dir>/../dist/<name>.mjs "$@"`, where `<dir>`
@@ -5892,7 +5921,11 @@ share identical logic):
 - `bin/nanojira.cmd`/`bin/nanojira-mcp.cmd` provide the same behaviour for Windows'
   `cmd.exe`, to the extent its own scripting lets them: `NJ_NODE` or
   `node` from `PATH`, the same `dist/<name>.mjs` entry, the same exit
-  127 on failure to start.
+  127 on failure to start. Delayed expansion stays off throughout (from
+  4.8.0), so a `!` in an argument or in the install path reaches node
+  unchanged, and the entry path in its message is quoted. They are
+  checked by their text only: Windows is not a target platform (§ 12)
+  and is untested.
 
 An ambient `package.json` with `"type": "module"` (or no `type` at all,
 which defaults to CommonJS) wherever `bin/` sits — the repo root's own

@@ -6,12 +6,17 @@
 // Seven sections, one `verify: <check>: OK|FAIL <why>|SKIPPED (<why>)`
 // line each. Read-only: the one scratch directory (the export in
 // "content") is removed again.
+//
+// Every git call runs with release-key.mts's gitEnv() and
+// --no-replace-objects (DECISIONS 240), so GIT_DIR and its family, one-off
+// GIT_CONFIG_* and replace refs cannot make it check another repository or
+// other objects than `root`'s own.
 
 import { spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { resolveTag, checkSigner } from './release-key.mts';
+import { GIT_GLOBAL_OPTIONS, gitEnv, resolveTag, checkSigner } from './release-key.mts';
 
 interface Line { check: string; status: 'OK' | 'FAIL' | 'SKIPPED'; detail: string }
 interface VerifyOptions {
@@ -36,8 +41,9 @@ function newer(a: string, b: string): boolean {
 }
 
 function verifyRelease(root: string, o: VerifyOptions): Line[] {
+  const env = Object.assign(gitEnv(process.env), { GIT_TERMINAL_PROMPT: '0' });
   const run = (args: string[], input?: string) =>
-    spawnSync('git', args, { cwd: root, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024, env: Object.assign({}, process.env, { GIT_TERMINAL_PROMPT: '0' }) });
+    spawnSync('git', [...GIT_GLOBAL_OPTIONS, ...args], { cwd: root, encoding: 'utf8', input, maxBuffer: 64 * 1024 * 1024, env });
   const out = (args: string[]) => String(run(args).stdout || '').trim();
   const lines = (s: string) => s.split('\n').filter((l) => l !== '');
   const result: Line[] = [];
@@ -114,7 +120,7 @@ function verifyRelease(root: string, o: VerifyOptions): Line[] {
   // (2) the release commit: one identity, the anonymous date for its
   // position, the subject, one signature, by the pinned key.
   const [author, committer, authorDate, committerDate, subject] = out(['show', '-s', '--format=%an <%ae>%x09%cn <%ce>%x09%at%x09%ct%x09%s', rel]).split('\t');
-  const resolved = resolveTag(root, o.tag);
+  const resolved = resolveTag(root, o.tag, env);
   const tagObject = resolved.ok ? run(['cat-file', 'tag', resolved.oid]).stdout : '';
   {
     const p: string[] = [];
@@ -133,7 +139,7 @@ function verifyRelease(root: string, o: VerifyOptions): Line[] {
     const header = run(['cat-file', 'commit', rel]).stdout.split('\n\n')[0];
     const sigs = (header.match(/^gpgsig(-sha256)? /gm) || []).length;
     if (sigs !== 1) p.push(`${sigs} signature headers, expected 1`);
-    signedAtPin(p, checkSigner(root, 'commit', rel, o.tag + '^{commit}', o.pin));
+    signedAtPin(p, checkSigner(root, 'commit', rel, o.tag + '^{commit}', o.pin, env));
     section('release commit', p);
   }
 
@@ -146,7 +152,8 @@ function verifyRelease(root: string, o: VerifyOptions): Line[] {
     } else {
       const blocks = (tagObject.match(SIG_BLOCK) || []).length;
       if (blocks !== 1) p.push(`${blocks} signature blocks, expected 1`);
-      signedAtPin(p, checkSigner(root, 'tag', resolved.oid, o.tag, o.pin));
+      if (resolved.commit !== rel) p.push(`tag object points at ${resolved.commit.slice(0, 7)}, not the release commit ${rel.slice(0, 7)}`);
+      signedAtPin(p, checkSigner(root, 'tag', resolved.oid, o.tag, o.pin, env));
       const tagger = out(['for-each-ref', '--format=%(taggername) <%(taggeremail:trim)> %(taggerdate:raw)', `refs/tags/${o.tag}`]);
       if (tagger !== `${author} ${authorDate} +0000`) p.push(`tagger ${JSON.stringify(tagger)}, expected ${JSON.stringify(`${author} ${authorDate} +0000`)}`);
       ownerIdentity(p, 'tagger', tagger.replace(/ \S+ \S+$/, ''));
@@ -159,8 +166,8 @@ function verifyRelease(root: string, o: VerifyOptions): Line[] {
   let pushed = false;
   let reachable = false;
   {
-    const ls = spawnSync('git', ['ls-remote', 'origin'], { cwd: root, encoding: 'utf8', timeout: 60000,
-      env: Object.assign({}, process.env, { GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || 'ssh -o BatchMode=yes' }) });
+    const ls = spawnSync('git', [...GIT_GLOBAL_OPTIONS, 'ls-remote', 'origin'], { cwd: root, encoding: 'utf8', timeout: 60000,
+      env: Object.assign({}, env, { GIT_SSH_COMMAND: process.env.GIT_SSH_COMMAND || 'ssh -o BatchMode=yes' }) });
     if (ls.status !== 0) {
       result.push({ check: 'old tags vs origin', status: 'SKIPPED', detail: 'origin unreachable' });
     } else {
@@ -194,6 +201,7 @@ function verifyRelease(root: string, o: VerifyOptions): Line[] {
     const skill = show('SKILL.md');
     const seen = [pkg && pkg.version, lock && lock.version, lock && lock.packages && lock.packages[''] && lock.packages[''].version,
       skill === null ? undefined : (/^\s*version:\s*"([^"]*)"/m.exec(skill) || [])[1]];
+    if (!pkg || pkg.name !== o.name) p.push(`package.json name ${JSON.stringify(pkg ? pkg.name ?? null : null)}, expected ${JSON.stringify(o.name)}`);
     if (seen.some((v) => v !== version)) p.push(`versions (package.json, lock x2, SKILL.md): ${seen.map((v) => v === undefined || v === null ? 'missing' : v).join(' ')}`);
     const changes = show('docs/CHANGES.md') ?? show('CHANGES.md');
     if (changes === null || !new RegExp(`^## ${version.replace(/\./g, '\\.')}( |$)`, 'm').test(changes)) p.push(`no "## ${version}" heading in CHANGES`);
@@ -205,7 +213,7 @@ function verifyRelease(root: string, o: VerifyOptions): Line[] {
     const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'release-verify-'));
     try {
       const dest = path.join(scratch, 'export');
-      const exp = spawnSync(process.execPath, [path.join(root, 'tools', 'export-skill.mts'), o.tag, dest], { cwd: root, encoding: 'utf8' });
+      const exp = spawnSync(process.execPath, [path.join(root, 'tools', 'export-skill.mts'), o.tag, dest], { cwd: root, encoding: 'utf8', env });
       if (exp.status !== 0) {
         p.push(`export-skill failed: ${String(exp.stderr || '').trim().split('\n').pop()}`);
       } else {
@@ -237,12 +245,12 @@ function verifyRelease(root: string, o: VerifyOptions): Line[] {
   {
     const p: string[] = [];
     const commits = lines(out(['rev-list', '--branches', '--tags']));
-    const badCommits = commits.filter((c) => !checkSigner(root, 'commit', c, c, o.pin).ok);
+    const badCommits = commits.filter((c) => !checkSigner(root, 'commit', c, c, o.pin, env).ok);
     if (badCommits.length > 0) p.push(`commit(s) not signed by the release key: ${badCommits.map((c) => c.slice(0, 7)).join(' ')}`);
     const annotated = lines(out(['for-each-ref', '--format=%(objecttype) %(objectname) %(refname:short)', 'refs/tags']))
       .map((l) => l.split(' ')).filter(([type]) => type === 'tag');
     const badTags = annotated.filter(([, oid, t]) =>
-      !checkSigner(root, 'tag', oid, t, o.pin).ok || (String(run(['cat-file', 'tag', oid]).stdout).match(SIG_BLOCK) || []).length !== 1).map(([, , t]) => t);
+      !checkSigner(root, 'tag', oid, t, o.pin, env).ok || (String(run(['cat-file', 'tag', oid]).stdout).match(SIG_BLOCK) || []).length !== 1).map(([, , t]) => t);
     if (badTags.length > 0) p.push(`annotated tag(s) not signed once by the release key: ${badTags.join(', ')}`);
     section('history signatures', p, `${commits.length} commit(s), ${annotated.length} annotated tag(s)`);
   }

@@ -61,7 +61,9 @@ it.** To move or share it, `cp -R` the whole folder — it keeps working from
 the copy, since nothing in it depends on where it sits. There is no
 `VERSION` file: the version lives in `SKILL.md`'s own `metadata.version`
 and in `nanojira --version`, both read from `package.json` at build time and
-checked equal to it directly.
+checked equal to it directly. A symlink to one of the launchers, for
+example one on `PATH`, does work from 4.8.0: the sh launcher follows it to
+the real file and runs the bundle next to that (SPECIFICATION § 18).
 
 - Working directly in this repo (no export needed): run `bin/nanojira init`
   once (§ 2) to create a project's `backlog/`.
@@ -1706,59 +1708,25 @@ commands as you. The exact rules are in the specification, § 9
 
 ## 31. Pulling the CLI kernel into another project
 
-`src/core/kernel.ts` (DECISIONS 231) is project-neutral by design: failure
-output, flag parsing, did-you-mean, the `NJ_NOW` clock and
-`--fields`/`--quiet` validation, importing only Node built-ins. Another
-CLI can use it unchanged instead of porting the same logic by hand. Today
-`git tag -v vX.Y.Z && git show vX.Y.Z:src/core/kernel.ts` already gets the
-file out of a signed release; `tools/export-kernel.mts` makes that one
-checked step, with a provenance line a consumer can re-verify later
-without touching git at all (TSK-057):
+`src/core/kernel.ts` is project-neutral by design: failure output, flag
+parsing, did-you-mean, a pinnable clock and `--fields`/`--quiet`
+validation, importing only Node built-ins. Since 4.8.0 it is not
+nanojira's own file any more but a vendored copy of **cli-kernel**
+v1.0.0, exported from a tag signed by the release key, with a provenance
+line on top (DECISIONS 239). Another CLI takes it from cli-kernel the
+same way nanojira does, not from nanojira:
 
 ```sh
-node tools/export-kernel.mts vX.Y.Z <dest-file>
+# in a cli-kernel checkout that has the tag
+node tools/export.mts v1.0.0 <dest-file>
+node tools/export.mts v1.0.0 <dest-file> --check   # verified: signed tag, byte for byte
+node tools/export.mts --check <dest-file>          # offline: detects a local edit only
 ```
 
-Refuses — nothing written — a tag that is not signed by this project's
-pinned release key (the same check `tools/export-skill.mts` uses, never a
-weaker one: an unsigned, unknown, lightweight, or another-key-signed tag,
-or one whose pinned key has expired or been revoked), and a `<dest-file>`
-that exists and is a symlink or anything other than a regular file. On
-success `<dest-file>` is one header comment line —
+cli-kernel's README describes both checks and what each one proves. The
+clock reads no environment variable until the project names one, as
+nanojira does with `setClockEnv('NJ_NOW')`.
 
-```
-// nanojira kernel vX.Y.Z commit <full sha> sha256 <hex of kernel.ts>
-```
-
-— followed by that tag's `src/core/kernel.ts`, byte for byte, nothing
-added or stripped. The header is inline, not a side file, so the file a
-consuming project imports or bundles is still just one `.ts` file, and the
-provenance travels with it if it's copied elsewhere.
-
-To tell a local edit from a real update later, without needing git or the
-original tag at all:
-
-```sh
-node tools/export-kernel.mts --check <dest-file>
-```
-
-Re-reads the header, recomputes the sha256 of everything after it, and
-reports a match (exit 0) or a one-line reason it no longer matches (exit
-1) — the file was hand-edited, or truncated, or the header itself is
-missing or malformed.
-
-Two things worth knowing before relying on either mode:
-
-- **A missing parent directory for `<dest-file>` is created** (`mkdir -p`,
-  the same as `cp` would — a symlinked parent directory along the way is
-  followed, not refused: only `<dest-file>` itself is checked, since the
-  destination is a path the caller chose, not one the tool is guarding
-  against them).
-- **`--check` proves consistency, not provenance.** A match only says the
-  file's body still agrees with its own header — someone could still have
-  hand-written a header and a body that agree with each other but were
-  never actually exported from a signed tag. The only real proof of
-  provenance is redoing the export from the tag itself (`node
-  tools/export-kernel.mts <tag> <dest-file>`, which re-verifies the tag's
-  signature every time) or `git tag -v <tag>` directly — not re-running
-  `--check` on a file you were just handed.
+`tools/export-kernel.mts`, the exporter of 4.7.x, is retired: it now
+only prints where the export moved and exits 2. A 4.7.x tag still carries
+the old exporter in its own tree.

@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { TYPE_PREFIX, IDS_BUCKET_PAD } from './constants.ts';
 import { fail, hardExit } from './output.ts';
-import { checkClockEnv, nowIso, nowMs } from './kernel.ts';
+import { checkClockEnv, nowIso, nowMs } from './clock.ts';
 import { serialize } from './parse.ts';
 import { readElementFile, ELEMENT_FILE_CAP } from './regular-file.ts';
 import { internalSymlink, requireNoInternalSymlink } from './internal-path.ts';
@@ -19,7 +19,7 @@ import { existedBefore, touchWrite, touchRename } from './touched.ts';
 
 // NJ_NOW, `checkClockEnv` (§ 12, DECISIONS 207), `nowIso` and `nowMs` (the
 // clock for `claim:stale`'s age arithmetic) live in the project-neutral
-// kernel (DECISIONS 231).
+// kernel (DECISIONS 231); `clock.ts` names NJ_NOW as its variable (DECISIONS 239).
 
 function mtimeIso(file: string) {
   try {
