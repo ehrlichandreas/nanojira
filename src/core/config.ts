@@ -10,6 +10,7 @@ import * as path from 'path';
 import { flagString } from './args.ts';
 import { DEFAULT_CONFIG, FOLDER_ROLES, GROUPS, V3_DIR_REL, V3_CONFIG_REL, LEGACY_CONFIG_REL } from './constants.ts';
 import { fail } from './output.ts';
+import { sleepMs } from './store.ts';
 
 // ------------------------------------------------------------ configuration
 
@@ -38,7 +39,30 @@ function validateConfig(obj: any) {
     }
   }
   if (obj.layout !== undefined) errs.push(...validateLayout(obj.layout));
+  if (obj.claims !== undefined) errs.push(...validateClaims(obj.claims));
   return errs;
+}
+
+// § 5: an optional top-level `claims` block, not written by `init`. Same
+// typo-safety as `layout` — an unknown key is invalid, not silently ignored.
+function validateClaims(c: any): string[] {
+  if (c === null || typeof c !== 'object' || Array.isArray(c)) return ['claims must be an object'];
+  const errs = [];
+  for (const k of Object.keys(c)) {
+    if (k !== 'staleAfterHours') errs.push(`unknown key 'claims.${k}'`);
+  }
+  if (c.staleAfterHours !== undefined) {
+    const v = c.staleAfterHours;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) {
+      errs.push(`claims.staleAfterHours must be a non-negative integer (got ${JSON.stringify(v)})`);
+    }
+  }
+  return errs;
+}
+
+function readClaims(c: any): { staleAfterHours: number } {
+  const d = DEFAULT_CONFIG.claims.staleAfterHours;
+  return { staleAfterHours: c && c.staleAfterHours !== undefined ? c.staleAfterHours : d };
 }
 
 // § 5: every part of `layout` is optional, but what is there must be right —
@@ -112,6 +136,7 @@ function loadConfig(backlog: string, legacy?: boolean) {
       schema: 1, statuses: obj.statuses.slice(),
       sections: { description: obj.sections.description.slice(), acceptance: obj.sections.acceptance.slice() },
       layout: readLayout(obj.layout),
+      claims: readClaims(obj.claims),
     },
     errors: [],
   };
@@ -219,12 +244,26 @@ function readNjrc(file: string): string | null {
   try { link = fs.lstatSync(file); } catch { return null; }
   const bad = (reason: string, hint?: string): never => fail('invalid_njrc', `invalid .njrc at ${file}: ${reason}`, hint);
   checkOwner(link.uid, bad);
+  njrcSwapFaultHook(path.dirname(file));
   let fd;
   try {
     fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
   } catch (e: any) {
     if (e.code === 'ELOOP') return bad('it is a symlink loop (ELOOP)');
-    return bad(e.code === 'ENOENT' ? 'it is a dangling symlink' : `cannot open it -- ${e.code || e.message}`);
+    // Judged by a FRESH lstat, not the one above (D142): the njrc-swap pause
+    // can remove or replace the path between that lstat and this open(), so
+    // the original's isSymbolicLink() no longer describes what's there now.
+    // Nothing there now -- whether it was a regular file or a symlink --
+    // means the entry was removed outright: absent at this level, the
+    // search (§ 4) continues upward exactly as if nothing had been here. A
+    // symlink still there, with its target missing, is a genuine dangling
+    // link and stays a fault.
+    if (e.code === 'ENOENT') {
+      let fresh;
+      try { fresh = fs.lstatSync(file); } catch { return null; }
+      return fresh.isSymbolicLink() ? bad('it is a dangling symlink') : null;
+    }
+    return bad(`cannot open it -- ${e.code || e.message}`);
   }
   try {
     // `checkOwner`'s own `fail()` must reach the caller unmasked \u2014 it is not
@@ -257,6 +296,24 @@ function readNjrc(file: string): string | null {
     return raw.startsWith('\uFEFF') ? raw.slice(1) : raw;
   } finally {
     fs.closeSync(fd);
+  }
+}
+
+/**
+ * NJ_FAULT=njrc-swap (verification hook, § 4): a pure pause between the
+ * ownership `lstat` and the `open()` -- the exact window TSK-029's residual
+ * race lived in. Polls for `<dir>/.nj-fault-go` (timeout 10s, the same
+ * marker filename `before-compare` uses, § 12). Released by the marker or
+ * by the timeout, `nj` always proceeds to `open()` next -- there is no
+ * `fault:njrc-swap` code, so this never fails or throws.
+ */
+function njrcSwapFaultHook(dir: string) {
+  if (process.env.NJ_FAULT !== 'njrc-swap') return;
+  const marker = path.join(dir, '.nj-fault-go');
+  const deadline = Date.now() + 10000;
+  while (!fs.existsSync(marker)) {
+    if (Date.now() >= deadline) return;
+    sleepMs(50);
   }
 }
 

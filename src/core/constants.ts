@@ -51,6 +51,7 @@ const DEFAULT_CONFIG: Config = {
     folders: { epics: 'epics', tasks: 'tasks', subtasks: 'subtasks', archive: 'archive' },
     statusFile: true,
   },
+  claims: { staleAfterHours: 24 },
 };
 
 // Closed problem vocabulary (§ 7). severity null === workflow-only code.
@@ -89,6 +90,7 @@ const SEVERITY: Record<string, string | null> = {
   'config:invalid': 'error',
   'claim:mismatch': 'warning',
   'claim:orphaned': 'warning',
+  'claim:stale': 'warning',
   'backlog:claims_unignored': 'warning',
 };
 

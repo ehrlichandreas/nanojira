@@ -204,19 +204,31 @@ const LEGACY_SET = ['backlog:legacy_layout:error'];
 /* L1 — every command except doctor: exit 1, legacy_layout, no change     */
 /* ===================================================================== */
 
+/* `legacy_layout` is checked before any command-specific precondition (an
+ * acting name, an archived target, …), so each entry below just needs an
+ * argument list that *would* be sensible on a migrated backlog — none of
+ * those preconditions is ever reached. `unarchive` addresses TSK-004, the
+ * one element already sitting under `archive/`; `claim`/`release`/`check`
+ * get the flags that would otherwise be their own first refusal (`--as`, a
+ * `--text` matching the checkbox `H.completeBody` writes). */
 const COMMANDS = [
   ['bare nj', []],
   ['list', ['list']],
   ['list --all', ['list', '--all']],
   ['list --ready', ['list', '--ready']],
+  ['find', ['find', 'Must']],
   ['show', ['show', '--id=TSK-001']],
   ['tree', ['tree']],
   ['new', ['new', '--type=task', '--parent=EPIC-001', '--title=Must not be written']],
   ['set', ['set', '--id=TSK-001', '--status=doing']],
   ['note', ['note', '--id=TSK-001', 'Must not be written']],
+  ['check', ['check', '--id=TSK-001', '--text=It works', '--on']],
   ['rm', ['rm', '--id=SUB-001']],
   ['rm --cascade', ['rm', '--id=TSK-001', '--cascade']],
   ['archive', ['archive', '--id=TSK-003']],
+  ['unarchive', ['unarchive', '--id=TSK-004']],
+  ['claim', ['claim', '--id=TSK-001', '--as=agent']],
+  ['release', ['release', '--id=TSK-001', '--as=agent']],
 ];
 
 /* `build()` gives a FRESH {o, root} per run: against an nj that does write,
@@ -695,6 +707,97 @@ function interruptedFix(desc, x, gitignoreWant, gitignoreApplies, readmeApplies)
    * rule; 108 G2 follow-up for the silence on a non-legacy backlog). */
   const x = interrupted('ac24-g2-nogi', { gitignore: null });
   interruptedFix('L5 an interrupted step 0, no .gitignore at all', x, null, false, true);
+}
+
+/* ===================================================================== */
+/* G1 — a stray top-level .ids/ left by a crash BETWEEN step 0's two      */
+/* renames, on a backlog that is otherwise already v3 (DECISIONS 108 G1,  */
+/* promoted v3.2 § E.2, D138: SPECIFICATION.md § 14 step 0)               */
+/* ===================================================================== */
+
+/*
+ * Distinct from L4's "both v2 and v3 places present" (above): L4's fixture
+ * is still legacy (the CONFIG is still at its v2 place, so the whole
+ * backlog reads as `backlog:legacy_layout` and step 0 refuses to touch
+ * anything, ambiguous). This fixture is already fully v3 — config and the
+ * real tombstones both at their v3 places, `.gitignore`/README already
+ * correct — with only a stray top-level `.ids/` left over from a crash
+ * that finished the OTHER rename (`.nanojira.json` → `.nanojira/config.json`)
+ * but not this one (`.ids/` → `.nanojira/ids/`). `backlog:legacy_layout`
+ * does not fire here (no top-level `.nanojira.json`), so this is reached
+ * only because G2 (above) made the renameless fix-ups — and now this
+ * cleanup — run on every `--fix`, not only a `backlog:legacy_layout` one.
+ */
+
+/**
+ * A v3 backlog (step 0 fully done, no `.gitignore`/README drift) with a
+ * stray top-level `.ids/` holding `strayTombstones`. `.nanojira/ids/`
+ * always carries the real `TOMBSTONES`.
+ */
+function strayIds(label, strayTombstones) {
+  const dir = H.freshDir(label);
+  const bl = path.join(dir, 'backlog');
+  for (const sub of ['epics', 'tasks', 'subtasks', 'archive']) fs.mkdirSync(path.join(bl, sub), { recursive: true });
+  fs.mkdirSync(path.join(bl, V3_IDS), { recursive: true });
+  fs.writeFileSync(path.join(bl, V3_CONFIG), V2_CONFIG_BYTES);
+  fs.writeFileSync(path.join(bl, '.gitignore'), '.nanojira/index.json\n.nj-tmp-*\n');
+  fs.writeFileSync(path.join(bl, 'README.md'), CUSTOM_README);
+  for (const [rel, body] of Object.entries(ELEMENTS)) {
+    fs.mkdirSync(path.dirname(path.join(bl, rel)), { recursive: true });
+    fs.writeFileSync(path.join(bl, rel), body);
+  }
+  for (const id of Object.keys(TOMBSTONES)) fs.writeFileSync(path.join(bl, V3_IDS, id), TOMBSTONES[id]);
+  fs.mkdirSync(path.join(bl, V2_IDS), { recursive: true });
+  for (const [id, body] of Object.entries(strayTombstones)) fs.writeFileSync(path.join(bl, V2_IDS, id), body);
+  return { dir, bl };
+}
+
+{
+  /* Every tombstone in the stray .ids/ is already mirrored in
+   * .nanojira/ids/ (a subset of the real set): --fix removes the stray
+   * directory outright, notes it, changes nothing else, and a repeat run
+   * is a no-op. */
+  const mirrored = { 'EPIC-001': '', 'TSK-001': 'kept\n' };
+  const x = strayIds('ac24-g1-mirrored', mirrored);
+  const pre = runJ(['doctor'], { cwd: x.dir });
+  T.check('G1 fixture: not seen as legacy', !(H.doctorSet(pre) || []).includes('backlog:legacy_layout:error'),
+    J(pre.json && pre.json.problems).slice(0, 300));
+  T.check('G1 fixture: the stray .ids/ exists before --fix', fs.existsSync(path.join(x.bl, V2_IDS)), 'missing');
+
+  const before = outsideBookkeeping(files(x.bl));
+  const r = runJ(['doctor', '--fix'], { cwd: x.dir });
+  T.check('G1 mirrored: --fix does not fail the run', r.status === 0 || r.status === 2, J(r.json));
+  T.check('G1 mirrored: the stray .ids/ is gone', !fs.existsSync(path.join(x.bl, V2_IDS)), 'still there');
+  T.eq('G1 mirrored: .nanojira/ids/ is untouched (every real tombstone, unchanged content)',
+    Object.keys(TOMBSTONES).sort().map(id => bytes(path.join(x.bl, V3_IDS, id))),
+    Object.keys(TOMBSTONES).sort().map(id => TOMBSTONES[id]));
+  T.eq('G1 mirrored: every element file is byte-identical', outsideBookkeeping(files(x.bl)), before);
+  const notes = (r.json && r.json.notes) || [];
+  T.check('G1 mirrored: a note says the stray .ids/ was removed (§ 14)',
+    notes.some(n => J(n).includes('.ids')), 'notes = ' + J(notes));
+
+  const r2 = runJ(['doctor', '--fix'], { cwd: x.dir });
+  T.check('G1 mirrored: a second --fix is a no-op for this (no .ids/ to remove, no note about it)',
+    !((r2.json && r2.json.notes) || []).some(n => J(n).includes('.ids')), J(r2.json && r2.json.notes));
+  T.check('G1 mirrored: doctor stays clean of this (no crash, no new finding)', r2.status === 0 || r2.status === 2, J(r2.json));
+}
+{
+  /* A tombstone in the stray .ids/ that .nanojira/ids/ does NOT have:
+   * never discard a tombstone that exists nowhere else (§ 8) — the stray
+   * directory is left alone entirely, including its mirrored siblings. */
+  const unmirrored = { 'EPIC-001': '', 'TSK-999': 'orphan\n' };
+  const x = strayIds('ac24-g1-unmirrored', unmirrored);
+  const before = outsideBookkeeping(files(x.bl));
+  const beforeStray = fs.readdirSync(path.join(x.bl, V2_IDS)).sort();
+
+  const r = runJ(['doctor', '--fix'], { cwd: x.dir });
+  T.check('G1 unmirrored: --fix does not fail the run', r.status === 0 || r.status === 2, J(r.json));
+  T.check('G1 unmirrored: the stray .ids/ is left alone entirely', fs.existsSync(path.join(x.bl, V2_IDS)), 'removed');
+  T.eq('G1 unmirrored: every tombstone in it is untouched, including the mirrored one',
+    fs.readdirSync(path.join(x.bl, V2_IDS)).sort(), beforeStray);
+  T.eq('G1 unmirrored: TSK-999 — found nowhere else — is not discarded (§ 8 never-reuse)',
+    bytes(path.join(x.bl, V2_IDS, 'TSK-999')), 'orphan\n');
+  T.eq('G1 unmirrored: every element file is byte-identical', outsideBookkeeping(files(x.bl)), before);
 }
 
 T.finish();

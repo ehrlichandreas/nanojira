@@ -176,7 +176,7 @@ function cmdNew(flags: Flags) {
 
   const changed: string[] = FIELD_ORDER.filter((f: string) => fields.has(f) && f !== 'created' && f !== 'updated')
     .concat(SECTION_ROLES.filter((r: string) => sections.has(r)));
-  if (json) emitWriteResult(true, el, changed, ctx.backlog);
+  if (json) emitWriteResult(true, el, changed, ctx.backlog, ctx.cfg);
   else writeFeedback(el, ctx.cfg, `${id} created → ${file}`);
   return 0;
 }

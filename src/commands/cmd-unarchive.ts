@@ -162,7 +162,7 @@ function cmdUnarchive(flags: Flags) {
   if (json) {
     out(JSON.stringify({
       ok: true, ids: moved.map((m) => m.id), changed: ['unarchived'],
-      entries: moved.map((m) => entryJson(m, ctx.backlog)),
+      entries: moved.map((m) => entryJson(m, ctx.backlog, ctx.cfg)),
       _problems: Array.from(new Set(moved.flatMap(elementProblems))).sort(),
     }, null, 2));
   } else {

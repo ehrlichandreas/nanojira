@@ -171,6 +171,10 @@ is readable without `nj` — in an editor or a forge's web view.
   `note`, `check`, `rm`, `archive`, `unarchive`, `claim`, `release` and
   `doctor --fix`, from a full scan, atomically (§ 12). **Never read** by
   `nj`: it is derived, never the truth.
+- **A batch write (`--id=A,B,C`, § 9) regenerates it at most once, after
+  every ID's write phase has finished** — never once per ID. If every ID in
+  the batch failed, nothing was written and `STATUS.md` is not touched at
+  all, the same "only after a successful write" rule as above.
 - **Format** (normative, byte-exact; a golden fixture pins it):
 
   ```
@@ -305,7 +309,37 @@ backlog = ../shared/backlog
   is reported ahead of every other `.njrc` fault. A file planted in a shared ancestor
   (`/tmp`) must not steer another user's `nj` (the precedent is git's
   `safe.directory`). `--backlog` and `NJ_BACKLOG` stop the search first and
-  so bypass the check (DECISIONS 93).
+  so bypass the check (DECISIONS 93). Ownership is checked on the open file
+  descriptor (`lstat` for the link owner, then `open(O_RDONLY|O_NONBLOCK)`,
+  `fstat`, read) rather than trusted from the pre-open `lstat` alone — the
+  window between them is exactly what could let a swapped target slip past
+  an `lstat`-only check.
+- **`NJ_FAULT=njrc-swap`** (verification hook, not a feature) fires in that
+  window — between the ownership `lstat` and the `open()` — and polls for
+  `<dir containing the reached .njrc>/.nj-fault-go` (timeout 10 s), the same
+  marker filename `before-compare` uses (§ 12), relative to the one path
+  this hook already knows at the point it fires: no backlog is resolved
+  yet, only the `.njrc` being checked is. **It is a pure pause, not a
+  fault injector: whether released by the marker or by the 10 s timeout,
+  `nj` always proceeds to `open()` next — there is no `fault:njrc-swap`
+  code.** Proceeding means `open()`ing whatever is at the path *at that
+  moment*, so a `.njrc` swapped in during the pause (even a same-user file
+  naming a different backlog) is what gets checked and read — the path is
+  re-resolved at `open()`, nothing is cached from the earlier `lstat`.
+  **If `.njrc` has been removed outright by the time `open()` runs, it is
+  treated as absent at that level**, the same as a directory with no
+  `.njrc` at all: the search (above) continues to the next ancestor,
+  resolving an outer `.njrc` or a `backlog/` folder, or ending in
+  `no_backlog` — never a crash, and never a fall-back to the content the
+  earlier `lstat` saw. For a symlinked `.njrc`, "removed outright" means the
+  *link itself* is gone — a dangling symlink (the link still there, its
+  target gone) is a different case and stays `invalid_njrc`, same as
+  today's dangling-symlink rule above. It exists so the swap race is deterministically
+  testable without timing luck. **A genuinely foreign-owned swap target is
+  still a known gap in practice** (DECISIONS 98): a non-root test process
+  cannot create one, but the hook itself does not care who owns the
+  swapped-in file — the ownership check runs on it exactly as it would on
+  any `.njrc` reached normally.
 - Known keys: `backlog`. A `.njrc` without `backlog` (e.g. only comments) does
   not set a location; the search continues upward.
 - An unknown key, a line without `=`, an empty value or a repeated key: exit
@@ -373,6 +407,16 @@ Rules:
   (§ 4, § 14).
 - An invalid configuration makes every command except `nj doctor` fail with
   exit 1 and a pointer to `nj doctor`; `doctor` reports the defect (exit 2).
+- `claims.staleAfterHours` (§ 12 "Claims"): an optional top-level
+  `"claims": {"staleAfterHours": <n>}` block, not written by `init`. A plain
+  integer, hours. Default when the key or the whole `claims` block is
+  absent: **24**. `0` disables `claim:stale` entirely, rather than meaning
+  "stale after zero hours" — the same "a `false`-shaped value turns the
+  feature off" reading `layout.statusFile: false` already gets. A
+  non-integer or negative value makes the configuration invalid
+  (`config:invalid`, § 7; commands other than `doctor` fail with
+  `invalid_config`, § 9). An unknown key inside `claims` is invalid the same
+  way, the same typo-safety `layout`/`layout.folders` already have.
 
 ---
 
@@ -551,6 +595,7 @@ condition that produces it:
 | `archive:split` | part of a subtree in archive, part outside | error | yes |
 | `claim:mismatch` | the element is `claimed N` but its `assignee` is not N — a crash between the append and the mirror write, a hand edit, or a claim's own rollback losing a race to a concurrent `archive`/`unarchive` (§ 12 "Claims") | warning | no |
 | `claim:orphaned` | a claim directory for an element that is archived or does not exist (backlog-level when it does not exist) — not merely `done`: a done-but-still-live element can still legitimately be claimed | warning | — |
+| `claim:stale` | the element is claimed and `now − _claim.since` exceeds `claims.staleAfterHours` (§ 5, § 12 "Claims") | warning | no |
 | `title:h1_mismatch` | H1 ≠ `title` | warning | no |
 | `incomplete:description` | description section absent/empty | — | yes |
 | `incomplete:acceptance` | acceptance section absent/empty (task/subtask) | — | yes |
@@ -653,6 +698,8 @@ nj check --id=TSK-009 --item=<n>         [--on | --off] [--force] (§ 10a)
 nj show  --id=TSK-009 [--json]
 nj list  [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
          [--ready] [--all] [--json]
+nj find  "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
+         [--all] [--case-sensitive] [--json] (§ 9a)
 nj tree  [--id=EPIC-001] [--all] [--json]
 nj rm    --id=TSK-009 [--cascade]
 nj archive --id=EPIC-001 (§ 11)
@@ -665,6 +712,10 @@ nj doctor [--fix] [--json]
 All commands accept `--json`; reads *and* writes (§ below). All commands
 accept `--backlog=<path>` as well, and it appears in every command's list of
 known flags; `--backlog` without a value is `missing_value`.
+
+`set`, `note`, `check`, `claim` and `release` additionally accept
+`--id=A,B,C` (two or more comma-separated IDs) in place of a single `--id`
+— see "Batch writes" below.
 
 ### The acting name
 
@@ -819,6 +870,136 @@ model `assignee` has (§ 6).
   weight descending (`urgent` 4, `high` 3, `normal` 2, `low` 1, missing 2),
   then `id` ascending. Never filesystem order.
 
+### Batch writes (`--id=A,B,C`)
+
+`set`, `note`, `check` (§ 10a), `claim` and `release` (§ 12 "Claims") accept
+`--id=A,B,C` — two or more comma-separated IDs — applying the same field map
+or action to every one. **Not** `rm`, `archive`, `unarchive`: those already
+have their own multi-element semantics built around one addressed root
+(`rm --cascade`, `archive`'s subtree, § 11a's archived-subtree gathering),
+where `--id=A,B,C` would mean "N independent subtree operations", no better
+than N invocations. A single `--id=A` (no comma) is unaffected and keeps
+today's unwrapped write-result shape exactly — the wrapper below applies
+only once there is more than one ID.
+
+**Preflight: every ID is resolved and validated before anything is
+written.** One pass over the backlog checks every ID in the batch. Preflight
+conditions fall into two kinds, reported differently (Output, below):
+
+- **Batch-wide argument errors** — conditions that are properties of the
+  *invocation*, not of any one ID: `unknown_field`, `missing_argument`,
+  `missing_value`, an invalid field value (`invalid_value`); a missing or
+  invalid acting name for `claim`/`release` (`missing_argument`,
+  `invalid_env`, `invalid_value`, § 9 "The acting name"); `--id=A,B,C`
+  together with `--file` (`invalid_target` — the same reading as
+  `--id`+`--file` for one element: `--file` addresses exactly one element
+  unambiguously, the opposite of what a batch solves); and **`--id=A,A`
+  — the same ID named twice, checked after trimming whitespace —
+  `invalid_value`**, since "resolved and validated" already implies every
+  named ID is distinct.
+- **Per-ID preflight failures** — conditions that are properties of one
+  named ID, evaluated the same way the command already evaluates them for a
+  single element, just once per ID up front: addressing (`not_found`,
+  `duplicate_id` without `--file`; for `check`, its `--text`/`--item`
+  resolving to exactly one countable checkbox, § 10a's
+  `not_found`/`ambiguous_target`) and each command's own
+  refusal-before-anything-is-written conditions (`refused:archived`,
+  `refused:unreadable`).
+
+**Any preflight failure, of either kind, aborts the whole batch: nothing is
+written for any ID**, and `STATUS.md` (§ 4) is not regenerated. The two
+kinds differ only in how the failure is *reported* (Output, below) — both
+abort identically.
+
+**Runtime failures do not stop the others.** Once preflight passes for
+every ID, **the IDs are written in the order `--id` named them** —
+execution order, not just the results order below — and each one writes
+independently through that command's own existing
+live-state mechanism (compare-before-write, § 12; `nj claim`'s
+read-decide-`link()` loop, § 12a) exactly as a single invocation would.
+Anything that mechanism can produce because the backlog moved between
+preflight and this ID's turn to write is specific to that one ID —
+`changed_in_parallel`, `refused:claimed`, a `fault:<hook>`, an `io_error` —
+and is reported for that ID without aborting or skipping the rest: a batch
+is not a transaction across its members, only within each one.
+**`NJ_FAULT` (§ 12, verification hook) fires once per batch**, at the first
+write, in execution order, that reaches its injection point — that ID fails
+with `fault:<hook>` and the hook is then spent, so every later ID writes
+normally. `--force`
+applies to the whole batch, overriding a parallel change on every ID it
+would otherwise have hit (§ 9, `--force`'s one meaning). Exit code: `1` if
+any ID failed, preflight or runtime; `0` only if every ID succeeded — the
+same binary the rest of this section uses, no third "partially succeeded"
+code.
+
+**Output — three forms, depending on where the batch stood when it stopped:**
+
+**1. A batch-wide argument error** (above) never reaches `results` at all —
+it is reported in § 9's ordinary generic single-write failure shape,
+`{ok: false, error: "<code>", hint: "…"}` (`hint` optional), exactly as a
+malformed single invocation is today. This is deliberate: these conditions
+are properties of the invocation, not of any named ID, so there is nothing
+to list per ID.
+
+**2. A per-ID preflight abort** uses the wrapper, but `results` names
+**only the ID(s) that failed preflight, in the order `--id` named them** —
+an ID that would have gone on to succeed is not listed at all, since
+nothing was attempted for it:
+
+```json
+{
+  "ok": false,
+  "results": [
+    { "id": "TSK-002", "ok": false, "error": "refused:archived" }
+  ]
+}
+```
+
+(Given `--id=TSK-001,TSK-002,TSK-003` with only `TSK-002` archived,
+`results` has exactly this one entry — not three.)
+
+**3. Once preflight passes for every ID**, `results` names **every** ID, in
+the order `--id` named them, succeeded or not:
+
+```json
+{
+  "ok": false,
+  "results": [
+    { "id": "TSK-001", "ok": true, "changed": ["status"],
+      "entry": { "…": "…" }, "_problems": [] },
+    { "id": "TSK-002", "ok": false, "error": "refused:claimed",
+      "hint": "use --steal=<holder>" }
+  ]
+}
+```
+
+(The example's failure is a *runtime* one — `refused:claimed` — which can
+only appear once every ID has cleared preflight; a batch that aborted at
+preflight never reaches this form.)
+
+In both wrapper forms (2 and 3):
+
+- **Top level:** exactly `{ok, results}`. `ok` is `true` iff every
+  `results[i].ok` is `true` — it mirrors the exit code; nothing else is
+  added at the top level (no batch-wide `_problems`, each result already
+  carries its own).
+- **Each entry whose write succeeded** is exactly that command's own
+  single-element write-result shape (§ 9's JSON-shapes table / § 12a's
+  `claim`/`release` row) plus the leading `id` key.
+- **Each entry whose write failed** (preflight or runtime — no new codes,
+  only a difference in *when* the failure was found and in which IDs
+  `results` lists, form 2 vs. form 3) is `{id, ok: false, error: "<code>",
+  hint: "…"}` — `hint` optional, exactly as in § 9's generic single-write
+  failure shape.
+- This is a genuinely new top-level shape, not an overload of the
+  single-write one: a single `nj set --id=TSK-001` continues to produce
+  exactly what it produces today, since that path never produces a
+  `results` array.
+
+`STATUS.md` (§ 4) is regenerated **at most once, after every ID's write
+phase has finished** — never once per ID — and only if at least one ID was
+actually written.
+
 ### `--ready`
 
 An element is ready when **all** hold:
@@ -886,13 +1067,14 @@ when claimed, `null` when not (§ 12 "Claims").
 
 | Command | JSON shape |
 |---|---|
-| `list`, `show` | `{backlog, counts, entries: [{…, _problems}]}` |
+| `list`, `show`, `find` | `{backlog, counts, entries: [{…, _problems}]}` — `find`'s shape is identical to `list`'s, no `_match` field (§ 9a) |
 | `new`, `set`, `note`, `check`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nj new`/`nj set`, `changed` also names the section roles written (`description`, `acceptance`); for `nj check`, `changed` is `["body"]` or `[]` (a no-op) |
 | `archive`, `unarchive`, `rm --cascade` | `{ok, ids: […], changed: ["archived" \| "unarchived" \| "deleted"], entries: […], _problems: […]}` — for `rm --cascade` the top-level `_problems` is `[]`: the elements are gone, so their problems are too. `archive` and `unarchive` emit the union, because the elements still exist and can still carry findings. **`rm --cascade` additionally carries `dependents: […]`**, the remaining elements whose `depends_on` names a removed one — archived elements included, since they carry `depends_on:dangling` too and the agent must know it; `archive` and `unarchive` do **not** — a `depends_on` pointing into the archive is satisfied by definition (§ 11), so there is nothing to warn about and nothing an agent must act on. |
 | `claim`, `release` | `{ok, id, changed: […], entry: {…, _problems, _claim}, _problems, claim: {by, since}\|null, stolen_from?, previous_assignee?}` (§ 12 "Claims") — the write-result shape plus `claim`, the element's claim state after the call; `stolen_from` names the previous holder after a `--steal`; `previous_assignee` when the claim overwrote a different `assignee`; `changed` names `assignee` and `status` when written, a `release` reports `changed: ["claim"]` |
 | `tree` | `{backlog, counts, entries: […]}` — **flat**, each entry carries `parent`; depth-first order conveys the tree |
 | `doctor` | `{backlog, ok, problems: [{code, severity, element?, file?, line?, message}]}` — `severity` ∈ `error`\|`warning` (the Doctor column value; `—` codes never appear as findings); element-level findings carry `element`, backlog-level ones do not |
 | bare `nj` | `{backlog, counts, ready: [entries ≤ 5], incomplete: [entries ≤ 5]}` |
+| `set`, `note`, `check`, `claim`, `release` with `--id=A,B,C` (two or more IDs) | `{ok, results: [{id, ok, …}]}` — the "Batch writes" wrapper (§ 9 above): `results` names every ID once preflight passes for all of them, or only the ID(s) that failed preflight if it did not; a batch-wide argument error (`unknown_field`, a repeated ID, …) instead uses this table's generic single-write failure shape, no `results` at all; a single `--id=A` is unaffected and keeps the unwrapped success shape on this table's earlier row |
 
 Every entry object always carries `_problems`; the codes come only from the
 closed table (§ 7). With `--json`, **every** exit path writes JSON to stdout:
@@ -982,6 +1164,9 @@ its code. These mappings are normative:
 | `check` on an unreadable stub | `refused:unreadable` | § 10a |
 | `check --text`/`--item` matches no countable checkbox, or `--item` is out of range | `not_found` | § 10a |
 | `check --text` matches two or more countable checkboxes | `ambiguous_target` | § 10a |
+| `find` with the literal empty string as `<text>` | `invalid_value` | § 9a |
+| `--id=A,B,C` together with `--file` | `invalid_target` | § 9 "Batch writes" |
+| `--id=A,A` — the same ID named twice in a batch, after trimming | `invalid_value` | § 9 "Batch writes" |
 
 Codes of the closed set that no passage above names —
 `id_allocation_failed`, `internal_error` — are
@@ -1006,6 +1191,66 @@ TSK-009 → doing
 | `0` | success — including reads that merely *report* data problems via `_problems` |
 | `1` | command failed — nothing or only partially written; hard errors (no backlog found, unknown field, refusal, retries exhausted) |
 | `2` | `nj doctor` only: at least one `error` finding |
+
+---
+
+## 9a. `nj find`
+
+```
+nj find "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
+                  [--all] [--case-sensitive] [--json]
+```
+
+A read, like `list`, over the same already-loaded element data, with one more
+predicate: a text match. No `--id`/`--file` — it searches, it does not
+address one element. Combines with every `list` filter already in § 9
+(`--status`, `--type`, `--tag`, `--parent`, `--assignee`) the same way they
+combine with each other on `list` — AND, not OR. `--all` includes the
+archive (§ 11), same meaning as everywhere else it appears.
+
+**Fields: title, body and notes.** The body already includes `## Notes` as
+one block (§ 7), so this is one read, not three. This is a *read* matching
+past decisions, not a *write* touching them — § 10a's `## Notes` exclusion
+is about writes, and does not apply here.
+
+**Match kind:** plain substring — not a regex, not a word-boundary match —
+consistent with `check --text` (§ 10a).
+
+**Case-insensitive by default**, `--case-sensitive` opts into exact-case
+matching. The comparison applies `String.prototype.toLowerCase()` —
+JavaScript's locale-independent **lowercase mapping**, not full Unicode case
+folding — to both the needle and the haystack before comparing, never
+`toLocaleLowerCase()`. This is `toLowerCase()`'s actual, narrower mapping,
+not a folding that would make every case-insensitive equivalent of a
+character match: `"ß"` does not match `"SS"` (`toLowerCase()` leaves `ß` as
+`ß`, it has no special-casing rule the way `toUpperCase()` does), and `"İ"`
+(U+0130) lowercases to `"i"` followed by a combining dot above (`"i̇"`, two
+code points), not to a plain `"i"` — so a plain ASCII `"i"` query does not
+match a title containing `"İ"`. `toLowerCase()` is locale-independent (the
+same bytes map the same way regardless of the host's configured locale),
+matching this project's existing determinism discipline (`NJ_NOW` pinning,
+§ 12; no hidden environment dependence); `toLocaleLowerCase()` would make a
+search's results depend on an environment variable `nj` does not otherwise
+read anywhere, for any other command. `<text>` given as the literal empty
+string is `invalid_value`, nothing searched — the same "an explicit flag or
+argument given empty is a caller's mistake" reading `--as=` (DECISIONS 119)
+and `check --text=` (DECISIONS 129) already get.
+
+**Output:** the same read shape as `list` (§ 9 JSON interface): `{backlog,
+counts, entries: [{…, _problems, _claim}]}`, filtered to matching entries, in
+`list`'s sort order (§ 9: priority descending, then `id` ascending) —
+relevance ranking is out of scope, the same way `list --ready`'s order is
+the backlog's order, not a ranked one. No `_match` field: the JSON shape is
+exactly `list`'s, nothing added. A search matching nothing returns `entries:
+[]`, exit 0 — a read never fails on "no results", the same as an empty `list
+--status=doing`. Human output adds one line of match context per hit — the
+first line of the body containing the match, truncated — the way `grep`
+shows the matching line, not the whole file; this is prose, not a JSON
+contract.
+
+Reuses the existing full-scan read path (§ 13): bodies are already parsed
+for completeness/title/section checks, so `nj find` adds one substring scan
+over text `nj` has already loaded, not a new read.
 
 ---
 
@@ -1081,6 +1326,12 @@ nj check --id=TSK-009 --item=<n>         [--on | --off] [--force] [--json]
 
 (`--file=<path>` instead of `--id`, and `--backlog`, as for every write.)
 
+**`--on`/`--off` are both optional, never both given.** With neither, the
+command **ticks** — `--on` is the default, since ticking is the command's
+name and its common case. `--on` together with `--off` is `invalid_value`,
+nothing written — the same contradictory-flags treatment `--text` with
+`--item` gets (below).
+
 **What counts as a checkbox.** After optional leading whitespace
 (indentation — nested list items count the same as top-level ones), a line
 is a checkbox when it starts with one of the list markers `-`, `*`, `+`, or
@@ -1105,7 +1356,13 @@ given is `missing_argument`, both given is `invalid_value`.
 
 - `--text=<substring>` — the **countable** checkbox (in scope, per above)
   whose line, with the list marker and the `[ ]`/`[x]`/`[X]` box stripped,
-  contains `<substring>` (a plain substring match, not a regex).
+  contains `<substring>` (a plain substring match, not a regex). **The
+  literally empty string is `invalid_value`, nothing written** — it matches
+  every checkbox, so with exactly one in scope it would silently tick the
+  wrong thing for the wrong reason (an unexpanded variable), the same
+  "an explicit flag given with nothing in it is a caller's mistake" reading
+  `--as=` already gets (§ 9). **No trimming:** a whitespace-only `--text` is
+  not empty and stays a plain substring, matched as given.
 - `--item=<n>` — the *n*-th countable checkbox, 1-based, in document order
   (top to bottom, depth-first through nested lists).
 
@@ -1321,6 +1578,12 @@ second meaning — the same reason the parent rule got its own flag
 (`--allow-open-children`). A parallel change during `archive` or
 `unarchive` aborts the run; the caller retries once the backlog is stable.
 
+**Batch writes (`--id=A,B,C`, § 9 "Batch writes") introduce no new
+mechanism.** Each ID in a batch goes through exactly the same
+compare-before-write (above) or `nj claim`'s read-decide-`link()` loop
+(§ 12a) a single invocation would; atomicity is still per-ID, never across
+the batch — a batch is N uses of the existing mechanism, reported together.
+
 **Fault injection (verification hook, not a feature).** `NJ_FAULT` accepts three
 distinct injection points, each exiting with code 1 and leaving the target
 file untouched:
@@ -1336,6 +1599,12 @@ file untouched:
 
 It exists so that criterion AC-9 is testable. The abandoned temp file is
 reported by `nj doctor` (`backlog:stray_tmp`) and removed by `doctor --fix`.
+A single command is unchanged by batch writes existing. **Within a batch
+(`--id=A,B,C`, § 9 "Batch writes"), `NJ_FAULT` fires once**: at the first
+write, in execution order, that reaches the injection point. That ID fails
+with `fault:<hook>` and its file is left untouched, exactly as a single
+command's would; the hook is then spent, and every later ID in the batch
+writes normally.
 
 **Clock pinning (verification hook, not a feature).** `NJ_NOW=<ISO-8601 UTC>`
 fixes the clock: if set, every timestamp the tool writes (`created`,
@@ -1405,6 +1674,22 @@ The frontmatter mirrors the claim for humans and for git: a successful claim
 writes `assignee: <name>` through the guarded write above. **The claim
 sequence is the truth for exclusivity; `assignee` is its mirror** (§ 6).
 Claims are local runtime state and are not committed (§ 4).
+
+**Stale claims (`claim:stale`, § 7) are advisory only.** `claim:stale`
+appears in the `_problems` of every entry `nj` returns — `list`, `show`,
+`tree`, bare `nj`, and the write results of `set`, `note` and the rest —
+exactly as `claim:mismatch`/`claim:orphaned` already do. It is reported
+when a claimed element's `now − _claim.since` exceeds
+`claims.staleAfterHours` (§ 5, default 24, `0` disables it) — `now` is
+`NJ_NOW` when set, real wall-clock time otherwise, the same clock-pinning
+discipline every other timestamp-sensitive behaviour in this section
+already has. This changes nothing about § 12's opening principle:
+`claim:stale` never auto-releases, never auto-steals, and `--ready`
+condition 5 (§ 9) is unaffected by staleness in either direction — a stale
+claim still hides the element from every other acting name's `--ready`,
+exactly as a fresh one does. It is the same kind of signal reported, acted
+on by a human or agent choosing to `--steal`, never acted on by `nj`
+itself.
 
 ### Limits, disclosed
 
@@ -1646,6 +1931,11 @@ when backlogs approach ~12 000–15 000 elements, or ~9 000 if `list --json` is
 routinely on the agent's hot path. Round one ships without it; the design is
 fixed now so it can land later without touching the data model.
 
+`nj find` (§ 9a) shares this same scan path: bodies are already parsed for
+completeness/title/section checks, so `find` adds one substring scan over
+text already loaded, not a new read. It does not change when the trigger
+above is crossed — the same O(n) scan every other command already does.
+
 - **Location:** `<backlog>/.nanojira/index.json`, listed in `nj init`'s
   `.gitignore` as uncommitted — a local cache, never a versioned artifact.
   This keeps it out of git merge conflicts, the failure mode that argues
@@ -1683,9 +1973,10 @@ duplicate IDs; files outside their layout place (`type:folder`,
 a missing or empty `ids/` while elements exist (`backlog:ids_missing`);
 element files without tombstones (`id:no_tombstone`); stray `.nj-tmp-*`
 files, including inside `.nanojira/claims/` (`backlog:stray_tmp`, § 12
-"Claims"); archive rules (§ 11); claim directories that are mismatched or
-orphaned (`claim:mismatch`, `claim:orphaned`, § 12a) and a `.gitignore`
-missing the claims line (`backlog:claims_unignored`); `STATUS.md` against a
+"Claims"); archive rules (§ 11); claim directories that are mismatched,
+orphaned or stale (`claim:mismatch`, `claim:orphaned`, `claim:stale`, § 12
+"Claims") and a `.gitignore` missing the claims line
+(`backlog:claims_unignored`); `STATUS.md` against a
 fresh rendering (`backlog:status_stale`, only with `statusFile: true`). The
 summary line splits the
 counts — `backlog/: 47 entries, 2 errors, 1 warning` — and the exit code is 2
@@ -1713,7 +2004,20 @@ unprotected:
    is byte-identical to the text a v2 `nj init` wrote; otherwise it is left
    alone and a note says so. If both the v2 and the v3 location of the
    configuration or of the tombstones exist, nothing is moved — ambiguous,
-   reported, never merged
+   reported, never merged.
+
+   **A backlog that is already v3** (not `backlog:legacy_layout`) can still
+   carry a stray top-level `.ids/` — the half of a crash between step 0's
+   two renames that left `.ids/` → `.nanojira/ids/` incomplete while
+   `.nanojira.json` → `.nanojira/config.json` finished (DECISIONS 108 G1,
+   harmless: it only doubles never-reuse, § 8). Step 0 also removes this
+   stray `.ids/`, but **only when every tombstone name in it is already
+   present in `.nanojira/ids/`** — never discard a tombstone that exists
+   nowhere else, since "never reuse" (§ 8) is the one invariant `--fix`
+   cannot compromise on. A `.ids/` holding a tombstone not mirrored in
+   `.nanojira/ids/` is left alone entirely. This is a `--fix` note only, no
+   new problem code: the leftover is harmless one-time migration residue,
+   not a current defect for `doctor` to name
 1. write the `id` from the file name, and the `type` from the ID prefix, when
    missing
 2. rename the file to match the `id` when frontmatter and file name disagree
@@ -1739,7 +2043,9 @@ unprotected:
     touches a live claim's entries: no pruning while the element could
     still be claimed. Never resolves a `claim:mismatch` (§ 7) — which of the
     claim and `assignee` is right is exactly the kind of question this
-    section forbids guessing
+    section forbids guessing. Never touches `claim:stale` (§ 7) either —
+    there is nothing to repair, only to report: no step here, or anywhere
+    in `--fix`, releases or steals a stale claim
 8. rebuild the index (round two)
 9. regenerate `STATUS.md` (with `statusFile: true`) — last, so it reflects
    every repair above; a merge conflict in it is thereby resolved
@@ -1953,26 +2259,85 @@ reported, not guessed at.
     `--on` an unticked box and `--off` a ticked one each flip exactly that
     line's bracket content and nothing else, byte-for-byte, with `updated`
     refreshed; `--on` already-on and `--off` already-off each exit 0 with
-    `changed: []` and change no byte. A checkbox inside `## Notes`, or
+    `changed: []` and change no byte. With **neither** `--on` nor `--off`,
+    the command ticks, exactly as `--on` would; `--on` **with** `--off` is
+    `invalid_value`, exit 1, changing nothing. A checkbox inside `## Notes`, or
     inside a fenced code block (` ``` ` or `~~~`, nested or indented), is
     never counted or matched — neither addresses it and neither index
     includes it. `--text` matching no countable checkbox, or `--item` out
     of range, is `not_found`; `--text` matching two or more is
-    `ambiguous_target`. `check` on an archived element is
+    `ambiguous_target`; a literally empty `--text=` is `invalid_value`,
+    changing nothing, even where exactly one checkbox exists — not trimmed,
+    so a whitespace-only `--text` is a plain substring, not empty. `check`
+    on an archived element is
     `refused:archived`, on an unreadable stub `refused:unreadable`, and
     `--id`+`--file` together is `invalid_target`, each exiting 1 and
     changing nothing. `NJ_FAULT=before-rename` leaves the file at its
     previous revision; a parallel edit aborts with `changed_in_parallel`
     unless `--force`.
 
+29. **Stale claims.** An element claimed more than `claims.staleAfterHours`
+    (default 24) ago reports `claim:stale` (warning, never blocks
+    `--ready`) on every read (`list`, `show`, `doctor`); one claimed less
+    than the threshold ago does not. "Ago" is measured against `NJ_NOW`
+    when set, real wall-clock time otherwise. `doctor --fix` leaves
+    `claim:stale` untouched — no auto-release, no auto-steal, the claim and
+    its `assignee` mirror are unchanged byte-for-byte, and the exit code
+    reflects only that one warning remaining (0, since a warning never
+    raises it). `claims.staleAfterHours: 0` turns the finding off entirely,
+    even for a claim far older than the un-configured default; a negative
+    or non-integer value, or an unknown key inside `claims`, is
+    `config:invalid`. A backlog with no `claims` config key behaves exactly
+    as the 24-hour default. `--ready` condition 5 (§ 9) is unaffected by
+    staleness in either direction; `_claim`'s shape is unchanged.
+
+30. **Find.** `nj find "<text>"` returns every element whose title or body
+    (including `## Notes`) contains `<text>` as a substring, case-insensitive
+    by default (`String.prototype.toLowerCase()`'s lowercase mapping on both
+    sides, not full Unicode case folding) and exact with
+    `--case-sensitive`; combines with `--status`/`--type`/`--tag`/
+    `--parent`/`--assignee` as an AND; archived elements are excluded
+    without `--all` and included with it, same as `list`. The JSON shape
+    matches `list`'s read shape exactly, no `_match` field. A search
+    matching nothing returns `entries: []`, exit 0 (a read never fails on
+    "no results" — same as an empty `list --status=doing`). `<text>` given
+    as the literal empty string is `invalid_value`.
+
+31. **Batch writes.** `--id=A,B,C` on `set`, `note`, `check`, `claim` or
+    `release` applies the same field map or action to all named IDs,
+    written in the order `--id` named them. A **batch-wide argument error**
+    (unknown field, missing/invalid value, a missing or invalid acting
+    name, `--id=A,B,C` with `--file` — `invalid_target` — or a repeated ID
+    after trimming — `invalid_value`) is reported in the ordinary
+    single-write failure shape, `{ok: false, error, hint?}`, no `results`
+    at all. A **per-ID preflight failure** (unknown ID, ambiguous `check`
+    target, an archived element, an unreadable stub) aborts the whole
+    batch — nothing is written for any ID, and `STATUS.md` is not
+    regenerated — and uses the wrapper shape with `results` naming **only**
+    the failing ID(s), in `--id`'s order; an ID that would have succeeded
+    is absent, not listed. Once preflight passes for every ID, each one
+    writes independently: a `--force`-less parallel edit on one ID during
+    the write phase fails only that ID with `changed_in_parallel`, a
+    competing claim is `refused:claimed` only for that ID, `NJ_FAULT`
+    fires once — at the first ID in execution order to reach its
+    injection point, which fails with `fault:<hook>` and keeps its
+    previous revision while the hook is spent for every later ID — and
+    every other ID still succeeds; `results` here names **every** ID, in
+    `--id`'s order; `STATUS.md` is regenerated once, after every ID's
+    write phase has finished, provided at least one ID was actually
+    written. Exit 0 only when every ID succeeded, 1 otherwise. Each
+    `results` entry is the single-write § 9/§ 12a shape for its command
+    plus `id` when it succeeded, or `{id, ok: false, error, hint?}` when it
+    failed. A single `--id=A` (no comma) is unaffected and keeps today's
+    unwrapped shape.
+
 ---
 
 ## 16. Not in Round One
 
 Terminal board (`nj board`), Obsidian Dataview snippet, import/export of
-foreign backlogs, full-text search over the body, attachments, the search
-index's implementation (§ 13), batch writes (`--id=A,B,C`), an MCP wrapper,
-Windows.
+foreign backlogs, attachments, the search index's implementation (§ 13),
+an MCP wrapper, Windows.
 
 A language migration (Go as the candidate; Rust considered and set aside) is
 deliberately deferred: round one ships on Node to gather real experience. The

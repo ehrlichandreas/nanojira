@@ -78,6 +78,19 @@ function readClaim(backlog: string, id: string): { by: string; since: string } |
 }
 
 /**
+ * `claim:stale` (§ 7, § 12 "Claims"): advisory only, reported by `list`,
+ * `show` and `doctor` alike, never acted on. `staleAfterHours <= 0` (the
+ * disabled default-off value, § 5) always answers false; otherwise strictly
+ * exceeding the threshold is required ("exceeds", not ">=" — exactly at the
+ * threshold is not yet stale).
+ */
+function isClaimStale(since: string, staleAfterHours: number, nowMs: number): boolean {
+  if (staleAfterHours <= 0) return false;
+  const ageHours = (nowMs - Date.parse(since)) / 3_600_000;
+  return ageHours > staleAfterHours;
+}
+
+/**
  * One compare-and-swap attempt: write the entry whole into a temp file,
  * `fsync`, then `link()` it to generation `baseGen + 1`. `EEXIST` means a
  * racing transition already landed there; `ENOENT` means the temp file was
@@ -174,5 +187,5 @@ function removeClaimDirWholesale(backlog: string, id: string): void {
   try { fs.rmdirSync(dir); } catch { /* not empty: left for doctor */ }
 }
 
-export { claimsRootDir, claimsDir, allClaimDirs, highestEntry, readClaim, transition, rollback, removeClaimDirWholesale };
+export { claimsRootDir, claimsDir, allClaimDirs, highestEntry, readClaim, isClaimStale, transition, rollback, removeClaimDirWholesale };
 export type { Entry };

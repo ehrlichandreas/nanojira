@@ -78,6 +78,11 @@ if (OUT) {
       // backlog without putting an absolute machine path in the record; the
       // driver turns it into a per-run ordinal, which is comparable.
       cwdHash: R.sha256(cwd).slice(0, 12),
+      // Which scratch-backlog scenario this cwd was made under (e.g.
+      // 'ac27-c5-claim'), or null — recovered from the mkdtemp dir name, so
+      // the driver can taint nondeterministic records by SCENARIO, not just
+      // by whole suite file (baseline.js CONCURRENT_BACKLOG_PREFIXES).
+      backlogLabel: R.backlogLabel(cwd),
       env: {
         NJ_NOW: env.NJ_NOW === undefined ? null : env.NJ_NOW,
         NJ_FAULT: env.NJ_FAULT === undefined ? null : env.NJ_FAULT,

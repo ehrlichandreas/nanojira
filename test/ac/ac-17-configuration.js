@@ -94,17 +94,28 @@ const INVALID = [
 
 /* Every command that uses a backlog. `nj init` is not among them: it *creates*
  * the configuration and refuses when backlog/ already exists, so § 5's rule
- * ("every command except nj doctor") does not reach it. */
+ * ("every command except nj doctor") does not reach it. `config:invalid` is
+ * checked before any command-specific precondition (an acting name, an
+ * archived target, …), so each command below just needs an argument list
+ * that *would* be sensible on a healthy backlog — none of those
+ * preconditions is ever reached. `claim`/`release`/`check` get the flags
+ * that would otherwise be their own first refusal (`--as`, a `--text` that
+ * matches the `## Acceptance Criteria` checkbox `taskFixture` writes). */
 const COMMANDS = [
   ['bare nj', []],
   ['list', ['list']],
+  ['find', ['find', 'Backend']],
   ['show', ['show', '--id=TSK-001']],
   ['tree', ['tree']],
   ['new', ['new', '--type=task', '--parent=EPIC-001', '--title=X']],
   ['set', ['set', '--id=TSK-001', '--status=doing']],
   ['note', ['note', '--id=TSK-001', 'text']],
+  ['check', ['check', '--id=TSK-001', '--text=It works', '--on']],
   ['rm', ['rm', '--id=TSK-001']],
   ['archive', ['archive', '--id=EPIC-001']],
+  ['unarchive', ['unarchive', '--id=EPIC-001']],
+  ['claim', ['claim', '--id=TSK-001', '--as=agent']],
+  ['release', ['release', '--id=TSK-001', '--as=agent']],
 ];
 
 function taskFixture(id, title, status, parent) {

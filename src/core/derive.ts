@@ -4,8 +4,9 @@
 
 import type { Element, Config, EntryJson } from './types.ts';
 
-import { readClaim } from './claims.ts';
+import { readClaim, isClaimStale } from './claims.ts';
 import { PRIORITY_WEIGHT, SEVERITY, BLOCKS_READY, BACKLOG_LEVEL } from './constants.ts';
+import { nowMs } from './store.ts';
 
 // -------------------------------------------------------------- derivations
 
@@ -64,7 +65,7 @@ function compareElements(a: Element, b: Element) {
  * grows; the `EntryJson` cast on return says what every caller can rely on
  * once the function has run to completion.
  */
-function entryJson(el: Element, backlog: string): EntryJson {
+function entryJson(el: Element, backlog: string, cfg: Config): EntryJson {
   const e: Partial<EntryJson> = { id: el.id, type: el.type };
   if (el.parent !== null) e.parent = el.parent;
   e.title = el.title;
@@ -77,8 +78,15 @@ function entryJson(el: Element, backlog: string): EntryJson {
   e.updated = el.updated;
   if (el.archivedAt !== null) e.archived = el.archivedAt;
   e.file = el.file;
-  e._problems = elementProblems(el);
-  e._claim = readClaim(backlog, el.id);
+  // claim:stale (§ 7, § 12 "Claims") is computed fresh here, never stored in
+  // el.problems — like claim:mismatch/claim:orphaned, it depends on the
+  // claims directory and the clock, not on the element file alone. Field
+  // order (_problems before _claim) matches the pre-existing EntryJson shape.
+  const claim = readClaim(backlog, el.id);
+  const probs = elementProblems(el);
+  if (claim && isClaimStale(claim.since, cfg.claims.staleAfterHours, nowMs())) probs.push('claim:stale');
+  e._problems = probs.sort();
+  e._claim = claim;
   return e as EntryJson;
 }
 

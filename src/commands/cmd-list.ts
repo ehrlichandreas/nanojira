@@ -21,6 +21,8 @@ function availableToActor(backlog: string, id: string, name: string | null): boo
   return claim === null || claim.by === name;
 }
 
+// Shared with `nj find` (§ 9a), which combines the same filters as an AND
+// with its own text-match predicate.
 function applyFilters(elements: Element[], flags: Flags, cfg: Config) {
   const all = flags.has('all');
   let list = elements.filter((e) => all || !e.archived);
@@ -62,7 +64,7 @@ function cmdList(flags: Flags) {
     const ready = filtered.filter((e) => isReady(e, ctx.cfg) && availableToActor(ctx.backlog, e.id, actor));
     const blocked = filtered.filter((e) => !isReady(e, ctx.cfg) && e.status === ctx.cfg.statuses[0] && isIncomplete(e));
     if (flags.has('json')) {
-      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map((e) => entryJson(e, ctx.backlog)) }, null, 2));
+      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map((e) => entryJson(e, ctx.backlog, ctx.cfg)) }, null, 2));
       return 0;
     }
     out('Ready to work:');
@@ -79,7 +81,7 @@ function cmdList(flags: Flags) {
   }
 
   if (flags.has('json')) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: filtered.map((e) => entryJson(e, ctx.backlog)) }, null, 2));
+    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: filtered.map((e) => entryJson(e, ctx.backlog, ctx.cfg)) }, null, 2));
     return 0;
   }
   if (filtered.length === 0) { out('(no matching elements)'); return 0; }
@@ -87,4 +89,4 @@ function cmdList(flags: Flags) {
   return 0;
 }
 
-export { cmdList };
+export { cmdList, applyFilters };

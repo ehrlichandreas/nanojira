@@ -79,6 +79,14 @@ function resolveTarget(ctx: Context, flags: Flags, forWrite?: boolean): Element 
     return el;
   }
   if (id === undefined) return fail('missing_argument', '--id is required');
+  return resolveById(ctx, id, forWrite);
+}
+
+// The --id-by-name half of resolveTarget, factored out so a batch write
+// (§ 9 "Batch writes") can resolve each of --id=A,B,C's names the same way,
+// without re-deriving --id/--file from flags (a batch has already decided
+// --file does not apply, § 9).
+function resolveById(ctx: Context, id: string, forWrite?: boolean): Element {
   const matches = ctx.elements.filter((e) => e.id === id);
   if (matches.length === 0) return fail('not_found', `no element with id '${id}'`);
   if (matches.length > 1) {
@@ -140,4 +148,4 @@ function requireActive(el: Element, verb: string) {
   }
 }
 
-export { context, requireTargetFlagSyntax, resolveTarget, requireWritable, requireNoStubs, requireNoUnreadableDirs, requireActive };
+export { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireNoStubs, requireNoUnreadableDirs, requireActive };

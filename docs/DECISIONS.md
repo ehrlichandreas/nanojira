@@ -1638,6 +1638,280 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      scenario label) so that only the three C5 backlogs leave the replay.
      The Verifier audits 92db73d together with the c6 recording.
 
+128. **`nj check` without `--on`/`--off` ticks; both given is
+     `invalid_value`.** § 10a (2130cbe) shows `[--on | --off]` as optional
+     but does not say what neither flag means. Ticking is the command's
+     name and its common case, so the default is `--on`. Both flags together
+     are contradictory and are `invalid_value`, the same treatment as
+     `--text` with `--item`. The Oracle adds one sentence to § 10a and the
+     matching AC-28 cases. Unrelated sweep, also for the Oracle: the
+     "every command" COMMANDS arrays in ac-17 and ac-24 lack `unarchive`,
+     `claim`, `release` (since v3.1) and now `check`. They are completed so
+     that the cross-cutting checks (`--backlog`, legacy migration) cover
+     every command.
+
+129. **V3.2-A verified (26d1703: accept); one delta: an empty `--text=` is
+     `invalid_value`.** The Verifier recorded that an empty `--text=`
+     matches every checkbox and so silently ticks the only one when there
+     is exactly one. An empty variable expanded by an agent would tick
+     something unintended. As with `--as=` (D119), an explicit flag with an
+     empty value is a caller's mistake and fails loudly: `--text=` with the
+     literally empty string → `invalid_value`, nothing written. **No
+     trimming:** a whitespace-only `--text` stays a plain substring. The Oracle adds the sentence to § 10a and the AC-28
+     case; the Implementer changes cmd-check.ts; the Verifier checks the
+     delta. Then A is accepted.
+
+130. **V3.2-A accepted.** `nj check` (§ 10a incl. D128/D129; AC-28,
+     128 checks) passes independent verification
+     (docs/verification/v3-2-a-check.md: 26d1703 accept; D129 delta
+     7c328d1 accept). Replay against c6-baseline: 6 calls, all the
+     inserted `nj check` help line (class *help*). TSK-034 done; B (stale
+     claims, TSK-035) starts. *Baseline cadence for v3.2:* no
+     re-recording after each feature. The gate's tally (D121) keeps the
+     accumulating classes legible; each acceptance names its classes here;
+     `c7-baseline` is recorded once, after v3.2 E is accepted.
+
+131. **V3.2-B accepted** (docs/verification/v3-2-b-stale-claims.md,
+     b9e83f2: accept). Stale claims: `claims.staleAfterHours`,
+     `claim:stale`; AC-29 43/43. The replay against c6-baseline is still
+     exactly the 6 help calls from A, confirmed unclipped over the whole
+     corpus, so the `_claim`/`_problems` key-order fix (d54322b) is
+     complete. *One text ruling:* `claim:stale` appears in the
+     `_problems` of every entry `nj` returns (`list`, `show`, `tree`,
+     bare `nj`, and the write results of `set`, `note`, …), exactly as
+     `claim:mismatch`/`claim:orphaned` already do. The code stays; § 12's
+     "doctor, list and show" is broadened, and AC-29 gains a case on a
+     write result and on `tree`. That is a spec/test-only delta, so no
+     re-verification of code is needed. TSK-035 done; C (`nj find`,
+     TSK-036) starts.
+
+132. **`nj find` spec (1e4f062) reviewed: two notes.** (a) The Oracle
+     added `--case-sensitive`, which D123 did not name. It is accepted: it
+     is small, it opts out of the default rather than changing it, and
+     agents searching for identifiers need it. (b) § 9a calls
+     `toLowerCase()` "Unicode simple case folding", which it is not: it is
+     the locale-independent lowercase mapping (`ß` stays `ß`, `İ` becomes
+     `i̇`, no full folding). The text is corrected to say exactly that,
+     with no behaviour change, and AC-30's Unicode cases must assert what
+     `toLowerCase()` actually does. The § 9a placement (its own section,
+     like § 10a) is fine. The Implementer starts in parallel, because the
+     correction changes no behaviour.
+
+133. **V3.2-C accepted; D paused until the backlog deletion is
+     explained.** `nj find` (§ 9a incl. D132; AC-30 34/34) passes
+     independent verification (docs/verification/v3-2-c-find.md, c615a6d:
+     accept). Replay: the same 6 help calls (check and find lines), and
+     `list` is provably unchanged (only applyFilters' export). `find` costs
+     the same as `list` at 10k elements. TSK-036 done.
+     *Incident:* the Verifier found the repo's own backlog/ (106 files,
+     incl. .nanojira) deleted from disk, uncommitted. The lead restored it
+     from git (`git checkout -- backlog`; doctor clean, 51 entries,
+     nothing lost: the last backlog commit was 6e6d1fc and nothing wrote
+     to the backlog after it). The cause is unknown. Until it is found,
+     nobody runs `nj` or tests with cwd inside the repo, and D (batch
+     writes) does not start. The Verifier does read-only forensics
+     (docs/review/backlog-deletion.md).
+
+134. **Backlog deletion explained; D resumes.** The Implementer reported
+     the cause: while building a 10k-element timing fixture for V3.2-C, a
+     bare `nj init` (no `--backlog=`) ran with cwd = repo root. `nj`
+     correctly refused ("…/backlog already exists"). The message was
+     misread as a stray directory, and the next command was
+     `rm -rf ./backlog` in the repo root. This was an operator error, not a
+     product defect; `nj init` behaved as specified. Restored from git
+     (D133); nothing lost. *Standing rules for every teammate, effective
+     now:* (1) never `rm -rf` (or `rm -r`, `git clean`, a bulk `mv`) any
+     path inside the repo; only paths under your own /tmp/<role>-*
+     directory. (2) Fixtures and probes always take an explicit
+     `--backlog=<path under /tmp>` or run with cwd under /tmp, never cwd =
+     repo. (3) An unexpected "already exists" or any refusal about a path
+     you did not mean to target is a stop signal: report it, don't act
+     around it. (4) Before deleting anything, look at what it is (`ls`,
+     `git status`). The forensic task is withdrawn as unneeded. D
+     (batch writes, TSK-037) starts.
+
+135. **`NJ_FAULT` in a batch fires once.** `NJ_FAULT` is process-wide, not
+     addressed to an ID. In a batch (`--id=A,B,C`) the hook fires at the
+     first write that reaches its injection point, in execution order;
+     that ID's result is a failure with `fault:<hook>`, its file stays at
+     its previous revision, and the hook is then spent, so later IDs
+     complete normally. This keeps AC-31's "one runtime failure does not
+     stop the others" deterministic and testable. A single-ID command is
+     unchanged: one write, one firing, exit 1 (§ 12).
+     `before-compare`'s marker wait applies to that one firing only.
+
+136. **Batch writes (01622e7): execution order and preflight output.**
+     (a) IDs are written in the order `--id` names them; `results` has the
+     same order (D135 relies on it). (b) *Batch-wide argument errors* are
+     not about one ID, so they use § 9's generic single-failure shape
+     `{ok: false, error, hint?}`, unwrapped: `unknown_field`,
+     `missing_argument`, `missing_value`, an invalid flag value, an invalid
+     acting name, `--id=A,B` with `--file` (`invalid_target`), and a
+     repeated ID (`invalid_value`). (c) *Per-ID preflight failures*
+     (`not_found`, `duplicate_id`, `refused:archived`,
+     `refused:unreadable`, `check`'s `not_found`/`ambiguous_target`) use the
+     wrapper. On such an abort `results` lists **only the IDs that failed
+     preflight**, in named order, each with its code. The IDs that passed
+     are absent, and `ok: false` plus the absence say that nothing was
+     written. No new code (e.g. "not_attempted") is introduced. The Oracle
+     adds (a)–(c) to the batch section together with D135 and the
+     matching AC-31 cases.
+
+137. **V3.2-D verified: needs changes (80b0971).** The single-ID paths are
+     provably unchanged; AC-31's 67 vs 68 is a setup guard that fires only
+     on failure. Two bugs: (1) `NJ_FAULT=before-compare` in a batch still
+     hard-exits the process, because compareGuard's before-compare branch
+     always calls hardExit, so D135 is violated for that hook (the other
+     two hooks are correct); (2) `release`'s batch JSON leaks the internal
+     `anyWritten` field. Both escaped AC-31, which tests D135 only with
+     `before-rename` and does not pin `release`'s batch keys. *Fix:* the
+     Implementer routes before-compare through the same
+     catchable/non-catchable split as atomicWrite/mirrorWrite, and builds
+     `release`'s wrapper like the other four. The Oracle adds AC-31 cases
+     for before-compare in a batch (with the marker) and for every batch
+     command's top-level keys being exactly `{ok, results}`. The Verifier
+     then checks the delta and also completes the byte-exact gate replay,
+     which stalled in the first run.
+
+138. **V3.2-D accepted.** Batch writes (§ 9 incl. D135/D136; AC-31, 95
+     checks) pass independent verification after the D137 fixes
+     (docs/verification/v3-2-d-batch.md: 80b0971 needs changes; a249051
+     accept). Replay against c6-baseline, confirmed unclipped: the 6 help
+     calls, differing only in the accepted check/find lines and the new
+     batch paragraph. *Recorded fix on a single-ID path:* single `nj claim`
+     under `NJ_FAULT=before-compare` (timeout) now goes through § 12a's
+     rollback (plain claim → `released N`; re-assertion keeps `claimed N`)
+     instead of hard-exiting. § 12a requires the rollback for "a fault
+     hook" without exception; the old hard exit was a latent violation that
+     no test asserted (AC-27 drove the rollback only with before-rename).
+     AC-27 gains that case in E. TSK-037 done; E (TSK-038) starts: the
+     `.njrc` swap-race hook, stray `.ids/` cleanup, replay exclusion per
+     scratch backlog (D127), the AC-27 before-compare rollback case, and
+     the quiet-machine perf measurement (lead).
+
+139. **`njrc-swap` fires before `open()`, as § 4 says; the lead's
+     message was wrong.** The swap race of TSK-029 was: check the path
+     (lstat), then open the path, so a swap in between opens a file that was
+     never checked. The fix opens first and checks ownership on the fd. The
+     hook therefore sits between the path-level lstat and `open()`, which is
+     exactly where the old race was. A swap during the pause makes `open()`
+     open the new file, and the fd-based check must then judge that new
+     file. Root leg (unchanged, root-only): a swap to a foreign-owned link
+     → refused, naming the post-swap uid. *Non-root leg:* a swap to a file
+     of the same user that names a different backlog → `nj` uses the
+     swapped-in content, and check and read come from the same opened file,
+     with no mix of old check and new content. Also covered: a swap to
+     nothing (`.njrc` removed during the pause) gives a clean error, not a
+     crash or a fallback to the old content; and no marker gives a timeout
+     per § 12. The Oracle writes the non-root leg against this ordering;
+     § 4's wording stays.
+
+140. **njrc-swap, final (crossed messages resolved).** The Oracle acted on
+     the lead's earlier, wrong message before D139 arrived and moved the hook
+     after `open()` (5633007). D139 stands: the hook sits **between the
+     path-level lstat and `open()`**, as 625e083 had it, because only there
+     does a swap test the fd-based ownership check. After `open()` a swap is
+     inert by POSIX and proves nothing. Kept from 5633007: the hook is a
+     **pure pause**. After the marker *or* the 10 s timeout, `nj` proceeds;
+     it never aborts, so there is **no `fault:njrc-swap` code** (625e083
+     listed one, which contradicted its own "proceeds"). *Expected
+     outcomes:* a same-user swap to a file naming another backlog → `nj`
+     uses the **swapped-in** backlog (check and read from the one opened
+     fd); a foreign-owned swap target → refused, naming the post-swap uid
+     (root-only, D98); `.njrc` removed during the pause → treated as
+     absent at that level, so § 4's search continues upward exactly as if
+     it had never been there (no stale-lstat trust, no crash); no marker →
+     proceeds after 10 s. The Oracle restores § 4 to the pre-open placement
+     (keeping the code removal) and flips the non-root suite's assertions
+     to the swapped-in backlog. The Implementer implements this.
+
+141. **Harness a21f195 sound; it surfaced 39 hidden claim/release diffs;
+     D138's replay claim was incomplete.** The audit
+     (docs/verification/harness-a21f195.md, 148296b) confirms exactly the
+     112 C5 calls are excluded and the gate is deterministic. gate.js pairs
+     harness code with its own corpus, so the old tag is no mix risk. With
+     AC-27's ordinary calls back in the byte replay, 39 `claim`/`release`
+     calls differ from c6: the JSON key order of their single-ID output
+     changed in the batch refactor (05e8bfa/aa4a4df). The old whole-suite
+     exclusion hid it. **D138's "replay: the 6 help calls" was therefore
+     incomplete**, and this entry corrects it. *Ruling:* the key-order
+     change was unintended. As in V3.2-B (d54322b), the original order is
+     restored, so single-ID `claim`/`release` output is byte-identical to
+     c6. The Implementer does this as its own commit after the E work, and
+     the gate tally must then show only the help class (plus whatever E
+     itself names). Also: backlogLabel() should consider only the
+     command's own cwd basename, not ancestors (a nested nj-gate-* root
+     yields a spurious 'gate'); this is harmless today, so it is fixed with
+     the same pass. `c7-baseline` is recorded after E's acceptance, as
+     planned (D130).
+
+142. **V3.2-E + D141 verified (0785c14: accept); one narrow E.1 gap is
+     fixed before acceptance.** D141 is done: the single-ID claim/release
+     key order is restored, backlogLabel is basename-only, and the gate
+     against oracle-frozen-11 shows exactly the 6 help calls, byte-confirmed.
+     *Gap:* a **symlinked** `.njrc` whose link is itself unlinked during the
+     njrc-swap pause is reported as `invalid_njrc` ("dangling symlink"),
+     because the ENOENT cause is judged from the original lstat alone.
+     D140's rule ("removed outright → absent, search continues") applies
+     to the link as much as to a regular file. *Fix:* at ENOENT, lstat the
+     path again. If nothing is there, the entry was removed: absent,
+     continue upward. If a symlink is still there, its target is missing:
+     a genuine dangling link, `invalid_njrc` as before. The Oracle adds S4
+     (symlinked `.njrc` unlinked in the pause → search continues) and S5
+     (symlink present, target removed in the pause → `invalid_njrc`); the
+     Implementer applies the fix; the Verifier checks the delta. Then E is
+     accepted and `c7-baseline` is recorded.
+
+143. **V3.2-E accepted; v3.2 functionally complete.** The njrc-swap hook
+     (§ 4, D139/D140/D142), the stray `.ids/` cleanup (§ 14 step 0), the
+     replay exclusion per scratch backlog (a21f195/f30c2a3, D127/D141) and
+     the AC-27 before-compare rollback case pass verification
+     (docs/verification/v3-2-e-gaps.md: 0785c14 accept; D142 delta 3cfab34
+     accept). The gate at c8eeac3 against oracle-frozen-11 shows exactly the
+     6 help calls (check, find and batch lines), byte-confirmed; there are
+     no other replay diffs since D141. TSK-038 and EPIC-008 are done.
+     *v3.2 summary:* `nj check` (D130), stale claims (D131), `nj find`
+     (D133), batch writes (D138), gaps (this entry). *Still open:* TSK-033,
+     the absolute § 13 perf measurement on a quiet machine (the machine has
+     been under foreign load: another process at 500 % CPU). *Next:*
+     the Implementer records `c7-baseline` / `oracle-frozen-12` at the
+     accepted state; then v3.3 (MCP wrapper, D122) starts with a proposal.
+
+144. **v3.3 proposal (0fba429): open questions ruled.**
+     - *A-1:* one backlog per server process, resolved once at startup by
+       the existing rules (`--backlog`, `NJ_BACKLOG`, `.njrc`).
+     - *B-1, deviating from the recommendation:* **hand-roll** the small
+       stdio JSON-RPC/MCP subset (initialize, tools/list, tools/call, the
+       required notifications), pinned to one stated protocol version. nj's
+       defining property is a single bundled file with no runtime
+       dependencies; the SDK would add a dependency tree for a few hundred
+       lines of protocol. Compatibility risk is answered by tests: the
+       oracle drives `dist/nj-mcp` with the official MCP SDK **client**,
+       added as a devDependency for tests only and never shipped. *B-2*
+       then reduces to the wrapper's own size and cold start; measure and
+       report.
+     - *C-1:* tools are list, show, find, tree, new, set, note, check,
+       claim, release, archive, unarchive, doctor. `rm` (incl. `--cascade`)
+       is **omitted** in v3.3. `archive`/`unarchive` are offered: they are
+       reversible. `doctor --fix` exists only when the server was started
+       with the safety flag (E-1).
+     - *C-2:* MCP input schemas are generated from a flag table shared with
+       the CLI parser. Moving the CLI onto that table must keep CLI
+       behaviour byte-identical, and the replay gate against c7 proves it.
+     - *C-3:* a failure is a tool result with `isError: true` and the
+       unmodified `{ok, error, hint?}` body; the code is never lost.
+     - *C-4:* the acting name is a per-call `as` parameter, defaulting to
+       the server's `NJ_AUTHOR`, with the same validation as `--as` (D119).
+     - *D-1:* process-per-call: the server spawns `dist/nj --json` for each
+       tool call, so there is no duplicated logic and § 12 holds by
+       construction. *D-2:* measure; the budget is the per-call overhead
+       over a direct CLI call (p50) ≤ 50 ms.
+     - *E-1:* a single `--allow-destructive` start flag, which today gates
+       only `doctor --fix`.
+     - *Section:* "§ 17. MCP Interface".
+     The Oracle folds these into the proposal; then the Verifier reviews
+     it before promotion (D122).
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

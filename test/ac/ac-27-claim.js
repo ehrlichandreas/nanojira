@@ -392,6 +392,41 @@ for (const bad of ['', ' ', '\t', 'a\nb', 'a:b']) {
   T.check('C4 landed steal: doctor reports claim:mismatch', (H.doctorSet(d) || []).includes('claim:mismatch:warning'), J(d.json && d.json.problems));
 }
 
+/* C4 continued (D138, 47dc2d9, § 12a): the SAME rollback, but triggered by
+ * NJ_FAULT=before-compare's TIMEOUT path (no marker ever created) rather
+ * than before-rename's immediate abort — the mirror write's guard is the
+ * same compare-before-write (§ 12) either way, so the rollback outcome is
+ * identical: a plain claim ends released, a re-assertion keeps claimed N. */
+function claimTimeout(x, id, authorEnv) {
+  const env = Object.assign({ HOME, NJ_NOW: LATER, NJ_FAULT: 'before-compare' }, authorEnv || {});
+  return H.runJson(['claim', '--id=' + id], { cwd: x.dir, env, unsetEnv: ['NJ_BACKLOG'], timeout: 15000 });
+}
+{
+  const x = model('ac27-c4-compare-plain');
+  const r = claimTimeout(x, 'TSK-001', { NJ_AUTHOR: 'alice' });
+  T.exit('C4 (before-compare timeout) plain claim, mirror write never confirmed: exit 1', r, 1);
+  T.eq('C4 (before-compare timeout): fault:before-compare', r.json && r.json.error, 'fault:before-compare');
+  T.eq('C4 (before-compare timeout) plain claim rollback: two entries (claimed, then released)',
+    genNums(x, 'TSK-001'), [1, 2]);
+  T.eq('C4 (before-compare timeout) plain claim rollback: entry 2 is released', (highest(x, 'TSK-001') || {}).kind, 'released');
+  T.eq('C4 (before-compare timeout) plain claim rollback: element ends unclaimed', assigneeOf(x, 'TSK-001'), undefined);
+  const after = claim(x, 'TSK-001', { NJ_AUTHOR: 'bob' });
+  T.exit('C4 (before-compare timeout) … and a later claim by someone else succeeds', after, 0);
+}
+{
+  const x = model('ac27-c4-compare-reassert');
+  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'initial claim');
+  const r = claimTimeout(x, 'TSK-001', { NJ_AUTHOR: 'alice' });
+  T.exit('C4 (before-compare timeout) re-assertion, mirror write never confirmed: exit 1', r, 1);
+  T.eq('C4 (before-compare timeout) re-assertion: fault:before-compare', r.json && r.json.error, 'fault:before-compare');
+  T.eq('C4 (before-compare timeout) re-assertion rollback: three entries', genNums(x, 'TSK-001'), [1, 2, 3]);
+  T.check('C4 (before-compare timeout) re-assertion rollback: every entry restores claimed alice (not released)',
+    [1, 2, 3].every(g => /^claimed\nalice\n/.test(readGen(x, 'TSK-001', g) || '')),
+    J([1, 2, 3].map(g => readGen(x, 'TSK-001', g))));
+  T.eq('C4 (before-compare timeout) re-assertion rollback: the claim is kept (assignee still alice)',
+    assigneeOf(x, 'TSK-001'), 'alice');
+}
+
 /* ===================================================================== */
 /* C6 — _claim visibility; --ready condition 5 (§ 9)                      */
 /* ===================================================================== */

@@ -388,3 +388,103 @@ description of the cache window in every particular: the mechanism
 backlog bound. § 9's `nj new` synopsis now reads `[--status=…] [--priority=
 …] …`, matching `help.ts` and `NEW_FIELDS`.
 
+---
+
+## c6-baseline audit (`92db73d`, `978c7a8`, D127)
+
+Verifier, 2026-10-04. Worktrees `/tmp/verifier-d127-claim` (plain) and
+`/tmp/verifier-d127-nested/projects/nanojira` (nested under its own
+`runtime/darwin-arm64` symlink, for `gate.js`'s own AC-15 check), both
+detached at `978c7a8`; both removed before writing this. **VERDICT:
+sound.** The instrument change is minimal and correctly scoped, the
+nondeterminism it tags is real and exactly as large as claimed, and the
+baseline recording is self-consistent.
+
+### (1) `92db73d` touches only `CONCURRENT_SUITES`, and the exclusion is exactly `ac-27-claim.js`, 436 calls
+
+`git show 92db73d --stat`: one file, `tools/refactor-harness/baseline.js`,
+5 insertions, 0 deletions — the one line adding `'oracle:ac/ac-27-claim.js'`
+to the `CONCURRENT_SUITES` set plus a comment. `isConcurrentProbe()` does
+`CONCURRENT_SUITES.has(rec.label)` — exact `Set` membership, not a prefix
+or substring match, so this addition cannot affect any other suite's
+`rec.label` by construction, not just in practice.
+
+Decompressed `c6-baseline`'s own recorded corpus
+(`tools/refactor-harness/baseline/corpus.ndjson.gz`, 6,313 records) and
+checked directly: 436 records carry `label === 'oracle:ac/ac-27-claim.js'`,
+spanning 61 distinct `cwdHash` values (scratch backlogs). Critically, the
+total number of records sharing *any* of those 61 `cwdHash` values is also
+exactly 436 — no other suite's call shares a backlog with `ac-27-claim.js`,
+so `markNondeterministic`'s per-backlog taint-spreading cannot reach
+anything outside those 436. **Exactly 436, exactly `ac-27-claim.js`,
+nothing else touched — confirmed both structurally (exact-match `Set`) and
+empirically (direct corpus inspection).**
+
+`node test/run-all.js dist/nj` and the gate's own oracle leg (below) both
+show `PASS ac-27-claim.js (262 checks)` — **AC-27's own verdict still runs
+in full** on every gate; only the *byte replay* comparison skips its 436
+calls, exactly as D127 states.
+
+### (2) Is AC-27 nondeterministic only through C5? Confirmed empirically, not just by reasoning
+
+Ran `ac-27-claim.js` twice against the same `dist/nj`, with `NJ_KEEP=1` and
+a dedicated `TMPDIR` per run so every scratch backlog (61 + the shared
+`HOME`) survived both runs for inspection. Hashed every backlog's full file
+tree (content + relative path, sorted) per run and diffed run 1 against
+run 2, labelling each backlog by its `model()` name (stripping the random
+`mkdtemp` suffix).
+
+**First pass, hashing everything: 6 of 50 distinct labels differed**
+(`ac27-c4-plain`, `ac27-c4-reassert`, `ac27-c4-steal` in addition to the
+three C5 ones). Before concluding C4 also races, I checked *why*: C4
+exercises `NJ_FAULT=before-rename`, which aborts a write **after** the
+temp file is written and `fsync`'d but **before** `rename` — intentionally
+leaving a stray `.nj-tmp-<pid>-<rand>` file behind. That filename embeds
+the process PID and a random suffix, which legitimately differs between
+any two runs **regardless of product determinism** — it is exactly the
+kind of difference the real corpus format already excludes from its own
+comparison (`after.stray` records a *count*, never the stray files'
+names, confirmed by reading `stripSha`/`after` handling in
+`baseline.js`). My first-pass hash was naively stricter than the actual
+replay comparison it was meant to validate.
+
+**Re-ran the comparison excluding `.nj-tmp-*` filenames** (matching the
+real corpus's own normalisation): **exactly 3 of 50 labels differ between
+the two runs — `ac27-c5-claim`, `ac27-c5-steal`, and one of the eight
+`ac27-c5-release-steal-N` rounds** (round 3 in this particular pair of
+runs; which round lands differently is itself part of the race, not fixed
+— consistent with an 8-round repeated trial of a genuine coin-flip race,
+not a defect). **This is an exact match to D127's own claim**: only the
+three C5 backlogs (claim, steal, release-steal) actually race; C1–C4,
+C6–C10 are confirmed deterministic across two independent runs, not just
+asserted to be.
+
+### (3) `c6-baseline` (`978c7a8`) is self-consistent
+
+- **`dist/nj` sha256 matches `73ae6c3` exactly**: `37a7ece6…50431f` on both
+  sides (`git show 73ae6c3:dist/nj | shasum -a 256` vs the worktree's own
+  `dist/nj`) — confirmed byte-identical, not just "said to be."
+- **6,313 calls**, confirmed directly from the decompressed corpus
+  (`corpus.ndjson.gz`, 6,313 NDJSON lines).
+- **`gate.js --step=978c7a8 --frozen=c6-baseline`** (i.e. replaying the
+  baseline against the exact commit it was recorded at — the
+  self-consistency check the task's "`--step=HEAD`" phrasing meant at the
+  time `978c7a8` was `HEAD`, since `HEAD` has since moved on to v3.2 work):
+  **`BEHAVIOUR UNCHANGED — the recorded surface is identical`**, `replay:
+  exit 0`, `oracle: passed 74, failed 0, cannot run 1 (1 expected)`,
+  `gate: exit 0, replay unchanged, oracle green`. `baseline: 6313 calls …
+  current: 6313 calls … compared: 5366 calls (947 excluded as
+  nondeterministic by design — AC-7 concurrency)` — `947 = 511` (AC-7) `+
+  436` (AC-27), matching the commit message's own self-reported numbers
+  exactly, reproduced independently rather than taken on trust.
+
+### Conclusion
+
+The instrument change is the smallest fix that correctly closes the gap it
+names (file-granularity exclusion, honestly disclosed as coarser than
+ideal in its own commit message), it does not touch anything it doesn't
+claim to, the nondeterminism it tags is real and exactly as large as
+claimed — confirmed by running the suite twice myself, not by re-deriving
+the claim from the commit message — and the baseline recording it protects
+reproduces itself exactly. **Sound.**
+

@@ -181,6 +181,25 @@ function snapshotBacklog(backlog, ctx) {
   return { files, ids, stray };
 }
 
+/**
+ * The scratch-backlog label a cwd was made under, or null. `H.freshDir(label)`
+ * (test/lib/harness.js) names its mkdtemp dir `nj-<label>-<6 random chars>`;
+ * this recovers `<label>` without the random tail, so the harness can group
+ * calls by WHICH scenario they belong to, not just by directory identity
+ * (`cwdHash`, which is a one-way hash and cannot be prefix-matched).
+ *
+ * The cwd's OWN basename only -- never an ancestor. A call made from a
+ * subdirectory of the scratch dir (e.g. njrc-swap's `proj/work`) does not
+ * match here and correctly returns null; walking up to find a match would
+ * also catch gate.js's own throwaway worktree root (`nj-gate-<rand>`,
+ * the same naming convention), tainting that call under the spurious label
+ * "gate".
+ */
+function backlogLabel(cwd) {
+  const m = /^nj-(.+)-[A-Za-z0-9]{6}$/.exec(path.basename(cwd));
+  return m ? m[1] : null;
+}
+
 /** Fixed mtimes on every fixture, so mtime-derived output stops moving. */
 const FIXED_MTIME = new Date('2020-01-02T03:04:05Z');
 function pinMtimes(dir, when) {
@@ -193,5 +212,5 @@ function pinMtimes(dir, when) {
 
 module.exports = {
   FIXED_NOW, LATER_NOW, FIXED_MTIME,
-  sha256, normalize, findBacklog, snapshotBacklog, pinMtimes, walk,
+  sha256, normalize, findBacklog, snapshotBacklog, pinMtimes, walk, backlogLabel,
 };
