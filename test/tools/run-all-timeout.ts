@@ -24,6 +24,10 @@
  *      Ctrl-C) no longer reaches a file directly: run-all, sent SIGTERM while
  *      a file that ignores it and its grandchild run, kills both and dies of
  *      the signal itself.
+ * Leftover detection here (the zombie check, and killLeftovers after a red
+ * run) reads /proc, so it is Linux-only (TSK-031); on other systems
+ * run-all's process-group kill still applies, only this test's own cleanup
+ * of a red run does not.
  */
 import fs from 'fs';
 import path from 'path';

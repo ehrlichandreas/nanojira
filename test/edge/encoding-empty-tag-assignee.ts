@@ -1,19 +1,11 @@
 /* Edge — empty `--tag` / `--assignee` (§ 9), not exercised anywhere else.
  *
- * § 9 pins validation only for `--status` and `--parent` — not `--tag` or
- * `--assignee` — and free-text fields with no registry (§ 6) have nothing to
- * validate against, so an empty value on either filter is not an error; it is
- * a literal filter value like any other. This is an omission argument (§ 9
- * simply never names these two as validated), not a positive spec statement,
- * so it is weaker footing than the rest of this file's assertions.
- *
- *  - `--tags=` on a write **empties the list** (§ 9), and the CLI's own
- *    `--tags`/`--depends-on` parser never produces an empty-string item, so
- *    in a **CLI-created backlog** `list --tag=` can only ever match zero
- *    elements. This is a claim about what the CLI writes, not about the data
- *    model in general — a hand-edited file can carry `tags: [""]`, and that
- *    element WOULD match `--tag=`; the test below only ever drives `nj new`,
- *    so it stays inside the claim it is actually allowed to make.
+ *  - `list --tag=` is `invalid_value` since DECISIONS 230: an empty value
+ *    is refused wherever it means nothing, and the CLI's own `--tags`
+ *    parser never writes an empty-string tag, so `--tag=` could only ever
+ *    match zero elements of a CLI-created backlog. Before, it was accepted
+ *    as a literal filter value matching nothing.
+ *  - `--tags=` on a write **empties the list** (§ 9), unchanged.
  *  - `assignee` defaults to empty (§ 6) and is written only when non-empty
  *    (§ 7 "empty optional fields are omitted"), so `list --assignee=`
  *    matches exactly the elements with no assignee set.
@@ -41,9 +33,8 @@ function ids(json: any): string[] {
     { cwd: d }), 0);
 
   const r = H.runJson(['list', '--tag='], { cwd: d });
-  T.exit('list --tag= is accepted, not an unknown/invalid filter', r, 0);
-  T.eq('an empty --tag matches nothing in a CLI-created backlog (see header comment)',
-    ids(r.json), []);
+  T.exit('list --tag= is refused (DECISIONS 230)', r, 1);
+  T.eq('list --tag=: invalid_value', r.json && r.json.error, 'invalid_value');
 }
 
 /* ---- `list --assignee=` matches the unassigned elements ----------------- */

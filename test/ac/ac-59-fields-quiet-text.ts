@@ -371,7 +371,8 @@ function sectionKR() {
   {
     const r = runJ(['note', `--id=${e}`, '--text='], { cwd: x.dir });
     T.exit('R1 empty --text alone: exit 1', r, 1);
-    T.eq('R1 error code', r.json.error, 'missing_argument');
+    // Given but empty: invalid_value, as every empty value (DECISIONS 230).
+    T.eq('R1 error code', r.json.error, 'invalid_value');
   }
   {
     // --quiet/--fields apply to note's own write result exactly as the

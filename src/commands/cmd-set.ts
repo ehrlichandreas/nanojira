@@ -8,7 +8,7 @@ import * as path from 'path';
 import { flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
 import { checkCommandFlags } from '../core/cli-flags.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
-import { PRIORITIES } from '../core/constants.ts';
+import { PRIORITIES, ENTRY_FIELDS } from '../core/constants.ts';
 import { cliFieldNames } from '../core/flag-table.ts';
 import { readInputText, parseInputJson } from '../core/input.ts';
 import { context, resolveTarget, resolveById, requireWritable, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
@@ -136,7 +136,7 @@ function setsFinalStatus(ctx: Context, overrides: Map<string, string | string[] 
 function cmdSet(flags: Flags) {
   checkCommandFlags(flags, 'set');
   const json = flags.has('json');
-  const opts = parseOutputOpts(flags, json);
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const force = flags.has('force');
   const allowOpen = flags.has('allow-open-children');
   const checkAll = flags.has('check-all');

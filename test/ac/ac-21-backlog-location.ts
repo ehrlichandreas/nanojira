@@ -277,13 +277,14 @@ function njrcFailure(desc: string, args: string[], o: EnvOpts, rcPath: string, l
   T.exit('A1 --backlog without a value: exit 1', mv, 1);
   T.eq('A1 --backlog without a value: missing_value', mv.json && mv.json.error, 'missing_value');
 
-  /* --backlog= with an empty value is missing_value too, never a fall-through
-   * to the search (DECISIONS 89, AMBIGUITIES 53) */
+  /* --backlog= with an empty value is refused, never a fall-through to the
+   * search (DECISIONS 89, AMBIGUITIES 53): invalid_value since DECISIONS 230,
+   * the code of every empty value */
   const withBl = mkdir(path.join(root, 'hasbl'));
   backlogAt(path.join(withBl, 'backlog'), 'TSK-009');
   const ev = runJ(['list', '--backlog='], { cwd: withBl });
   T.exit('A1 --backlog= (empty): exit 1', ev, 1);
-  T.eq('A1 --backlog= (empty): missing_value, not the backlog/ beside it', ev.json && ev.json.error, 'missing_value');
+  T.eq('A1 --backlog= (empty): invalid_value, not the backlog/ beside it', ev.json && ev.json.error, 'invalid_value');
 }
 
 /* ~/ is expanded only inside .njrc: --backlog and NJ_BACKLOG are literal
@@ -301,9 +302,8 @@ function njrcFailure(desc: string, args: string[], o: EnvOpts, rcPath: string, l
 
 /* § 9: "it appears in every command's list of known flags". Probed through
  * the unknown-field rejection, which lists the known flags (§ 9 Rules): every
- * "Known flags:" line names --backlog. `new` and `set` print "Known fields:"
- * instead — schema fields only, unchanged (DECISIONS 88); for them the
- * acceptance of --backlog is asserted in A1 above. The backlog comes from
+ * "Known flags:" line names --backlog; `new` and `set` too since DECISIONS
+ * 230 (edge/coverage-v3-gaps.ts B13). The backlog comes from
  * NJ_BACKLOG, so --backlog itself is not on the command line. */
 {
   const root = H.freshDir('ac21-known');

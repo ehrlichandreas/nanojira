@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
 import { checkCommandFlags } from '../core/cli-flags.ts';
-import { TYPE_FOLDER_ROLE, TYPES, PARENT_TYPE, PRIORITIES, FIELD_ORDER, SECTION_ROLES, NEW_FIELDS, TYPE_PREFIX } from '../core/constants.ts';
+import { TYPE_FOLDER_ROLE, TYPES, PARENT_TYPE, PRIORITIES, FIELD_ORDER, SECTION_ROLES, NEW_FIELDS, TYPE_PREFIX, ENTRY_FIELDS } from '../core/constants.ts';
 import { cliFieldNames } from '../core/flag-table.ts';
 import { readInputText, parseInputJson } from '../core/input.ts';
 import { context, unarchiveCalls } from '../core/context.ts';
@@ -116,7 +116,10 @@ function validateNewFlags(ctx: Context, flags: Flags): NewFlags {
   if (!TYPES.includes(type)) return fail('invalid_value', `unknown type '${type}'`, valueHint('type', type, TYPES));
 
   const title = flagString(flags, 'title');
-  if (title === undefined || normalizeTitle(title) === '') return fail('missing_argument', '--title is required and must not be empty');
+  // Absent is missing_argument; given but empty is invalid_value, as for
+  // every flag (TSK-038, DECISIONS 230).
+  if (title === undefined) return fail('missing_argument', '--title is required');
+  if (normalizeTitle(title) === '') return fail('invalid_value', '--title must not be empty');
   const cleanTitle = normalizeTitle(title);
 
   const parent = flagString(flags, 'parent');
@@ -217,7 +220,7 @@ function buildBody(ctx: Context, type: string, cleanTitle: string, sections: Map
 function cmdNew(flags: Flags) {
   checkCommandFlags(flags, 'new');
   const json = flags.has('json');
-  const opts = parseOutputOpts(flags, json);
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
 
   const inputValue = flagString(flags, 'input');
@@ -400,9 +403,8 @@ function validatePlanNode(ctx: Context, node: FlatNode, flat: FlatNode[], seenRe
   if (typeof type !== 'string' || !TYPES.includes(type)) fail('invalid_value', `unknown type '${String(type)}' (${node.path})`, valueHint('type', String(type), TYPES));
 
   const titleRaw = raw.title;
-  if (titleRaw === undefined || typeof titleRaw !== 'string' || normalizeTitle(titleRaw) === '') {
-    fail('missing_argument', `--title is required and must not be empty (${node.path})`);
-  }
+  if (titleRaw === undefined) fail('missing_argument', `--title is required (${node.path})`);
+  if (typeof titleRaw !== 'string' || normalizeTitle(titleRaw) === '') fail('invalid_value', `--title must not be empty (${node.path})`);
   const cleanTitle = normalizeTitle(titleRaw as string);
 
   if ((type as string) === 'subtask' && node.hadChildren) {

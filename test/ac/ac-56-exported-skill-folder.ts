@@ -145,8 +145,14 @@ function buildFixtureRepo(label: string) {
     fs.mkdirSync(path.join(dir, 'references'));
     for (const n of REAL_REFERENCE_NAMES) fs.copyFileSync(path.join(REAL_REFERENCES, n), path.join(dir, 'references', n));
   }
+  // export-skill reads the release-key pin from the package.json beside its
+  // own tools/ (DECISIONS 226), so the fixture runs its own copy of the
+  // tool, pinned to the throwaway key.
+  fs.mkdirSync(path.join(dir, 'tools'), { recursive: true });
+  fs.copyFileSync(EXPORT_TS, path.join(dir, 'tools', 'export-skill.mts'));
+  fs.copyFileSync(path.join(ROOT, 'tools', 'release-key.mts'), path.join(dir, 'tools', 'release-key.mts'));
   fs.writeFileSync(path.join(dir, 'package.json'),
-    JSON.stringify({ name: 'nanojira-fixture', version: REAL_PKG_VERSION }, null, 2) + '\n');
+    JSON.stringify({ name: 'nanojira-fixture', version: REAL_PKG_VERSION, releaseKey: FPR }, null, 2) + '\n');
 
   git(['add', '-A']);
   const commit = gitSigned(['commit', '-q', '-m', 'fixture commit']);
@@ -163,7 +169,7 @@ function unsignedTag(repo: string, name: string) {
 }
 
 function runExport(args: string[], cwd: string) {
-  const r = spawnSync(process.execPath, [EXPORT_TS].concat(args),
+  const r = spawnSync(process.execPath, [path.join(cwd, 'tools', 'export-skill.mts')].concat(args),
     { cwd, env: gpgEnv(), encoding: 'utf8', timeout: 30000 });
   return { status: r.status, stdout: r.stdout || '', stderr: r.stderr || '' };
 }

@@ -11,10 +11,12 @@ import type { Flags } from '../core/types.ts';
 import { resolveActingName } from '../core/actor.ts';
 import { flagString } from '../core/args.ts';
 import { checkCommandFlags } from '../core/cli-flags.ts';
+import { ENTRY_FIELDS } from '../core/constants.ts';
 import { context, resolveById, requireWritable, requireActive } from '../core/context.ts';
 import { isReady, hasOpenChild } from '../core/derive.ts';
 import { Fail, fail, out } from '../core/output.ts';
 import { recordChange } from '../core/on-change.ts';
+import { parseOutputOpts, trimResult } from '../core/result-opts.ts';
 import { refreshStatus } from '../core/status.ts';
 import { refreshTags } from '../core/tags.ts';
 import { nowIso } from '../core/store.ts';
@@ -27,6 +29,9 @@ import { requireChildrenDone } from './cmd-set.ts';
 function cmdNext(flags: Flags) {
   checkCommandFlags(flags, 'next');
   const json = flags.has('json');
+  // As on `claim`, whose shape `next` returns (DECISIONS 229): checked
+  // before anything is claimed.
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const name = resolveActingName(flags, true) as string;
 
   const ctx = context(flags);
@@ -80,7 +85,7 @@ function cmdNext(flags: Flags) {
     const built = withFiles(Object.assign({ ok: (single as any).ok, id: el.id }, single, { skipped }), ctx.backlog);
     recordChange(ctx.backlog, () => built);
     if (json) {
-      out(JSON.stringify(built, null, 2));
+      out(JSON.stringify(opts.quiet || opts.fields !== undefined ? trimResult(built, opts) : built, null, 2));
     } else {
       out(`${el.id} claimed by ${name}${status !== undefined ? ` (status: ${status})` : ''}`);
       for (const code of (single as any)._problems as string[]) out(`⚠ ${el.id}: ${code}`);

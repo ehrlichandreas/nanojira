@@ -327,7 +327,7 @@ function escapeInvisible(s: string): string {
 function explicitLocation(flags: Flags): { dir: string; src: Source } | null {
   const flag = flagString(flags, 'backlog');
   if (flag !== undefined) {
-    if (flag === '') fail('missing_value', '--backlog needs a value (use --backlog=…)');
+    if (flag === '') fail('invalid_value', '--backlog must not be empty', 'give a value, or leave --backlog out');
     return { dir: fromCwd(flag), src: { kind: 'flag' } };
   }
   const env = process.env.NJ_BACKLOG;

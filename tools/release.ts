@@ -7,6 +7,7 @@
 //
 //   node tools/release.ts <version> --message <text> [--apply]
 //   node tools/release.ts <version> --message-file <file> [--apply]
+//   node tools/release.ts --verify-only vX.Y.Z
 //
 // Dry-run by default -- prints git-release-squash's own `tail --tag` plan
 // and writes nothing; --apply is required to actually squash and tag.
@@ -15,12 +16,15 @@
 // twice per release bought nothing -- the dry run writes nothing either way.
 // The step-by-step release procedure is docs/RELEASING.md.
 //
-// --apply also refuses while any local branch other than the checked-out
-// one exists, naming them (a dry run only warns): git-release-squash's
-// post-write verify runs `verify-commit` on every commit of every branch,
-// so one unsigned WIP branch turned it red only AFTER main and the tag had
-// already been rewritten (DECISIONS 202, E). This check runs before the
-// gate, so a refusal costs no test run.
+// Before the gate and before anything is written, dry run included, the
+// preflight (tools/release-preflight.mts, DECISIONS 227) refuses other
+// local branches or worktrees -- git-release-squash's post-write verify
+// runs `verify-commit` on every commit of every branch, so one unsigned
+// WIP branch turned it red only AFTER main and the tag had already been
+// rewritten (DECISIONS 202, E) -- a dirty tree, a tag after the previous
+// release, a version that is not X.Y.Z everywhere, node_modules that are
+// not the lock, a doc naming a squashed commit and a stale bundle, all
+// reported at once, each with its own code.
 //
 // <name> is package.json's own "name" ("nanojira"), passed to
 // git-release-squash explicitly as --name -- never the checkout's directory
@@ -50,11 +54,30 @@
 // A): one-off env config outranks a repo's own local config, so inherited,
 // the signing identity overrode every test fixture's own user.signingkey
 // (ac-56's fixture tags came out unsignable and the gate went red).
+//
+// After a successful --apply, and alone with --verify-only vX.Y.Z (after
+// the push; read-only, no preflight, no gate), it verifies the release in
+// seven sections (tools/release-verify.mts, DECISIONS 228), one
+// `verify: <check>: OK|FAIL <why>|SKIPPED (<why>)` line each, exit 1 on
+// any FAIL; --verify-only also requires origin's main and tag to be this
+// repo's.
+//
+// The release key is pinned (DECISIONS 226): package.json's "releaseKey"
+// must be a 40-hex primary fingerprint, checked before the branch check
+// and the test gate. After --apply the new release commit and tag must
+// both carry a VALIDSIG from exactly that key (tools/release-key.mts) --
+// git-release-squash's own `verify: signatures` accepts any key in the
+// keyring. A mismatch is a FAIL verify line naming the expected and the
+// found fingerprint; the branch and the tag are already rewritten by then,
+// so it is a rollback (docs/RELEASING.md), never a push.
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { fileURLToPath } from 'url';
+import { readReleaseKey } from './release-key.mts';
+import { preflight } from './release-preflight.mts';
+import { verifyRelease, formatLine } from './release-verify.mts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..');
@@ -76,6 +99,21 @@ function refuse(msg: string): never {
 }
 
 const argv = process.argv.slice(2);
+
+// --verify-only vX.Y.Z: only as the first argument, so a value consumed by
+// --message can never turn into it.
+if (argv[0] === '--verify-only') {
+  const tag = argv[1];
+  if (argv.length !== 2 || tag === undefined || !/^v\d+\.\d+\.\d+$/.test(tag)) usageError('usage: release.ts --verify-only vX.Y.Z');
+  let name: unknown;
+  try { name = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).name; } catch { /* reported next */ }
+  if (typeof name !== 'string' || name === '') usageError('package.json has no "name"');
+  const key = readReleaseKey(ROOT);
+  if (!key.ok) refuse(`${key.error}: ${key.message}`);
+  const lines = verifyRelease(ROOT, { name, tag, pin: key.pin, requirePushed: true });
+  for (const l of lines) process.stdout.write(formatLine(l) + '\n');
+  process.exit(lines.some((l) => l.status === 'FAIL') ? 1 : 0);
+}
 const positional: string[] = [];
 let message: string | undefined;
 let messageFile: string | undefined;
@@ -112,6 +150,10 @@ if (pkg.version !== version) {
   usageError(`package.json's version is '${pkg.version}', not '${version}' -- bump it first, this script never edits it`);
 }
 
+const releaseKey = readReleaseKey(ROOT);
+if (!releaseKey.ok) refuse(`${releaseKey.error}: ${releaseKey.message}`);
+const PIN = releaseKey.pin;
+
 const tag = 'v' + version;
 const prefix = NAME + ' ' + tag + ': ';
 let titleSource: string;
@@ -139,24 +181,15 @@ if (firstLine.startsWith(prefix)) {
   );
 }
 
-// Every local branch but the checked-out one. An unborn repo (`git init`,
-// no commit yet) has none; a directory that is not a git repository at all
-// is left for git-release-squash itself to refuse.
-function otherBranches(): string[] {
-  const heads = spawnSync('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads'],
-    { cwd: ROOT, encoding: 'utf8' });
-  if (heads.status !== 0) return [];
-  const current = spawnSync('git', ['symbolic-ref', '--quiet', '--short', 'HEAD'],
-    { cwd: ROOT, encoding: 'utf8' }).stdout.trim();
-  return heads.stdout.split('\n').filter((b) => b !== '' && b !== current);
-}
-const others = otherBranches();
-if (others.length > 0) {
-  const why = `local branch(es) other than the checked-out one: ${others.join(', ')} -- ` +
-    `git-release-squash verifies the signature of every commit on every branch AFTER rewriting the refs; ` +
-    `merge or delete them first (git worktree remove <path>; git branch -D <branch>), see docs/RELEASING.md`;
-  if (apply) refuse(why);
-  process.stderr.write('release: warning: ' + why + ' -- --apply will refuse\n');
+// The preflight (DECISIONS 227, tools/release-preflight.mts): other
+// branches or worktrees, a dirty tree, a tag after the previous release,
+// the version everywhere, node_modules == the lock, docs naming squashed
+// commits, bundle --check. Every problem at once, before the gate and
+// before git-release-squash, dry run included.
+const problems = preflight(ROOT, NAME, version);
+if (problems.length > 0) {
+  for (const p of problems) process.stderr.write(`release: refused: ${p.code}: ${p.message} -- ${p.hint}\n`);
+  process.exit(1);
 }
 
 // One-off git config from the environment (DECISIONS 202, A): kept for
@@ -187,5 +220,16 @@ const squashArgs = ['tail', ROOT, '--name=' + NAME, '--tag=' + tag]
   .concat(message !== undefined ? ['--message=' + message] : ['--message-file=' + (messageFile as string)])
   .concat(apply ? ['--apply'] : []);
 
+const pre = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).stdout.trim();
 const r = spawnSync(bin, squashArgs, { cwd: ROOT, env: process.env, stdio: 'inherit' });
-process.exit(r.status === null ? 1 : r.status);
+if (r.status !== 0 || !apply) process.exit(r.status === null ? 1 : r.status);
+
+// The release git-release-squash just wrote, in seven sections
+// (tools/release-verify.mts): its own verify accepts any key and checks
+// neither dates, content nor origin.
+const verified = verifyRelease(ROOT, { name: NAME, tag, pin: PIN, pre, requirePushed: false });
+for (const l of verified) process.stdout.write(formatLine(l) + '\n');
+if (verified.some((l) => l.status === 'FAIL')) {
+  process.stderr.write(`release: verify FAILED -- the branch and ${tag} are already rewritten: roll back (docs/RELEASING.md), do not push\n`);
+  process.exit(1);
+}

@@ -165,12 +165,13 @@ function sameValue(name, a, b) {
   if (a === b) return true;
   return name === "backlog" && typeof a === "string" && typeof b === "string" && a !== "" && b !== "" && path6.resolve(a) === path6.resolve(b);
 }
-function parseArgs(argv) {
+function parseArgs(argv, kinds) {
   const flags = /* @__PURE__ */ new Map();
   const positional = [];
   const repeated = [];
   let options = true;
-  for (const a of argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
     if (options && a === "--") {
       options = false;
       continue;
@@ -178,8 +179,11 @@ function parseArgs(argv) {
     if (options && a.startsWith("--")) {
       const eq = a.indexOf("=");
       const typed = eq === -1 ? a.slice(2) : a.slice(2, eq);
-      const value = eq === -1 ? true : a.slice(eq + 1);
       const name = FLAG_ALIASES.get(typed) ?? typed;
+      let value = eq === -1 ? true : a.slice(eq + 1);
+      if (value === true && kinds !== void 0 && Object.hasOwn(kinds, name) && kinds[name] === "string" && i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
+        value = argv[++i];
+      }
       if (flags.has(name) && !sameValue(name, flags.get(name), value) && !repeated.some((r) => r.name === name)) {
         repeated.push({ name, typed });
       }
@@ -269,10 +273,11 @@ var CLI_SPEC = {
   },
   note: { fields: [], controls: [...OUTPUT, "force", "text", "text-file", ...cliFieldNames("note")], write: true },
   check: { fields: [], controls: [...OUTPUT, "force", ...cliFieldNames("check")], write: true },
-  show: { fields: [], controls: ["json", ...cliFieldNames("show")], write: false },
+  show: { fields: [], controls: ["json", "fields", ...cliFieldNames("show")], write: false },
   log: { fields: [], controls: ["json", ...cliFieldNames("log")], write: false },
-  list: { fields: [], controls: ["json", "ready", "all", ...cliFieldNames("list")], write: false },
-  find: { fields: [], controls: ["json", "all", "text", ...cliFieldNames("find")], write: false },
+  // The reads take `--fields` but no `--quiet` (DECISIONS 229).
+  list: { fields: [], controls: ["json", "fields", "ready", "all", ...cliFieldNames("list")], write: false },
+  find: { fields: [], controls: ["json", "fields", "all", "text", ...cliFieldNames("find")], write: false },
   tree: { fields: [], controls: ["json", "all", ...cliFieldNames("tree")], write: false },
   tags: { fields: [], controls: ["json"], write: false },
   rm: { fields: [], controls: ["json", ...cliFieldNames("rm")], write: true },
@@ -282,7 +287,7 @@ var CLI_SPEC = {
   claim: { fields: ["status"], controls: [...OUTPUT, ...cliFieldNames("claim").filter((f) => f !== "status"), "allow-open-children", "check-all"], write: true },
   // Only `status` in "Known fields:", as for claim.
   release: { fields: ["status"], controls: [...OUTPUT, ...cliFieldNames("release").filter((f) => f !== "status"), "allow-open-children"], write: true },
-  next: { fields: cliFieldNames("next"), controls: ["json"], write: true },
+  next: { fields: cliFieldNames("next"), controls: [...OUTPUT], write: true },
   doctor: { fields: [], controls: ["json", "dry-run", ...cliFieldNames("doctor")], write: false }
 };
 var doc = (text, value) => value === void 0 ? { text } : { value, text };
@@ -327,6 +332,7 @@ var FLAG_DOCS = {
   ready: doc("only elements ready to start"),
   all: doc("include archived elements")
 };
+var READ_FIELDS = doc("with --json: keep only these fields of every entry, in this order", "<a,b,...>");
 var COMMAND_DOCS = {
   init: { backlog: doc("create the backlog at this path", "<path>") },
   new: { input: doc("read the element, or a whole plan, as JSON from a file, - for stdin", "<path|->") },
@@ -346,14 +352,15 @@ var COMMAND_DOCS = {
   },
   show: {
     id: doc("the element to show", "<id>"),
+    fields: doc("with --json: keep only these fields of the entry, in this order", "<a,b,...>"),
     notes: doc("which notes to show (default all)", "none|all|last:N")
   },
   log: {
     id: doc("the element whose history to show", "<id>"),
     last: doc("show only the last N events", "<N>")
   },
-  list: FILTER,
-  find: { ...FILTER, "case-sensitive": doc("match the text with exact case"), text: doc("the search text, instead of the positional argument", "<text>") },
+  list: { ...FILTER, fields: READ_FIELDS },
+  find: { ...FILTER, fields: READ_FIELDS, "case-sensitive": doc("match the text with exact case"), text: doc("the search text, instead of the positional argument", "<text>") },
   tree: { id: doc("show only this element and what is below it", "<id>") },
   rm: { cascade: doc("also remove every element below this one") },
   claim: {
@@ -390,7 +397,7 @@ import * as os2 from "node:os";
 import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.3.0";
+var VERSION = "4.4.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -631,7 +638,7 @@ function escapeInvisible(s) {
 function explicitLocation(flags) {
   const flag = flagString(flags, "backlog");
   if (flag !== void 0) {
-    if (flag === "") fail("missing_value", "--backlog needs a value (use --backlog=\u2026)");
+    if (flag === "") fail("invalid_value", "--backlog must not be empty", "give a value, or leave --backlog out");
     return { dir: fromCwd(flag), src: { kind: "flag" } };
   }
   const env = process.env.NJ_BACKLOG;
@@ -884,12 +891,14 @@ var TOOL_DESCRIPTIONS = {
   doctor: "Check the backlog and report every problem found; fix, offered only when the server allows destructive tools, repairs what it can."
 };
 var REQUIRED = { new: ["type", "title"], find: ["text"], note: ["text"] };
-var SHRINKABLE = ["new", "set", "note", "check", "claim", "release"];
-var WRITES = [...SHRINKABLE, "next", "archive", "unarchive"];
+var SHRINKABLE = ["new", "set", "note", "check", "claim", "release", "next"];
+var WRITES = [...SHRINKABLE, "archive", "unarchive"];
+var READS_WITH_FIELDS = ["list", "find", "show"];
 function toolFields(name, allowDestructive) {
   if (name === "doctor") return allowDestructive ? [...commandFields(name), { name: "dry-run", kind: "boolean" }] : [];
   const fields = commandFields(name).filter((f) => !f.name.endsWith("-file"));
   if (SHRINKABLE.includes(name)) fields.push({ name: "quiet", kind: "boolean" }, { name: "fields", kind: "string" });
+  else if (READS_WITH_FIELDS.includes(name)) fields.push({ name: "fields", kind: "string" });
   if (WRITES.includes(name)) fields.push({ name: "dry-run", kind: "boolean" });
   return fields;
 }
@@ -960,7 +969,7 @@ function rejectStartup(message) {
   process.exit(1);
 }
 function main() {
-  const argv = parseArgs(process.argv.slice(2));
+  const argv = parseArgs(process.argv.slice(2), { backlog: "string", "allow-destructive": "boolean", version: "boolean" });
   for (const name of argv.flags.keys()) {
     if (!KNOWN_STARTUP_FLAGS.includes(name)) rejectStartup(`unknown argument '--${name}'.`);
   }

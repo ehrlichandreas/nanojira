@@ -4997,7 +4997,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        `unknown_field` is about a flag name, and `invalid_value` about a
        flag's value. So the closed set gains `unexpected_argument`, which
        is additive under § 7's rule. `nanojira-mcp` cannot trip it: since
-       b871f51 (TSK-035, DECISIONS 214) it sends no positional at all,
+       the TSK-035 fix in 4.2.0 (DECISIONS 214) it sends no positional at all,
        note/find's text included, which goes as `--text=`.
      - **Precedence (Reviewer).** An unknown command or flag is reported
        before a conflicting repeat or a stray positional. `main` runs the
@@ -5144,8 +5144,9 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        the backlog stay byte-identical, that `changes` equals what the
        real call changed, and that the real call still writes through the
        link. Red before: 16 of 408.
-     - Follow-up, after ImprovementScout's check of 5fab8b9
-       (`scout-t042-attack.mjs`, 0 of 27 dry runs wrote outside):
+     - Follow-up, after ImprovementScout's check of the first version
+       of this fix (`scout-t042-attack.mjs`, 0 of 27 dry runs wrote
+       outside):
        - `$TMPDIR` inside a followed layout folder's target put the
          scratch folder inside what was being copied, so the copy copied
          itself until `ENAMETOOLONG` (`io_error` after about 2 s, while
@@ -5260,7 +5261,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        `isError` refusals with every problem listed and the did-you-mean
        hint, `-32602` for an unknown argument, a wrong type and
        `check-all`, the 4.3.0 flags (S9), and S8 legs for a link to a
-       FIFO and a directory; red on the rebased first version (9873b8e)
+       FIFO and a directory; red on the rebased first version
        for 101 checks. The S8 swap race (review R1): `config.json` is a
        symlink a separate process re-points in a tight loop between a
        regular file and a FIFO, by rename, while 3000 `tools/list`
@@ -5368,7 +5369,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        real backlog around each call and requires `files` to name exactly
        what changed on disk, for every writer, both layouts, a batch,
        `--quiet`, `--fields`, `--dry-run` and the hook's stdin; red on
-       79a4e74. Pinned key sets in ac-31, ac-59, ac-61 and ac-63 gain
+       the code before this change. Pinned key sets in ac-31, ac-59, ac-61 and ac-63 gain
        `files`. ac-23's C7 (STATUS.md cannot be written) compares the
        result with its twin's but for `STATUS.md` in `files`, and checks
        that `files` does not name the overview it failed to write. Mutation-tested: without the move recording, or without
@@ -5377,7 +5378,8 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        calls that fail part way (`new` and `archive` with a read-only
        folder, `set --parent` and `new` into a read-only epic folder under
        `hierarchy`) must name exactly what git sees changed, red on
-       94ee7a9; and the recipe itself, run on `new`, a plan, `archive`,
+       the first version of this change, before its review round; and
+       the recipe itself, run on `new`, a plan, `archive`,
        `unarchive`, `rm` and `set --parent`, must commit exactly the
        call's files and leave another agent's staged file staged, and
        commit nothing after a no-op.
@@ -5419,7 +5421,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        character, fences, `--acceptance-file`, `--input` string and
        array, batch, `--dry-run`, the stderr warning, `--add-acceptance`
        (with and without a section, via `--input`, in a batch) and every
-       refusal; red on 0c52b90. ac-64's pinned `set` flag list gains
+       refusal; red on the code before this change. ac-64's pinned `set` flag list gains
        `add-acceptance`. Mutation-tested: an old tick used more than once,
        or the single-ID path skipping the `--add-acceptance` checks, fails
        AC-68.
@@ -5451,7 +5453,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      - Tests: `test/ac/ac-69-next-filters.ts` (40 checks): both filters on
        `list --ready`, plain `list`, `find` and `next` (including
        `--dry-run` and `none_ready`), the refusals with their hint, the
-       help lines and the `SKILL.md` entry; red on 0aafd61. ac-64's
+       help lines and the `SKILL.md` entry; red on the code before this change. ac-64's
        pinned filter list gains both flags.
 
 225. **`--check-all`: close and tick every open acceptance box in one
@@ -5479,8 +5481,353 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      - Tests: `test/ac/ac-70-check-all.ts` (37 checks): `set`, `claim`,
        `--input`, a replace in the same call, batch on both, `--dry-run`,
        nothing open, never implicit, every refusal (and `release`/`next`
-       rejecting the flag), `--help`; red on 6c9f48b. ac-64's and
+       rejecting the flag), `--help`; red on the code before this change. ac-64's and
        boolean-flag-values' pins for `set` and `claim` gain `check-all`.
+
+226. **The release key is pinned: `package.json` `"releaseKey"`, checked by
+     export-skill and release.ts** (2026-10-21, TSK-040 step A; survey § 6).
+     - The finding: `tools/export-skill.mts` verified a tag with `git tag
+       -v` only, so a good signature from any key in the verifier's
+       keyring passed; the survey exported a tag signed by a freshly
+       generated "Mallory" key. git-release-squash's `verify: signatures`
+       has the same blind spot for the release itself.
+     - Lead settled: pin the primary fingerprint
+       `BEEEE63B314331D0054DBEBE2FEE273AD7BB6092` in one place both tools
+       read; check with `git verify-tag`/`verify-commit --raw` for a
+       `VALIDSIG` whose primary-key field equals the pin (`GOODSIG` alone
+       is not enough); refuse an expired or revoked key, no `VALIDSIG`,
+       and a pin that is not 40 hex digits; export-skill refuses before
+       writing, with a stable code and one line naming the expected and
+       the found fingerprint; release.ts checks the release commit and
+       tag after signing them; tests use a throwaway `GNUPGHOME` only.
+     - Choices mine: the pin lives in `package.json` as `"releaseKey"`,
+       next to `"name"` and `"version"`, which release.ts already reads.
+       It is read from the `package.json` beside the running script's own
+       `tools/`, never from the tag being checked (a forged tag would
+       bring its own pin) and never from the current directory's
+       repository (a trusted tool run inside someone else's clone would
+       trust that clone's pin). So ac-56's fixture runs its own copy of
+       the tool with its own pin. The check is one module,
+       `tools/release-key.mts`, imported by both tools. Accepted: a
+       `GOODSIG`, at least one `VALIDSIG`, every `VALIDSIG`'s primary
+       fingerprint equal to the pin (compared upper-cased), `git` exit 0,
+       and none of `BADSIG`, `ERRSIG`, `EXPSIG`, `EXPKEYSIG`, `REVKEYSIG`,
+       `KEYREVOKED`. `KEYEXPIRED` alone is not refused: gpg also prints
+       it for an expired subkey that did not make the signature, and
+       `EXPKEYSIG` already covers a signature by an expired key. Codes:
+       `release_key_invalid` (the pin) and `release_key_mismatch` (every
+       signature problem, the reason in parentheses: no signature, signing
+       key not in the keyring, signed by another key, expired or revoked
+       key, …). export-skill keeps exit 2. release.ts refuses an
+       invalid pin with exit 1 before the gate, dry run included, and
+       after a successful squash prints `verify: release key (commit
+       HEAD): OK` and `(tag vX.Y.Z): OK`; on a mismatch one
+       `release: release_key_mismatch: …` line, exit 1, and the rollback
+       of docs/RELEASING.md, since main and the tag are already written.
+       A key change now also updates `"releaseKey"` (RELEASING, *Signing
+       key change*).
+     - The tag name is bound (Reviewer R1): a signature covers the tag
+       object, not the ref naming it, so a lightweight `git tag v9 v1` or
+       a hand-written `refs/tags/v9` replayed v1's code as "from v9", and
+       a mirror could serve `refs/tags/v4.4.0` pointing at the genuine
+       v4.0.0 object. `resolveTag` resolves `refs/tags/<tag>` once
+       (`rev-parse --verify --end-of-options`, no DWIM), requires a tag
+       object whose own `tag` header is `<tag>`, and every later call
+       (`verify-tag`, `show`, `ls-tree`; release.ts's post-sign check of
+       `vX.Y.Z`) uses that object id, never the name again, so the name
+       cannot be re-resolved in between either. A failure there is its own
+       code, `tag_invalid` (no such tag, not a tag object, or `tag object
+       names "v1", not "v9"`), since no signature was looked at yet. The
+       reasons are fixed texts, never git's or gpg's own output, so an
+       option-shaped tag name echoes no usage text, and every name in a
+       message is JSON-quoted, so a newline in one cannot add a line
+       (Reviewer R2). The reason order (R2): `NO_PUBKEY` first, as
+       "signing key not in the keyring", since gpg pairs it with `ERRSIG`
+       and a missing release key is the common case; then the refused
+       statuses; then "signed by another key"; with no status at all,
+       "no signature" only when the object has no signature block,
+       otherwise "gpg printed no status (git exit N)" (a missing
+       `gpg.program`, or a gpg that said nothing). Not done: checking the
+       exported `SKILL.md` version against the tag name. The binding already
+       stops a replay, and it would refuse every tag not named after its
+       version, ac-56's and export-skill-key's fixture tags included.
+     - Every release tag v3.3 to v4.3.0 passes the check against the
+       owner's keyring; v4.0.0 and v4.3.0 export as before.
+     - Tests: `test/tools/export-skill-key.ts` (29 checks; red against
+       cd29035): the pinned key exports; Mallory, an expired pinned key
+       (made and used at a faked 2020 date) and a revoked pinned key
+       (gpg's own revocation certificate) are `release_key_mismatch`; a
+       39-digit pin is `release_key_invalid`; a lightweight alias and a
+       hand-written ref to the genuine tag object are `tag_invalid`, the
+       genuine name still exports (red before the R1 fix); a name with a
+       newline stays on one quoted line; an empty keyring says "signing
+       key not in the keyring", a missing gpg "gpg printed no status", an
+       unsigned annotated tag "no signature" (red before the R2 fix); nothing
+       written.
+       `release-regression.ts` AC9 now pins its throwaway key and checks
+       the two OK lines; AC11 (a pin other than the signer, exit 1 naming
+       both) and AC12 (an invalid pin refused before the gate) are new;
+       red with cd29035's release.ts.
+
+227. **release.ts preflight: every refusal before any write, dry run
+     included, all reported together** (2026-10-22, TSK-040 step B;
+     survey § 6).
+     - The finding: RELEASING § 0 kept three preconditions as copy-paste
+       shell (no tag after vPREV, no doc naming a squashed commit,
+       `node_modules` == the lock), and a team script checked the version
+       places, the bundle and a clean tree. release.ts enforced only other
+       local branches, and only with `--apply`; RELEASING claimed a
+       worktree refusal that did not exist. v4.1.1 shipped three doc lines
+       naming squashed commits.
+     - Lead settled: release.ts refuses before anything is written, in a
+       dry run too, each problem with its own code and a one-line hint:
+       a tag after vPREV, a doc naming a squashed commit, `node_modules`
+       not the lock (`resolved` compared, not only the version), another
+       branch or worktree, the version not X.Y.Z everywhere, a stale
+       bundle, a dirty tree; cheap checks first; RELEASING § 0 shrinks to
+       "release.ts checks these".
+     - Choices mine: every check runs and every problem is reported in
+       one run, one `release: refused: <code>: <what> -- <hint>` line each,
+       exit 1. A release candidate usually has several things to fix,
+       and a stop-at-first run would need one round per problem; the whole
+       preflight takes about a second (the bundle check most of it). Codes:
+       `other_branches`, `other_worktrees`, `dirty_tree` (untracked files
+       count), `tag_after_release`, `version_mismatch`,
+       `node_modules_mismatch`, `doc_names_squashed_commit`,
+       `bundle_stale`. vPREV is the newest exact `vX.Y.Z`
+       (`^v\d+\.\d+\.\d+$`) in HEAD's history, by version (Reviewer
+       R2: with any `v<digit>…` tag, an annotated `v4.4.0-rc1` after
+       v4.3.0 became vPREV, nothing was reported, and `tail` silently cut
+       a smaller release). A first release has none and no
+       `tag_after_release` check. A tag counts as "after", whatever its
+       name or kind, when it is reachable from HEAD and contains vPREV's
+       commit without pointing at it (a second tag on the release commit
+       itself does not shrink anything). The doc check ports § 0's rule,
+       "in no release" (Reviewer R1: limited to `vPREV..HEAD`, it never
+       fired in the real cut, whose picks get new shas, so the docs name
+       work-branch commits that main only has as fetched objects): hex
+       words of 7 to 40 digits, either case, on lines added since vPREV
+       (since the empty tree for a first release) to `docs/`, `SKILL.md`,
+       `README.md` and `references/`, resolved in one `git cat-file
+       --batch-check`. A word is a finding when it resolves to a commit
+       that no exact `vX.Y.Z` tag contains; a word that resolves to no
+       commit (a digest, a fingerprint) and a released commit's sha are
+       not. The code keeps its name: either way the commit does not exist
+       on main once the release is out. `node_modules` compares
+       `node_modules/.package-lock.json` with the lock, skipping an
+       optional package that is not installed (esbuild's other
+       platforms), as the team's cut script did. The preflight lives in
+       `tools/release-preflight.mts`. Other branches are now refused in a
+       dry run as well, not only warned about: a dry run that passes now
+       means `--apply` gets past the preflight. The prefix guard, the
+       missing-`name` and pin checks stay usage errors or refusals before
+       the preflight.
+     - Tests: `release-regression.ts` now builds every case in a
+       release-ready fixture repo from scratch (four version places, stub
+       launcher and bundle check, its own `node_modules` with the real
+       git-release-squash, a fake that records its argv, or none),
+       never a clone of this repo, whose state between releases never
+       passes the preflight. AC13 has one leg per refusal plus one with
+       two defects reported in one run; AC7 now expects the dry run
+       refused. Red with step A's release.ts: 29 of 88. The R1/R2 legs (a
+       doc naming, in upper case, a commit outside HEAD in no release; an
+       rc tag after vPREV) were red before the fix: 6 of 94. Run against this
+       branch itself, the preflight found two lines in DECISIONS 226 that
+       named step A's own commits; they now name the fix instead.
+
+228. **release.ts verifies the release section by section; `--verify-only`
+     re-checks it after the push** (2026-10-22, TSK-040 step C; survey
+     § 6).
+     - The finding: after `--apply`, release.ts checked only that the
+       release commit and tag carry the pinned key (DECISIONS 226).
+       Everything else a cut needs to be right (one commit on top of the
+       previous release, anonymous dates, the subject, one signature
+       block, old tags untouched on origin, the version in every shipped
+       place, no stray refs, the whole history signed by the pin) lived
+       in a team script run by hand.
+     - Lead settled: after a successful `--apply`, one `verify: <check>:
+       OK|FAIL <why>` line per section, exit 1 on any FAIL, reusing
+       `tools/release-key.mts` and the preflight's helpers. A new
+       read-only mode, `release.ts --verify-only vX.Y.Z`, runs the same
+       sections and also checks that origin's `main` and tag equal the
+       local ones (`git ls-remote`), for use after the push. When origin
+       cannot be reached, the old-tags section reads `SKIPPED (origin
+       unreachable)`, not FAIL; a mismatch is FAIL.
+     - Lead settled after the first round: the signature time is a
+       privacy property and is checked. The release commit's and the
+       tag's signature creation time must equal the pin of DECISIONS 190
+       (git-history-tools D10), the release key's creation time + 60 s,
+       so the real signing time never leaks. The creation time is read
+       from the pinned key, read-only, with no number in the code: `gpg
+       --batch --with-colons --list-keys -- <pin>` through git's
+       `gpg.program`; the signature time is VALIDSIG's own field, from
+       the same `git verify-commit`/`verify-tag --raw` call that checks
+       the signer (`checkSigner` returns it).
+     - Choices mine: the checks live in `tools/release-verify.mts`, and
+       the sections are named `squash`, `release commit`, `release tag`,
+       `old tags vs origin`, `content`, `refs`, `history signatures` and,
+       in `--verify-only` only, `origin == local`. A FAIL line lists every
+       problem of its section; a signature by another key reads
+       `release_key_mismatch: …` with both fingerprints, as before. The
+       sections replace the two `verify: release key` lines of
+       DECISIONS 226. The identity check has no hard-coded owner:
+       author, committer and tagger must be one identity, the signature
+       must come from the pin, and (Lead, after the review) the author's
+       and the tagger's `Name <email>` must equal a user ID of the pinned
+       key that is not revoked (`uid` records of the same `--list-keys`
+       call, field 10), so a cut signed by the pin under a WIP name
+       fails. The expected date is `tail`'s
+       anonymous date for the release's position (the number of tagged
+       commits before it). `squash` compares the tree with the pre-squash
+       `HEAD` after `--apply`; `--verify-only` has no pre-squash head and
+       checks the shape only. `content` exports the tag with this
+       checkout's `tools/export-skill.mts` into a scratch folder under
+       `$TMPDIR`, removed afterwards, and runs the exported launcher's
+       `--version`. In `--verify-only`, an unreachable origin makes
+       `origin == local` a FAIL: that mode exists to check the push.
+       `--verify-only` is accepted only as the first argument, with
+       exactly one exact `vX.Y.Z`. Left out of the team script: the
+       `git-sign` cross-check (`history signatures` checks the same
+       signatures through git) and `bundle --check` on the extracted tag
+       tree (the preflight checks the pre-squash tree, `squash` that the
+       release has the same tree). The script's per-cut options
+       (`--message-file` equality, `--fix`, `--expect-grep` and
+       `--reject-grep`) are not ported either, and tags between vPREV and
+       the pre-squash head are the preflight's `tag_after_release`.
+     - Tests: `release-regression.ts`'s fixtures gain `dist/` files that
+       embed the version, a CHANGES heading and the exported files. AC9
+       expects every section OK after `--apply` (the fixture has no
+       origin: SKIPPED); AC11 expects `release commit` and `release tag`
+       to FAIL with `release_key_mismatch`. AC14 runs `--verify-only` on
+       a clone whose origin is the fixture: clean, then one leg per cheap
+       forgery (an extra commit, a wrong date, two signature blocks, a
+       lightweight tag, an old tag moved on origin), each failing its own
+       section. Red with step B's release.ts: 21 of 111. The signature
+       time leg rebuilds the release commit and tag with the same
+       identity, dates, tree and messages, signed at the real time: both
+       sections FAIL naming only the signature time; red without the
+       check, 4 of 119. The identity leg signs the same rebuild by the
+       pin at the pinned time (a gpg wrapper with
+       `--faked-system-time`) as `Implementer (WIP)`: both sections FAIL
+       naming only the identity; red without the check, 4 of 127.
+
+229. **`--fields` on the reads; `--quiet`/`--fields` on `next`**
+     (2026-10-22, TSK-037; survey § 7, scans team TSK-004).
+     - The finding: `--fields`/`--quiet` existed only on the six write
+       commands, validated against the write `entry` keys, while `list`,
+       `find`, `show` and `next` are the largest outputs. Measured on a
+       2000-task fixture (one epic, 2000 tasks, `NJ_NOW` fixed): `list
+       --json` 907459 bytes, `list --json --fields=id,status,title`
+       230127 bytes, about 3.9 times less.
+     - Lead settled: `parseOutputOpts(flags, json, allowedFields)`, as
+       agent-skills generalised it; the writes pass `ENTRY_FIELDS` and
+       are unchanged. `list` and `find` take `--fields` over the
+       list-entry keys, projected per entry, the envelope unchanged;
+       `show` over its entry keys, `entry` staying identical to
+       `entries[0]`; `next` takes `--quiet` and `--fields` as `claim`
+       does. An unknown name is `invalid_value` with the allowed list, an
+       empty `--fields=` too. Without the flags the output is
+       byte-identical. The MCP schemas follow.
+     - Choices mine: the reads take no `--quiet`. `--quiet` means `{ok,
+       id}` plus non-empty `_problems`, and a read result has neither
+       `ok` nor a single `id`; `--fields=id` already lists just the ids.
+       `list --quiet` stays `unknown_field`. The list-entry keys are
+       `ENTRY_FIELDS` itself, `assignee` and `archived` included: list
+       entries are `entryJson`, the same keys. `show`'s vocabulary adds
+       `notes` and `notes_total`, which an entry carries only with
+       `--notes`; without it they are omitted, like an unset `assignee`,
+       not refused. The hint keeps its "entry fields" wording for every
+       command. The projection is `projectEntry` beside `trimResult` in
+       `core/result-opts.ts`; each read validates `--fields` right after
+       its flag check, before the backlog is read, and `next` before it
+       claims anything. In `nanojira-mcp`, `next` joins the tools with
+       `quiet` and `fields`, and `list`, `find` and `show` get `fields`
+       alone. `SKILL.md` stays under its 4000-character budget (ac-56 W17):
+       the write-results bullet now covers reads too, and the Notes
+       bullet drops its `--as=<name>`, which the Sign bullet already
+       says.
+     - Tests: `test/ac/ac-71-read-fields.ts` (25 checks): a golden
+       `list --json` byte for byte; `list`, `list --ready` and `find`
+       projected per entry; `show`'s `entry`/`entries[0]` and
+       `notes_total`; `next --fields` and `--quiet`; the refusals (did-you-
+       mean, empty, `show`'s hint naming `notes_total`, `next` claiming
+       nothing, no `--json`, `list --quiet`). Red without the change: 21 of
+       25. Pins updated: ac-64's flag lists, `mcp-schemas` S4,
+       `boolean-flag-values`' `next`.
+
+230. **Flags parse from the flag table: `--name value`; one code for an
+     empty value; the full `unknown_field` hint** (2026-10-22, TSK-038;
+     survey § 8).
+     - The finding: a string flag took its value only as `--name=value`;
+       `nanojira --backlog /x list` read `/x` as the command. The same
+       empty-value mistake gave `missing_argument` (`new --title=`,
+       `note --text=`), `not_found` (`--id=`, `--parent=`, `--input=`,
+       `--*-file=`, `check --item=`), `missing_value` (`--backlog=`) or
+       nothing at all (`claim --steal=`, `list --tag=`), and `check
+       --item=abc` was `not_found` "out of range". The `unknown_field`
+       hint listed a subset ("Known fields: status" for `claim`) and
+       showed `depends_on`.
+     - Lead settled: `parseArgs(argv, kinds)` with the kinds from the flag
+       table; `--name value` for string flags, a value starting with
+       `--` still needs `=`, `--name -` works, `--` ends the options, a
+       leading `--backlog <path>` parses before the command. Stray
+       positionals: 4.2.0's `unexpected_argument`, verified, gaps only.
+       `find --text=`. `check --item=abc` is `invalid_value`. A given
+       flag with an empty value is `invalid_value` everywhere;
+       `missing_argument` stays for a required flag that is absent. The
+       `unknown_field` hint lists every accepted flag in its documented
+       spelling. Out of scope: `rm --cascade`'s `id`/`ids` shape. MCP
+       unaffected.
+     - Choices mine: the kinds come from `acceptedFlagNames` (what
+       `--help` lists) with `isBooleanFlag` deciding, `--dry-run`
+       boolean, so there is no second list; a word that is not a command
+       is parsed without kinds and refused as before. The `--version`
+       pre-scan and `nanojira-mcp`'s own startup flags parse without
+       kinds, unchanged. `splitCommand` skips the token after a bare
+       `--backlog` unless it starts with `--`. "Empty means nothing" is a
+       list, `NON_EMPTY` in `core/cli-flags.ts` (`id`, `file`, `parent`,
+       the `*-file` flags, `input`, `item`, `steal`, `tag`, `backlog`),
+       checked with the flag check before the command runs; the flags
+       that already refused an empty value with `invalid_value` and a
+       message of their own (`--status=`, `--as=`, `--fields=`,
+       `--exclude-tag=`, …) keep that message, and the ones where empty
+       means "none" (`--assignee=`, `--tags=`, `--depends-on=`,
+       `--description=`, `--acceptance=`, `--add-tags=`,
+       `--remove-tags=`) keep that meaning. `new --title=` and the note
+       text are checked where they are read, after trimming: absent is
+       `missing_argument`, given but empty (whitespace only, an empty
+       `--text-file`, `""`) is `invalid_value`; an `--input` plan's
+       empty or non-string `title` too. `--backlog=` became
+       `invalid_value` in `config.ts` itself, so `--help`'s backlog
+       lookup and `nanojira-mcp --backlog=` say the same. A probe over
+       every command and string flag with an empty value now reports
+       only `invalid_value` and the "none" flags. `check --item` must be
+       digits only once surrounding whitespace is dropped (Lead, after
+       the review: `--item=$(wc -l <f)` pads on BSD); `1.0`, `+1`, `1e0`
+       and `0x1`, which `Number()` read as 1 before, are refused; a whole
+       number out of range stays `not_found`. `nanojira-mcp`'s startup
+       flags parse with kinds too (Lead, after the review), so
+       `--backlog <path>` works there as MCP client configs pass it. The
+       hint is one sorted `Known flags:` line for every command,
+       superseding DECISIONS 88's schema-fields-only `Known fields:` on
+       `new`/`set`. `find --text=` already existed (TSK-035, 4.2.0), and
+       `unexpected_argument` already covered every command (TSK-034's
+       `args-end-of-options-and-repeats`); nothing was missing there.
+     - Tests: `test/ac/ac-72-flag-parsing.ts` (43 checks): `--name
+       value`, `--description-file -`, a value starting with `--`, `--`,
+       a leading `--backlog <path>`, a flag-table boolean leaving the next
+       word positional (`find --case-sensitive Two`; red on the review's
+       mutant m25a, booleans parsed as strings, rebuilt in a private
+       copy); fifteen empty values and three absent required flags;
+       `--item=abc`/`1.5`/`1.0`/`+1`/`1e0`/`0x1`/`9`/`   1`; the full
+       hint on `claim` and `set`. `hardening-mcp` X12: `nanojira-mcp
+       --backlog <path>`, red before. Red without the change: 38 of 43. Pins updated:
+       ac-21 (`--backlog=`), ac-25 N7 (`--id TEXT` now takes TEXT; the
+       leg puts `--json` after `--id`), ac-59 R1 (`--text=`),
+       coverage-v3-gaps B13 (`Known flags:` with `--backlog`), and, found
+       by the full suite, archive-ac20-write-paths (`--description-file=`)
+       and encoding-empty-tag-assignee (`list --tag=`, accepted before as
+       a filter matching nothing).
 
 ## Known gaps, stated plainly
 

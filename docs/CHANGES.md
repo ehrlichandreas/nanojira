@@ -5,6 +5,94 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nanojira --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 4.4.0
+
+Flags parse from the flag table (`--name value` works for every flag
+that takes a value), `--fields` on `list`/`find`/`show` and
+`--quiet`/`--fields` on `next`, a full `unknown_field` hint, and release
+tooling that checks a release before and after it writes. Visible
+changes that can break a caller: an empty flag value is now
+`invalid_value` wherever empty means nothing (`--id=`, `--title=`,
+`--tag=`, `--steal=`, …; before it was `missing_argument`, `not_found`,
+`missing_value` or accepted); `check --item=` takes digits only, so
+`abc`, `1.0`, `+1`, `1e0` and `0x1` are refused; `tools/export-skill.mts`
+refuses a tag not signed by the release key pinned in `package.json`;
+and `tools/release.ts` refuses to cut a release that is not ready
+(another branch or worktree, a dirty tree, a version not X.Y.Z
+everywhere, …), dry run included.
+
+- **New: a flag that takes a value also takes it as `--name value`.**
+  `nanojira set --id TSK-001 --status doing`, `--description-file -`,
+  and a leading `nanojira --backlog /x list` now work; every one of them
+  was an error before (`missing_value`, or `/x` read as the command), so
+  nothing that worked changes meaning. Which flags take a value comes
+  from the command's flag table. A value that starts with `--` still
+  needs `=`, and `--` still ends the options. `nanojira-mcp` always sends
+  `--name=value` and is unaffected. (DECISIONS 230, TSK-038)
+- **Changed: an empty value is `invalid_value` everywhere it means
+  nothing.** Before, the same mistake gave three codes: `new --title=`
+  and an empty note text (`note --text=`, `""`, whitespace only, an
+  empty `--text-file`) were `missing_argument`; `--id=`, `--file=`,
+  `--parent=`, `--input=`, every `--*-file=` and `check --item=` were
+  `not_found`; `--backlog=` was `missing_value`; `claim --steal=` and
+  `list`/`find`/`next --tag=` were accepted. All are `invalid_value` now,
+  nothing written; in an `--input` plan, an empty or non-string `title`
+  too. `missing_argument` stays for a required flag that is absent.
+  `--assignee=`, `--tags=`, `--depends-on=`, `--description=`,
+  `--acceptance=`, `--add-tags=` and `--remove-tags=` keep meaning
+  "none". (DECISIONS 230, TSK-038)
+- **Changed: `check --item=` takes digits only** — surrounding whitespace
+  is ignored, so `--item=$(wc -l <f)` still works where `wc` pads. Every
+  other form is now `invalid_value`, not `not_found`: `abc`, and the
+  forms that used to be read as a number, `1.0`, `+1`, `1e0`, `0x1`. A
+  whole number past the last box stays `not_found`. (DECISIONS 230,
+  TSK-038)
+- **New: `nanojira-mcp --backlog <path>`** (the space form many MCP client
+  configs use) as well as `--backlog=<path>`. (DECISIONS 230, TSK-038)
+- **Changed: the `unknown_field` hint lists every flag the command
+  accepts**, sorted and in its documented spelling, as `Known flags:
+  --a, --b, …`. `new`, `set`, `claim`, `release` and `next` printed
+  `Known fields:` with a subset (only `status` for `claim`), and `set`
+  showed `depends_on` for `--depends-on`. (DECISIONS 230, TSK-038)
+- **New: `--fields=<a,b,...>` on `list`, `find` and `show`, and `--quiet`/
+  `--fields` on `next`.** The reads narrow every entry to the named keys,
+  in the order given, with `--json`; the envelope stays. On a 2000-task
+  backlog, `list --json --fields=id,status,title` is 230127 bytes against
+  907459 for `list --json`. `next` shrinks its result exactly as `claim`
+  does. An unknown or empty name is `invalid_value` with the allowed
+  names. Without the flags the output is unchanged. `nanojira-mcp`'s
+  tool schemas offer the new fields. (DECISIONS 229, TSK-037)
+- **New: `tools/release.ts` verifies the release it cut, and
+  `--verify-only vX.Y.Z` re-checks it after the push.** After `--apply`
+  it prints one `verify: <check>: OK|FAIL` line per section (one commit
+  on the previous release, the release commit's identity, date, subject
+  and signature, made at the pinned time and never the real one, the
+  tag, old tags on origin, the version in every shipped place and in an
+  export, no stray refs, the whole history signed by the release key)
+  and exits 1 on any FAIL. `--verify-only` runs the same checks without
+  writing anything, and also requires origin's `main` and tag to match
+  the local ones. (DECISIONS 228, TSK-040)
+- **New: `tools/release.ts` checks a release before it writes anything,
+  in a dry run too.** Other branches or worktrees, a dirty tree, a tag
+  after the previous release, a version that is not X.Y.Z in every place,
+  `node_modules` not matching the lock (`resolved` included), a doc naming
+  a commit the squash removes, and a stale bundle are each refused with
+  their own code, all of them in one run. These were copy-paste shell in
+  `docs/RELEASING.md` § 0. A dry run no longer only warns about another
+  branch. (DECISIONS 227, TSK-040)
+- **Changed (breaking for a tag signed by another key):
+  `tools/export-skill.mts` exports only a tag signed by the release
+  key.** Its primary fingerprint is pinned in `package.json`'s
+  `"releaseKey"`. Before, any good signature from any key in your keyring
+  passed. A tag signed by another key, or by the pinned key after it
+  expired or was revoked, is refused with `release_key_mismatch` before
+  anything is written, naming the expected and the found fingerprint.
+  The tag must also carry its own name: another name pointing at a
+  signed tag (a lightweight alias, a renamed ref) is refused with
+  `tag_invalid`, so an old release cannot be exported as a new one.
+  Every release tag from v3.3 on is signed by the pinned key and exports
+  as before. (DECISIONS 226, TSK-040)
+
 ## 4.3.0
 
 New flags for closing and picking work (`--check-all`,

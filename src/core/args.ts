@@ -24,9 +24,19 @@ function displayFlagName(name: string): string {
   return name;
 }
 
+/** A flag's kind, from the command's flag table (`core/cli-flags.ts`'s
+ * `flagKinds`): a `string` flag also takes its value as the next token. */
+type FlagKinds = Record<string, 'string' | 'boolean'>;
+
 /**
  * `--` ends the options: every later token is a positional, even one that
- * starts with `--` (TSK-034 F11). A flag given again with a different
+ * starts with `--` (TSK-034 F11). With `kinds` (TSK-038, DECISIONS 230), a
+ * string flag written without `=` takes the next token as its value,
+ * unless that token starts with `--` (a value like that needs the `=`
+ * form) or there is none: `--title "Two words"`, `--description-file -`.
+ * Without `kinds` (the `--version` pre-scan, `nanojira-mcp`'s own startup
+ * flags) every bare flag is `true`, as before; so is a flag `kinds` does
+ * not know, which the command's flag check then refuses. A flag given again with a different
  * value (aliases counted as one) keeps its last value in `flags`, and
  * `repeated` gets its name plus the spelling typed the second time
  * (`depends_on` vs `depends-on`) — reported, not thrown, so each caller decides:
@@ -44,18 +54,23 @@ function sameValue(name: string, a: string | true, b: string | true): boolean {
   return name === 'backlog' && typeof a === 'string' && typeof b === 'string' && a !== '' && b !== '' && path.resolve(a) === path.resolve(b);
 }
 
-function parseArgs(argv: string[]) {
+function parseArgs(argv: string[], kinds?: FlagKinds) {
   const flags: Flags = new Map();
   const positional = [];
   const repeated: Repeat[] = [];
   let options = true;
-  for (const a of argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
     if (options && a === '--') { options = false; continue; }
     if (options && a.startsWith('--')) {
       const eq = a.indexOf('=');
       const typed = eq === -1 ? a.slice(2) : a.slice(2, eq);
-      const value = eq === -1 ? true : a.slice(eq + 1);
       const name = FLAG_ALIASES.get(typed) ?? typed;
+      let value: string | true = eq === -1 ? true : a.slice(eq + 1);
+      if (value === true && kinds !== undefined && Object.hasOwn(kinds, name) && kinds[name] === 'string'
+        && i + 1 < argv.length && !argv[i + 1].startsWith('--')) {
+        value = argv[++i];
+      }
       if (flags.has(name) && !sameValue(name, flags.get(name) as string | true, value) && !repeated.some((r) => r.name === name)) {
         repeated.push({ name, typed });
       }
@@ -91,10 +106,10 @@ function checkFlags(flags: Flags, allowedFields: string[], commandControls: Set<
     if (allowedControls.has(name)) continue;
     if (allowedFields.includes(name)) continue;
     const suffix = isWrite ? ' Nothing written.' : '';
-    const known = allowedFields.length > 0
-      ? `Known fields: ${allowedFields.join(', ')}`
-      : `Known flags: ${Array.from(allowedControls).sort().map((f) => '--' + f).join(', ')}`;
-    fail('unknown_field', `unknown field '${name}'.${suffix}`, known);
+    // Every flag the command takes, as documented (`--depends-on`), not
+    // the subset an earlier version listed (TSK-038, DECISIONS 230).
+    const known = Array.from(new Set([...allowedFields, ...allowedControls])).map(displayFlagName).sort();
+    fail('unknown_field', `unknown field '${name}'.${suffix}`, `Known flags: ${known.map((f) => '--' + f).join(', ')}`);
   }
   if (flags.has('dry-run')) {
     armDryRun();
@@ -163,4 +178,5 @@ function readSectionFlags(flags: Flags) {
   return wanted;
 }
 
+export type { FlagKinds };
 export { parseArgs, refuseRepeated, displayFlagName, allowedControlSet, checkFlags, flagString, parseListFlag, readSectionFlags, readStdin };

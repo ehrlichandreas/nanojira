@@ -53,14 +53,20 @@ is unchanged keeps its tick; --add-acceptance appends one unticked line.
                ${NEXT_CLAIMS}
   nanojira doctor [--fix]
 
+A flag that takes a value takes it as --name=value or --name value (a value
+that starts with -- needs the =); -- ends the options. A given flag with an
+empty value (--id=, --title=) is invalid_value, except where empty means
+none (--assignee=, --tags=, --depends-on=, --description=, --acceptance=).
+
 Every command accepts --json. Write commands accept --file=<path> instead of
 --id to address one file of a duplicated ID unambiguously. set/note/check/
 claim/release accept --id=A,B,C (two or more) to apply the same write to
 every named element; results come back as {ok, results: [...]}. new/set/
-note/check/claim/release accept --quiet ({ok, id}, plus _problems when
-non-empty) and --fields=<a,b,...> (keeps entry only, narrowed to those
-names) to shrink a --json write result; both require --json and are
-mutually exclusive with each other and with --input. show accepts
+note/check/claim/release/next accept --quiet ({ok, id}, plus _problems
+when non-empty) and --fields=<a,b,...> (keeps entry only, narrowed to
+those names) to shrink a --json write result; both require --json and are
+mutually exclusive with each other and with --input. list/find/show accept
+--fields=<a,b,...> with --json, narrowing every entry to those names. show accepts
 --notes=none|all|last:N to narrow which notes it shows (all, the default,
 is unchanged); log accepts --last=N to show only the last N events of any
 kind. Both work with or without --json, and add notes_total/events_total

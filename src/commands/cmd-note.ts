@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import { resolveActingName } from '../core/actor.ts';
 import { flagString, readStdin } from '../core/args.ts';
 import { checkCommandFlags } from '../core/cli-flags.ts';
+import { ENTRY_FIELDS } from '../core/constants.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireActive } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
@@ -83,10 +84,13 @@ function resolveNoteText(flags: Flags, positional: string[]): string {
     raw = positional.join(' ');
   }
   const text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-  if (text === '') {
+  if (given === 0) {
     fail('missing_argument', 'nanojira note needs the note text as an argument',
       'nanojira note --id=TSK-007 "…" (or --text=…, --text-file=<path|->)');
   }
+  // Given but empty (or only whitespace): invalid_value, as for every
+  // flag (TSK-038, DECISIONS 230).
+  if (text === '') fail('invalid_value', 'the note text must not be empty', 'nanojira note --id=TSK-007 "…"');
   return text;
 }
 
@@ -100,7 +104,7 @@ function readTextFile(filePath: string): string {
 function cmdNote(flags: Flags, positional: string[]) {
   checkCommandFlags(flags, 'note');
   const json = flags.has('json');
-  const opts = parseOutputOpts(flags, json);
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
 
   requireTargetFlagSyntax(flags);

@@ -19,7 +19,7 @@
 // any repo laid out like this one works, which is what makes this testable
 // against a throwaway fixture repo without touching this project's own
 // history. Every shipped file is read from <tag>'s own tree (`git show
-// <tag>:<path>`), never from the working tree, which may be dirty or on a
+// <tag object id>:<path>`), never from the working tree, which may be dirty or on a
 // different commit entirely. git is called only via execFileSync, never
 // through a shell.
 //
@@ -33,8 +33,12 @@
 // this file carries no wrapper templates of its own.
 //
 // Steps (exactly the order the spec gives):
-//   1. verify <tag> with `git tag -v` -- refuses a non-existent, unsigned or
-//      merely-annotated tag, touching <dest> not at all;
+//   1. verify <tag> against the pinned release key (DECISIONS 226): a
+//      VALIDSIG from package.json's "releaseKey" -- refuses a non-existent,
+//      unsigned or merely-annotated tag, one signed by any other key, and
+//      one whose pinned key has expired or been revoked, and another name
+//      pointing at a signed tag object (tag_invalid), touching <dest> not
+//      at all;
 //   2. read SKILL.md, bin/ and dist/ from the tag's own tree;
 //   3. build the folder at a temporary path beside <dest>, in the same
 //      parent directory (so the final step is a same-filesystem rename);
@@ -48,6 +52,11 @@
 import { execFileSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { readReleaseKey, resolveTag, checkSigner } from './release-key.mts';
+
+// The checkout this script runs from: its package.json holds the pin.
+const SCRIPT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function fail(msg: string): never {
   process.stderr.write(`export-skill: ${msg}\n`);
@@ -85,23 +94,28 @@ function main(): void {
     fail(`not inside a git checkout (${(e as Error).message})`);
   }
 
-  // Step 1: the tag must exist and be a valid SIGNED tag object -- `git
-  // tag -v` itself refuses a non-existent tag, a lightweight one, or an
-  // annotated-but-unsigned one, and (via gpg) one whose signature cannot be
-  // verified. Nothing below this point has touched <dest> yet.
-  try {
-    execFileSync('git', ['tag', '-v', tag], { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] });
-  } catch (e: any) {
-    const stderrText = e && e.stderr ? String(e.stderr) : '';
-    const reason = stderrText.trim().split('\n').filter(Boolean).pop() || (e as Error).message;
-    fail(`tag '${tag}' is not a valid signed tag: ${reason}`);
-  }
+  // Step 1: the tag must be a signed tag object whose signature is a
+  // VALIDSIG from the pinned release key (DECISIONS 226). `git tag -v`
+  // alone accepted any key in the keyring. `git verify-tag` refuses a
+  // non-existent tag, a lightweight one, or an annotated-but-unsigned one;
+  // checkSigner also refuses another signer and an expired or revoked
+  // pinned key. Nothing below this point has touched <dest> yet.
+  // refs/tags/<tag> is resolved once (resolveTag): a tag object naming
+  // <tag> itself, so an old signed tag cannot be replayed under a new name,
+  // and every git call below uses that object id, never the name again.
+  const pin = readReleaseKey(SCRIPT_ROOT);
+  if (!pin.ok) fail(`${pin.error}: ${pin.message}`);
+  const resolved = resolveTag(repo, tag);
+  if (!resolved.ok) fail(`${resolved.error}: ${resolved.message}`);
+  const oid = resolved.oid;
+  const signer = checkSigner(repo, 'tag', oid, tag, pin.pin);
+  if (!signer.ok) fail(`${signer.error}: ${signer.message}`);
 
   // Step 2: read every shipped file from the tag's own tree, never the
   // working tree: SKILL.md, bin/ and dist/, nothing else.
   function show(relPath: string): Buffer {
     try {
-      return git(['show', `${tag}:${relPath}`], repo);
+      return git(['show', `${oid}:${relPath}`], repo);
     } catch (e) {
       fail(`tag '${tag}' has no '${relPath}' (${(e as Error).message})`);
     }
@@ -118,7 +132,7 @@ function main(): void {
   // without the folder, never with an empty one.
   // `ls-tree <tag> references/` (not `<tag>:references`) lists nothing,
   // successfully, when the folder does not exist.
-  const referenceNames = git(['ls-tree', '--name-only', tag, 'references/'], repo)
+  const referenceNames = git(['ls-tree', '--name-only', oid, 'references/'], repo)
     .toString('utf8').split('\n').filter((p) => /^references\/[^/]+\.md$/.test(p))
     .map((p) => p.slice('references/'.length));
   const references = referenceNames.map((name) => ({ name, content: show(`references/${name}`) }));

@@ -85,8 +85,9 @@ function mkTask(label: string, body: string) {
 
   const r2 = H.runJson(['set', '--id=TSK-001', '--description-file='], { cwd: d });
   T.exit('--description-file=<empty path> is rejected', r2, 1);
-  T.eq('the error code is not_found (an empty path names nothing readable)',
-    r2.json && r2.json.error, 'not_found');
+  // invalid_value since DECISIONS 230: an empty value is a bad value, not a missing file.
+  T.eq('the error code is invalid_value (an empty value, DECISIONS 230)',
+    r2.json && r2.json.error, 'invalid_value');
   T.check('the file is unchanged', H.sha256(fs.readFileSync(taskFile)) === before, 'checksum changed');
 }
 

@@ -52,10 +52,10 @@ const PINNED: Record<string, string[]> = {
     'title', 'parent', 'status', 'priority', 'assignee', 'tags', 'depends_on', ...SECTIONS, 'add-tags', 'remove-tags', 'add-acceptance'],
   note: ['backlog', 'dry-run', ...OUT, 'id', 'file', 'as', 'force', 'text', 'text-file'],
   check: ['backlog', 'dry-run', ...OUT, 'id', 'file', 'force', 'text', 'item', 'on', 'off'],
-  show: ['backlog', 'json', 'id', 'file', 'notes'],
+  show: ['backlog', 'json', 'fields', 'id', 'file', 'notes'],
   log: ['backlog', 'json', 'id', 'file', 'last'],
-  list: ['backlog', 'json', ...FILTERS, 'ready', 'all'],
-  find: ['backlog', 'json', ...FILTERS, 'all', 'case-sensitive', 'text'],
+  list: ['backlog', 'json', 'fields', ...FILTERS, 'ready', 'all'],
+  find: ['backlog', 'json', 'fields', ...FILTERS, 'all', 'case-sensitive', 'text'],
   tree: ['backlog', 'json', 'id', 'all'],
   tags: ['backlog', 'json'],
   rm: ['backlog', 'dry-run', 'json', 'id', 'file', 'cascade'],
@@ -63,7 +63,7 @@ const PINNED: Record<string, string[]> = {
   unarchive: ['backlog', 'dry-run', 'json', 'id', 'file'],
   claim: ['backlog', 'dry-run', ...OUT, 'id', 'file', 'as', 'steal', 'status', 'allow-open-children', 'check-all'],
   release: ['backlog', 'dry-run', ...OUT, 'id', 'file', 'as', 'status', 'allow-open-children'],
-  next: ['backlog', 'dry-run', 'json', 'as', ...FILTERS],
+  next: ['backlog', 'dry-run', 'json', 'quiet', 'fields', 'as', ...FILTERS],
   doctor: ['backlog', 'dry-run', 'json', 'fix'],
 };
 

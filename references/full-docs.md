@@ -41,7 +41,7 @@ its allowed values.
 - § 22 — Reparenting: `nanojira set --parent`
 - § 23 — Acceptance-quality warnings
 - § 24 — Tags: `TAGS.md`, `nanojira tags`, and healing drift
-- § 25 — Shrinking write results: `--fields` / `--quiet`
+- § 25 — Shrinking results: `--fields` / `--quiet`
 - § 26 — Umbrella tickets: make the parts children
 - § 27 — Fewer notes, fewer events: `show --notes=` / `log --last=`
 - § 28 — Probe before you apply: `--dry-run`

@@ -8,62 +8,29 @@ of a release.**
 
 ## 0. Before you start
 
-- Everything that ships has landed on `main`; the working tree is clean.
-- **No other local branch.** `git branch` lists `main` only, `git worktree
-  list` the main checkout only. `release.ts --apply` refuses otherwise and
-  names them: git-release-squash verifies the signature of every commit on
-  every branch *after* it has rewritten `main` (§ 4), so one unsigned WIP
-  branch turns that verify red when it is too late to stop. Merge or abandon
-  each one, then `git worktree remove <path>` and `git branch -D <branch>`.
-- **No tag of any kind after the last release.** `tail` squashes the commits
-  after the newest *tagged* commit, and any tag counts: a lightweight or
-  annotated helper tag (a test baseline, a bookmark) on a commit after
-  `vPREV` silently shrinks the release to the commits after that tag. This
-  must print the previous release tag and nothing else:
+Everything that ships has landed on `main`. Run `npm ci` in the release
+checkout (if other clones or worktrees symlink this `node_modules`, only
+while nothing runs there).
 
-  ```sh
-  git tag --contains vPREV
-  ```
+`release.ts` checks the rest itself, before it writes anything, in a dry
+run too (DECISIONS 227). Each problem is one line,
+`release: refused: <code>: <what> -- <hint>`, all of them in one run, exit 1:
 
-- **No doc names a commit the squash removes.** `tail` replaces every
-  commit after `vPREV` with the one release commit, so a sha that this
-  release's docs changes name ("fixed in …", "against the binary of …")
-  points nowhere once the release is out. v4.1.1 shipped three such lines.
-  Every line this prints is a finding, except a "no commit here" for
-  something that is no nanojira commit (a digest, a fingerprint, a
-  git-history-tools sha):
+| Code | Refused when |
+|---|---|
+| `other_branches` | a local branch other than the checked-out one exists: git-release-squash verifies every commit on every branch *after* it has rewritten `main` (§ 4), so one unsigned WIP branch turns that verify red when it is too late to stop |
+| `other_worktrees` | `git worktree list` shows more than this checkout |
+| `dirty_tree` | `git status --porcelain` is not empty, untracked files included |
+| `tag_after_release` | any tag, of any name or kind (an rc included), sits on a commit after the previous release `vPREV`, the newest exact `vX.Y.Z` in HEAD's history: `tail` squashes the commits after the newest *tagged* commit, so a helper tag silently shrinks the release |
+| `version_mismatch` | `package.json`, the lock's root x2, `SKILL.md`'s `metadata.version` and `bin/nanojira --version` do not all say X.Y.Z (§ 1) |
+| `node_modules_mismatch` | an installed package's version or `resolved` source differs from `package-lock.json`: the release is cut with the installed git-release-squash, and two commits can both call themselves `0.3.1` |
+| `doc_names_squashed_commit` | a line added to `docs/`, `SKILL.md`, `README.md` or `references/` since `vPREV` names a commit (7 to 40 hex digits, either case) contained in no release tag: the squash removes this release's commits, and a cut from cherry-picks names work-branch commits main never gets (v4.1.1 shipped three such lines); name the release (`v4.1.0`) instead, or no commit |
+| `bundle_stale` | `node tools/bundle.ts --check` fails |
 
-  ```sh
-  git diff -U0 vPREV HEAD -- docs | grep '^+[^+]' |
-    grep -oE '\b[0-9a-f]{7,40}\b' | sort -u | while read -r s; do
-      if c=$(git rev-parse -q --verify "$s^{commit}"); then
-        git tag --contains "$c" | grep -q . || echo "$s: in no release"
-      else
-        case $s in *[a-f]*) echo "$s: no commit here";; esac
-      fi
-    done
-  ```
+Merge or abandon another branch, then `git worktree remove <path>` and
+`git branch -D <branch>`. A first release, with no `vX.Y.Z` tag before
+it, has no `tag_after_release` check and scans every doc line.
 
-  Fix a finding by naming the release instead (`v4.1.0`), or no commit at
-  all.
-
-- **`node_modules` matches the lock.** `release.ts` runs
-  `node_modules/.bin/git-release-squash` from this checkout, so the release
-  is cut with whatever git-history-tools is installed there, not with the
-  commit the lock names. Run `npm ci` in the release checkout, then compare
-  the installed commit with the locked one; the two lines must be
-  identical. The version number alone proves nothing: two different
-  commits can both call themselves `0.3.1`.
-
-  ```sh
-  npm ci
-  for f in node_modules/.package-lock.json package-lock.json; do
-    node -p "require('./$f').packages['node_modules/git-history-tools'].resolved"
-  done
-  ```
-
-  If other clones or worktrees symlink this `node_modules`, `npm ci`
-  rewrites it under them too: run it only while nothing runs there.
 - **Rehearsals and suites keep their scratch files off the disk.** The
   `--dry-run` sandboxes, git-history-tools' signer and a few tests write to
   `$TMPDIR` (`os.tmpdir()`); the test harness's own fixtures go to
@@ -137,7 +104,7 @@ node tools/release.ts X.Y.Z --message-file /tmp/release-msg.txt
 ```
 
 The dry run writes nothing and **skips the test gate** (it says so:
-`test gate runs with --apply`). Expect no branch warning, then
+`test gate runs with --apply`). Expect no `release: refused:` line, then
 git-release-squash's plan:
 `tail: squashes N commit(s) (<oldest>..<head>) into "nanojira vX.Y.Z: <title>"`
 and `dry run, no ref changed`. Check N and the subject.
@@ -152,13 +119,56 @@ test fixtures' own keys) and refuses on red — fix the tree; `RELEASE_TEST_CMD`
 exists for release.ts's own regression test, not to skip the gate. Then it
 squashes every commit since the last tag into one signed commit plus a
 signed annotated tag, writes a backup bundle *beside* the repository
-directory (`../nanojira.backup-<UTC stamp>.bundle`), and prints two lines
-that must both read OK:
+directory (`../nanojira.backup-<UTC stamp>.bundle`), and prints
+git-release-squash's two verify lines, then release.ts's own, one per
+section (DECISIONS 228). Every line must read OK; `old tags vs origin` may
+read `SKIPPED (origin unreachable)` when there is no network:
 
 ```text
 verify: tree delta: OK
 verify: signatures: OK
+verify: squash: OK
+verify: release commit: OK
+verify: release tag: OK
+verify: old tags vs origin: OK (not pushed yet)
+verify: content: OK
+verify: refs: OK
+verify: history signatures: OK
 ```
+
+- `squash`: `main` is the previous release tag plus exactly one commit,
+  the tag points at it, no tag lies between, and its tree is the
+  pre-squash `HEAD`'s.
+- `release commit`: author and committer are one identity, a user ID of
+  the pinned key (the owner, never a WIP name), both dates are
+  the anonymous date for its position, the subject is
+  `nanojira vX.Y.Z: <title>`, and it carries one signature, from the key
+  pinned in `package.json`'s `"releaseKey"`,
+  `BEEEE63B314331D0054DBEBE2FEE273AD7BB6092` (DECISIONS 226), made at the
+  pinned time: the key's creation time + 60 s (DECISIONS 190), never the
+  real one.
+- `release tag`: annotated and named for itself, one signature block, by
+  the pinned key at the pinned time, tagged by the commit's identity (a
+  user ID of the pinned key) at its date.
+- `old tags vs origin`: every older tag on origin is byte-identical to the
+  local one, origin has no tag this repo lacks and no branch besides
+  `main`, and origin is either before the push (`main` at the previous
+  release, no vX.Y.Z) or after it (`main` and the tag exactly as here).
+- `content`: package.json, the lock's root x2, `SKILL.md`, the CHANGES
+  heading and the version in `dist/` all say X.Y.Z, and the tag exported
+  by `tools/export-skill.mts` says `nanojira X.Y.Z` too.
+- `refs`: `main` and tags only, no other branch or worktree.
+- `history signatures`: every commit and annotated tag reachable from a
+  branch or tag is signed by the pinned key (`verify: signatures` accepts
+  any key in the keyring).
+
+A FAIL line names what is wrong (a signature by another key reads
+`release_key_mismatch: … expected <pin>, found <fingerprint>`), and
+release.ts exits 1 after printing `release: verify FAILED`. A
+`"releaseKey"` that is not 40 hex digits is refused with
+`release_key_invalid` before the test gate, dry run included. So
+`GIT_CONFIG_VALUE_2` (the signing key) must be the pinned key or one of
+its signing subkeys.
 
 Exit status 0. Anything else: **roll back** (below) — by the time verify
 runs, `main` and the tag are already rewritten.
@@ -184,14 +194,25 @@ real dates, but the squash replaces it, so it never reaches the remote.
 
 ## 5. Verify and export
 
+The verify lines of § 4 are the post-squash check. Then:
+
 ```sh
-git tag -v vX.Y.Z                    # Good signature, the owner's key
-git log --oneline -3                 # one new commit on top of the previous tag
 git status                           # clean
 node tools/export-skill.mts vX.Y.Z <dest>
-sh <dest>/bin/nanojira --version     # nanojira X.Y.Z
 ls <dest>                            # SKILL.md bin/ dist/ LICENSE references/
 ```
+
+After the push (§ 6), check the published state with the same sections,
+read-only:
+
+```sh
+node tools/release.ts --verify-only vX.Y.Z
+```
+
+It prints the same `verify:` lines for the local repo, plus
+`verify: origin == local: OK` once `git ls-remote origin` shows `main` and
+the tag exactly as they are locally; there, an unreachable origin is a
+FAIL, not SKIPPED. Exit 0 only when every line is OK.
 
 ## 6. Push — only with the owner's go
 
@@ -248,6 +269,12 @@ npx git-sign check . HEAD --tags
 
 Then release as usual. The release itself uses the identity from the
 `GIT_CONFIG_*` variables (§ 4), so they must name the same new key.
+
+Put the new key's primary fingerprint into `package.json`'s `"releaseKey"`
+in the same change (DECISIONS 226): release.ts checks the new release
+against it, and `tools/export-skill.mts` exports only tags signed by it.
+After a re-sign every old tag carries the new key, so old tags still
+export; a tag that was not re-signed no longer does.
 
 ## Rollback
 

@@ -1,7 +1,8 @@
 'use strict';
 
-// `--fields=<a,b,...>` / `--quiet` on write commands (§ 9 "`--fields` /
-// `--quiet`"): shared by new/set/note/check/claim/release so the flag
+// `--fields=<a,b,...>` / `--quiet` (§ 9 "`--fields` / `--quiet`"): shared
+// by new/set/note/check/claim/release/next and, `--fields` only, by
+// list/find/show (DECISIONS 229), so the flag
 // validation and the result-shrinking they do lives in one place, applied
 // as the last step before a single-ID JSON result or a batch item is
 // serialised. A separate file from core/output.ts (not args.ts either):
@@ -12,7 +13,6 @@
 import type { Flags, Element, Config } from './types.ts';
 
 import { flagString } from './args.ts';
-import { ENTRY_FIELDS } from './constants.ts';
 import { buildWriteResult, fail, out } from './output.ts';
 import { listHint } from './suggest.ts';
 
@@ -22,13 +22,15 @@ interface OutputOpts { quiet: boolean; fields?: string[] }
  * Parses and validates `--quiet`/`--fields` (§ 9): mutually exclusive with
  * each other, both require `--json` (there is no human-output meaning for
  * either — § 9 states this explicitly rather than leaving it to infer), and
- * every `--fields` name is checked against `ENTRY_FIELDS` — the exact set
- * `entryJson` can produce — before anything else in the caller runs, so a
- * bad name is refused before any write (the same "validate before the first
- * write" discipline every other flag value check in this codebase already
- * has).
+ * every `--fields` name is checked against `allowedFields` — the caller's
+ * own entry keys, `ENTRY_FIELDS` for the writes (the exact set `entryJson`
+ * can produce) — before anything else in the caller runs, so a bad name is
+ * refused before any write (the same "validate before the first write"
+ * discipline every other flag value check in this codebase already has).
+ * The caller-supplied list is agent-skills' generalisation of this
+ * function (DECISIONS 229).
  */
-function parseOutputOpts(flags: Flags, json: boolean): OutputOpts {
+function parseOutputOpts(flags: Flags, json: boolean, allowedFields: string[]): OutputOpts {
   const quiet = flags.has('quiet');
   const fieldsRaw = flagString(flags, 'fields');
   if (quiet && fieldsRaw !== undefined) {
@@ -41,8 +43,8 @@ function parseOutputOpts(flags: Flags, json: boolean): OutputOpts {
   const names = fieldsRaw.split(',').map((s) => s.trim()).filter((s) => s !== '');
   if (names.length === 0) fail('invalid_value', '--fields must not be empty');
   for (const n of names) {
-    if (!ENTRY_FIELDS.includes(n)) {
-      fail('invalid_value', `unknown field '${n}' in --fields`, listHint('entry fields', n, ENTRY_FIELDS));
+    if (!allowedFields.includes(n)) {
+      fail('invalid_value', `unknown field '${n}' in --fields`, listHint('entry fields', n, allowedFields));
     }
   }
   return { quiet, fields: names };
@@ -91,6 +93,16 @@ function trimResult<T extends Record<string, unknown>>(result: T, opts: OutputOp
   return result;
 }
 
+/** One read entry (`list`/`find`/`show`) narrowed to `fields`, in their
+ * order; a name the entry does not carry (an absent `parent`) is left out,
+ * as `--fields` does on a write's `entry`. */
+function projectEntry<T extends object>(entry: T, fields: string[] | undefined): Record<string, unknown> | T {
+  if (fields === undefined) return entry;
+  const projected: Record<string, unknown> = {};
+  for (const f of fields) if (f in entry) projected[f] = (entry as Record<string, unknown>)[f];
+  return projected;
+}
+
 /** `core/output.ts`'s own `emitWriteResult`, with `--fields`/`--quiet`
  * applied before printing — the single-ID JSON success path for
  * new/set/note/check (§ 9 "`--fields` / `--quiet`"). Neither flag changes
@@ -105,4 +117,4 @@ function emitWriteResultOpts(json: boolean, el: Element, changed: string[], back
 }
 
 export type { OutputOpts };
-export { parseOutputOpts, trimResult, emitWriteResultOpts };
+export { parseOutputOpts, trimResult, emitWriteResultOpts, projectEntry };

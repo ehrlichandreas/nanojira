@@ -16,9 +16,11 @@
  *    no schema uses a top-level anyOf/oneOf/allOf;
  * S3 `enum` on every `status` (the served backlog's configured statuses,
  *    here a custom set), `type` and `priority` property;
- * S4 `quiet`/`fields` on new/set/note/check/claim/release, `dry-run` on
- *    every write tool, `doctor`'s only next to `fix` (so only with
- *    `--allow-destructive`), and none of the three on a read tool;
+ * S4 `quiet`/`fields` on new/set/note/check/claim/release/next, `fields`
+ *    alone on list/find/show (DECISIONS 229), `dry-run` on every write
+ *    tool, `doctor`'s only next to `fix` (so only with
+ *    `--allow-destructive`), and neither `quiet` nor `dry-run` on a read
+ *    tool;
  * S5 the server enforces what it declares (§ 17): a missing required field
  *    or a value outside an enum is a tool result with isError and the
  *    CLI's failure shape, every problem of the call listed, nothing
@@ -53,8 +55,10 @@ const NOW = H.FIXED_NOW;
 const env = { NJ_NOW: NOW, NJ_AUTHOR: 'agent' };
 const STATUSES = ['open', 'wip', 'done'];
 const WRITES = ['new', 'set', 'note', 'check', 'claim', 'release', 'next', 'archive', 'unarchive'];
-const SHRINKABLE = ['new', 'set', 'note', 'check', 'claim', 'release'];
+const SHRINKABLE = ['new', 'set', 'note', 'check', 'claim', 'release', 'next'];
 const READS = ['list', 'show', 'find', 'tree', 'log'];
+// `fields` without `quiet` (DECISIONS 229).
+const READS_WITH_FIELDS = ['list', 'find', 'show'];
 
 function cli(args: string[], cwd: string, input?: string) {
   return H.runJson(args, { cwd, env, input });
@@ -157,10 +161,12 @@ for (const t of tools) {
   const p = props(t);
   const shrink = SHRINKABLE.includes(t.name), write = WRITES.includes(t.name);
   T.eq(`S4 ${t.name}: quiet ${shrink ? 'offered' : 'absent'}`, 'quiet' in p, shrink);
-  T.eq(`S4 ${t.name}: fields ${shrink ? 'offered' : 'absent'}`, 'fields' in p, shrink);
+  const fields = shrink || READS_WITH_FIELDS.includes(t.name);
+  T.eq(`S4 ${t.name}: fields ${fields ? 'offered' : 'absent'}`, 'fields' in p, fields);
   if (t.name !== 'doctor') T.eq(`S4 ${t.name}: dry-run ${write ? 'offered' : 'absent'}`, 'dry-run' in p, write);
   if (shrink) T.eq(`S4 ${t.name}: quiet is a boolean, fields a string`, [p.quiet && p.quiet.type, p.fields && p.fields.type], ['boolean', 'string']);
-  if (READS.includes(t.name)) T.eq(`S4 ${t.name}: a read tool offers none of the three`, ['quiet', 'fields', 'dry-run'].filter((k) => k in p), []);
+  if (READS_WITH_FIELDS.includes(t.name)) T.eq(`S4 ${t.name}: fields is a string`, p.fields && p.fields.type, 'string');
+  if (READS.includes(t.name)) T.eq(`S4 ${t.name}: a read tool offers neither quiet nor dry-run`, ['quiet', 'dry-run'].filter((k) => k in p), []);
 }
 T.eq('S4 doctor without --allow-destructive: neither fix nor dry-run', ['fix', 'dry-run'].filter((k) => k in props(byName.get('doctor'))), []);
 await withServer(x.dir, ['--allow-destructive'], async (s) => {

@@ -2139,12 +2139,13 @@ function sameValue(name, a, b) {
   if (a === b) return true;
   return name === "backlog" && typeof a === "string" && typeof b === "string" && a !== "" && b !== "" && path6.resolve(a) === path6.resolve(b);
 }
-function parseArgs(argv) {
+function parseArgs(argv, kinds) {
   const flags = /* @__PURE__ */ new Map();
   const positional = [];
   const repeated = [];
   let options = true;
-  for (const a of argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
     if (options && a === "--") {
       options = false;
       continue;
@@ -2152,8 +2153,11 @@ function parseArgs(argv) {
     if (options && a.startsWith("--")) {
       const eq = a.indexOf("=");
       const typed = eq === -1 ? a.slice(2) : a.slice(2, eq);
-      const value = eq === -1 ? true : a.slice(eq + 1);
       const name = FLAG_ALIASES.get(typed) ?? typed;
+      let value = eq === -1 ? true : a.slice(eq + 1);
+      if (value === true && kinds !== void 0 && Object.hasOwn(kinds, name) && kinds[name] === "string" && i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
+        value = argv[++i];
+      }
       if (flags.has(name) && !sameValue(name, flags.get(name), value) && !repeated.some((r) => r.name === name)) {
         repeated.push({ name, typed });
       }
@@ -2178,8 +2182,8 @@ function checkFlags(flags, allowedFields, commandControls, isWrite) {
     if (allowedControls.has(name)) continue;
     if (allowedFields.includes(name)) continue;
     const suffix = isWrite ? " Nothing written." : "";
-    const known = allowedFields.length > 0 ? `Known fields: ${allowedFields.join(", ")}` : `Known flags: ${Array.from(allowedControls).sort().map((f) => "--" + f).join(", ")}`;
-    fail("unknown_field", `unknown field '${name}'.${suffix}`, known);
+    const known = Array.from(/* @__PURE__ */ new Set([...allowedFields, ...allowedControls])).map(displayFlagName).sort();
+    fail("unknown_field", `unknown field '${name}'.${suffix}`, `Known flags: ${known.map((f) => "--" + f).join(", ")}`);
   }
   if (flags.has("dry-run")) {
     armDryRun();
@@ -2335,10 +2339,11 @@ var CLI_SPEC = {
   },
   note: { fields: [], controls: [...OUTPUT, "force", "text", "text-file", ...cliFieldNames("note")], write: true },
   check: { fields: [], controls: [...OUTPUT, "force", ...cliFieldNames("check")], write: true },
-  show: { fields: [], controls: ["json", ...cliFieldNames("show")], write: false },
+  show: { fields: [], controls: ["json", "fields", ...cliFieldNames("show")], write: false },
   log: { fields: [], controls: ["json", ...cliFieldNames("log")], write: false },
-  list: { fields: [], controls: ["json", "ready", "all", ...cliFieldNames("list")], write: false },
-  find: { fields: [], controls: ["json", "all", "text", ...cliFieldNames("find")], write: false },
+  // The reads take `--fields` but no `--quiet` (DECISIONS 229).
+  list: { fields: [], controls: ["json", "fields", "ready", "all", ...cliFieldNames("list")], write: false },
+  find: { fields: [], controls: ["json", "fields", "all", "text", ...cliFieldNames("find")], write: false },
   tree: { fields: [], controls: ["json", "all", ...cliFieldNames("tree")], write: false },
   tags: { fields: [], controls: ["json"], write: false },
   rm: { fields: [], controls: ["json", ...cliFieldNames("rm")], write: true },
@@ -2348,7 +2353,7 @@ var CLI_SPEC = {
   claim: { fields: ["status"], controls: [...OUTPUT, ...cliFieldNames("claim").filter((f) => f !== "status"), "allow-open-children", "check-all"], write: true },
   // Only `status` in "Known fields:", as for claim.
   release: { fields: ["status"], controls: [...OUTPUT, ...cliFieldNames("release").filter((f) => f !== "status"), "allow-open-children"], write: true },
-  next: { fields: cliFieldNames("next"), controls: ["json"], write: true },
+  next: { fields: cliFieldNames("next"), controls: [...OUTPUT], write: true },
   doctor: { fields: [], controls: ["json", "dry-run", ...cliFieldNames("doctor")], write: false }
 };
 function cliSpec(command) {
@@ -2363,7 +2368,18 @@ function checkCommandFlags(flags, command) {
     if (value !== true && isBooleanFlag(command, name)) {
       fail("invalid_value", `--${name} takes no value`, `pass --${name} on its own`);
     }
+    if (value === "" && NON_EMPTY.has(name)) {
+      fail("invalid_value", `--${displayFlagName(name)} must not be empty`, `give a value, or leave --${displayFlagName(name)} out`);
+    }
   }
+}
+var NON_EMPTY = /* @__PURE__ */ new Set(["id", "file", "parent", "description-file", "acceptance-file", "text-file", "input", "item", "steal", "tag", "backlog"]);
+function flagKinds(command) {
+  const names = acceptedFlagNames(command);
+  if (names === null) return void 0;
+  const kinds = {};
+  for (const n of names) kinds[n] = n === "dry-run" || isBooleanFlag(command, n) ? "boolean" : "string";
+  return kinds;
 }
 function refuseStrayPositionals(command, positional) {
   if (positional.length === 0 || !Object.hasOwn(CLI_SPEC, command)) return;
@@ -2372,7 +2388,7 @@ function refuseStrayPositionals(command, positional) {
   fail(
     "unexpected_argument",
     `unexpected argument '${positional[0]}' \u2014 ${shown} takes no positional argument`,
-    "flags go before `--`; write every flag as --name or --name=value"
+    "flags go before `--`; write every flag as --name, --name=value or --name value"
   );
 }
 var BOOLEAN_CONTROLS = /* @__PURE__ */ new Set(["json", "quiet", "force", "allow-open-children", "check-all", "ready", "all"]);
@@ -2429,6 +2445,7 @@ var FLAG_DOCS = {
   ready: doc("only elements ready to start"),
   all: doc("include archived elements")
 };
+var READ_FIELDS = doc("with --json: keep only these fields of every entry, in this order", "<a,b,...>");
 var COMMAND_DOCS = {
   init: { backlog: doc("create the backlog at this path", "<path>") },
   new: { input: doc("read the element, or a whole plan, as JSON from a file, - for stdin", "<path|->") },
@@ -2448,14 +2465,15 @@ var COMMAND_DOCS = {
   },
   show: {
     id: doc("the element to show", "<id>"),
+    fields: doc("with --json: keep only these fields of the entry, in this order", "<a,b,...>"),
     notes: doc("which notes to show (default all)", "none|all|last:N")
   },
   log: {
     id: doc("the element whose history to show", "<id>"),
     last: doc("show only the last N events", "<N>")
   },
-  list: FILTER,
-  find: { ...FILTER, "case-sensitive": doc("match the text with exact case"), text: doc("the search text, instead of the positional argument", "<text>") },
+  list: { ...FILTER, fields: READ_FIELDS },
+  find: { ...FILTER, fields: READ_FIELDS, "case-sensitive": doc("match the text with exact case"), text: doc("the search text, instead of the positional argument", "<text>") },
   tree: { id: doc("show only this element and what is below it", "<id>") },
   rm: { cascade: doc("also remove every element below this one") },
   claim: {
@@ -2496,7 +2514,7 @@ import * as os2 from "node:os";
 import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.3.0";
+var VERSION = "4.4.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -2737,7 +2755,7 @@ function escapeInvisible(s) {
 function explicitLocation(flags) {
   const flag = flagString(flags, "backlog");
   if (flag !== void 0) {
-    if (flag === "") fail("missing_value", "--backlog needs a value (use --backlog=\u2026)");
+    if (flag === "") fail("invalid_value", "--backlog must not be empty", "give a value, or leave --backlog out");
     return { dir: fromCwd(flag), src: { kind: "flag" } };
   }
   const env = process.env.NJ_BACKLOG;
@@ -4036,7 +4054,7 @@ function runBatch(ids, preflight, write) {
 }
 
 // src/core/result-opts.ts
-function parseOutputOpts(flags, json) {
+function parseOutputOpts(flags, json, allowedFields) {
   const quiet = flags.has("quiet");
   const fieldsRaw = flagString(flags, "fields");
   if (quiet && fieldsRaw !== void 0) {
@@ -4052,8 +4070,8 @@ function parseOutputOpts(flags, json) {
   const names = fieldsRaw.split(",").map((s) => s.trim()).filter((s) => s !== "");
   if (names.length === 0) fail("invalid_value", "--fields must not be empty");
   for (const n of names) {
-    if (!ENTRY_FIELDS.includes(n)) {
-      fail("invalid_value", `unknown field '${n}' in --fields`, listHint("entry fields", n, ENTRY_FIELDS));
+    if (!allowedFields.includes(n)) {
+      fail("invalid_value", `unknown field '${n}' in --fields`, listHint("entry fields", n, allowedFields));
     }
   }
   return { quiet, fields: names };
@@ -4074,6 +4092,12 @@ function trimResult(result, opts) {
     return Object.assign({}, result, { entry: projected });
   }
   return result;
+}
+function projectEntry(entry, fields) {
+  if (fields === void 0) return entry;
+  const projected = {};
+  for (const f of fields) if (f in entry) projected[f] = entry[f];
+  return projected;
 }
 function emitWriteResultOpts(json, el, changed, backlog, cfg, extra, opts) {
   if (!json) return;
@@ -4114,8 +4138,9 @@ function prepareCheck(el, text, item, wantOn) {
   const { lines, boxes } = scanCheckboxes(el.body);
   let target;
   if (item !== void 0) {
-    const n = Number(item);
-    if (!Number.isInteger(n) || n < 1 || n > boxes.length) fail("not_found", `--item=${item} is out of range (1..${boxes.length})`);
+    if (!/^\d+$/.test(item.trim())) fail("invalid_value", `--item=${item} is not a whole number`, "count the acceptance items from 1");
+    const n = Number(item.trim());
+    if (n < 1 || n > boxes.length) fail("not_found", `--item=${item} is out of range (1..${boxes.length})`);
     target = boxes[n - 1];
   } else {
     const matches = boxes.filter((b) => b.rest.includes(text));
@@ -4134,7 +4159,7 @@ function prepareCheck(el, text, item, wantOn) {
 function cmdCheck(flags) {
   checkCommandFlags(flags, "check");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json);
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
   const text = flagString(flags, "text");
@@ -4313,7 +4338,8 @@ function validateNewFlags(ctx, flags) {
   if (type === void 0) return fail("missing_argument", "--type is required", `Known types: ${TYPES.join(", ")}`);
   if (!TYPES.includes(type)) return fail("invalid_value", `unknown type '${type}'`, valueHint("type", type, TYPES));
   const title = flagString(flags, "title");
-  if (title === void 0 || normalizeTitle(title) === "") return fail("missing_argument", "--title is required and must not be empty");
+  if (title === void 0) return fail("missing_argument", "--title is required");
+  if (normalizeTitle(title) === "") return fail("invalid_value", "--title must not be empty");
   const cleanTitle = normalizeTitle(title);
   const parent = flagString(flags, "parent");
   checkExplicitParent(ctx, type, parent);
@@ -4381,7 +4407,7 @@ function buildBody(ctx, type, cleanTitle, sections) {
 function cmdNew(flags) {
   checkCommandFlags(flags, "new");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json);
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
   const inputValue = flagString(flags, "input");
   if (inputValue !== void 0) {
@@ -4497,9 +4523,8 @@ function validatePlanNode(ctx, node, flat, seenRefs, anyRefIndex, declaredSoFar,
   if (type === void 0) fail("missing_argument", `--type is required (${node.path})`, `Known types: ${TYPES.join(", ")}`);
   if (typeof type !== "string" || !TYPES.includes(type)) fail("invalid_value", `unknown type '${String(type)}' (${node.path})`, valueHint("type", String(type), TYPES));
   const titleRaw = raw.title;
-  if (titleRaw === void 0 || typeof titleRaw !== "string" || normalizeTitle(titleRaw) === "") {
-    fail("missing_argument", `--title is required and must not be empty (${node.path})`);
-  }
+  if (titleRaw === void 0) fail("missing_argument", `--title is required (${node.path})`);
+  if (typeof titleRaw !== "string" || normalizeTitle(titleRaw) === "") fail("invalid_value", `--title must not be empty (${node.path})`);
   const cleanTitle = normalizeTitle(titleRaw);
   if (type === "subtask" && node.hadChildren) {
     fail("invalid_target", `${node.path}: a subtask may not have children`);
@@ -4791,7 +4816,7 @@ function setsFinalStatus(ctx, overrides) {
 function cmdSet(flags) {
   checkCommandFlags(flags, "set");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json);
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const force = flags.has("force");
   const allowOpen = flags.has("allow-open-children");
   const checkAll = flags.has("check-all");
@@ -5158,7 +5183,7 @@ function claimOne(ctx, el, name, status, steal, ts, checkAll = false) {
 function cmdClaim(flags) {
   checkCommandFlags(flags, "claim");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json);
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
   const name = resolveActingName(flags, true);
@@ -5264,6 +5289,7 @@ function applyFilters(elements, flags, cfg) {
 }
 function cmdList(flags) {
   checkCommandFlags(flags, "list");
+  const { fields } = parseOutputOpts(flags, flags.has("json"), ENTRY_FIELDS);
   const ctx = context(flags);
   const scope = ctx.elements.filter((e) => flags.has("all") || !e.archived);
   const filtered = applyFilters(ctx.elements, flags, ctx.cfg);
@@ -5272,7 +5298,7 @@ function cmdList(flags) {
     const ready = filtered.filter((e) => isReady(e, ctx.cfg, ctx.backlog) && availableToActor(ctx.backlog, e.id, actor));
     const blocked = filtered.filter((e) => !isReady(e, ctx.cfg, ctx.backlog) && e.status === ctx.cfg.statuses[0] && isIncomplete(e));
     if (flags.has("json")) {
-      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map((e) => entryJson(e, ctx.backlog, ctx.cfg)) }, null, 2));
+      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map((e) => projectEntry(entryJson(e, ctx.backlog, ctx.cfg), fields)) }, null, 2));
       return 0;
     }
     out("Ready to work:");
@@ -5288,7 +5314,7 @@ function cmdList(flags) {
     return 0;
   }
   if (flags.has("json")) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: filtered.map((e) => entryJson(e, ctx.backlog, ctx.cfg)) }, null, 2));
+    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: filtered.map((e) => projectEntry(entryJson(e, ctx.backlog, ctx.cfg), fields)) }, null, 2));
     return 0;
   }
   if (filtered.length === 0) {
@@ -5313,6 +5339,7 @@ function matchContext(el, needle, fold) {
 }
 function cmdFind(flags, positional) {
   checkCommandFlags(flags, "find");
+  const { fields } = parseOutputOpts(flags, flags.has("json"), ENTRY_FIELDS);
   const textFlag = flagString(flags, "text");
   if (textFlag !== void 0 && positional.length > 0) {
     fail("invalid_value", "the search text was given both as an argument and with --text", 'pass it one way: nanojira find "<text>" or nanojira find --text=<text>');
@@ -5328,7 +5355,7 @@ function cmdFind(flags, positional) {
   const needle = fold(text);
   const matched = filtered.filter((e) => fold(e.title).includes(needle) || fold(e.body).includes(needle));
   if (flags.has("json")) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: matched.map((e) => entryJson(e, ctx.backlog, ctx.cfg)) }, null, 2));
+    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: matched.map((e) => projectEntry(entryJson(e, ctx.backlog, ctx.cfg), fields)) }, null, 2));
     return 0;
   }
   if (matched.length === 0) {
@@ -6353,6 +6380,7 @@ function cmdLog(flags) {
 function cmdNext(flags) {
   checkCommandFlags(flags, "next");
   const json = flags.has("json");
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const name = resolveActingName(flags, true);
   const ctx = context(flags);
   const status = flagString(flags, "status");
@@ -6383,7 +6411,7 @@ function cmdNext(flags) {
     const built = withFiles(Object.assign({ ok: single.ok, id: el.id }, single, { skipped }), ctx.backlog);
     recordChange(ctx.backlog, () => built);
     if (json) {
-      out(JSON.stringify(built, null, 2));
+      out(JSON.stringify(opts.quiet || opts.fields !== void 0 ? trimResult(built, opts) : built, null, 2));
     } else {
       out(`${el.id} claimed by ${name}${status !== void 0 ? ` (status: ${status})` : ""}`);
       for (const code of single._problems) out(`\u26A0 ${el.id}: ${code}`);
@@ -6449,13 +6477,14 @@ function resolveNoteText(flags, positional) {
     raw = positional.join(" ");
   }
   const text = raw.replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-  if (text === "") {
+  if (given === 0) {
     fail(
       "missing_argument",
       "nanojira note needs the note text as an argument",
       'nanojira note --id=TSK-007 "\u2026" (or --text=\u2026, --text-file=<path|->)'
     );
   }
+  if (text === "") fail("invalid_value", "the note text must not be empty", 'nanojira note --id=TSK-007 "\u2026"');
   return text;
 }
 function readTextFile(filePath) {
@@ -6472,7 +6501,7 @@ function readTextFile(filePath) {
 function cmdNote(flags, positional) {
   checkCommandFlags(flags, "note");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json);
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
   const text = resolveNoteText(flags, positional);
@@ -6595,7 +6624,7 @@ function releaseOne(ctx, el, name, status, ts) {
 function cmdRelease(flags) {
   checkCommandFlags(flags, "release");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json);
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
   const name = resolveActingName(flags, true);
@@ -6721,6 +6750,7 @@ ${archivedVictims.map((v) => "  " + v.id).join("\n")}`,
 }
 
 // src/commands/cmd-show.ts
+var SHOW_FIELDS = [...ENTRY_FIELDS, "notes", "notes_total"];
 function parseNotesFlag(flags) {
   const raw = flagString(flags, "notes");
   if (raw === void 0) return void 0;
@@ -6761,13 +6791,14 @@ function renderBodyForNotes(body, mode) {
 }
 function cmdShow(flags) {
   checkCommandFlags(flags, "show");
+  const { fields } = parseOutputOpts(flags, flags.has("json"), SHOW_FIELDS);
   const ctx = context(flags);
   const mode = parseNotesFlag(flags);
   const el = resolveTarget(ctx, flags, false);
   const scope = ctx.elements;
   const shown = flags.has("file") ? [el] : ctx.elements.filter((e) => e.id === el.id).sort(compareElements);
   if (flags.has("json")) {
-    const entries = shown.map((e) => withNotesExtra(entryJson(e, ctx.backlog, ctx.cfg), e.body, mode));
+    const entries = shown.map((e) => projectEntry(withNotesExtra(entryJson(e, ctx.backlog, ctx.cfg), e.body, mode), fields));
     out(JSON.stringify(Object.assign(
       { backlog: ctx.backlog, counts: countsOf(scope.filter((e) => !e.archived)), entries },
       entries.length === 1 ? { entry: entries[0] } : {}
@@ -7075,14 +7106,20 @@ is unchanged keeps its tick; --add-acceptance appends one unticked line.
                ${NEXT_CLAIMS}
   nanojira doctor [--fix]
 
+A flag that takes a value takes it as --name=value or --name value (a value
+that starts with -- needs the =); -- ends the options. A given flag with an
+empty value (--id=, --title=) is invalid_value, except where empty means
+none (--assignee=, --tags=, --depends-on=, --description=, --acceptance=).
+
 Every command accepts --json. Write commands accept --file=<path> instead of
 --id to address one file of a duplicated ID unambiguously. set/note/check/
 claim/release accept --id=A,B,C (two or more) to apply the same write to
 every named element; results come back as {ok, results: [...]}. new/set/
-note/check/claim/release accept --quiet ({ok, id}, plus _problems when
-non-empty) and --fields=<a,b,...> (keeps entry only, narrowed to those
-names) to shrink a --json write result; both require --json and are
-mutually exclusive with each other and with --input. show accepts
+note/check/claim/release/next accept --quiet ({ok, id}, plus _problems
+when non-empty) and --fields=<a,b,...> (keeps entry only, narrowed to
+those names) to shrink a --json write result; both require --json and are
+mutually exclusive with each other and with --input. list/find/show accept
+--fields=<a,b,...> with --json, narrowing every entry to those names. show accepts
 --notes=none|all|last:N to narrow which notes it shows (all, the default,
 is unchanged); log accepts --last=N to show only the last N events of any
 kind. Both work with or without --json, and add notes_total/events_total
@@ -7161,6 +7198,7 @@ function splitCommand(argv) {
     const eq = a.indexOf("=");
     const name = eq === -1 ? a.slice(2) : a.slice(2, eq);
     if (!GLOBAL_PREFIX_FLAGS.has(name)) break;
+    if (name === "backlog" && eq === -1 && i + 1 < argv.length && !argv[i + 1].startsWith("--")) i++;
   }
   return { cmd: null, rest: argv };
 }
@@ -7181,7 +7219,7 @@ function main(argv) {
     fail("unknown_field", `unknown field 'version'.`, "--version takes no other flag and names no command");
   }
   const { cmd, rest } = splitCommand(argv);
-  const { flags, positional, repeated } = parseArgs(rest);
+  const { flags, positional, repeated } = parseArgs(rest, flagKinds(cmd ?? "status"));
   if (cmd === "help") {
     process.stdout.write(HELP);
     return 0;

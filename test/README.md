@@ -96,7 +96,9 @@ NJ_TEST_JOBS=4 $NODE run-all.ts "$NJ"
   session (`setsid`, a daemon) escapes the group kill; that is inherent
   to process-group kills. Stop a run with Ctrl-C or SIGTERM, never
   SIGKILL: run-all passes those on to every file's group, while a
-  SIGKILL leaves the files running.
+  SIGKILL leaves the files running. `test/tools/run-all-timeout.ts`
+  detects leftover processes through /proc, so that detection is
+  Linux-only; on other systems the process-group kill still applies.
 
 **The marker.** A file is `@serial` when a comment line in its header —
 before the first `import` — starts with `@serial`, followed by a one-line

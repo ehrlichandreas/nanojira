@@ -6,14 +6,20 @@ import type { Flags, Element, Config, EntryJson } from '../core/types.ts';
 
 import { flagString } from '../core/args.ts';
 import { checkCommandFlags } from '../core/cli-flags.ts';
+import { ENTRY_FIELDS } from '../core/constants.ts';
 import { context, resolveTarget } from '../core/context.ts';
 import { elementProblems, compareElements, entryJson, countsOf } from '../core/derive.ts';
 import { fail, out } from '../core/output.ts';
 import { parseNotes, renderNoteLine, notesSectionBounds } from '../core/parse.ts';
 import type { NoteLine } from '../core/parse.ts';
+import { parseOutputOpts, projectEntry } from '../core/result-opts.ts';
 import { listHint } from '../core/suggest.ts';
 
 type NotesMode = { kind: 'all' } | { kind: 'none' } | { kind: 'last'; n: number };
+
+// `--fields` names (DECISIONS 229): the entry keys, plus the two `--notes`
+// adds. Without `--notes` an entry has neither, and they are left out.
+const SHOW_FIELDS = [...ENTRY_FIELDS, 'notes', 'notes_total'];
 
 /**
  * `--notes=none|all|last:N` (§ 9b "`show --notes`", TSK-005): `undefined`
@@ -98,6 +104,7 @@ function renderBodyForNotes(body: string, mode: NotesMode | undefined): string {
 
 function cmdShow(flags: Flags) {
   checkCommandFlags(flags, 'show');
+  const { fields } = parseOutputOpts(flags, flags.has('json'), SHOW_FIELDS);
   const ctx = context(flags);
   const mode = parseNotesFlag(flags);
   const el = resolveTarget(ctx, flags, false);
@@ -105,7 +112,7 @@ function cmdShow(flags: Flags) {
   // Reads show every file claiming the id, each marked duplicate_id (§ 9).
   const shown = flags.has('file') ? [el] : ctx.elements.filter((e: Element) => e.id === el.id).sort(compareElements);
   if (flags.has('json')) {
-    const entries = shown.map((e) => withNotesExtra(entryJson(e, ctx.backlog, ctx.cfg), e.body, mode));
+    const entries = shown.map((e) => projectEntry(withNotesExtra(entryJson(e, ctx.backlog, ctx.cfg), e.body, mode), fields));
     // `entry` (DECISIONS 171 C, § 9): additive, identical to entries[0],
     // present exactly when `entries` has exactly one element -- never for a
     // duplicate_id target (two entries). `list`/`find` never carry it.

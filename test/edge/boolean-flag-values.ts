@@ -32,7 +32,7 @@ const BOOLEANS: Record<string, string[]> = {
   unarchive: ['json', 'dry-run'],
   claim: ['json', 'quiet', 'allow-open-children', 'check-all', 'dry-run'],
   release: ['json', 'quiet', 'allow-open-children', 'dry-run'],
-  next: ['json', 'dry-run'],
+  next: ['json', 'dry-run', 'quiet'],
   doctor: ['fix', 'json', 'dry-run'],
 };
 

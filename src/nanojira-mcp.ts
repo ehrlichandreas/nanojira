@@ -74,8 +74,10 @@ const REQUIRED: Record<string, string[]> = { new: ['type', 'title'], find: ['tex
 // The control flags a tool call may also pass (TSK-041): `quiet`/`fields`
 // where the CLI command takes them, `dry-run` on every write. The result
 // is still exactly that CLI invocation's `--json` output.
-const SHRINKABLE = ['new', 'set', 'note', 'check', 'claim', 'release'];
-const WRITES = [...SHRINKABLE, 'next', 'archive', 'unarchive'];
+const SHRINKABLE = ['new', 'set', 'note', 'check', 'claim', 'release', 'next'];
+const WRITES = [...SHRINKABLE, 'archive', 'unarchive'];
+// `--fields` without `--quiet` (DECISIONS 229).
+const READS_WITH_FIELDS = ['list', 'find', 'show'];
 
 /** `doctor`'s `fix` field exists in its schema only when the server was
  * launched with `--allow-destructive` (§ 17): the gate is schema-level,
@@ -89,6 +91,7 @@ function toolFields(name: string, allowDestructive: boolean): FieldSpec[] {
   if (name === 'doctor') return allowDestructive ? [...commandFields(name), { name: 'dry-run', kind: 'boolean' }] : [];
   const fields = commandFields(name).filter((f) => !f.name.endsWith('-file'));
   if (SHRINKABLE.includes(name)) fields.push({ name: 'quiet', kind: 'boolean' }, { name: 'fields', kind: 'string' });
+  else if (READS_WITH_FIELDS.includes(name)) fields.push({ name: 'fields', kind: 'string' });
   if (WRITES.includes(name)) fields.push({ name: 'dry-run', kind: 'boolean' });
   return fields;
 }
@@ -212,7 +215,9 @@ function rejectStartup(message: string): never {
 }
 
 function main() {
-  const argv = parseArgs(process.argv.slice(2));
+  // `--backlog <path>` (the space form, as MCP client configs often pass
+  // args) as well as `--backlog=<path>` (TSK-038, DECISIONS 230).
+  const argv = parseArgs(process.argv.slice(2), { backlog: 'string', 'allow-destructive': 'boolean', version: 'boolean' });
 
   for (const name of argv.flags.keys()) {
     if (!KNOWN_STARTUP_FLAGS.includes(name)) rejectStartup(`unknown argument '--${name}'.`);

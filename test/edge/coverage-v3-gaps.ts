@@ -495,15 +495,17 @@ function statusSection(bl: string, status: string): string[] | null {
   }
 }
 {
-  /* B13: "Known fields:" of new/set lists schema fields only (DECISIONS 88) */
+  /* B13: new/set list every flag they accept, --backlog included, in one
+   * "Known flags:" line (DECISIONS 230, superseding DECISIONS 88's
+   * schema-fields-only "Known fields:") */
   const x = initBacklog('gaps-known');
   epic(x);
   for (const args of [['new', '--type=epic', '--title=X', '--bogus=1'], ['set', '--id=EPIC-001', '--bogus=1']]) {
     const r = run(args, { cwd: x.dir });
     T.exit('B13 ' + args[0] + ' --bogus: exit 1', r, 1);
-    const line = /^Known fields: (.*)$/m.exec((r.stdout || '') + '\n' + (r.stderr || ''));
-    T.check('B13 ' + args[0] + ': prints a "Known fields:" line', !!line, J(r.stderr));
-    T.check('B13 ' + args[0] + ': the "Known fields:" line does not list --backlog', !!line && !/backlog/.test(line[1]), J(line && line[0]));
+    const line = /^Known flags: (.*)$/m.exec((r.stdout || '') + '\n' + (r.stderr || ''));
+    T.check('B13 ' + args[0] + ': prints a "Known flags:" line', !!line, J(r.stderr));
+    T.check('B13 ' + args[0] + ': the "Known flags:" line lists --backlog and --title', !!line && /--backlog,/.test(line[1]) && /--title\b/.test(line[1]), J(line && line[0]));
   }
 }
 {

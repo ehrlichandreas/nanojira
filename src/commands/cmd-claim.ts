@@ -7,6 +7,7 @@ import type { Flags, Element, Context } from '../core/types.ts';
 import { resolveActingName } from '../core/actor.ts';
 import { flagString } from '../core/args.ts';
 import { checkCommandFlags } from '../core/cli-flags.ts';
+import { ENTRY_FIELDS } from '../core/constants.ts';
 import type { Entry } from '../core/claims.ts';
 import { rollback, requireTransitionable, transition, releaseUnconditional, undoRelease, highestEntry, claimsDir } from '../core/claims.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
@@ -119,7 +120,7 @@ function claimOne(ctx: Context, el: Element, name: string, status: string | unde
 function cmdClaim(flags: Flags) {
   checkCommandFlags(flags, 'claim');
   const json = flags.has('json');
-  const opts = parseOutputOpts(flags, json);
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
 
   requireTargetFlagSyntax(flags);

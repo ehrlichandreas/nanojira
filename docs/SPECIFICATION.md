@@ -1119,7 +1119,8 @@ Only `ids/` tombstones move — element files and folders are untouched
 
 ### Principle
 
-**Writes are field maps.** Every field is a `--name=value`, and the names are
+**Writes are field maps.** Every field is a `--name=value` (or `--name
+value`, § 9 "Rules"), and the names are
 **the same as in the frontmatter**. One vocabulary in three places: command
 line, file, JSON output. The agent translates nothing.
 
@@ -1162,15 +1163,17 @@ nanojira doctor [--fix] [--json]
 
 All commands accept `--json`; reads *and* writes (§ below). All commands
 accept `--backlog=<path>` as well, and it appears in every command's list of
-known flags; `--backlog` without a value is `missing_value`.
+known flags; `--backlog` with no value at all is `missing_value`, an empty
+`--backlog=` is `invalid_value`.
 
 `set`, `note`, `check`, `claim` and `release` additionally accept
 `--id=A,B,C` (two or more comma-separated IDs) in place of a single `--id`
 — see "Batch writes" below.
 
-`new`, `set`, `note`, `check`, `claim` and `release` additionally accept
-`--fields=<a,b,...>` and `--quiet`, to shrink their `--json` write result —
-see "`--fields` / `--quiet`" below.
+`new`, `set`, `note`, `check`, `claim`, `release` and `next` additionally
+accept `--fields=<a,b,...>` and `--quiet`, to shrink their `--json` write
+result; `list`, `find` and `show` accept `--fields=<a,b,...>`, to narrow
+every entry of their `--json` result — see "`--fields` / `--quiet`" below.
 
 `show` additionally accepts `--notes=none|all|last:N`, and `log` accepts
 `--last=N`, to narrow which notes (`show`) or events (`log`) they return —
@@ -1365,7 +1368,7 @@ model `assignee` has (§ 6).
   absolute path); every other flag compares its values exactly. These are the **only** two flags
   this applies to:
   the search for the command word skips past a leading run of exactly
-  `--backlog[=…]`/`--json` and stops at the first token that either does
+  `--backlog[=…]`/`--backlog <path>`/`--json` and stops at the first token that either does
   not start with `--` (that token is the command) or does (anything
   else — including a flag that would be perfectly valid for whatever
   command follows, such as `--status=doing` ahead of `set`). In the
@@ -1408,9 +1411,28 @@ model `assignee` has (§ 6).
 - Control flags (`--json`, `--force`, `--fix`, `--cascade`, `--ready`,
   `--all`, `--allow-open-children`) are not schema fields; they are hard-wired
   in the tool. Unknown field flags are **rejected** — nothing is written —
-  and the known fields are listed. A control flag that the addressed command
+  and the hint lists every flag the command accepts, in its documented
+  spelling (`--depends-on`), sorted (TSK-038, DECISIONS 230). A control flag that the addressed command
   does not take is rejected the same way, as `unknown_field` (e.g. `nanojira archive
   --force`, § 12).
+- **A flag that takes a value takes it as `--name=value` or `--name
+  value`** (TSK-038, DECISIONS 230): `nanojira new --type epic --title
+  "Two words"`, `nanojira --backlog /x list`. Which flags take a value
+  comes from the command's flag table, the same one `--help` and
+  `nanojira-mcp` read; a flag that takes none (`--json`, `--force`,
+  `--ready`, …) never takes the next token. The next token is not taken
+  when it starts with `--`: a value that does (`--text=--y`) needs the
+  `=` form, and `--title --json` is `--title` with no value
+  (`missing_value`). `-` is an ordinary value, so `--description-file -`
+  reads stdin.
+- **An empty value is `invalid_value`** for every flag where empty means
+  nothing (TSK-038, DECISIONS 230): `--id=`, `--file=`, `--parent=`,
+  `--title=` on `new`, the note text, `--input=`, every `--*-file=`,
+  `--item=`, `--steal=`, `--tag=`, `--backlog=`, and the flags that
+  already refused it (`--status=`, `--as=`, …). `missing_argument` is for
+  a required flag that is absent. The flags where empty means "none" keep
+  that meaning: `--assignee=`, `--tags=`, `--depends-on=`,
+  `--description=`, `--acceptance=`, `--add-tags=`, `--remove-tags=`.
 - **`--` ends the options.** Every token after it is a positional, even
   one that starts with `--`: `nanojira note --id=X --as=scout -- --as=y`
   writes the note text `--as=y`, signed `scout`; `nanojira find -- --x`
@@ -1818,7 +1840,7 @@ In both wrapper forms (2 and 3):
 phase has finished** — never once per ID — and only if at least one ID was
 actually written.
 
-### `--fields` / `--quiet` (write commands)
+### `--fields` / `--quiet`
 
 > TSK-004 (feedback/scans-team): the "scans" team's ten agents pipe every
 > `set`/`new` result through `head`/`grep` to shrink it, bypassing the
@@ -1827,8 +1849,8 @@ actually written.
 > precisely because a second codebase (scans' own future CLI kernel) is
 > expected to adopt these flag names and shapes verbatim.
 
-`new`, `set`, `note`, `check`, `claim` and `release` accept `--fields=<a,b,...>`
-and `--quiet` on their `--json` write result — the single-ID shape and each
+`new`, `set`, `note`, `check`, `claim`, `release` and `next` accept
+`--fields=<a,b,...>` and `--quiet` on their `--json` write result — the single-ID shape and each
 successful member of a batch result (`--id=A,B,C`, above) alike. Neither
 flag has a meaning without `--json`: giving either without it is
 `invalid_value` ("`--quiet` requires `--json`" / "`--fields` requires
@@ -1902,6 +1924,26 @@ $ nanojira set --id=TSK-009 --status=done --quiet --json
 $ nanojira set --id=TSK-009 --priority=high --fields=id,priority --json
 {"ok": true, "id": "TSK-009", "changed": ["priority"],
  "entry": {"id": "TSK-009", "priority": "high"}, "_problems": []}
+```
+
+**On the reads** (TSK-037, DECISIONS 229): `list` (with or without
+`--ready`), `find` and `show` accept `--fields=<a,b,...>` with `--json`,
+and project **every entry** of `entries` exactly as above: the named keys
+in the order given, a name the entry does not carry omitted. The
+envelope — `backlog`, `counts`, `entries`, and `show`'s `entry` — is
+unchanged; `show`'s `entry` stays identical to `entries[0]`. The
+vocabulary is `entryJson`'s keys, as above; `show` adds `notes` and
+`notes_total`, which an entry carries only with `--notes` (§ 9b). The
+same refusals apply: without `--json`, an unknown name (with the allowed
+names in the hint), an empty `--fields=`. The reads take no `--quiet`:
+a read result has no `{ok, id}` to shrink to, and `--fields=id` already
+lists just the ids. Without `--fields` the output is byte-identical to
+before.
+
+```json
+$ nanojira list --ready --fields=id,status,title --json
+{"backlog": "…", "counts": {…},
+ "entries": [{"id": "TSK-009", "status": "todo", "title": "…"}, …]}
 ```
 
 ### `--notes` / `--last`
@@ -2814,6 +2856,7 @@ just makes it a lookup instead of a re-read of the hint every time:
 | `--version` combined with another flag or an explicit subcommand | `unknown_field` | § 9 | — |
 | unknown subcommand | `unknown_command` | § 9 | — |
 | a required flag or its value is missing | `missing_argument` / `missing_value` | § 9 | — |
+| a given flag's value is empty where empty means nothing (`--id=`, `--title=`, …) | `invalid_value` | § 9 "Rules" | — |
 | a value fails validation (`--status`, `--priority`, `--type`) | `invalid_value` | § 9 | — |
 | `--parent` names an element of the **wrong type** | `invalid_target` | § 9 | — |
 | `--id` and `--file` given together | `invalid_target` | § 9 | — |
@@ -3355,7 +3398,10 @@ given is `missing_argument`, both given is `invalid_value`.
   `--as=` already gets (§ 9). **No trimming:** a whitespace-only `--text` is
   not empty and stays a plain substring, matched as given.
 - `--item=<n>` — the *n*-th countable checkbox, 1-based, in document order
-  (top to bottom, depth-first through nested lists).
+  (top to bottom, depth-first through nested lists). The value is digits
+  only, surrounding whitespace ignored (`--item=$(wc -l <f)` where `wc`
+  pads); anything else — empty, `abc`, `1.5`, `1.0`, `+1`, `1e0`, `0x1` —
+  is `invalid_value` (TSK-038, DECISIONS 230), not `not_found`.
 
 `--text` matching no countable checkbox, or `--item` out of range (< 1 or
 > the count), is `not_found` — the same code `--parent`/`--depends-on`/
@@ -4030,6 +4076,7 @@ until cleanup, the same-named re-assertion audit-trail residual).
 ```
 nanojira next  [--as=<name>] [--status=<s>] [--type=…] [--tag=…] [--parent=…]
          [--assignee=…] [--exclude-tag=<a,b>] [--min-priority=<p>] [--json]
+         [--quiet | --fields=<a,b,...>]
 ```
 
 **`next` claims the element it picks** — said first in `next --help`
@@ -4145,7 +4192,11 @@ call to `next` sees it.
 **JSON shape.** Success is `claim`'s own shape (§ 9 "JSON shapes per
 command"), with one addition: **`skipped`** — the ids that lost their
 race before the one that succeeded, in attempt order; always present,
-`[]` when none were skipped. Failure, including `none_ready`, stays the
+`[]` when none were skipped. `--quiet` and `--fields` shrink it exactly
+as they shrink `claim`'s result (§ 9 "`--fields` / `--quiet`",
+DECISIONS 229): `--quiet` drops `skipped` with the rest, `--fields`
+narrows `entry` only, and a bad `--fields` is refused before anything
+is claimed. Failure, including `none_ready`, stays the
 generic `{ok: false, error, hint?}` — no extra field there, the same
 discipline every other failure in this document holds (§ 9); the hint
 text for `none_ready` may say how many candidates were tried.
@@ -5179,8 +5230,9 @@ reported, not guessed at.
     copies `SKILL.md`, `LICENSE`, `bin/`, `dist/` and (from v4.1, when
     the tag has it) `references/*.md` from `<tag>`'s own tree
     (never the working tree, never `src/`/`test/`/`tools/`), after
-    verifying `<tag>` with `git tag -v` (refusing an unsigned or
-    non-existent tag); builds beside `<dest>` and renames atomically
+    verifying that `<tag>` is signed by the pinned release key (below:
+    "Verify the tag"; refusing an unsigned or non-existent tag and any
+    other signer); builds beside `<dest>` and renames atomically
     into place; refuses to replace a `<dest>` that lacks its own valid
     `SKILL.md`.
 
@@ -5216,9 +5268,12 @@ document.
 ### Shape and backlog confinement
 
 ```
-dist/nanojira-mcp [--backlog=<path>] [--allow-destructive]
+dist/nanojira-mcp [--backlog=<path> | --backlog <path>] [--allow-destructive]
 dist/nanojira-mcp --version
 ```
+
+`--backlog` takes its path either way, as on the CLI (§ 9 "Rules",
+DECISIONS 230); MCP client configs often pass it as two arguments.
 
 **`nanojira-mcp --version`** follows the same rule § 9 states for `nanojira
 --version`: prints `nanojira-mcp <version>`, exit 0, no backlog resolved, works
@@ -5392,8 +5447,9 @@ table's (§ 9), so every field flag a command gains reaches its tool —
 `min-priority`, `set`'s `add-acceptance` — while control flags do not:
 `--check-all` (DECISIONS 225) and `--allow-open-children` are CLI-only.
 Three control flags are extra inputs beyond the flag table: `quiet` and
-`fields` on `new`, `set`, `note`, `check`, `claim` and `release`;
-`dry-run` on those six and on `next`, `archive` and `unarchive`, and on
+`fields` on `new`, `set`, `note`, `check`, `claim`, `release` and `next`;
+`fields` alone on `list`, `find` and `show` (DECISIONS 229); `dry-run`
+on those seven write tools and on `archive` and `unarchive`, and on
 `doctor` next to `fix`, so only under `--allow-destructive`. Each is
 passed on as the same CLI flag, so the result is that invocation's
 `--json` output. The server enforces what it declares, before any child
@@ -5585,13 +5641,29 @@ script's own path) — any repo laid out like this one works, which is
 what makes the tool testable against a throwaway fixture repo without
 touching this project's own history. Given `<tag>`:
 
-1. **Verify the tag** with `git tag -v <tag>`. A tag that does not exist,
-   or exists but is not a valid signed tag object (lightweight, or
-   annotated but unsigned), fails this step — exits non-zero, one
-   stderr line naming the tag and git's own reason, and touches `<dest>`
-   not at all.
+1. **Verify the tag against the pinned release key** (DECISIONS 226).
+   The pin is `package.json`'s `"releaseKey"`, the release key's
+   40-hex primary fingerprint, read from the checkout the script itself
+   runs from (beside its own `tools/`), never from `<tag>` or the
+   current directory's repository. `git verify-tag --raw <tag>` must
+   report a `GOODSIG` and a `VALIDSIG` whose primary-key fingerprint is
+   the pin, and no `BADSIG`, `ERRSIG`, `EXPSIG`, `EXPKEYSIG`, `REVKEYSIG`
+   or `KEYREVOKED`. The tag is resolved once, `refs/tags/<tag>` only,
+   and must be a tag object whose own `tag` header is `<tag>`; the
+   verify and every read below use that object id, never the name
+   again, so another name pointing at an old signed tag object (a
+   lightweight alias, a hand-written ref) cannot replay it. A pin that
+   is not 40 hex digits fails with `release_key_invalid`; a tag that
+   does not exist, is not a tag object (lightweight) or names another
+   tag fails with `tag_invalid`; a tag object that is unsigned, signed
+   by any other key, or by the pinned key after it expired or was
+   revoked fails with `release_key_mismatch`, naming the expected and
+   the found fingerprint (`none` without a valid signature). Each: exit
+   2, one stderr line `export-skill: <code>: …` with the reason, and
+   `<dest>` untouched. `git tag -v` alone, before 4.4.0, accepted a
+   good signature from any key in the keyring.
 2. **Read `SKILL.md`, `bin/` and `dist/` from the tag's tree** (`git show
-   <tag>:<path>`), never from the working tree — a dirty or
+   <tag object id>:<path>`), never from the working tree — a dirty or
    out-of-sync checkout must not change what gets exported, and must
    not need to. Nothing else is copied: no `src/`, no `test/`, no
    `tools/`, no `package.json` — the exported folder is exactly

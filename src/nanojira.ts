@@ -30,7 +30,7 @@ import { cmdStatus } from './commands/cmd-status.ts';
 import { cmdTags } from './commands/cmd-tags.ts';
 import { cmdTree } from './commands/cmd-tree.ts';
 import { cmdUnarchive } from './commands/cmd-unarchive.ts';
-import { acceptedFlagNames, refuseStrayPositionals } from './core/cli-flags.ts';
+import { acceptedFlagNames, flagKinds, refuseStrayPositionals } from './core/cli-flags.ts';
 import { HELP, commandHelp } from './core/help.ts';
 import { finishDryRun } from './core/dry-run.ts';
 import { beginOnChange, fireRecordedChange } from './core/on-change.ts';
@@ -49,7 +49,9 @@ import { checkClockEnv } from './core/store.ts';
 // neither a global flag nor the command word (starts with `--` but isn't
 // `--backlog`/`--json`) stops the search outright: the whole, unmodified
 // input is then the **bare** invocation's own arguments — no partial
-// reordering, no silent fallback to a different command.
+// reordering, no silent fallback to a different command. `--backlog <path>`
+// without `=` takes the next token as its path, as every string flag does
+// (TSK-038), so `nanojira --backlog /x list` runs `list`.
 const GLOBAL_PREFIX_FLAGS = new Set(['backlog', 'json']);
 
 function splitCommand(argv: string[]): { cmd: string | null; rest: string[] } {
@@ -59,6 +61,7 @@ function splitCommand(argv: string[]): { cmd: string | null; rest: string[] } {
     const eq = a.indexOf('=');
     const name = eq === -1 ? a.slice(2) : a.slice(2, eq);
     if (!GLOBAL_PREFIX_FLAGS.has(name)) break;
+    if (name === 'backlog' && eq === -1 && i + 1 < argv.length && !argv[i + 1].startsWith('--')) i++;
   }
   return { cmd: null, rest: argv };
 }
@@ -88,7 +91,7 @@ function main(argv: string[]) {
   }
 
   const { cmd, rest } = splitCommand(argv);
-  const { flags, positional, repeated } = parseArgs(rest);
+  const { flags, positional, repeated } = parseArgs(rest, flagKinds(cmd ?? 'status'));
 
   // `help`/`--help`'s own precedence is unchanged: checked before anything
   // else, regardless of other flags, never failing (§ 9). `--help` now

@@ -6,6 +6,7 @@ import type { Flags, Element } from '../core/types.ts';
 
 import { flagString } from '../core/args.ts';
 import { checkCommandFlags } from '../core/cli-flags.ts';
+import { ENTRY_FIELDS } from '../core/constants.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireActive } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
@@ -69,8 +70,13 @@ function prepareCheck(el: Element, text: string | undefined, item: string | unde
   const { lines, boxes } = scanCheckboxes(el.body);
   let target: Checkbox;
   if (item !== undefined) {
-    const n = Number(item);
-    if (!Number.isInteger(n) || n < 1 || n > boxes.length) fail('not_found', `--item=${item} is out of range (1..${boxes.length})`);
+    // Not a whole number at all is a bad value; a number past the boxes is
+    // a box that does not exist (TSK-038). Surrounding whitespace is
+    // dropped first: `--item=$(wc -l <f)` pads on BSD. Digits only after
+    // that, so 1.0, +1, 1e0 and 0x1 are refused.
+    if (!/^\d+$/.test(item.trim())) fail('invalid_value', `--item=${item} is not a whole number`, 'count the acceptance items from 1');
+    const n = Number(item.trim());
+    if (n < 1 || n > boxes.length) fail('not_found', `--item=${item} is out of range (1..${boxes.length})`);
     target = boxes[n - 1];
   } else {
     const matches = boxes.filter((b) => b.rest.includes(text as string));
@@ -90,7 +96,7 @@ function prepareCheck(el: Element, text: string | undefined, item: string | unde
 function cmdCheck(flags: Flags) {
   checkCommandFlags(flags, 'check');
   const json = flags.has('json');
-  const opts = parseOutputOpts(flags, json);
+  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
 
   requireTargetFlagSyntax(flags);

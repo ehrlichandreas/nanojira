@@ -262,7 +262,9 @@ for (const [label, value] of [
   const cases: [string, string[], string][] = [
     ['an unknown flag beats the invalid name', ['note', '--id=TSK-001', '--bogus=1', TEXT], 'unknown_field'],
     ['a missing --id beats the invalid name', ['note', TEXT], 'missing_argument'],
-    ['--id without a value beats the invalid name', ['note', '--id', TEXT], 'missing_value'],
+    // `--id TEXT` would take TEXT as the id (DECISIONS 230); a next token
+    // that starts with `--` is never taken.
+    ['--id without a value beats the invalid name', ['note', '--id', '--json', TEXT], 'missing_value'],
     ['the invalid name beats an unknown target', ['note', '--id=TSK-404', TEXT], 'invalid_env'],
   ];
   for (const [label, args, code] of cases) {

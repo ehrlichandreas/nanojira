@@ -32,6 +32,16 @@ team vendors its own copy, exported from a signed tag:
 $ node tools/export-skill.mts <signed-tag> <dest>
 ```
 
+The tag must be signed by the release key pinned in `package.json`'s
+`"releaseKey"` (the primary fingerprint
+`BEEEE63B314331D0054DBEBE2FEE273AD7BB6092`), and that public key must be in
+your keyring. A tag signed by any other key, or by the pinned key after it
+expired or was revoked, is refused with `release_key_mismatch` before
+anything is written; the line names the expected and the found
+fingerprint. A pin that is not 40 hex digits is `release_key_invalid`. The
+name must be the tag's own: another name pointing at a signed tag (a
+lightweight `git tag v9 v1`) is `tag_invalid`.
+
 This reads `SKILL.md`, `LICENSE`, `references/`, `bin/` and `dist/` from `<signed-tag>`'s own tree —
 never the working tree, and nothing else (no `src/`, `test/`, `tools/` or
 `package.json`) — and writes `<dest>/` as one atomic unit:
@@ -247,6 +257,14 @@ TSK-001 note added
 $ nanojira set --id=TSK-001 --status=done
 TSK-001 → status=done
 ```
+
+A flag that takes a value takes it either way: `--status=done` or
+`--status done`, `--backlog /x list` too. A value that itself starts with
+`--` needs the `=` form (`--text=--y`), and `--` ends the options, so
+`nanojira note --id TSK-001 --as alice -- --looks-like-a-flag` writes that
+text. An empty value (`--id=`, `--title=`, `--tag=`) is `invalid_value`,
+except where empty means "none": `--assignee=`, `--tags=`,
+`--depends-on=`, `--description=` and `--acceptance=` clear the field.
 
 - `nanojira note` appends `- <time> <author>: <text>` under `## Notes`; the author
   is the element's `assignee`, else `?`. The text can be positional (as
@@ -957,8 +975,9 @@ $ <dest>/bin/nanojira-mcp --backlog=./backlog [--allow-destructive]
   re-read on every request), `type` and `priority` list their allowed
   values. A call that misses a required field or uses a value outside
   the list is refused before anything runs, as a tool result with
-  `isError` that names every problem and the allowed values. The write tools also take `dry-run`, and new, set, note,
-  check, claim and release take `quiet` and `fields`, as on the CLI.
+  `isError` that names every problem and the allowed values. The write tools also take `dry-run`, new, set, note,
+  check, claim, release and next take `quiet` and `fields`, and list,
+  find and show take `fields`, as on the CLI.
 - A minimal client config — the shape only; where this goes is your MCP
   client's own concern, not `nanojira`'s:
   ```json
@@ -977,7 +996,7 @@ With `--json`, `error` is one of a closed set. The ones an agent meets:
 | `backlog_without_config` | a `backlog/` was found without its configuration | `nanojira doctor` |
 | `invalid_config` | the configuration violates § 5 | `nanojira doctor` names the defect |
 | `legacy_layout` | a v2 backlog | `nanojira doctor --fix` migrates it (`docs/MIGRATION-v3.md`) |
-| `unknown_field`, `unknown_command` | a typo | the hint lists the known flags |
+| `unknown_field`, `unknown_command` | a typo | the hint lists every flag the command accepts |
 | `missing_argument`, `missing_value`, `invalid_value`, `invalid_target`, `unexpected_argument` | the call itself is wrong | fix the call |
 | `ambiguous_target` | `check --text` matches two or more checkboxes | narrow the text, or use `--item=<n>` |
 | `invalid_env` | `NJ_AUTHOR`, `NJ_NOW` or `NJ_ON_CHANGE_TIMEOUT` holds an invalid value; the hint names which | fix or unset it; for `NJ_AUTHOR`, `--as` works too |
@@ -1269,10 +1288,10 @@ nothing else about any of those elements' tags needs to be re-specified by
 hand.) `nanojira doctor --fix` (or the next successful write to any element)
 regenerates `TAGS.md` to match once the carriers are fixed.
 
-## 25. Shrinking write results: `--fields` / `--quiet`
+## 25. Shrinking results: `--fields` / `--quiet`
 
-`new`, `set`, `note`, `check`, `claim` and `release` return the whole
-`entry` (~600 bytes) on every `--json` call. If you only need to confirm
+`new`, `set`, `note`, `check`, `claim`, `release` and `next` return the
+whole `entry` (~600 bytes) on every `--json` call. If you only need to confirm
 the write happened, or only need a couple of fields back, `--quiet` and
 `--fields=` shrink the result — without falling back to piping it through
 `head`/`grep`, which is a parsing gamble the stable JSON contract exists
@@ -1308,6 +1327,20 @@ $ nanojira set --id=TSK-009 --priority=high --fields=id,priority --json
 - On a batch (`--id=A,B,C`, § 18), both apply to each **successful**
   member of `results` the same way; a failed member keeps its full
   `{id, ok: false, error, hint?}` regardless — errors are never shrunk.
+
+The reads are the larger outputs: `list --json` carries every field of
+every entry. `list`, `find` and `show` take `--fields=` too (no
+`--quiet`), and narrow each entry the same way; `counts` and the rest
+of the envelope stay. On a 2000-task backlog, `list --json` is about
+907 KB, `list --json --fields=id,status,title` about 230 KB:
+
+```sh
+$ nanojira list --ready --fields=id,status,title --json
+$ nanojira show --id=TSK-009 --notes=last:3 --fields=id,status,notes --json
+```
+
+`show` also knows `notes` and `notes_total`, present only with
+`--notes`.
 
 ## 26. Umbrella tickets: make the parts children
 

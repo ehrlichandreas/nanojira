@@ -26,6 +26,8 @@
  *       nanojira's stderr: the call answers success once the child has
  *       exited and its stdout has ended, not when stderr closes, and the
  *       server exits at EOF without waiting for the job (D214, revised)
+ *   X12 `--backlog <path>` (the space form MCP client configs often use)
+ *       serves that backlog, as `--backlog=<path>` does (DECISIONS 230)
  */
 import fs from 'fs';
 import path from 'path';
@@ -302,6 +304,18 @@ function alive(pid: number): boolean {
   await s2.close();
   const pid2 = fs.existsSync(pidFile2) ? Number(fs.readFileSync(pidFile2, 'utf8')) : 0;
   if (pid2 > 0 && alive(pid2)) { try { process.kill(pid2, 'SIGKILL'); } catch { /* gone */ } }
+}
+
+/* ---- X12 --backlog <path>, the space form -------------------------------- */
+{
+  const x = model('mcp-x12');
+  const elsewhere = H.freshDir('mcp-x12-cwd');
+  const s = MCP.spawnServer(H.NJ_MCP as string, ['--backlog', x.bl], { cwd: elsewhere, env: { NJ_NOW: NOW } });
+  try {
+    const r = await call(s, 'X12 list under --backlog <path>', 'list', {});
+    T.check('X12 --backlog <path> serves that backlog', !!sc(r) && sc(r).backlog === x.bl
+      && (sc(r).entries || []).some((e: any) => e.id === 'TSK-001'), J(r) + ' stderr=' + s.stderr().slice(0, 300));
+  } finally { await s.close(); }
 }
 
 T.finish();

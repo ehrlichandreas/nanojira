@@ -11,8 +11,9 @@
 // grants every command (`--backlog`) or every write (`--dry-run`).
 
 import type { Flags } from './types.ts';
+import type { FlagKinds } from './args.ts';
 
-import { allowedControlSet, checkFlags } from './args.ts';
+import { allowedControlSet, checkFlags, displayFlagName } from './args.ts';
 import { FLAG_TABLE, cliFieldNames, commandFields } from './flag-table.ts';
 import { fail } from './output.ts';
 
@@ -46,10 +47,11 @@ const CLI_SPEC: Record<string, CliSpec> = {
   },
   note: { fields: [], controls: [...OUTPUT, 'force', 'text', 'text-file', ...cliFieldNames('note')], write: true },
   check: { fields: [], controls: [...OUTPUT, 'force', ...cliFieldNames('check')], write: true },
-  show: { fields: [], controls: ['json', ...cliFieldNames('show')], write: false },
+  show: { fields: [], controls: ['json', 'fields', ...cliFieldNames('show')], write: false },
   log: { fields: [], controls: ['json', ...cliFieldNames('log')], write: false },
-  list: { fields: [], controls: ['json', 'ready', 'all', ...cliFieldNames('list')], write: false },
-  find: { fields: [], controls: ['json', 'all', 'text', ...cliFieldNames('find')], write: false },
+  // The reads take `--fields` but no `--quiet` (DECISIONS 229).
+  list: { fields: [], controls: ['json', 'fields', 'ready', 'all', ...cliFieldNames('list')], write: false },
+  find: { fields: [], controls: ['json', 'fields', 'all', 'text', ...cliFieldNames('find')], write: false },
   tree: { fields: [], controls: ['json', 'all', ...cliFieldNames('tree')], write: false },
   tags: { fields: [], controls: ['json'], write: false },
   rm: { fields: [], controls: ['json', ...cliFieldNames('rm')], write: true },
@@ -59,7 +61,7 @@ const CLI_SPEC: Record<string, CliSpec> = {
   claim: { fields: ['status'], controls: [...OUTPUT, ...cliFieldNames('claim').filter((f) => f !== 'status'), 'allow-open-children', 'check-all'], write: true },
   // Only `status` in "Known fields:", as for claim.
   release: { fields: ['status'], controls: [...OUTPUT, ...cliFieldNames('release').filter((f) => f !== 'status'), 'allow-open-children'], write: true },
-  next: { fields: cliFieldNames('next'), controls: ['json'], write: true },
+  next: { fields: cliFieldNames('next'), controls: [...OUTPUT], write: true },
   doctor: { fields: [], controls: ['json', 'dry-run', ...cliFieldNames('doctor')], write: false },
 };
 
@@ -80,7 +82,34 @@ function checkCommandFlags(flags: Flags, command: string): void {
     if (value !== true && isBooleanFlag(command, name)) {
       fail('invalid_value', `--${name} takes no value`, `pass --${name} on its own`);
     }
+    if (value === '' && NON_EMPTY.has(name)) {
+      fail('invalid_value', `--${displayFlagName(name)} must not be empty`, `give a value, or leave --${displayFlagName(name)} out`);
+    }
   }
+}
+
+/**
+ * The flags whose empty value means nothing, refused as `invalid_value`
+ * before the command runs (TSK-038, DECISIONS 230): before, `--id=`,
+ * `--parent=` or `--input=` was `not_found` and `--steal=` or `--tag=`
+ * passed. Not here: the flags where empty means "none" (`--assignee=`,
+ * `--tags=`, `--depends-on=`, `--description=`, `--acceptance=`,
+ * `--add-tags=`, `--remove-tags=`), and the ones that already refuse an
+ * empty value with `invalid_value` and a message of their own (`--status=`,
+ * `--as=`, `--fields=`, `--exclude-tag=`, …). `new --title=` and the note
+ * text are checked where they are read, after trimming.
+ */
+const NON_EMPTY = new Set(['id', 'file', 'parent', 'description-file', 'acceptance-file', 'text-file', 'input', 'item', 'steal', 'tag', 'backlog']);
+
+/** `command`'s flag kinds for `parseArgs` (TSK-038): every flag it
+ * accepts, `string` unless it takes no value. Undefined for a word that is
+ * not a command, which is then parsed without kinds and refused. */
+function flagKinds(command: string): FlagKinds | undefined {
+  const names = acceptedFlagNames(command);
+  if (names === null) return undefined;
+  const kinds: FlagKinds = {};
+  for (const n of names) kinds[n] = n === 'dry-run' || isBooleanFlag(command, n) ? 'boolean' : 'string';
+  return kinds;
 }
 
 /**
@@ -96,7 +125,7 @@ function refuseStrayPositionals(command: string, positional: string[]): void {
   if (Object.hasOwn(FLAG_TABLE, command) && commandFields(command).some((f) => f.positional)) return;
   const shown = command === 'status' ? 'nanojira' : `nanojira ${command}`;
   fail('unexpected_argument', `unexpected argument '${positional[0]}' — ${shown} takes no positional argument`,
-    'flags go before `--`; write every flag as --name or --name=value');
+    'flags go before `--`; write every flag as --name, --name=value or --name value');
 }
 
 /** The control flags that take no value; `--dry-run` is checked by `checkFlags` itself. */
@@ -174,6 +203,8 @@ const FLAG_DOCS: Record<string, FlagDoc> = {
   all: doc('include archived elements'),
 };
 
+const READ_FIELDS = doc('with --json: keep only these fields of every entry, in this order', '<a,b,...>');
+
 // Where a command gives a flag its own meaning.
 const COMMAND_DOCS: Record<string, Record<string, FlagDoc>> = {
   init: { backlog: doc('create the backlog at this path', '<path>') },
@@ -194,14 +225,15 @@ const COMMAND_DOCS: Record<string, Record<string, FlagDoc>> = {
   },
   show: {
     id: doc('the element to show', '<id>'),
+    fields: doc('with --json: keep only these fields of the entry, in this order', '<a,b,...>'),
     notes: doc('which notes to show (default all)', 'none|all|last:N'),
   },
   log: {
     id: doc('the element whose history to show', '<id>'),
     last: doc('show only the last N events', '<N>'),
   },
-  list: FILTER,
-  find: { ...FILTER, 'case-sensitive': doc('match the text with exact case'), text: doc('the search text, instead of the positional argument', '<text>') },
+  list: { ...FILTER, fields: READ_FIELDS },
+  find: { ...FILTER, fields: READ_FIELDS, 'case-sensitive': doc('match the text with exact case'), text: doc('the search text, instead of the positional argument', '<text>') },
   tree: { id: doc('show only this element and what is below it', '<id>') },
   rm: { cascade: doc('also remove every element below this one') },
   claim: {
@@ -237,4 +269,4 @@ function flagDoc(command: string, name: string): FlagDoc {
 }
 
 export type { CliSpec, FlagDoc };
-export { checkCommandFlags, refuseStrayPositionals, acceptedFlagNames, flagDoc };
+export { checkCommandFlags, refuseStrayPositionals, acceptedFlagNames, flagDoc, flagKinds };
