@@ -112,16 +112,15 @@ function main() {
     process.exit(1);
   }
 
-  // The sibling `nj` next to this file — both ship from the same directory
-  // (§ 3), built in the same commit. Never guessed from PATH or re-derived
-  // from cwd: that is exactly the ambiguity `--backlog` confinement below
-  // exists to remove. A release directory (DECISIONS 179) holds both the
-  // CommonJS bundle (`nj-mcp.cjs`) and a POSIX sh wrapper (`nj-mcp`) that
-  // execs it; this process is always run as one JS file or the other, so
-  // its own basename says which the sibling must be too — `node` can run
-  // `nj.cjs` but would try (and fail) to parse `nj`'s shell wrapper as JS.
-  const selfIsCjs = path.basename(process.argv[1]).endsWith('.cjs');
-  const njPath = path.join(path.dirname(path.resolve(process.argv[1])), selfIsCjs ? 'nj.cjs' : 'nj');
+  // The sibling `nj.mjs` next to this file — both ship from the same
+  // directory (§ 3, § 18), built in the same commit. Never guessed from PATH
+  // or re-derived from cwd: that is exactly the ambiguity `--backlog`
+  // confinement below exists to remove. This file is always invoked as
+  // `dist/nj-mcp.mjs` directly, or via the exported folder's `bin/nj-mcp`
+  // wrapper, which execs `dist/nj-mcp.mjs` the same way — either way its own
+  // sibling is `nj.mjs` in the same `dist/` directory (DECISIONS 185
+  // addendum 9b3d0de, replacing the earlier `.cjs` sibling lookup, D179).
+  const njPath = path.join(path.dirname(path.resolve(process.argv[1])), 'nj.mjs');
 
   // Children spawned for in-flight tool calls, so a disconnect (stdin
   // closes) can clean them up instead of leaving zombies — distinct from

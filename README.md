@@ -8,7 +8,7 @@ backlog: `docs/MIGRATION-v3.md`). Wiring an agent up to it: copy-paste block
 for a project's `AGENTS.md` in `docs/AGENT-INSTRUCTIONS.md`.
 Upgrading from an earlier nj release: `docs/CHANGES.md`.
 
-`dist/nj` (the CLI) and `dist/nj-mcp` (an MCP server exposing the same
+`dist/nj.mjs` (the CLI) and `dist/nj-mcp.mjs` (an MCP server exposing the same
 commands as tools over stdio, § 17) implement spec v3 through **v3.9**
 (`docs/SPECIFICATION.md`): backlog location via `--backlog`, `NJ_BACKLOG` or
 `.njrc`, accepted before the command word as well as after; configurable
@@ -57,21 +57,25 @@ src/nj-mcp.ts   entry point: the MCP server (§ 17), stdio
 src/commands/   one module per verb (cmd-*.ts)
 src/core/       shared modules (args, config, load, output, claims, batch,
                 actor, flag-table, input, …)
-dist/nj         built, single-file artefact — what ships, checked into git
-dist/nj-mcp     built, single-file artefact — the MCP server, checked into git
+dist/nj.mjs     built, single-file artefact (ESM) — what ships, checked into git
+dist/nj-mcp.mjs built, single-file artefact (ESM) — the MCP server, checked into git
 docs/           SPECIFICATION.md, ARCHITECTURE.md, DECISIONS.md
 test/           black-box oracle against the CLI and the MCP server
-tools/          build, perf, and refactor-safety tooling
+tools/          build, perf, export, and refactor-safety tooling
 ```
 
-`docs/ARCHITECTURE.md` has the module map and build graph in detail.
+`docs/ARCHITECTURE.md` has the module map and build graph in detail. A
+consuming team does not install from this layout directly — it exports a
+self-contained skill folder from a signed tag (`node
+tools/export-skill.mts <tag> <dest>`) and copies that folder wherever it is
+needed; see `docs/SPECIFICATION.md` § 18 and `docs/GUIDE.md` § 1.
 
 ## Commands
 
 ```sh
-npm run build        # write dist/nj and dist/nj-mcp from src/
+npm run build        # write dist/nj.mjs and dist/nj-mcp.mjs from src/
 npm run build:check  # verify both are byte-identical to a fresh build
 npm run typecheck     # tsc --noEmit, strict, over src/**/*.ts
-npm test              # build:check + the oracle (test/) against dist/nj (and dist/nj-mcp)
+npm test              # build:check + the oracle (test/) against dist/nj.mjs (and dist/nj-mcp.mjs)
 npm run perf          # build:check + performance gate (SPECIFICATION.md § 13)
 ```

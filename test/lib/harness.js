@@ -30,14 +30,16 @@ const NJ = (() => {
 })();
 const NODE = process.env.NJ_NODE || process.execPath;
 
-/* `dist/nj-mcp` (§ 17 "MCP Interface"), resolved the same way NJ is:
+/* `dist/nj-mcp.mjs` (§ 17 "MCP Interface"), resolved the same way NJ is:
  * NJ_MCP wins if set, otherwise the sibling `nj-mcp` next to whatever NJ
- * resolved to (both ship from the same `dist/` directory, § 3). Not
- * required to exist — tests that need it check with requireNjMcp(). */
+ * resolved to, with NJ's own extension (both ship from the same `dist/`
+ * directory, § 3, § 18) — `.mjs` for the current bundle, or none for an old,
+ * frozen `dist/nj` replayed by the gate. Not required to exist — tests that
+ * need it check with requireNjMcp(). */
 const NJ_MCP = (() => {
   const given = process.env.NJ_MCP || null;
   if (given) return path.resolve(given);
-  return NJ ? path.join(path.dirname(NJ), 'nj-mcp') : null;
+  return NJ ? path.join(path.dirname(NJ), 'nj-mcp' + path.extname(NJ)) : null;
 })();
 
 /* Fixed clock for every run (§ 12). Timestamps are the only non-deterministic

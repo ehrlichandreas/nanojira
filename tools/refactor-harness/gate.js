@@ -16,10 +16,10 @@
 //    one running this script, not the one the step shipped with (a step older
 //    than DECISIONS 90 B2 would not gate on verdicts); with --harness=<rev>
 //    the one committed at <rev>;
-// 4. `baseline.js verify --nj=<worktree>/dist/nj` (the replay);
+// 4. `baseline.js verify --nj=<worktree>/dist/nj.mjs` (the replay);
 // 5. test/ replaced by <tests>'s test/ (default: the step itself) and
-//    `test/run-all.js <worktree>/dist/nj` (the new suites' verdict), unless
-//    the replay said its instrument is stale or damaged (6, 7);
+//    `test/run-all.js <worktree>/dist/nj.mjs` (the new suites' verdict),
+//    unless the replay said its instrument is stale or damaged (6, 7);
 // 6. the worktree removed (`--keep` leaves it for forensics).
 //
 // The harness brings its corpus along, and a corpus pins one frozen test/.
@@ -29,10 +29,11 @@
 // --harness=<a commit that still carries that corpus>, which brings that
 // commit's code along too: exactly the instrument of the time.
 //
-// `--nj=<path>` replaces the step's dist/nj in steps 4 and 5 by a copy of
-// another file (a candidate not yet committed, or a deliberately broken one
-// to prove the gate goes red). The copy sits at the worktree's dist/nj, so
-// the suites that look for dist/nj themselves (AC-15) see the same file.
+// `--nj=<path>` replaces the step's dist/nj.mjs (or, for a step from before
+// DECISIONS 185, dist/nj) in steps 4 and 5 by a copy of another file (a
+// candidate not yet committed, or a deliberately broken one to prove the
+// gate goes red). The copy sits at that same worktree path, so the suites
+// that look for it themselves (AC-15) see the same file.
 //
 // The main working tree and its index are never written: everything happens
 // inside the throwaway worktree, which only adds git's own bookkeeping under
@@ -389,19 +390,29 @@ async function main() {
         ' (or --harness=<a commit carrying the corpus of that tag>).'
     );
   }
-  const NJ = path.join(WT, 'dist', 'nj');
+  // `dist/nj.mjs` (DECISIONS 185 addendum 9b3d0de) for any step at or after
+  // v3.11; a step from before that (replayed with --step=<old commit>, or
+  // --harness=<old rev>) still ships the extensionless `dist/nj`, which the
+  // frozen oracle tags themselves never touch (they only replace test/,
+  // above) -- so both must keep working here. --nj=<path> targets whichever
+  // of the two the checked-out step itself already has; absent either (a
+  // step with neither file yet built), it defaults to the current, `.mjs`
+  // name, since that is what a future build would produce.
+  const NJ_MJS = path.join(WT, 'dist', 'nj.mjs');
+  const NJ_CJS = path.join(WT, 'dist', 'nj');
+  const NJ = fs.existsSync(NJ_MJS) ? NJ_MJS : fs.existsSync(NJ_CJS) ? NJ_CJS : NJ_MJS;
   if (NJ_OVERRIDE) {
     fs.mkdirSync(path.dirname(NJ), { recursive: true });
     fs.copyFileSync(NJ_OVERRIDE, NJ);
     fs.chmodSync(NJ, 0o755);
   }
-  if (!fs.existsSync(NJ)) setupFailed(`${STEP} has no dist/nj`);
+  if (!fs.existsSync(NJ)) setupFailed(`${STEP} has no dist/nj.mjs or dist/nj`);
   const njSha = require('crypto').createHash('sha256').update(fs.readFileSync(NJ)).digest('hex');
 
   process.stdout.write(
     `gate: step ${STEP} (${stepSha.slice(0, 7)}), replay test/ from ${FROZEN} (${frozenSha.slice(0, 7)}), ` +
       `oracle test/ from ${TESTS} (${testsSha.slice(0, 7)})\n` +
-      `      nj ${NJ_OVERRIDE ? NJ_OVERRIDE + ' (--nj)' : STEP + ':dist/nj'} sha256 ${njSha}\n` +
+      `      nj ${NJ_OVERRIDE ? NJ_OVERRIDE + ' (--nj)' : STEP + ':' + path.relative(WT, NJ)} sha256 ${njSha}\n` +
       `      harness from ${harnessName}, node ${process.version}, worktree ${WT}\n`
   );
 

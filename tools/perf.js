@@ -13,7 +13,7 @@
 // Node built-ins only (fs/os/path/child_process) -- no new devDependency for
 // four spawnSync calls and a median.
 //
-//   node tools/perf.js                          absolute § 13 bar, dist/nj
+//   node tools/perf.js                          absolute § 13 bar, dist/nj.mjs
 //   node tools/perf.js --ab=<nj A> --ab=<nj B> [--rounds=N] [--gate=all|reads]
 //                                               interleaved A/B, "no regression"
 //
@@ -27,7 +27,7 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const ROOT = path.resolve(__dirname, '..');
-const DIST_NJ = path.join(ROOT, 'dist', 'nj');
+const DIST_NJ = path.join(ROOT, 'dist', 'nj.mjs');
 const NODE = process.execPath;
 const RUNS = 5; // docs/SPECIFICATION.md:840: "median of 5"
 const ELEMENT_COUNT = 10000;
@@ -397,7 +397,7 @@ function main() {
   const dir = buildBacklog(DIST_NJ);
   let overBar = false;
   process.stdout.write(
-    `perf: dist/nj, ${ELEMENT_COUNT} elements, ${RUNS} runs each, bar median<=${MEDIAN_MS}ms max<=${MAX_MS}ms (docs/SPECIFICATION.md:850)\n\n`
+    `perf: dist/nj.mjs, ${ELEMENT_COUNT} elements, ${RUNS} runs each, bar median<=${MEDIAN_MS}ms max<=${MAX_MS}ms (docs/SPECIFICATION.md:850)\n\n`
   );
   for (const cmd of COMMANDS) {
     const { median: med, max } = measure(dir, cmd);

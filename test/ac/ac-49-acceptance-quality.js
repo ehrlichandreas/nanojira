@@ -553,6 +553,57 @@ for (const bad of ['3.6', '3.6.0.1', '3.6.x', 'v3.6.0', 'not-a-version', '']) {
   T.exit('J8 nj set --help: still exit 0, unaffected by minVersion', r, 0);
 }
 
+/* J9 -- version comparison across a TWO-DIGIT minor (v3-10.md § 13): a   */
+/* naive string/lexical compare reads "3.10.0" as OLDER than "3.9.0"      */
+/* ('1' < '9' in the second component), which a numeric tuple compare     */
+/* must not fall for. Every value here is derived from the running       */
+/* nj's own --version, not hardcoded, so the leg tracks the next bump     */
+/* automatically instead of going stale. */
+{
+  const vr = H.runJson(['--version'], { unsetEnv: ['NJ_BACKLOG'] });
+  const parts = ((vr.json && vr.json.version) || '').split('.').map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isInteger(n))) {
+    T.check('fixture: J9 nj --version is exactly X.Y.Z', false, J(vr.json));
+  } else {
+    const [maj, min, patch] = parts;
+    const oneMinorBelow = maj + '.' + (min - 1) + '.' + patch;
+    const running = maj + '.' + min + '.' + patch;
+    const oneMinorAbove = maj + '.' + (min + 1) + '.' + patch;
+
+    function minVersionCheck(label, minVersion, expectPass) {
+      const dir = H.mkBacklog({
+        label: 'ac49-j9-' + label,
+        config: JSON.stringify({
+          schema: 1,
+          statuses: ['todo', 'doing', 'blocked', 'review', 'done'],
+          sections: { description: ['Description'], acceptance: ['Acceptance Criteria'] },
+          minVersion,
+        }, null, 2) + '\n',
+      });
+      const r = runJ(['list'], dir);
+      if (expectPass) {
+        T.exit('J9 minVersion=' + minVersion + ' (running ' + running + '): list exits 0', r, 0);
+      } else {
+        T.exit('J9 minVersion=' + minVersion + ' (running ' + running + '): list fails with exit 1', r, 1);
+        T.eq('J9 minVersion=' + minVersion + ': needs_newer_nj', r.json && r.json.error, 'needs_newer_nj');
+      }
+    }
+    /* one minor BELOW the running version: with a running minor >= 10
+     * (true from 3.10.0 onward) this is exactly the lexical trap -- a
+     * string compare reads e.g. "3.9.0" as newer than "3.10.0" and
+     * would wrongly fail this case. min === 0 has no minor below to
+     * construct; skip with a reason rather than asserting a negative
+     * minor. */
+    if (min > 0) {
+      minVersionCheck('below', oneMinorBelow, true);
+    } else {
+      T.check('J9 skipped: running minor is 0, no minor below to construct', true, 'skip');
+    }
+    minVersionCheck('exact', running, true);
+    minVersionCheck('above', oneMinorAbove, false);
+  }
+}
+
 /* ===================================================================== */
 /* K — DECISIONS 167: both E/F apply to LIVE elements only. An archived   */
 /* done element with empty acceptance gets neither warning; the SAME     */
