@@ -403,7 +403,37 @@ printf 'Line one\nLine two\n' | nanojira set --id=TSK-002 --description-file=-  
   written. An unreadable `-file` is `not_found`.
 - Everything else in the body — your own sections, `## Notes` — stays byte
   for byte. Don't put a `## ` heading inside the content: it would read as
-  the next section.
+  the next section, **even inside a fenced code example** — section
+  matching is line-based, not fence-aware, on purpose (TSK-052). To quote a
+  heading-looking line in an example without it ending the section, indent
+  it by at least one space or tab, or put any other character before the
+  `#` — either is enough:
+
+  ```sh
+  nanojira set --id=TSK-002 --description="See the example:
+
+  \`\`\`
+   ## Not a real heading, indented by one space
+  \`\`\`"
+  ```
+
+  If the RESULTING body would leave a fence open at a later section
+  boundary or at end of file — whether from a section's own end landing
+  inside a still-open fence, from the new content you supplied opening a
+  fence of its own, or from an *earlier*, untouched section that was
+  already broken this way — the write refuses with `refused:open_fence`
+  and nothing is written, rather than leave a dangling fence behind
+  (TSK-053 v2): `nanojira check` tracks fence state across the whole body
+  without resetting at section boundaries, so an open fence anywhere can
+  swallow real content anywhere after it. The error names the line the
+  fence opened at and its section — fix the example there (quote the inner
+  line, or close the fence before the next real heading) and retry; if the
+  broken section is the one you're replacing anyway, your new content
+  simply overwrites it and the write goes through. An unclosed fence
+  inside `## Notes` itself is exempt at end of file — nothing real ever
+  follows the last section, and older `nanojira` wrote note text with no
+  fence check at all, so a Notes entry like that from before this check
+  existed never blocks another write.
 - Replacing the acceptance criteria keeps the ticks of the lines you left
   alone: a new `- [ ] …` line whose text matches a ticked old line exactly
   stays ticked. If ticked lines were reworded or dropped, the result says
@@ -1013,6 +1043,7 @@ With `--json`, `error` is one of a closed set. The ones an agent meets:
 | `refused:misplaced` | a hierarchy archive of a subtree outside its folder | `nanojira doctor --fix` |
 | `refused:unreadable_dir` | an unreadable directory hides part of the backlog | fix its permissions, then `nanojira doctor` |
 | `refused:too_large` | the write would make an element file larger than 1 MiB | shorten the text, or keep large content in a separate file and link to it |
+| `refused:open_fence` | a section write or note would leave a fence open at a section boundary or end of file | close the fence, or move the fenced example out of its section; a write that replaces the broken span with clean content goes through |
 | `refused:symlink` | `.nanojira/`, its `ids/` or `claims/`, a claim directory or a claim entry is a symlink (`new`, `claim`, `release`, `archive`, `rm`, `unarchive`) | replace the link with a real directory holding the same contents; `doctor` names every such link (`claim:symlink`, or `backlog:ids_missing` for `ids/`) |
 | `refused:invalid_id` | an element involved has an `id` that is not `EPIC-`/`TSK-`/`SUB-<n>` (`claim`, `release`, `archive`, `rm`, `unarchive`, as `--parent`) | give it a real id by hand (and rename the file to match) |
 | `exists` | `init` target occupied, or an archive target occupied | choose another target, or clear it |
@@ -1340,7 +1371,22 @@ $ nanojira show --id=TSK-009 --notes=last:3 --fields=id,status,notes --json
 ```
 
 `show` also knows `notes` and `notes_total`, present only with
-`--notes`.
+`--notes`; and `description` (the Description section's text, `null` when
+absent) and `acceptance` (`[{text, checked, item}, …]`, in file order,
+`[]` when there are none), present by default on `show --json` — unlike
+`notes`, no flag is needed — but, like every other field, left out of
+`list`/`find`'s default output unless named with `--fields` (TSK-051,
+scans TSK-014). Each acceptance item's `item` is that box's own 1-based
+`check --item=<n>` number (TSK-052 item 1) — not its position in this
+array — so `check --item=<acceptance[i].item>` always ticks that exact
+box, even when a stray checkbox-shaped line elsewhere in the body (e.g.
+Description) would otherwise make `acceptance[i-1]` → `check --item=i`
+tick the wrong one:
+
+```sh
+$ nanojira show --id=TSK-009 --fields=id,description,acceptance --json
+$ nanojira list --fields=id,title,acceptance --json
+```
 
 ## 26. Umbrella tickets: make the parts children
 

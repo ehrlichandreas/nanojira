@@ -5,6 +5,7 @@
 import type { ParsedFile, Config } from './types.ts';
 
 import { FIELD_ORDER, LIST_FIELDS, SECTION_ROLES } from './constants.ts';
+import { fail } from './kernel.ts';
 
 // ------------------------------------------------------- frontmatter values
 
@@ -287,31 +288,148 @@ function sectionCheckboxCounts(body: string, names: string[]): { total: number; 
   const lines = body.split('\n');
   const idx = sectionHeadingIndex(lines, names);
   if (idx === -1) return null;
-  let total = 0;
+  const boxes = acceptanceCheckboxes(body, names);
   let unticked = 0;
-  for (const { m } of checkboxesOutsideFences(lines, idx + 1, sectionEnd(lines, idx))) {
-    total++;
-    if (m[3] === ' ') unticked++;
+  for (const { m } of boxes) if (m[3] === ' ') unticked++;
+  return { total: boxes.length, unticked };
+}
+
+// A fenced block's opening delimiter (``` or ~~~, length 3 or more, after
+// optional leading whitespace). Shared by every scanner below that must
+// skip fenced content (§ 7 "What counts as a checkbox", § 10a "Scope",
+// TSK-053) so they can never disagree about where a fence opens or closes.
+const FENCE_OPEN_RE = /^[ \t]*(`{3,}|~{3,})/;
+
+interface FenceState { ch: string; len: number }
+
+/** One line's effect on fence state: `skip` is true for a line that must
+ * never be matched as a checkbox or a heading (the fence delimiter itself,
+ * or any line already inside an unclosed fence) — the single rule every
+ * fence-skipping scanner below applies the same way (TSK-053). */
+function fenceStep(line: string, fence: FenceState | null): { fence: FenceState | null; skip: boolean } {
+  const fm = FENCE_OPEN_RE.exec(line);
+  if (fence) {
+    if (fm && fm[1][0] === fence.ch && fm[1].length >= fence.len) return { fence: null, skip: true };
+    return { fence, skip: true };
   }
-  return { total, unticked };
+  if (fm) return { fence: { ch: fm[1][0], len: fm[1].length }, skip: true };
+  return { fence: null, skip: false };
+}
+
+/** The line a still-open fence opened at, found by walking `lines`
+ * continuously from line 0 — the exact fence tracking `scanCheckboxes`
+ * itself uses, never reset per section — and stopping the instant a fence
+ * is open at a line that starts a `#`/`##` heading, or (if none trips it)
+ * at the end of the body (TSK-053 v2, Scout MUST, DECISIONS 233). A
+ * result with an open fence at either kind of boundary is exactly the
+ * shape that makes `check`'s own scan treat the rest of the body —
+ * whichever section or Notes comes after — as still fenced, silently.
+ * `null` when every fence opened anywhere in `lines` is also closed
+ * before the next such boundary (including EOF). A span-local check
+ * (only the role being written) would miss a fence an EARLIER, untouched
+ * section left open, or one this write's own new content opens without
+ * closing (TSK-053's own MUST #1) — this one catches both, because it
+ * is run against the RESULT, after the write, not against either side
+ * of the splice alone. */
+function openFenceAtAnyBoundary(lines: string[]): number | null {
+  let fence: FenceState | null = null;
+  let openedAt = -1;
+  let inNotes = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (fence !== null && /^#{1,2}[ \t]/.test(lines[i])) return openedAt;
+    const h2 = /^##[ \t]+(.*?)[ \t]*$/.exec(lines[i]);
+    if (h2) inNotes = h2[1].replace(/:\s*$/, '').trim().toLowerCase() === 'notes';
+    const was = fence;
+    fence = fenceStep(lines[i], fence).fence;
+    if (was === null && fence !== null) openedAt = i;
+  }
+  // A fence still open at end of file is only a violation outside `## Notes`
+  // (older nanojira wrote note text with no fence validation at all, so an
+  // unclosed ``` already on disk there must not start refusing unrelated
+  // writes now — compat). `## Notes` is always the body's last section
+  // (§ 9 insertion order), so nothing with real content ever follows one
+  // left open there; the heading-boundary check above already refuses the
+  // one case that does matter — a fence open BEFORE `## Notes` is caught
+  // there, at the `## Notes` heading line itself, before this is reached.
+  return fence !== null && !inNotes ? openedAt : null;
+}
+
+/** The nearest `##` heading's own text at or before `from`, stopping at an
+ * H1 (content before any `##` section has no section name to report) —
+ * purely for `refuseIfOpenFenceAtBoundary`'s own message, naming which
+ * section the open fence's own opening line sits in. */
+function sectionNameAt(lines: string[], from: number): string | null {
+  for (let i = from; i >= 0; i--) {
+    const m = /^##[ \t]+(.*?)[ \t]*$/.exec(lines[i]);
+    if (m) return m[1].replace(/:\s*$/, '').trim();
+    if (/^#[ \t]/.test(lines[i])) return null;
+  }
+  return null;
+}
+
+/** Refuses (`refused:open_fence`, nothing written) when `body` — the
+ * RESULT a write is about to produce, already containing whatever that
+ * write changed — would leave a fence open at a line that starts a
+ * section, or at the end of the file (TSK-053 v2, Scout MUST,
+ * DECISIONS 233): the one case `check`'s own continuous fence tracking
+ * can no longer tell a real heading or checkbox apart from fenced
+ * content, from there on. Covers every direction at once: an old span
+ * spliced out that left its own opener behind, new content (a
+ * `--description`/`--acceptance`/`--add-acceptance` value, or a note's
+ * own text) that opens a fence of its own, and a fence an earlier,
+ * untouched section already had open before this write ran at all.
+ * Every caller runs this against the body it is about to write, before
+ * writing it — never against a read. */
+function refuseIfOpenFenceAtBoundary(body: string): void {
+  const lines = body.split('\n');
+  const openedAt = openFenceAtAnyBoundary(lines);
+  if (openedAt === null) return;
+  const section = sectionNameAt(lines, openedAt);
+  fail('refused:open_fence',
+    `a fenced block opened at line ${openedAt + 1}${section !== null ? ` (in the ${section} section)` : ''} is still open at a section boundary or end of file — refusing to write, nothing changed`,
+    'close the fence, or move the fenced example out of its section');
 }
 
 /** The checkbox lines in `lines[from..to)`, skipping fenced code blocks: a
  * checkbox inside a fence is an example, not a criterion. */
 function checkboxesOutsideFences(lines: string[], from: number, to: number): { i: number; m: RegExpExecArray }[] {
   const out: { i: number; m: RegExpExecArray }[] = [];
-  let fence: { ch: string; len: number } | null = null;
+  let fence: FenceState | null = null;
   for (let i = from; i < to; i++) {
-    const line = lines[i];
-    const fm = /^[ \t]*(`{3,}|~{3,})/.exec(line);
-    if (fence) {
-      if (fm && fm[1][0] === fence.ch && fm[1].length >= fence.len) fence = null;
-      continue;
-    }
-    if (fm) { fence = { ch: fm[1][0], len: fm[1].length }; continue; }
-    const m = CHECKBOX_RE.exec(line);
+    const step = fenceStep(lines[i], fence);
+    fence = step.fence;
+    if (step.skip) continue;
+    const m = CHECKBOX_RE.exec(lines[i]);
     if (m) out.push({ i, m });
   }
+  return out;
+}
+
+/** Every acceptance-section checkbox `check`'s own `--item=<n>` can
+ * address, for `tickAllAcceptance`/`sectionCheckboxCounts`/
+ * `sectionCheckboxItems` to share (TSK-053 v2, Reviewer MUST, DECISIONS
+ * 233 addendum). `checkboxesOutsideFences(lines, idx + 1, sectionEnd(...))`
+ * resets fence state at the section's own start -- span-local -- while
+ * `scanCheckboxes` tracks it continuously from line 0; in a hand-broken
+ * file where an earlier, untouched section already left a fence open, the
+ * span-local scan sees a checkbox the continuous one still treats as
+ * fenced (swallowed), so counts/ticks/items disagreed with what `check
+ * --item=<n>` could actually reach. Filtering `scanCheckboxes`' own box
+ * list to the section's line span means every consumer here sees exactly
+ * what `check` sees: a swallowed box is not counted, not ticked, and not
+ * listed (never `item: 0`). `item` is the box's 1-based position in the
+ * unfiltered list, `check --item=<n>`'s own numbering. `[]` when the
+ * section has no heading at all. */
+function acceptanceCheckboxes(body: string, names: string[]): { line: number; m: RegExpExecArray; item: number }[] {
+  const lines = body.split('\n');
+  const idx = sectionHeadingIndex(lines, names);
+  if (idx === -1) return [];
+  const end = sectionEnd(lines, idx);
+  const { boxes } = scanCheckboxes(body);
+  const out: { line: number; m: RegExpExecArray; item: number }[] = [];
+  boxes.forEach((b, i) => {
+    if (b.line > idx && b.line < end) out.push({ line: b.line, m: CHECKBOX_RE.exec(lines[b.line]) as RegExpExecArray, item: i + 1 });
+  });
   return out;
 }
 
@@ -321,15 +439,69 @@ function checkboxesOutsideFences(lines: string[], from: number, to: number): { i
  * trimmed, in order; `[]` (and `body` itself) when nothing was open. */
 function tickAllAcceptance(body: string, names: string[]): { body: string; checked: string[] } {
   const lines = body.split('\n');
-  const idx = sectionHeadingIndex(lines, names);
-  if (idx === -1) return { body, checked: [] };
   const checked: string[] = [];
-  for (const { i, m } of checkboxesOutsideFences(lines, idx + 1, sectionEnd(lines, idx))) {
+  for (const { line, m } of acceptanceCheckboxes(body, names)) {
     if (m[3] !== ' ') continue;
-    lines[i] = `${m[1]}${m[2]} [x]${m[4]}`;
+    lines[line] = `${m[1]}${m[2]} [x]${m[4]}`;
     checked.push(m[4].trim());
   }
   return checked.length === 0 ? { body, checked } : { body: lines.join('\n'), checked };
+}
+
+/** Every acceptance checkbox in the role's own section span, in file order
+ * (TSK-051, show/list `--json`'s `acceptance` field): `{text, checked,
+ * item}`, same span and fence-skipping as `sectionCheckboxCounts` so the
+ * two can never disagree about what's in the section. `item` is the box's
+ * own 1-based position in `scanCheckboxes`' whole-body-minus-Notes scan
+ * (TSK-052 item 1, Scout's N1) -- the exact number `nanojira check
+ * --item=<n>` needs to flip that very box, so a consumer that reads
+ * `acceptance[i].item` and passes it straight to `check --item=` never
+ * ticks the wrong box just because a stray checkbox sits earlier in the
+ * body (e.g. in Description). `[]` both when the section has no heading at
+ * all and when it has one but no checkboxes -- the field itself does not
+ * distinguish the two, unlike `description` below. */
+function sectionCheckboxItems(body: string, names: string[]): { text: string; checked: boolean; item: number }[] {
+  return acceptanceCheckboxes(body, names).map(({ m, item }) => ({
+    text: m[4].trim(), checked: m[3] !== ' ', item,
+  }));
+}
+
+interface Checkbox { line: number; rest: string; ticked: boolean }
+
+/**
+ * Every countable checkbox in document order (§ 10a, `nanojira check`'s own
+ * `--item=<n>` numbering, TSK-052 item 1): top to bottom is depth-first
+ * through nested lists, since a nested item is just a later, more-indented
+ * line. `## Notes` is excluded (§ 10, an append-only audit trail); fenced
+ * regions (``` / ~~~, matched after optional leading whitespace, closed
+ * only by a matching-or-longer fence of the same character) are never
+ * scanned — the one place in the spec where fence-awareness applies to
+ * heading lines too (§ 7), unlike `sectionHeadingIndex`/`sectionEnd` above.
+ * Lives here, not in `commands/cmd-check.ts`, so `core/derive.ts`'s
+ * `acceptance[].item` (TSK-052 item 1) can share the exact same scan `check`
+ * itself resolves `--item=<n>` against, rather than a second copy that
+ * could drift from it.
+ */
+function scanCheckboxes(body: string): { lines: string[]; boxes: Checkbox[] } {
+  const lines = body.split('\n');
+  const boxes: Checkbox[] = [];
+  let inNotes = false;
+  let fence: FenceState | null = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const step = fenceStep(line, fence);
+    fence = step.fence;
+    if (step.skip) continue;
+    if (/^#{1,2}[ \t]/.test(line)) {
+      const h2 = /^##[ \t]+(.*?)[ \t]*$/.exec(line);
+      inNotes = !!h2 && h2[1].replace(/:\s*$/, '').trim().toLowerCase() === 'notes';
+      continue;
+    }
+    if (inNotes) continue;
+    const m = CHECKBOX_RE.exec(line);
+    if (m) boxes.push({ line: i, rest: m[4], ticked: m[3] !== ' ' });
+  }
+  return { lines, boxes };
 }
 
 /** A section's content as `writeSection` takes it (trailing blank lines
@@ -405,13 +577,20 @@ function sectionInsertPoint(lines: string[], role: 'description' | 'acceptance',
 // separator before the next section; at the end of the body the same trailing
 // empty element is the file's single closing newline, so one rule serves both
 // and everything outside the region stays byte-for-byte (§ 9).
+// Never checks for an open fence itself (TSK-053 v2, DECISIONS 233): that is
+// now `refuseIfOpenFenceAtBoundary`'s job, run once against the fully
+// resulting body in `applySections` below, after every role has been
+// spliced in — a per-call, span-local check here could neither see a fence
+// this call's own new content opens nor one an earlier, already-applied
+// role left open.
 function writeSection(body: string, role: 'description' | 'acceptance', cfg: Config, content: string) {
   const names = cfg.sections[role];
   const lines = body.split('\n');
   const contentLines = content === '' ? [] : content.split('\n');
   const at = sectionHeadingIndex(lines, names);
   if (at !== -1) {
-    lines.splice(at + 1, sectionEnd(lines, at) - at - 1, ...contentLines, '');
+    const end = sectionEnd(lines, at);
+    lines.splice(at + 1, end - at - 1, ...contentLines, '');
   } else {
     lines.splice(sectionInsertPoint(lines, role, cfg), 0, `## ${names[0]}`, ...contentLines, '');
   }
@@ -428,6 +607,12 @@ function applySections(body: string, wanted: Map<string, string>, cfg: Config) {
     const next = writeSection(result, role, cfg, wanted.get(role) as string);
     if (next !== result) { result = next; changed.push(role); }
   }
+  // Checked once, against the fully resulting body, only when something
+  // actually changed (§ 9, "every write that changes body text" —
+  // TSK-053 v2, DECISIONS 233): an unchanged result is already on disk,
+  // so re-validating it here would block an unrelated frontmatter-only
+  // write on damage this call did not cause and is not writing.
+  if (changed.length > 0) refuseIfOpenFenceAtBoundary(result);
   return { body: result, changed };
 }
 
@@ -531,5 +716,6 @@ function notesSectionBounds(lines: string[]): { headingLine: number; endLine: nu
   return { headingLine, endLine };
 }
 
-export { parseFile, serialize, h1Of, syncH1, sectionPresent, sectionHasCheckbox, sectionCheckboxCounts, sectionContent, carryAcceptanceTicks, tickAllAcceptance, CHECKBOX_RE, normalizeTitle, normalizeSectionContent, applySections, parseNotes, renderNoteLine, notesSectionBounds };
+export type { Checkbox };
+export { parseFile, serialize, h1Of, syncH1, sectionPresent, sectionHasCheckbox, sectionCheckboxCounts, sectionCheckboxItems, sectionContent, scanCheckboxes, carryAcceptanceTicks, tickAllAcceptance, CHECKBOX_RE, normalizeTitle, normalizeSectionContent, applySections, parseNotes, renderNoteLine, notesSectionBounds, refuseIfOpenFenceAtBoundary };
 export type { NoteLine };

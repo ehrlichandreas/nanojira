@@ -657,6 +657,184 @@ function undoRelease(backlog, id, holder, time) {
   rollback(backlog, id, h ? h.gen : 0, "claimed", holder, time);
 }
 
+// src/core/kernel.ts
+import * as fs4 from "node:fs";
+var Fail = class extends Error {
+  hint;
+  code;
+  constructor(message, hint, code) {
+    super(message);
+    this.hint = hint;
+    this.code = code || "failed";
+  }
+};
+function fail(code, message, hint) {
+  throw new Fail(message, hint, code);
+}
+var output = { json: false };
+var decorateFailure = (res) => res;
+function setFailureDecorator(fn) {
+  decorateFailure = fn;
+}
+function hardExit(code, message) {
+  process.stderr.write(message + "\n");
+  if (output.json) process.stdout.write(JSON.stringify(decorateFailure({ ok: false, error: code }), null, 2) + "\n");
+  process.exit(1);
+}
+process.stdout.on("error", (err) => {
+  if (err.code === "EPIPE") process.exit(0);
+  throw err;
+});
+function out(s) {
+  process.stdout.write(s + "\n");
+}
+function emitFailure(code, message, hint) {
+  process.stderr.write(`Error: ${message}
+`);
+  if (hint) process.stderr.write(`${hint}
+`);
+  if (output.json) {
+    const res = { ok: false, error: code };
+    if (hint) res.hint = hint;
+    out(JSON.stringify(decorateFailure(res), null, 2));
+  }
+  process.exitCode = 1;
+}
+function parseArgs(argv, kinds, opts) {
+  const aliases = opts?.aliases;
+  const sameValue2 = opts?.sameValue ?? ((_name, a, b) => a === b);
+  const flags = /* @__PURE__ */ new Map();
+  const positional = [];
+  const repeated = [];
+  let options = true;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (options && a === "--") {
+      options = false;
+      continue;
+    }
+    if (options && a.startsWith("--")) {
+      const eq = a.indexOf("=");
+      const typed = eq === -1 ? a.slice(2) : a.slice(2, eq);
+      const name = aliases?.get(typed) ?? typed;
+      let value = eq === -1 ? true : a.slice(eq + 1);
+      if (value === true && kinds !== void 0 && Object.hasOwn(kinds, name) && kinds[name] === "string" && i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
+        value = argv[++i];
+      }
+      if (flags.has(name) && !sameValue2(name, flags.get(name), value) && !repeated.some((r) => r.name === name)) {
+        repeated.push({ name, typed });
+      }
+      flags.set(name, value);
+    } else {
+      positional.push(a);
+    }
+  }
+  return { flags, positional, repeated };
+}
+function allowedControlSet(commandControls, globalControls = []) {
+  return /* @__PURE__ */ new Set([...commandControls, ...globalControls]);
+}
+function checkFlags(flags, allowedFields, allowedControls, isWrite, displayName = (name) => name) {
+  for (const name of flags.keys()) {
+    if (allowedControls.has(name)) continue;
+    if (allowedFields.includes(name)) continue;
+    const suffix = isWrite ? " Nothing written." : "";
+    const known = Array.from(/* @__PURE__ */ new Set([...allowedFields, ...allowedControls])).map(displayName).sort();
+    fail("unknown_field", `unknown field '${name}'.${suffix}`, `Known flags: ${known.map((f) => "--" + f).join(", ")}`);
+  }
+}
+function flagString(flags, name) {
+  const v = flags.get(name);
+  if (v === void 0) return void 0;
+  if (v === true) return fail("missing_value", `--${name} needs a value (use --${name}=\u2026 or --${name} <value>)`);
+  return v;
+}
+function readStdin(hint = "pipe the text in") {
+  try {
+    return fs4.readFileSync(0, "utf8");
+  } catch (e) {
+    return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, hint);
+  }
+}
+function osaDistance(a, b) {
+  const m = a.length, n = b.length;
+  const d = [];
+  for (let i = 0; i <= m; i++) d.push([i]);
+  for (let j = 1; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        v = Math.min(v, d[i - 2][j - 2] + 1);
+      }
+      d[i][j] = v;
+    }
+  }
+  return d[m][n];
+}
+function nearestMatch(value, allowed) {
+  const threshold = value.length <= 4 ? 1 : 2;
+  let best = [];
+  let bestDist = Infinity;
+  for (const v of allowed) {
+    const d = osaDistance(value, v);
+    if (d < bestDist) {
+      bestDist = d;
+      best = [v];
+    } else if (d === bestDist) best.push(v);
+  }
+  return bestDist <= threshold && best.length === 1 ? best[0] : null;
+}
+function listHint(label, value, allowed) {
+  const known = `Known ${label}: ${allowed.join(", ")}`;
+  const suggestion = nearestMatch(value, allowed);
+  return suggestion === null ? known : `did you mean '${suggestion}'? ${known}`;
+}
+function pinnedNow() {
+  const pinned = process.env.NJ_NOW;
+  if (pinned === void 0 || pinned === "") return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(pinned) || Number.isNaN(Date.parse(pinned))) {
+    fail(
+      "invalid_env",
+      `invalid NJ_NOW '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`,
+      "fix NJ_NOW, or unset it for the system clock"
+    );
+  }
+  return pinned;
+}
+function checkClockEnv() {
+  pinnedNow();
+}
+function nowIso() {
+  return pinnedNow() ?? (/* @__PURE__ */ new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+function nowMs() {
+  return Date.parse(nowIso());
+}
+function parseOutputOpts(flags, json, allowedFields, label = "fields") {
+  const quiet = flags.has("quiet");
+  const fieldsRaw = flagString(flags, "fields");
+  if (quiet && fieldsRaw !== void 0) {
+    fail(
+      "invalid_value",
+      "--quiet cannot be combined with --fields",
+      "use --fields=<list> to choose fields, or --quiet for {ok, id}"
+    );
+  }
+  if (quiet && !json) fail("invalid_value", "--quiet requires --json");
+  if (fieldsRaw !== void 0 && !json) fail("invalid_value", "--fields requires --json");
+  if (fieldsRaw === void 0) return { quiet };
+  const names = fieldsRaw.split(",").map((s) => s.trim()).filter((s) => s !== "");
+  if (names.length === 0) fail("invalid_value", "--fields must not be empty");
+  for (const n of names) {
+    if (!allowedFields.includes(n)) {
+      fail("invalid_value", `unknown field '${n}' in --fields`, listHint(label, n, allowedFields));
+    }
+  }
+  return { quiet, fields: names };
+}
+
 // src/core/parse.ts
 function readQuoted(raw, i) {
   let out2 = "";
@@ -903,44 +1081,115 @@ function sectionCheckboxCounts(body, names) {
   const lines = body.split("\n");
   const idx = sectionHeadingIndex(lines, names);
   if (idx === -1) return null;
-  let total = 0;
+  const boxes = acceptanceCheckboxes(body, names);
   let unticked = 0;
-  for (const { m } of checkboxesOutsideFences(lines, idx + 1, sectionEnd(lines, idx))) {
-    total++;
-    if (m[3] === " ") unticked++;
+  for (const { m } of boxes) if (m[3] === " ") unticked++;
+  return { total: boxes.length, unticked };
+}
+var FENCE_OPEN_RE = /^[ \t]*(`{3,}|~{3,})/;
+function fenceStep(line, fence) {
+  const fm = FENCE_OPEN_RE.exec(line);
+  if (fence) {
+    if (fm && fm[1][0] === fence.ch && fm[1].length >= fence.len) return { fence: null, skip: true };
+    return { fence, skip: true };
   }
-  return { total, unticked };
+  if (fm) return { fence: { ch: fm[1][0], len: fm[1].length }, skip: true };
+  return { fence: null, skip: false };
+}
+function openFenceAtAnyBoundary(lines) {
+  let fence = null;
+  let openedAt = -1;
+  let inNotes = false;
+  for (let i = 0; i < lines.length; i++) {
+    if (fence !== null && /^#{1,2}[ \t]/.test(lines[i])) return openedAt;
+    const h2 = /^##[ \t]+(.*?)[ \t]*$/.exec(lines[i]);
+    if (h2) inNotes = h2[1].replace(/:\s*$/, "").trim().toLowerCase() === "notes";
+    const was = fence;
+    fence = fenceStep(lines[i], fence).fence;
+    if (was === null && fence !== null) openedAt = i;
+  }
+  return fence !== null && !inNotes ? openedAt : null;
+}
+function sectionNameAt(lines, from) {
+  for (let i = from; i >= 0; i--) {
+    const m = /^##[ \t]+(.*?)[ \t]*$/.exec(lines[i]);
+    if (m) return m[1].replace(/:\s*$/, "").trim();
+    if (/^#[ \t]/.test(lines[i])) return null;
+  }
+  return null;
+}
+function refuseIfOpenFenceAtBoundary(body) {
+  const lines = body.split("\n");
+  const openedAt = openFenceAtAnyBoundary(lines);
+  if (openedAt === null) return;
+  const section = sectionNameAt(lines, openedAt);
+  fail(
+    "refused:open_fence",
+    `a fenced block opened at line ${openedAt + 1}${section !== null ? ` (in the ${section} section)` : ""} is still open at a section boundary or end of file \u2014 refusing to write, nothing changed`,
+    "close the fence, or move the fenced example out of its section"
+  );
 }
 function checkboxesOutsideFences(lines, from, to) {
   const out2 = [];
   let fence = null;
   for (let i = from; i < to; i++) {
-    const line = lines[i];
-    const fm = /^[ \t]*(`{3,}|~{3,})/.exec(line);
-    if (fence) {
-      if (fm && fm[1][0] === fence.ch && fm[1].length >= fence.len) fence = null;
-      continue;
-    }
-    if (fm) {
-      fence = { ch: fm[1][0], len: fm[1].length };
-      continue;
-    }
-    const m = CHECKBOX_RE.exec(line);
+    const step = fenceStep(lines[i], fence);
+    fence = step.fence;
+    if (step.skip) continue;
+    const m = CHECKBOX_RE.exec(lines[i]);
     if (m) out2.push({ i, m });
   }
   return out2;
 }
-function tickAllAcceptance(body, names) {
+function acceptanceCheckboxes(body, names) {
   const lines = body.split("\n");
   const idx = sectionHeadingIndex(lines, names);
-  if (idx === -1) return { body, checked: [] };
+  if (idx === -1) return [];
+  const end = sectionEnd(lines, idx);
+  const { boxes } = scanCheckboxes(body);
+  const out2 = [];
+  boxes.forEach((b, i) => {
+    if (b.line > idx && b.line < end) out2.push({ line: b.line, m: CHECKBOX_RE.exec(lines[b.line]), item: i + 1 });
+  });
+  return out2;
+}
+function tickAllAcceptance(body, names) {
+  const lines = body.split("\n");
   const checked = [];
-  for (const { i, m } of checkboxesOutsideFences(lines, idx + 1, sectionEnd(lines, idx))) {
+  for (const { line, m } of acceptanceCheckboxes(body, names)) {
     if (m[3] !== " ") continue;
-    lines[i] = `${m[1]}${m[2]} [x]${m[4]}`;
+    lines[line] = `${m[1]}${m[2]} [x]${m[4]}`;
     checked.push(m[4].trim());
   }
   return checked.length === 0 ? { body, checked } : { body: lines.join("\n"), checked };
+}
+function sectionCheckboxItems(body, names) {
+  return acceptanceCheckboxes(body, names).map(({ m, item }) => ({
+    text: m[4].trim(),
+    checked: m[3] !== " ",
+    item
+  }));
+}
+function scanCheckboxes(body) {
+  const lines = body.split("\n");
+  const boxes = [];
+  let inNotes = false;
+  let fence = null;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const step = fenceStep(line, fence);
+    fence = step.fence;
+    if (step.skip) continue;
+    if (/^#{1,2}[ \t]/.test(line)) {
+      const h2 = /^##[ \t]+(.*?)[ \t]*$/.exec(line);
+      inNotes = !!h2 && h2[1].replace(/:\s*$/, "").trim().toLowerCase() === "notes";
+      continue;
+    }
+    if (inNotes) continue;
+    const m = CHECKBOX_RE.exec(line);
+    if (m) boxes.push({ line: i, rest: m[4], ticked: m[3] !== " " });
+  }
+  return { lines, boxes };
 }
 function sectionContent(body, names) {
   const lines = body.split("\n");
@@ -999,7 +1248,8 @@ function writeSection(body, role, cfg, content) {
   const contentLines = content === "" ? [] : content.split("\n");
   const at = sectionHeadingIndex(lines, names);
   if (at !== -1) {
-    lines.splice(at + 1, sectionEnd(lines, at) - at - 1, ...contentLines, "");
+    const end = sectionEnd(lines, at);
+    lines.splice(at + 1, end - at - 1, ...contentLines, "");
   } else {
     lines.splice(sectionInsertPoint(lines, role, cfg), 0, `## ${names[0]}`, ...contentLines, "");
   }
@@ -1016,6 +1266,7 @@ function applySections(body, wanted, cfg) {
       changed.push(role);
     }
   }
+  if (changed.length > 0) refuseIfOpenFenceAtBoundary(result);
   return { body: result, changed };
 }
 var NOTE_LINE_RE = /^-\ (\S+)\ (.*)$/;
@@ -1083,184 +1334,6 @@ function notesSectionBounds(lines) {
 // src/core/store.ts
 import * as fs6 from "node:fs";
 import * as path4 from "node:path";
-
-// src/core/kernel.ts
-import * as fs4 from "node:fs";
-var Fail = class extends Error {
-  hint;
-  code;
-  constructor(message, hint, code) {
-    super(message);
-    this.hint = hint;
-    this.code = code || "failed";
-  }
-};
-function fail(code, message, hint) {
-  throw new Fail(message, hint, code);
-}
-var output = { json: false };
-var decorateFailure = (res) => res;
-function setFailureDecorator(fn) {
-  decorateFailure = fn;
-}
-function hardExit(code, message) {
-  process.stderr.write(message + "\n");
-  if (output.json) process.stdout.write(JSON.stringify(decorateFailure({ ok: false, error: code }), null, 2) + "\n");
-  process.exit(1);
-}
-process.stdout.on("error", (err) => {
-  if (err.code === "EPIPE") process.exit(0);
-  throw err;
-});
-function out(s) {
-  process.stdout.write(s + "\n");
-}
-function emitFailure(code, message, hint) {
-  process.stderr.write(`Error: ${message}
-`);
-  if (hint) process.stderr.write(`${hint}
-`);
-  if (output.json) {
-    const res = { ok: false, error: code };
-    if (hint) res.hint = hint;
-    out(JSON.stringify(decorateFailure(res), null, 2));
-  }
-  process.exitCode = 1;
-}
-function parseArgs(argv, kinds, opts) {
-  const aliases = opts?.aliases;
-  const sameValue2 = opts?.sameValue ?? ((_name, a, b) => a === b);
-  const flags = /* @__PURE__ */ new Map();
-  const positional = [];
-  const repeated = [];
-  let options = true;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (options && a === "--") {
-      options = false;
-      continue;
-    }
-    if (options && a.startsWith("--")) {
-      const eq = a.indexOf("=");
-      const typed = eq === -1 ? a.slice(2) : a.slice(2, eq);
-      const name = aliases?.get(typed) ?? typed;
-      let value = eq === -1 ? true : a.slice(eq + 1);
-      if (value === true && kinds !== void 0 && Object.hasOwn(kinds, name) && kinds[name] === "string" && i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
-        value = argv[++i];
-      }
-      if (flags.has(name) && !sameValue2(name, flags.get(name), value) && !repeated.some((r) => r.name === name)) {
-        repeated.push({ name, typed });
-      }
-      flags.set(name, value);
-    } else {
-      positional.push(a);
-    }
-  }
-  return { flags, positional, repeated };
-}
-function allowedControlSet(commandControls, globalControls = []) {
-  return /* @__PURE__ */ new Set([...commandControls, ...globalControls]);
-}
-function checkFlags(flags, allowedFields, allowedControls, isWrite, displayName = (name) => name) {
-  for (const name of flags.keys()) {
-    if (allowedControls.has(name)) continue;
-    if (allowedFields.includes(name)) continue;
-    const suffix = isWrite ? " Nothing written." : "";
-    const known = Array.from(/* @__PURE__ */ new Set([...allowedFields, ...allowedControls])).map(displayName).sort();
-    fail("unknown_field", `unknown field '${name}'.${suffix}`, `Known flags: ${known.map((f) => "--" + f).join(", ")}`);
-  }
-}
-function flagString(flags, name) {
-  const v = flags.get(name);
-  if (v === void 0) return void 0;
-  if (v === true) return fail("missing_value", `--${name} needs a value (use --${name}=\u2026 or --${name} <value>)`);
-  return v;
-}
-function readStdin(hint = "pipe the text in") {
-  try {
-    return fs4.readFileSync(0, "utf8");
-  } catch (e) {
-    return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, hint);
-  }
-}
-function osaDistance(a, b) {
-  const m = a.length, n = b.length;
-  const d = [];
-  for (let i = 0; i <= m; i++) d.push([i]);
-  for (let j = 1; j <= n; j++) d[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      let v = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
-        v = Math.min(v, d[i - 2][j - 2] + 1);
-      }
-      d[i][j] = v;
-    }
-  }
-  return d[m][n];
-}
-function nearestMatch(value, allowed) {
-  const threshold = value.length <= 4 ? 1 : 2;
-  let best = [];
-  let bestDist = Infinity;
-  for (const v of allowed) {
-    const d = osaDistance(value, v);
-    if (d < bestDist) {
-      bestDist = d;
-      best = [v];
-    } else if (d === bestDist) best.push(v);
-  }
-  return bestDist <= threshold && best.length === 1 ? best[0] : null;
-}
-function listHint(label, value, allowed) {
-  const known = `Known ${label}: ${allowed.join(", ")}`;
-  const suggestion = nearestMatch(value, allowed);
-  return suggestion === null ? known : `did you mean '${suggestion}'? ${known}`;
-}
-function pinnedNow() {
-  const pinned = process.env.NJ_NOW;
-  if (pinned === void 0 || pinned === "") return null;
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(pinned) || Number.isNaN(Date.parse(pinned))) {
-    fail(
-      "invalid_env",
-      `invalid NJ_NOW '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`,
-      "fix NJ_NOW, or unset it for the system clock"
-    );
-  }
-  return pinned;
-}
-function checkClockEnv() {
-  pinnedNow();
-}
-function nowIso() {
-  return pinnedNow() ?? (/* @__PURE__ */ new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
-}
-function nowMs() {
-  return Date.parse(nowIso());
-}
-function parseOutputOpts(flags, json, allowedFields, label = "fields") {
-  const quiet = flags.has("quiet");
-  const fieldsRaw = flagString(flags, "fields");
-  if (quiet && fieldsRaw !== void 0) {
-    fail(
-      "invalid_value",
-      "--quiet cannot be combined with --fields",
-      "use --fields=<list> to choose fields, or --quiet for {ok, id}"
-    );
-  }
-  if (quiet && !json) fail("invalid_value", "--quiet requires --json");
-  if (fieldsRaw !== void 0 && !json) fail("invalid_value", "--fields requires --json");
-  if (fieldsRaw === void 0) return { quiet };
-  const names = fieldsRaw.split(",").map((s) => s.trim()).filter((s) => s !== "");
-  if (names.length === 0) fail("invalid_value", "--fields must not be empty");
-  for (const n of names) {
-    if (!allowedFields.includes(n)) {
-      fail("invalid_value", `unknown field '${n}' in --fields`, listHint(label, n, allowedFields));
-    }
-  }
-  return { quiet, fields: names };
-}
 
 // src/core/touched.ts
 import * as fs5 from "node:fs";
@@ -1823,6 +1896,20 @@ function entryJson(el, backlog, cfg) {
   e._problems = probs.sort();
   e._claim = claim2;
   return e;
+}
+function trimBlankLines(text) {
+  const lines = text.split("\n");
+  let start = 0;
+  let end = lines.length;
+  while (start < end && lines[start].trim() === "") start++;
+  while (end > start && lines[end - 1].trim() === "") end--;
+  return lines.slice(start, end).join("\n");
+}
+function withBodyExtra(entry, body, cfg) {
+  const raw = sectionContent(body, cfg.sections.description);
+  const description = raw === null ? null : trimBlankLines(raw);
+  const acceptance = sectionCheckboxItems(body, cfg.sections.acceptance);
+  return Object.assign({}, entry, { description, acceptance });
 }
 function countsOf(scope, backlogErrors = 0) {
   return {
@@ -2592,7 +2679,7 @@ import * as os2 from "node:os";
 import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.5.0";
+var VERSION = "4.6.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -4131,33 +4218,6 @@ function emitWriteResultOpts(json, el, changed, backlog, cfg, extra, opts) {
 }
 
 // src/commands/cmd-check.ts
-function scanCheckboxes(body) {
-  const lines = body.split("\n");
-  const boxes = [];
-  let inNotes = false;
-  let fence = null;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const fm = /^[ \t]*(`{3,}|~{3,})/.exec(line);
-    if (fence) {
-      if (fm && fm[1][0] === fence.ch && fm[1].length >= fence.len) fence = null;
-      continue;
-    }
-    if (fm) {
-      fence = { ch: fm[1][0], len: fm[1].length };
-      continue;
-    }
-    if (/^#{1,2}[ \t]/.test(line)) {
-      const h2 = /^##[ \t]+(.*?)[ \t]*$/.exec(line);
-      inNotes = !!h2 && h2[1].replace(/:\s*$/, "").trim().toLowerCase() === "notes";
-      continue;
-    }
-    if (inNotes) continue;
-    const m = CHECKBOX_RE.exec(line);
-    if (m) boxes.push({ line: i, rest: m[4], ticked: m[3] !== " " });
-  }
-  return { lines, boxes };
-}
 function prepareCheck(el, text, item, wantOn) {
   const { lines, boxes } = scanCheckboxes(el.body);
   let target;
@@ -5267,6 +5327,11 @@ function cmdClaim(flags) {
 }
 
 // src/commands/cmd-list.ts
+var LIST_JSON_FIELDS = [...ENTRY_FIELDS, "description", "acceptance"];
+function entryForList(e, ctx, fields) {
+  const entry = entryJson(e, ctx.backlog, ctx.cfg);
+  return fields === void 0 ? entry : withBodyExtra(entry, e.body, ctx.cfg);
+}
 function availableToActor(backlog, id, name) {
   const claim2 = readClaim(backlog, id);
   return claim2 === null || claim2.by === name;
@@ -5313,7 +5378,7 @@ function applyFilters(elements, flags, cfg) {
 }
 function cmdList(flags) {
   checkCommandFlags(flags, "list");
-  const { fields } = parseOutputOpts2(flags, flags.has("json"), ENTRY_FIELDS);
+  const { fields } = parseOutputOpts2(flags, flags.has("json"), LIST_JSON_FIELDS);
   const ctx = context(flags);
   const scope = ctx.elements.filter((e) => flags.has("all") || !e.archived);
   const filtered = applyFilters(ctx.elements, flags, ctx.cfg);
@@ -5322,7 +5387,7 @@ function cmdList(flags) {
     const ready = filtered.filter((e) => isReady(e, ctx.cfg, ctx.backlog) && availableToActor(ctx.backlog, e.id, actor));
     const blocked = filtered.filter((e) => !isReady(e, ctx.cfg, ctx.backlog) && e.status === ctx.cfg.statuses[0] && isIncomplete(e));
     if (flags.has("json")) {
-      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map((e) => projectEntry(entryJson(e, ctx.backlog, ctx.cfg), fields)) }, null, 2));
+      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map((e) => projectEntry(entryForList(e, ctx, fields), fields)) }, null, 2));
       return 0;
     }
     out("Ready to work:");
@@ -5338,7 +5403,7 @@ function cmdList(flags) {
     return 0;
   }
   if (flags.has("json")) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: filtered.map((e) => projectEntry(entryJson(e, ctx.backlog, ctx.cfg), fields)) }, null, 2));
+    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: filtered.map((e) => projectEntry(entryForList(e, ctx, fields), fields)) }, null, 2));
     return 0;
   }
   if (filtered.length === 0) {
@@ -5363,7 +5428,7 @@ function matchContext(el, needle, fold) {
 }
 function cmdFind(flags, positional) {
   checkCommandFlags(flags, "find");
-  const { fields } = parseOutputOpts2(flags, flags.has("json"), ENTRY_FIELDS);
+  const { fields } = parseOutputOpts2(flags, flags.has("json"), LIST_JSON_FIELDS);
   const textFlag = flagString(flags, "text");
   if (textFlag !== void 0 && positional.length > 0) {
     fail("invalid_value", "the search text was given both as an argument and with --text", 'pass it one way: nanojira find "<text>" or nanojira find --text=<text>');
@@ -5379,7 +5444,7 @@ function cmdFind(flags, positional) {
   const needle = fold(text);
   const matched = filtered.filter((e) => fold(e.title).includes(needle) || fold(e.body).includes(needle));
   if (flags.has("json")) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: matched.map((e) => projectEntry(entryJson(e, ctx.backlog, ctx.cfg), fields)) }, null, 2));
+    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: matched.map((e) => projectEntry(entryForList(e, ctx, fields), fields)) }, null, 2));
     return 0;
   }
   if (matched.length === 0) {
@@ -6541,6 +6606,7 @@ function cmdNote(flags, positional) {
         requireActive(ctx, el2, "note");
         const signer2 = author !== null ? author : el2.assignee !== "" ? el2.assignee : "?";
         const newBody2 = withNote(el2, text, signer2, ts2);
+        refuseIfOpenFenceAtBoundary(newBody2);
         return { el: el2, content: renderElement(el2, /* @__PURE__ */ new Map([["updated", ts2]]), newBody2) };
       },
       ({ el: el2, content }) => {
@@ -6569,6 +6635,7 @@ function cmdNote(flags, positional) {
   const ts = nowIso();
   const signer = author !== null ? author : el.assignee !== "" ? el.assignee : "?";
   const newBody = withNote(el, text, signer, ts);
+  refuseIfOpenFenceAtBoundary(newBody);
   const overrides = /* @__PURE__ */ new Map([["updated", ts]]);
   guardedWrite(el, renderElement(el, overrides, newBody), flags.has("force"), ctx.backlog);
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
@@ -6774,7 +6841,7 @@ ${archivedVictims.map((v) => "  " + v.id).join("\n")}`,
 }
 
 // src/commands/cmd-show.ts
-var SHOW_FIELDS = [...ENTRY_FIELDS, "notes", "notes_total"];
+var SHOW_FIELDS = [...ENTRY_FIELDS, "description", "acceptance", "notes", "notes_total"];
 function parseNotesFlag(flags) {
   const raw = flagString(flags, "notes");
   if (raw === void 0) return void 0;
@@ -6822,7 +6889,7 @@ function cmdShow(flags) {
   const scope = ctx.elements;
   const shown = flags.has("file") ? [el] : ctx.elements.filter((e) => e.id === el.id).sort(compareElements);
   if (flags.has("json")) {
-    const entries = shown.map((e) => projectEntry(withNotesExtra(entryJson(e, ctx.backlog, ctx.cfg), e.body, mode), fields));
+    const entries = shown.map((e) => projectEntry(withNotesExtra(withBodyExtra(entryJson(e, ctx.backlog, ctx.cfg), e.body, ctx.cfg), e.body, mode), fields));
     out(JSON.stringify(Object.assign(
       { backlog: ctx.backlog, counts: countsOf(scope.filter((e) => !e.archived)), entries },
       entries.length === 1 ? { entry: entries[0] } : {}

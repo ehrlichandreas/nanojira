@@ -6,7 +6,7 @@ import type { Element, Config, EntryJson } from './types.ts';
 
 import { readClaim, isClaimStale, elementClaimLink } from './claims.ts';
 import { PRIORITY_WEIGHT, SEVERITY, BLOCKS_READY, BACKLOG_LEVEL } from './constants.ts';
-import { sectionCheckboxCounts } from './parse.ts';
+import { sectionCheckboxCounts, sectionCheckboxItems, sectionContent } from './parse.ts';
 import { nowMs } from './store.ts';
 
 // -------------------------------------------------------------- derivations
@@ -117,6 +117,46 @@ function entryJson(el: Element, backlog: string, cfg: Config): EntryJson {
   return e as EntryJson;
 }
 
+// A blank line (trim() === '') at either end of a section's content is
+// structure (separating the heading or the next heading from the text),
+// never content (TSK-051). The leading side is always this function's own
+// job: `sectionContent` never sees a leading one for content nanojira itself
+// writes (the write path always starts right after the heading line), but
+// a hand-edited file can. The trailing side looks covered by
+// `sectionContent`'s own `normalizeSectionContent`, which strips trailing
+// *newline characters* -- but that only removes fully empty trailing
+// lines, not a final line that is whitespace-only without a newline after
+// it (the line directly above the next heading, in a hand-edited file).
+// That line still reaches here with its spaces intact, so the trailing
+// loop below is live, not dead -- confirmed by AC-73 section L.
+function trimBlankLines(text: string): string {
+  const lines = text.split('\n');
+  let start = 0;
+  let end = lines.length;
+  while (start < end && lines[start].trim() === '') start++;
+  while (end > start && lines[end - 1].trim() === '') end--;
+  return lines.slice(start, end).join('\n');
+}
+
+/**
+ * `description`/`acceptance` (TSK-051, show/list `--json`, scans TSK-014):
+ * appended to an already-built `entryJson` result, never produced by
+ * `entryJson` itself, so a write command's own `entry` (never asked for
+ * these) stays exactly as it was. `description` is the Description
+ * section's text trimmed of leading/trailing blank lines -- `null` when
+ * the section has no heading at all, `""` when it has one with nothing (or
+ * only blank lines) under it. `acceptance` is `sectionCheckboxItems` as it
+ * is -- each item's `item` is its own `check --item=<n>` number (TSK-052
+ * item 1), not its position within this array -- `[]` either way the
+ * section has nothing.
+ */
+function withBodyExtra<T extends EntryJson>(entry: T, body: string, cfg: Config): T & { description: string | null; acceptance: { text: string; checked: boolean; item: number }[] } {
+  const raw = sectionContent(body, cfg.sections.description);
+  const description = raw === null ? null : trimBlankLines(raw);
+  const acceptance = sectionCheckboxItems(body, cfg.sections.acceptance);
+  return Object.assign({}, entry, { description, acceptance });
+}
+
 // `backlogErrors` folds in error-severity findings that are not about any
 // one element — an unreadable directory hiding files nanojira never even saw is
 // exactly the sort of problem a caller must not read past as "0 errors"
@@ -144,4 +184,4 @@ function openAcceptanceExtra(el: Element, cfg: Config, isFinal: boolean): { open
   return counts ? { open_acceptance: counts } : {};
 }
 
-export { priorityWeight, elementProblems, isIncomplete, isReady, hasOpenChild, compareElements, entryJson, countsOf, openAcceptanceExtra };
+export { priorityWeight, elementProblems, isIncomplete, isReady, hasOpenChild, compareElements, entryJson, withBodyExtra, countsOf, openAcceptanceExtra };

@@ -681,7 +681,29 @@ writes alike, so a section write replaces that region and destroys the fence
 content. Fence-aware matching is deliberately out of scope for round one —
 **except for `nanojira check`** (§ 10a), which tracks fence state and never
 matches a checkbox-shaped line inside one; that command's own section states
-the one exception, this rule is otherwise unchanged.
+the one exception, this rule is otherwise unchanged. **This is a safety
+choice, not only a scope one** (TSK-052, DECISIONS 234): making section
+matching fence-aware would mean a fence that is *never closed* for the rest
+of the body is still "open" when a later, real section heading — Acceptance,
+Notes — is reached, so a fence-aware reader would treat that real heading,
+and everything after it, as still inside the fence and therefore still part
+of the earlier section. A write that then replaced the earlier section's
+span would delete the real Acceptance/Notes content along with it — the
+exact failure mode this rule avoids by staying line-based. The price is the
+one already described above (an unfenced-looking line inside a fence still
+ends the section); § 9 "Section writes" additionally **refuses** any write
+whose RESULTING body would leave a fence open at a later section boundary
+or at end of file (`refused:open_fence`, TSK-053, DECISIONS 233) — checked
+against the whole body after the write, not against either side of a
+single section's own splice — rather than silently leaving an unclosed
+fence behind, so the two rules work together: line-based reading never
+swallows real content past an unclosed fence, and a guarded write never
+produces a result that would.
+To keep a `## `-shaped line from ending a section early, indent it by at
+least one space or tab, or put any other character before the `#` — either
+is enough, fenced or not, since both `sectionHeadingIndex` and `sectionEnd`
+only match a line that starts with `#` in column one (§ 9 "Section writes"
+has the `nanojira check` exception; this one has none).
 
 ### Completeness (derived, never stored)
 
@@ -1606,6 +1628,40 @@ model `assignee` has (§ 6).
   directory** (`--file`, by contrast, resolves against the backlog). Content is
   written as given; a level-2 heading inside the content is indistinguishable
   from a section boundary on the next read, so callers must not embed one.
+  **The resulting body must never leave a fence open at a section boundary
+  or end of file** (TSK-053 v2, DECISIONS 233): section matching is
+  line-based, not fence-aware (§ 7), so a `## `-shaped line inside a fenced
+  example can end a section's own region mid-fence, and new content a write
+  itself supplies (a `--description`/`--acceptance`/`--add-acceptance`
+  value, or a `note`'s own text) can open a fence of its own. Either way,
+  every later fence-skipping scan — `nanojira check`'s own `scanCheckboxes`
+  included, which tracks fence state continuously across the whole body and
+  never resets it at a section boundary — would then treat the rest of the
+  body, whichever section or Notes comes next, as still fenced content and
+  silently skip it: a checkbox added anywhere after the open fence becomes
+  invisible to `check --item=`/`--text=`, even in a section this write never
+  touched. Before writing, every command that changes section text or a
+  note (`new`, `set --description`/`--acceptance`/`--add-acceptance`,
+  `note`, including their `--input`/batch forms) builds the RESULTING body
+  and runs that same continuous fence scan over it; if a fence is still
+  open at a line that starts a section or at end of file, the write is
+  refused with `refused:open_fence`, nothing written, naming the line
+  where that fence opened and its section. This also catches a fence an
+  *earlier*, otherwise-untouched section already had open, not only one
+  the current write's own span or content introduces. A write that
+  replaces the offending span with clean content is allowed if the
+  resulting body is clean (the repair path). Frontmatter-only writes
+  (`status`, `tags`, `claim`, `check`) never rebuild section text and are
+  unaffected. **Compat exception for `## Notes`**: a fence still open at
+  end of file is only a violation when it opened outside `## Notes` —
+  older `nanojira` wrote note text with no fence validation at all, so a
+  backlog can already carry a Notes entry with an unclosed fence, and
+  upgrading must not start refusing every later write on such a file;
+  `## Notes` is always the body's last section, so nothing with real
+  content ever follows one left open there, and a fence opened *before*
+  `## Notes` that is still open when its heading is reached is still
+  caught there, by the heading-boundary case above. Reads are never
+  refused — only a write whose own result would be unreadable this way.
 - **Replacing acceptance keeps ticks on unchanged lines** (DECISIONS 223).
   When `set` replaces the acceptance section (`--acceptance=`,
   `--acceptance-file=`, or `acceptance` in `--input`, string or array), a
@@ -1933,12 +1989,41 @@ in the order given, a name the entry does not carry omitted. The
 envelope — `backlog`, `counts`, `entries`, and `show`'s `entry` — is
 unchanged; `show`'s `entry` stays identical to `entries[0]`. The
 vocabulary is `entryJson`'s keys, as above; `show` adds `notes` and
-`notes_total`, which an entry carries only with `--notes` (§ 9b). The
-same refusals apply: without `--json`, an unknown name (with the allowed
-names in the hint), an empty `--fields=`. The reads take no `--quiet`:
-a read result has no `{ok, id}` to shrink to, and `--fields=id` already
-lists just the ids. Without `--fields` the output is byte-identical to
-before.
+`notes_total`, which an entry carries only with `--notes` (§ 9b); `show`,
+`list` and `find` all additionally accept `description` and `acceptance`
+in `--fields` (TSK-051, scans' TSK-014). The same refusals apply: without
+`--json`, an unknown name (with the allowed names in the hint), an empty
+`--fields=`. The reads take no `--quiet`: a read result has no `{ok, id}`
+to shrink to, and `--fields=id` already lists just the ids. Without
+`--fields` the output is byte-identical to before — **except `show`**,
+whose default entry (with or without `--fields`) always carries
+`description`/`acceptance` too, appended after `_claim` (below); the
+"byte-identical to before" guarantee is for `list`/`find` only, which
+never materialise either field unless `--fields` names it.
+
+**`description`/`acceptance`** (TSK-051, scans' TSK-014: a consumer that
+needed a ticket's own free text had no way to get it from `show`/`list`
+and had to re-parse the `.md` file itself). `description` is the
+Description section's text (§ 5), trimmed of leading and trailing blank
+lines: `null` when the section has no heading at all, `""` when it has
+one with nothing (or only blank lines) under it. `acceptance` is every
+checkbox in the Acceptance Criteria section (§ 10a), in file order, as
+`{"text": "…", "checked": true|false, "item": <n>}`; `[]` both when the
+section has no heading and when it has one with no checkboxes — the
+field does not distinguish the two, unlike `description`. `item` (TSK-052
+item 1) is that box's own 1-based position in `check`'s own whole-body
+scan (§ 10a "Scope"), not its position within this `acceptance` array:
+`check`'s `--item=<n>` counts every countable checkbox in the body except
+`## Notes`, so a stray checkbox-shaped line earlier in the body (e.g. in
+Description) shifts every later Acceptance box's number. Reading
+`acceptance[i].item` and passing it straight to `check --item=` always
+ticks that exact box, even then. Both read the body as it is
+on disk; neither writes anything. `show --json` carries both **by
+default**, appended after `_claim` — unlike `notes`/`notes_total`, no
+flag is needed. `list --json` and `find --json` leave both out by
+default, the same as any other field a caller did not ask for; naming
+either in `--fields` adds it. Every existing key, value and order is
+unchanged either way (additive only).
 
 ```json
 $ nanojira list --ready --fields=id,status,title --json
@@ -2767,7 +2852,7 @@ when claimed, `null` when not (§ 12 "Claims").
 
 | Command | JSON shape |
 |---|---|
-| `list`, `show`, `find` | `{backlog, counts, entries: [{…, _problems}]}` — `find`'s shape is identical to `list`'s, no `_match` field (§ 9a); **`show` additionally carries `entry: {…, _problems}`** (DECISIONS 171 C), identical to `entries[0]`, exactly when `entries` has **exactly one** element — never when it has several (a `duplicate_id` target, `entries.length > 1`) or, hypothetically, none; `list`/`find` never carry it, since returning many entries is their own point; **`show --notes=<any value>` additionally carries `notes`/`notes_total`** on each entry (§ 9 "`--notes` / `--last`", TSK-005) — absent on every entry when `--notes` is not given, `list`/`find` never carry it either way |
+| `list`, `show`, `find` | `{backlog, counts, entries: [{…, _problems}]}` — `find`'s shape is identical to `list`'s, no `_match` field (§ 9a); **`show` additionally carries `entry: {…, _problems}`** (DECISIONS 171 C), identical to `entries[0]`, exactly when `entries` has **exactly one** element — never when it has several (a `duplicate_id` target, `entries.length > 1`) or, hypothetically, none; `list`/`find` never carry it, since returning many entries is their own point; **`show --notes=<any value>` additionally carries `notes`/`notes_total`** on each entry (§ 9 "`--notes` / `--last`", TSK-005) — absent on every entry when `--notes` is not given, `list`/`find` never carry it either way; **`show`'s every entry additionally carries `description`/`acceptance` by default** (TSK-051, scans' TSK-014), `list`/`find` only through `--fields` |
 | `new`, `set`, `note`, `check`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nanojira new`/`nanojira set`, `changed` also names the section roles written (`description`, `acceptance`); for `nanojira check`, `changed` is `["body"]` or `[]` (a no-op); **`nanojira set` additionally carries `released?: "<holder>"`** (DECISIONS 171 B) when a write setting `status` to the last configured status released an existing claim — absent, not `null`, when there was no claim to release; **and `open_acceptance?: {unticked, total}`** (DECISIONS 176 B) when that same write leaves the element carrying `done:open_acceptance` — absent otherwise |
 | `archive`, `unarchive`, `rm --cascade` | `{ok, ids: […], changed: ["archived" \| "unarchived" \| "deleted"], entries: […], _problems: […]}` — for `rm --cascade` the top-level `_problems` is `[]`: the elements are gone, so their problems are too. `archive` and `unarchive` emit the union, because the elements still exist and can still carry findings. **`rm --cascade` additionally carries `dependents: […]`**, the remaining elements whose `depends_on` names a removed one — archived elements included, since they carry `depends_on:dangling` too and the agent must know it; `archive` and `unarchive` do **not** — a `depends_on` pointing into the archive is satisfied by definition (§ 11), so there is nothing to warn about and nothing an agent must act on. |
 | `claim`, `release` | `{ok, id, changed: […], entry: {…, _problems, _claim}, _problems, claim: {by, since}\|null, stolen_from?, previous_assignee?, released?}` (§ 12 "Claims") — the write-result shape plus `claim`, the element's claim state after the call; `stolen_from` names the previous holder after a `--steal`; `previous_assignee` when the claim overwrote a different `assignee`; `changed` names `assignee` and `status` when written, a `release` reports `changed: ["claim"]`, plus `status`/`assignee` when `--status` changed them (DECISIONS 220); **`released?: "<holder>"`** (DECISIONS 171 B) on `claim` only, when `--status=<last>` released the very claim this same call just made — absent, not `null`, otherwise; `release` never carries it (a plain release is already reported via `claim: null`); **`open_acceptance?: {unticked, total}`** (DECISIONS 176 B) on `claim`, same condition as `set`'s own, and on `release --status=<last>` (DECISIONS 220) — a plain `release` never carries it, since it never writes `status` |
@@ -2816,7 +2901,7 @@ none_ready            unexpected_argument
 refused:<reason>      reason ∈ unreadable | unreadable_dir | archived | children_open |
                                has_children | not_done | parent_archived |
                                misplaced | not_archived | claimed | invalid_id |
-                               symlink | too_large
+                               symlink | too_large | open_fence
 fault:<hook>          hook ∈ before-compare | after-tmp-write | before-rename
 ```
 
@@ -2892,6 +2977,7 @@ just makes it a lookup instead of a re-read of the hint every time:
 | `claim`/`release`, or `archive`/`rm`/`unarchive` of a subtree, where a claim directory, `.nanojira/claims/` or `.nanojira/` is a symlink — or, for `claim`/`release`, a claim entry is | `refused:symlink` | § 8, § 12 Claims, DECISIONS 215 | — (replace the link with a real directory) |
 | `new` where `.nanojira/ids/` (or a sharded directory below it, or `.nanojira/`) is a symlink | `refused:symlink` | § 8, DECISIONS 215 | — (replace the link with a real directory) |
 | any write (`new`, `set`, `note`, `check`, `claim`, `archive`, `unarchive`) that would make an element file larger than 1 MiB | `refused:too_large` | § 7, DECISIONS 215 | — (shorten the text, or keep large content in a separate file) |
+| a write that changes section text or a note (`new`, `set --description`/`--acceptance`/`--add-acceptance`, `note`) whose RESULTING body leaves a fence open at a section boundary or end of file | `refused:open_fence` | § 9 "Section writes", DECISIONS 233 | — (close the fence, or move the fenced example out of its section) |
 | an `NJ_FAULT` hook fires | `fault:<hook>` | § 12 | — (test-only, not a real refusal) |
 | `NJ_AUTHOR` is not a valid name, on a command that uses it | `invalid_env` | § 9 | — (use `--as` instead) |
 | `--as` is not a valid name | `invalid_value` | § 9 | — |
@@ -3383,7 +3469,16 @@ of a line after optional leading whitespace, closed only by a matching or
 longer fence of the same character) line by line and never counts or
 matches a checkbox-shaped line while inside one. **This is the one place in
 the spec where fence-awareness exists** (§ 7: section matching is
-otherwise, and remains, line-based and not fenced-code-aware).
+otherwise, and remains, line-based and not fenced-code-aware). This exact
+scan is what `show`/`list --json`'s `acceptance[].item` numbers against
+(§ 9, TSK-052 item 1) — a stray checkbox-shaped line outside Acceptance
+shifts every later item's number the same way it would shift which box
+`--item=<n>` here resolves to. `--check-all` (§ 9) and `done:open_acceptance`
+(§ 7) also filter this exact scan to the Acceptance section's own span,
+rather than a second scan that resets fence state there, so a box a fence
+an earlier section left open already swallows for `check` is swallowed for
+them too — never ticked, counted, or numbered `item: 0` (TSK-053 v2,
+DECISIONS 233 addendum).
 
 **Addressing.** Exactly one of `--text`/`--item` is required — neither
 given is `missing_argument`, both given is `invalid_value`.

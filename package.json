@@ -2,7 +2,7 @@
   "name": "nanojira",
   "private": true,
   "type": "module",
-  "version": "4.5.0",
+  "version": "4.6.0",
   "description": "NanoJira: a local, file-based task tool for agents.",
   "releaseKey": "BEEEE63B314331D0054DBEBE2FEE273AD7BB6092",
   "engines": {
@@ -23,7 +23,7 @@
     "@modelcontextprotocol/sdk": "1.32.0",
     "@types/node": "^22.0.0",
     "esbuild": "^0.25.0",
-    "git-history-tools": "github:ehrlichandreas/git-history-tools#v0.4.4",
+    "git-history-tools": "github:ehrlichandreas/git-history-tools#v0.4.6",
     "typescript": "^5.6.0"
   }
 }

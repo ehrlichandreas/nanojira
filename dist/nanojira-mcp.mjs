@@ -130,10 +130,6 @@ function readRegularFile(file, cap, opts = {}) {
   }
 }
 
-// src/core/store.ts
-import * as fs6 from "node:fs";
-import * as path4 from "node:path";
-
 // src/core/kernel.ts
 import * as fs4 from "node:fs";
 var Fail = class extends Error {
@@ -223,6 +219,10 @@ function nearestMatch(value, allowed) {
   }
   return bestDist <= threshold && best.length === 1 ? best[0] : null;
 }
+
+// src/core/store.ts
+import * as fs6 from "node:fs";
+import * as path4 from "node:path";
 
 // src/core/touched.ts
 import * as fs5 from "node:fs";
@@ -474,7 +474,7 @@ import * as os2 from "node:os";
 import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.5.0";
+var VERSION = "4.6.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;

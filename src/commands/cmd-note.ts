@@ -15,7 +15,7 @@ import { entryJson } from '../core/derive.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
 import { buildWriteResult, fail, out, writeFeedback } from '../core/output.ts';
 import { recordChange } from '../core/on-change.ts';
-import { renderNoteLine } from '../core/parse.ts';
+import { renderNoteLine, refuseIfOpenFenceAtBoundary } from '../core/parse.ts';
 import { parseOutputOpts, emitWriteResultOpts, trimResult } from '../core/result-opts.ts';
 import { refreshStatus } from '../core/status.ts';
 import { refreshTags } from '../core/tags.ts';
@@ -126,6 +126,7 @@ function cmdNote(flags: Flags, positional: string[]) {
         // Rendered in preflight: refused:too_large (DECISIONS 215) writes nothing of the batch.
         const signer = author !== null ? author : el.assignee !== '' ? el.assignee : '?';
         const newBody = withNote(el, text, signer, ts);
+        refuseIfOpenFenceAtBoundary(newBody);
         return { el, content: renderElement(el, new Map([['updated', ts]]), newBody) };
       },
       ({ el, content }) => {
@@ -155,6 +156,7 @@ function cmdNote(flags: Flags, positional: string[]) {
   const ts = nowIso();
   const signer = author !== null ? author : el.assignee !== '' ? el.assignee : '?';
   const newBody = withNote(el, text, signer, ts);
+  refuseIfOpenFenceAtBoundary(newBody);
 
   const overrides = new Map([['updated', ts]]);
   guardedWrite(el, renderElement(el, overrides, newBody), flags.has('force'), ctx.backlog);

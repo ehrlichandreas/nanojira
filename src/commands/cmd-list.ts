@@ -10,10 +10,28 @@ import { checkCommandFlags } from '../core/cli-flags.ts';
 import { readClaim } from '../core/claims.ts';
 import { TYPES, PRIORITIES, PRIORITY_WEIGHT, ENTRY_FIELDS } from '../core/constants.ts';
 import { context } from '../core/context.ts';
-import { priorityWeight, elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } from '../core/derive.ts';
+import { priorityWeight, elementProblems, isIncomplete, isReady, compareElements, entryJson, withBodyExtra, countsOf } from '../core/derive.ts';
 import { fail, out, printEntryLine } from '../core/output.ts';
 import { parseOutputOpts, projectEntry } from '../core/result-opts.ts';
 import { valueHint } from '../core/suggest.ts';
+
+// `--fields` names (TSK-051): the entry keys, plus `description`/
+// `acceptance` -- unlike `show`, `list`'s default output leaves both out
+// (see `entryForList` below); naming either here only widens what a caller
+// is ALLOWED to ask for.
+const LIST_JSON_FIELDS = [...ENTRY_FIELDS, 'description', 'acceptance'];
+
+// The one entry object both JSON branches below map to: `description`/
+// `acceptance` computed only when `--fields` was given at all (TSK-051) --
+// not simply dropped afterward, so the default path never pays for a body
+// scan it never asked for, and never gains the two keys even when neither
+// is named (`fields` narrows to the fields it DOES list; the point here is
+// that an unnamed `fields` must not just happen to omit them, they must
+// never have existed to omit).
+function entryForList(e: Element, ctx: { backlog: string; cfg: Config }, fields: string[] | undefined) {
+  const entry = entryJson(e, ctx.backlog, ctx.cfg);
+  return fields === undefined ? entry : withBodyExtra(entry, e.body, ctx.cfg);
+}
 
 // --ready condition 5 (§ 9, § 12 "Claims"): unclaimed, or claimed by the
 // acting name. `list` has no `--as`; an invalid or absent `NJ_AUTHOR` is no
@@ -73,7 +91,7 @@ function applyFilters(elements: Element[], flags: Flags, cfg: Config) {
 
 function cmdList(flags: Flags) {
   checkCommandFlags(flags, 'list');
-  const { fields } = parseOutputOpts(flags, flags.has('json'), ENTRY_FIELDS);
+  const { fields } = parseOutputOpts(flags, flags.has('json'), LIST_JSON_FIELDS);
   const ctx = context(flags);
   const scope = ctx.elements.filter((e: Element) => flags.has('all') || !e.archived);
   const filtered = applyFilters(ctx.elements, flags, ctx.cfg);
@@ -83,7 +101,7 @@ function cmdList(flags: Flags) {
     const ready = filtered.filter((e) => isReady(e, ctx.cfg, ctx.backlog) && availableToActor(ctx.backlog, e.id, actor));
     const blocked = filtered.filter((e) => !isReady(e, ctx.cfg, ctx.backlog) && e.status === ctx.cfg.statuses[0] && isIncomplete(e));
     if (flags.has('json')) {
-      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map((e) => projectEntry(entryJson(e, ctx.backlog, ctx.cfg), fields)) }, null, 2));
+      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map((e) => projectEntry(entryForList(e, ctx, fields), fields)) }, null, 2));
       return 0;
     }
     out('Ready to work:');
@@ -100,7 +118,7 @@ function cmdList(flags: Flags) {
   }
 
   if (flags.has('json')) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: filtered.map((e) => projectEntry(entryJson(e, ctx.backlog, ctx.cfg), fields)) }, null, 2));
+    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: filtered.map((e) => projectEntry(entryForList(e, ctx, fields), fields)) }, null, 2));
     return 0;
   }
   if (filtered.length === 0) { out('(no matching elements)'); return 0; }
@@ -108,4 +126,4 @@ function cmdList(flags: Flags) {
   return 0;
 }
 
-export { cmdList, applyFilters, availableToActor };
+export { cmdList, applyFilters, availableToActor, LIST_JSON_FIELDS, entryForList };

@@ -5898,6 +5898,196 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        --name <value>)`, as agent-skills' does, since 4.4.0 parses both
        (DECISIONS 230). Pinned in `ac-72` V4.
 
+232. **`show`/`list --json` carry `description`/`acceptance`** (2026-10-24,
+     TSK-051; scans' TSK-014).
+     - The finding: `wave-build` (TSK-126, agent-skills/scans team) needed
+       a ticket's own Description text and had no way to get it from
+       `nanojira show`/`list --json` — neither field, nor any body text at
+       all, was ever in `entryJson`'s output, with or without `--fields`.
+       The workaround — re-parsing the `.md` file directly — is exactly
+       the "second parser for the backlog format" the project's own docs
+       warn against elsewhere. Not urgent (TSK-014 flagged it only for
+       triage), but a clean gap worth closing.
+     - Lead settled: two new entry fields, additive only. `description`
+       is the Description section's text (§ 5), trimmed of leading/
+       trailing blank lines — `null` when the section has no heading,
+       `""` when it has one with nothing (or only blank lines) under it.
+       `acceptance` is every checkbox in the Acceptance Criteria section,
+       in file order, as `{text, checked, item}` — `[]` either way the
+       section has nothing to offer (no heading, or a heading with no
+       checkbox). **Amended 2026-10-24 (TSK-052 item 1, Scout's N1):**
+       `check --item=<n>` resolves against every countable checkbox in
+       the *whole body* except `## Notes` (§ 10a "Scope"), not just the
+       Acceptance section — so a consumer doing `acceptance[n-1]` →
+       `check --item=n` could silently tick the wrong box when a stray
+       checkbox-shaped line sits earlier in the body (e.g. in
+       Description). `item` is that box's own 1-based number in `check`'s
+       own scan, computed via the same `scanCheckboxes` function `check`
+       itself resolves `--item=<n>` against (relocated from
+       `commands/cmd-check.ts` into `core/parse.ts`, re-exported back, so
+       core never imports from commands and the two numberings cannot
+       drift apart) — not the item's position within this `acceptance`
+       array. `check` itself is unchanged.
+       `entryJson` itself stays pure (a write's own `entry` never gains
+       either field, since nothing asked for it there); a new
+       `withBodyExtra` wrapper (`core/derive.ts`) appends them to an
+       already-built entry, called unconditionally by `show` (so its
+       default `--json` carries both, appended after `_claim`) and only
+       when `--fields` is given at all by `list` (so its default stays
+       byte-identical — the whole reason the fields are computed by a
+       wrapper and not inside `entryJson`). `find` was left alone — not
+       in TSK-051's own acceptance criteria, which name only `show`/
+       `list`.
+     - `sectionCheckboxItems` (`core/parse.ts`) is `sectionCheckboxCounts`'
+       own twin: same span, same fence-skipping, same `CHECKBOX_RE`, so
+       the two can never disagree about what counts as a checkbox — one
+       counts, the other lists `{text, checked, item}` in order.
+     - `--fields` vocabulary: `show`'s `SHOW_FIELDS` and a new, `list`-
+       local `LIST_JSON_FIELDS` each gain `description`/`acceptance`
+       (`core/constants.ts`'s own `ENTRY_FIELDS`, used by every write
+       command's `--fields`, is untouched — those commands' own `entry`
+       never carries these fields, so naming them there would be the
+       exact thing D229's own rule ("never adds a name `entryJson` would
+       not itself produce") exists to prevent). The did-you-mean hint on
+       an unknown `--fields` name updates for free, since it is built
+       from the same allowed-names array passed to `parseOutputOpts`.
+
+233. **A write that changes section text or a note refuses when its
+     RESULTING body leaves a fence open at a section boundary or EOF**
+     (2026-10-24, TSK-053, amended same day — Scout MUST on the first cut).
+     - The finding: while pinning TSK-052 (a `## `-shaped line inside a
+       fenced Description example ends the section early, § 7, line-based
+       on purpose), the Implementer found that `set --description` on such
+       a file leaves the fenced block's *opening* delimiter behind with
+       nothing left to close it — the original closing delimiter was
+       inside the span that got spliced out. From there to the end of the
+       body, every fence-skipping scanner (`nanojira check`'s own
+       `scanCheckboxes` included) treats everything as still inside a
+       fence. `check --item`/`--text` then returns `not_found` for every
+       real acceptance checkbox in the file, and `show --json`'s
+       `acceptance[].item` (DECISIONS 232's amendment) comes back wrong
+       for the same reason. No text is deleted, but `check` is silently
+       disabled on the rest of the file.
+     - First cut (same day, superseded below): refuse per-section, checking
+       only the one span being spliced, reset at that span's own
+       boundaries. Scout then found this misses two shapes: new content a
+       write itself supplies (a `--description`/`--acceptance`/
+       `--add-acceptance` value, or a `note`'s own text) can open a fence
+       of its own without ever being checked; and — the sharper gap —
+       `check`'s own `scanCheckboxes` tracks fence state *continuously*
+       from line 0 of the whole body, never resetting at a section
+       boundary, while the per-section check resets fence state to null at
+       each span's own edge. So a fence an *earlier*, completely untouched
+       section already had open could still swallow a *later* write's new
+       content from `check`'s point of view, with no refusal at all: on a
+       file whose Description has an unclosed fence, `set --acceptance=…`/
+       `--add-acceptance=…`/`new --description=<unclosed> --acceptance=…`
+       in one call/batch all previously succeeded silently.
+     - Lead settled (replacing the first cut, not amending it): one check,
+       run against the fully RESULTING body, not against either side of a
+       single splice. Before writing, build the body the write would
+       produce; run the same continuous, never-reset fence scan
+       `scanCheckboxes` itself uses; if a fence is still open at a line
+       that starts a section (line-based, as `sectionEnd` sees it) or at
+       end of file, refuse — `refused:open_fence` (§ 9 "Section writes"
+       table), naming the line the fence opened at and its section. This
+       single check covers the original orphan-closer case, the
+       new-content-opens-its-own-fence case, and Scout's earlier-section
+       case, all at once, with less code than checking each span on its
+       own. The rule applies to every write that changes body text:
+       section-splicing writes (`new`/`set --description`/`--acceptance`/
+       `--add-acceptance`) and `note`. Frontmatter-only writes (`status`,
+       `tags`, `claim`, `check`) never rebuild section text and are
+       unaffected. **Compat exception for `## Notes`**: a fence still open
+       at end of file is only a violation when it opened *outside*
+       `## Notes` — older nanojira wrote note text with no fence
+       validation at all, so a backlog can already carry a Notes entry
+       with an unclosed fence, and upgrading must not start refusing
+       every later write on such a file. `## Notes` is always the body's
+       last section (§ 9 insertion order), so nothing with real content
+       ever follows one left open there; a fence that opened *before*
+       `## Notes` and is still open when the `## Notes` heading itself is
+       reached is still caught, by the heading-boundary half of the same
+       check, before this exception is even reached. A write that replaces
+       the broken span with clean content is allowed when the result comes
+       out clean — the repair path; `set --description=<clean>` on an
+       otherwise-broken file is
+       the test for it.
+     - `core/parse.ts`'s `checkboxesOutsideFences` and `scanCheckboxes`
+       (the latter relocated from `commands/cmd-check.ts` for DECISIONS
+       232's amendment) step through a shared `fenceStep` helper; the new
+       `refuseIfOpenFenceAtBoundary`, built on the same helper, is what
+       `applySections` (called from both `set`/`new`) and `note`'s
+       `withNote` path ask, once, against the body each is about to
+       write — one fence rule, every writer of body text asking the same
+       question of the same result, so none of them can drift from what
+       `check` itself recognises as an open fence.
+     - Reads are unaffected: `show`/`list --json`'s `description`/
+       `acceptance` fields, and `nanojira check` itself, behave exactly as
+       before (§ 7's line-based rule, DECISIONS 123, is unchanged). Only a
+       write whose own result would be unreadable this way is refused —
+       not every write that merely touches a section near a fence.
+     - **Addendum (TSK-053 v2, Reviewer MUST, same day): the same
+       span-local-vs-continuous split
+       the Lead-settled fix above closes for `refuseIfOpenFenceAtBoundary`
+       still existed, unaddressed, in every other acceptance-box consumer.
+       `sectionCheckboxCounts` (`done:open_acceptance`, `doctor`,
+       `open_acceptance` in write results), `tickAllAcceptance`
+       (`--check-all`) and `sectionCheckboxItems` (`show`/`list --json`'s
+       `acceptance[]`) each ran their own `checkboxesOutsideFences` reset
+       at the Acceptance section's own start, not `scanCheckboxes`'
+       continuous tracking from line 0 — so on a hand-broken file where an
+       *earlier*, untouched section already left a fence open, these three
+       disagreed with `check`: counts and `--check-all` saw and ticked
+       boxes `check --item=<n>` cannot address at all, and `acceptance[]`
+       reported them with `item: 0` (`globalBoxes.findIndex` returning -1)
+       instead of a real, usable item number. Fixed the same way: one
+       shared `acceptanceCheckboxes` helper filters `scanCheckboxes`' own
+       box list to the Acceptance section's line span, so all three (and
+       `check` itself) now agree on exactly which boxes exist — a box a
+       fence already swallows for `check` is omitted from `acceptance[]`,
+       not counted, and not ticked by `--check-all`, never `item: 0`.
+       `--check-all` itself is never refused by `refuseIfOpenFenceAtBoundary`
+       (ticking a box changes no fence state), so this fix is purely about
+       which boxes these three functions see, not a new refusal path.
+
+234. **Section matching stays line-based; the reason is now written down**
+     (2026-10-24, TSK-052).
+     - The finding (Reviewer, TSK-051 review): `sectionHeadingIndex`/
+       `sectionEnd` (§ 7) are not fence-aware, unlike `checkboxesOutsideFences`
+       (DECISIONS 123's `nanojira check` exception): a `## `-shaped line inside a
+       fenced Description example ends the section on both the read fields
+       (TSK-051's `description`/`acceptance`) and the write path
+       (`sectionContent`, `set --description` and friends).
+     - The Implementer's analysis (on hold while this was open): no
+       DECISIONS entry ever gave this rule its own safety reason — § 7's
+       own text called it a round-one scope call. A fence-aware `sectionEnd`
+       would change seven callers: `core/derive.ts` (`withBodyExtra`,
+       `openAcceptanceExtra`), `core/output.ts` (`buildWriteResult`'s
+       `open_acceptance`), `core/load.ts` (the `incomplete:*`/
+       `done:*acceptance`/`acceptance:no_checkbox` problems),
+       `commands/cmd-set.ts` (`--description`/`--acceptance`/
+       `--add-acceptance`, `--check-all`), `commands/cmd-new.ts` (initial
+       sections), `commands/cmd-doctor.ts` (`open_acceptance` reporting)
+       and `commands/cmd-claim.ts` (`--check-all`).
+     - Lead settled: **the rule stays line-based.** Fence-aware matching
+       would mean an unclosed fence makes everything after it — including a
+       real Acceptance or Notes heading — still "inside" the earlier
+       section, so a write there could delete real content it never meant
+       to touch (§ 7 now states this directly). The actually dangerous half
+       of that — a write silently leaving an unclosed fence behind, which
+       then broke `nanojira check` on the rest of the file — turned out to be a
+       real, separate bug, fixed by DECISIONS 233/TSK-053 (refuse the write
+       instead). With that refusal in place, staying line-based has no
+       destructive write path left: the read-side surprise (an early
+       section end) is the whole remaining cost, now named in § 7 and
+       guarded by a GUIDE how-to (indent a `## `-shaped example line by at
+       least one space or tab, or put any character before the `#` — either
+       stops it from matching `sectionHeadingIndex`/`sectionEnd`, which only
+       ever match a line starting with `#` in column one).
+     - This task records the reason and pins today's read/write behaviour;
+       it does not change `sectionHeadingIndex`/`sectionEnd` themselves.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

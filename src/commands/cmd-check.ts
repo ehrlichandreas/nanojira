@@ -14,7 +14,8 @@ import { loadElement, deriveGraph } from '../core/load.ts';
 import { buildWriteResult, fail, out, writeFeedback } from '../core/output.ts';
 import { recordChange } from '../core/on-change.ts';
 import { parseOutputOpts, emitWriteResultOpts, trimResult } from '../core/result-opts.ts';
-import { CHECKBOX_RE } from '../core/parse.ts';
+import { CHECKBOX_RE, scanCheckboxes } from '../core/parse.ts';
+import type { Checkbox } from '../core/parse.ts';
 import { refreshStatus } from '../core/status.ts';
 import { refreshTags } from '../core/tags.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement } from '../core/store.ts';
@@ -27,41 +28,6 @@ import { touchedFiles } from '../core/touched.ts';
 // pieces, so only the box content ever changes (§ 10a). Shared with
 // `acceptance:no_checkbox` (§ 7, DECISIONS 163 E) so the two can never
 // disagree on what counts as a checkbox.
-
-interface Checkbox { line: number; rest: string; ticked: boolean }
-
-/**
- * Every countable checkbox in document order: top to bottom is depth-first
- * through nested lists, since a nested item is just a later, more-indented
- * line. `## Notes` is excluded (§ 10, an append-only audit trail); fenced
- * regions (``` / ~~~, matched after optional leading whitespace, closed
- * only by a matching-or-longer fence of the same character) are never
- * scanned — the one place in the spec where fence-awareness exists (§ 7).
- */
-function scanCheckboxes(body: string): { lines: string[]; boxes: Checkbox[] } {
-  const lines = body.split('\n');
-  const boxes: Checkbox[] = [];
-  let inNotes = false;
-  let fence: { ch: string; len: number } | null = null;
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const fm = /^[ \t]*(`{3,}|~{3,})/.exec(line);
-    if (fence) {
-      if (fm && fm[1][0] === fence.ch && fm[1].length >= fence.len) fence = null;
-      continue;
-    }
-    if (fm) { fence = { ch: fm[1][0], len: fm[1].length }; continue; }
-    if (/^#{1,2}[ \t]/.test(line)) {
-      const h2 = /^##[ \t]+(.*?)[ \t]*$/.exec(line);
-      inNotes = !!h2 && h2[1].replace(/:\s*$/, '').trim().toLowerCase() === 'notes';
-      continue;
-    }
-    if (inNotes) continue;
-    const m = CHECKBOX_RE.exec(line);
-    if (m) boxes.push({ line: i, rest: m[4], ticked: m[3] !== ' ' });
-  }
-  return { lines, boxes };
-}
 
 interface CheckItem { el: Element; newBody: string | null }
 

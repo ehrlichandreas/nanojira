@@ -5,6 +5,56 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nanojira --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 4.6.0
+
+`show`/`list --json` carry a task's Description and Acceptance Criteria
+directly, and a write that would leave a fenced example open past its own
+section is refused before anything reaches disk, rather than silently
+breaking `nanojira check`'s view of everything after it.
+
+- New: `show --json` carries `description` (the Description section's
+  text, trimmed of leading/trailing blank lines; `null` when the section
+  is absent, `""` when it is present but empty) and `acceptance`
+  (`[{text, checked, item}, …]` in file order, `[]` when there are none)
+  on every entry, by default. Each acceptance item's `item` is that
+  box's own 1-based `check --item=<n>` number, counted the same way
+  `check` itself does (every countable checkbox in the body except
+  `## Notes`), not the item's position in this array — so
+  `check --item=<acceptance[i].item>` always ticks that exact box, even
+  when a stray checkbox-shaped line elsewhere in the body shifts the
+  numbering. `list --json` and `find --json` leave both out unless
+  named in `--fields`, which all three reads now accept them in. Every
+  existing key, value and order is unchanged. (DECISIONS 232, scans
+  TSK-014, TSK-051)
+- Fix: `set`/`new --description`/`--acceptance`/`--add-acceptance` and
+  `note` now refuse, with nothing written, if the RESULTING body would
+  leave a fence open at a section boundary or end of file — whether from
+  the section being written ending inside a fenced example, from the new
+  content itself opening a fence, or from an *earlier*, untouched section
+  already left broken this way. Previously an open fence anywhere made
+  `nanojira check` silently unable to find any real checkbox after it,
+  including ones added by a write that never touched the broken section.
+  New failure code `refused:open_fence`, naming the line the fence opened
+  at and its section; a write that replaces the broken span with clean
+  content is unaffected. A `## Notes` entry with an unclosed fence from
+  before this check existed does not retroactively block unrelated
+  writes. (DECISIONS 233, TSK-053)
+- Fix: on a hand-broken file where an earlier section already left a fence
+  open, `--check-all`, `done:open_acceptance` and `show`/`list --json`'s
+  `acceptance[]` could see or tick an Acceptance checkbox `nanojira check`
+  itself cannot address (and `acceptance[].item` could read back `0`).
+  They now agree with `check` on exactly which boxes exist; a swallowed
+  one is omitted, not counted, and not ticked. No change on a file without
+  such an open fence. (DECISIONS 233, TSK-053)
+- Docs: section matching stays line-based, and SPECIFICATION § 7 now says
+  why: a fence-aware section end would let one unclosed fence carry the
+  Acceptance and Notes sections into Description. A `## ` line inside a
+  fenced example therefore still ends its section, so a write that would
+  leave that fence open is refused (above); indent such a line by one
+  space, or put any character before the `#`, to quote it. GUIDE shows
+  how. (DECISIONS 234, TSK-052)
+- Internal: `git-history-tools` re-pinned to v0.4.6 (no observable change to any `nanojira` command).
+
 ## 4.5.0
 
 The project-neutral CLI core is one source file, `src/core/kernel.ts`,

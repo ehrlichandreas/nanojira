@@ -6,10 +6,9 @@ import type { Flags, Element } from '../core/types.ts';
 
 import { flagString } from '../core/args.ts';
 import { checkCommandFlags } from '../core/cli-flags.ts';
-import { ENTRY_FIELDS } from '../core/constants.ts';
-import { applyFilters } from './cmd-list.ts';
+import { applyFilters, LIST_JSON_FIELDS, entryForList } from './cmd-list.ts';
 import { context } from '../core/context.ts';
-import { entryJson, countsOf } from '../core/derive.ts';
+import { countsOf } from '../core/derive.ts';
 import { fail, out, printEntryLine } from '../core/output.ts';
 import { parseOutputOpts, projectEntry } from '../core/result-opts.ts';
 
@@ -30,7 +29,7 @@ function matchContext(el: Element, needle: string, fold: (s: string) => string):
 
 function cmdFind(flags: Flags, positional: string[]) {
   checkCommandFlags(flags, 'find');
-  const { fields } = parseOutputOpts(flags, flags.has('json'), ENTRY_FIELDS);
+  const { fields } = parseOutputOpts(flags, flags.has('json'), LIST_JSON_FIELDS);
   // `--text=<t>` is the same search text as the positional form (TSK-035):
   // a text that starts with `--` can only be given that way, and
   // nanojira-mcp always passes it that way. One or the other, not both,
@@ -59,7 +58,7 @@ function cmdFind(flags: Flags, positional: string[]) {
   const matched = filtered.filter((e: Element) => fold(e.title).includes(needle) || fold(e.body).includes(needle));
 
   if (flags.has('json')) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: matched.map((e) => projectEntry(entryJson(e, ctx.backlog, ctx.cfg), fields)) }, null, 2));
+    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: matched.map((e) => projectEntry(entryForList(e, ctx, fields), fields)) }, null, 2));
     return 0;
   }
   if (matched.length === 0) { out('(no matches)'); return 0; }

@@ -14,7 +14,7 @@
  * unknown_field."
  *
  * The expected version string is pinned to the package.json "version"
- * field's current value — "4.5.0" as of v4.5.0's release — the same
+ * field's current value — "4.6.0" as of v4.6.0's release — the same
  * spec-named value this whole criterion exists to check, not a looser
  * pattern match. Bumping this pin is expected to go red until the
  * Implementer bumps package.json to match (and rebuilds); that is the
@@ -32,7 +32,7 @@ const T = H.T;
 H.requireNj();
 H.requireNjMcp();
 
-const VERSION = '4.5.0';
+const VERSION = '4.6.0';
 function J(x: unknown) { return JSON.stringify(x === undefined ? null : x); }
 
 interface RunOptsIn {

@@ -25,6 +25,9 @@ import * as H from '../lib/harness.ts';
 const T = H.T;
 import fs from 'fs';
 import path from 'path';
+import * as MCP from '../lib/mcp-stdio.ts';
+
+H.requireNjMcp();
 
 const C = H.FIXED_NOW;
 const LATER = H.LATER_NOW;
@@ -457,4 +460,240 @@ function mkTask(label: string, body: string) {
   T.goldenEq('new task scaffold unchanged == golden', taskPath(d), 'new-task.md');
 }
 
-T.finish();
+/* ---- 9. refused:open_fence (TSK-053 v2, DECISIONS 233): a write's        */
+/*         RESULTING body never leaves a fence open at a section boundary   */
+/*         or EOF -- checked whole-body, not per-span (Scout MUST).         */
+
+const openFenceBody = '# Backend API Endpoints\n\n## Description\nIntro.\n\n```\n' +
+  '## Looks like a heading\nmore\n```\n\nAfter fence.\n\n## Acceptance Criteria\n- [ ] keep me\n';
+
+// A single opener with no matching closer anywhere in Description's own
+// span (unlike openFenceBody, which has a closer paired with a fake-heading
+// opener -- splicing that one out leaves the orphaned closer behind acting
+// as a NEW opener). Here, splicing the span removes the only delimiter,
+// so the result is genuinely clean: the repair path this fixture tests.
+const singleOpenFenceBody = '# Backend API Endpoints\n\n## Description\nIntro.\n\n```\n' +
+  'never closes\n\n## Acceptance Criteria\n- [ ] keep me\n';
+
+{
+  // Description's own span ends at the next heading-matching line,
+  // regardless of fence state (§ 7, line-based `sectionEnd`); here that
+  // heading is Acceptance Criteria itself, so replacing the span removes
+  // the lone unclosed opener along with it -- the result is clean, and
+  // this repair must succeed.
+  const d = mkTask('ac20-open-fence-repair', singleOpenFenceBody);
+  const r = H.runJson(['set', '--id=TSK-001', '--description=New description.'], { cwd: d, env: { NJ_NOW: LATER } });
+  T.exit('set --description replaces the broken span: exit 0 (repair path)', r, 0);
+  T.eq('Description replaced as usual', r.json && r.json.entry && r.json.entry.id, 'TSK-001');
+}
+
+{
+  // Scout MUST: a write that does NOT touch Description (only Acceptance)
+  // leaves Description's own open fence in the result -- `check`'s
+  // continuous, never-reset-at-sections scan would then treat the new
+  // Acceptance content as still inside that fence. The whole-body check
+  // must catch this even though Acceptance's own span has no local problem.
+  const d = mkTask('ac20-open-fence-elsewhere-acceptance', openFenceBody);
+  const before = fs.readFileSync(taskPath(d), 'utf8');
+
+  const r = H.runJson(['set', '--id=TSK-001', '--add-acceptance=another'], { cwd: d, env: { NJ_NOW: LATER } });
+  T.exit('--add-acceptance while Description has an open fence: exit 1', r, 1);
+  T.eq('refused:open_fence', r.json && r.json.error, 'refused:open_fence');
+  T.eq('nothing written: file is byte-identical to before', fs.readFileSync(taskPath(d), 'utf8'), before);
+
+  const r2 = H.runJson(['set', '--id=TSK-001', '--acceptance=- [ ] replaced'], { cwd: d, env: { NJ_NOW: LATER } });
+  T.exit('--acceptance (full replace) same file: exit 1', r2, 1);
+  T.eq('--acceptance: refused:open_fence too', r2.json && r2.json.error, 'refused:open_fence');
+  T.eq('--acceptance: nothing written either', fs.readFileSync(taskPath(d), 'utf8'), before);
+}
+
+{
+  // Same fence-truncation pattern, but in the Acceptance section itself.
+  const body = '# Backend API Endpoints\n\n## Description\nIntro.\n\n' +
+    '## Acceptance Criteria\n- [ ] keep me\n\n```\n## Looks like a heading\nmore\n```\n\nAfter fence.\n';
+  const d = mkTask('ac20-open-fence-acceptance', body);
+  const before = fs.readFileSync(taskPath(d), 'utf8');
+
+  const r = H.runJson(['set', '--id=TSK-001', '--add-acceptance=another'], { cwd: d, env: { NJ_NOW: LATER } });
+  T.exit('--add-acceptance on a fence-truncated Acceptance: exit 1', r, 1);
+  T.eq('--add-acceptance: refused:open_fence', r.json && r.json.error, 'refused:open_fence');
+  T.eq('--add-acceptance: nothing written', fs.readFileSync(taskPath(d), 'utf8'), before);
+}
+
+{
+  // Review MUST #1: new content the write ITSELF supplies can open the
+  // fence -- not just an old span's orphan. One-shot `new` with a
+  // `--description` whose own value never closes its fence must refuse
+  // before the file is ever created.
+  const d = H.freshDir('ac20-open-fence-new-description');
+  T.exit('nj init', H.runNj(['init'], { cwd: d }), 0);
+  T.exit('new epic', H.runNj(['new', '--type=epic', '--title=Auth'], { cwd: d }), 0);
+
+  const r = H.runJson(['new', '--type=task', '--parent=EPIC-001', '--title=One shot',
+    '--description=unclosed\n```\nfence never closes',
+    '--acceptance=- [ ] item one'], { cwd: d });
+  T.exit('new with a self-opening Description fence: exit 1', r, 1);
+  T.eq('refused:open_fence', r.json && r.json.error, 'refused:open_fence');
+  T.eq('no task file created', fs.existsSync(taskPath(d)), false);
+}
+
+{
+  // Scout's batch case: both ids' Acceptance sections are locally fine, but
+  // TSK-001's Description already has an open fence -- the whole-body check
+  // must still catch it, and the batch's existing all-or-nothing contract
+  // (DECISIONS 215) must leave TSK-002 untouched too.
+  const d = H.mkBacklog({
+    label: 'ac20-open-fence-batch',
+    files: {
+      'tasks/TSK-001.md': H.element({
+        id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'Broken', status: 'todo', created: C, updated: C,
+      }, openFenceBody),
+      'tasks/TSK-002.md': H.element({
+        id: 'TSK-002', type: 'task', parent: 'EPIC-001', title: 'Clean', status: 'todo', created: C, updated: C,
+      }, '# Clean\n\n## Description\nFine.\n\n## Acceptance Criteria\n- [ ] item one\n'),
+    },
+    tombstones: ['TSK-001', 'TSK-002', 'EPIC-001'],
+  });
+  const beforeClean = fs.readFileSync(path.join(d, 'backlog', 'tasks', 'TSK-002.md'), 'utf8');
+
+  const r = H.runJson(['set', '--id=TSK-001,TSK-002', '--add-acceptance=new box'], { cwd: d, env: { NJ_NOW: LATER } });
+  T.exit('batch add-acceptance, one id has an open fence elsewhere: exit 1', r, 1);
+  T.eq('batch overall not ok', r.json && r.json.ok, false);
+  T.eq('TSK-001 refused:open_fence', r.json && r.json.results && r.json.results[0] && r.json.results[0].error, 'refused:open_fence');
+  T.eq('TSK-002 (clean sibling) left untouched too -- all-or-nothing',
+    fs.readFileSync(path.join(d, 'backlog', 'tasks', 'TSK-002.md'), 'utf8'), beforeClean);
+}
+
+{
+  // `note` builds and writes body text too (§ 10) -- it must run the same
+  // whole-body check before appending under `## Notes`.
+  const d = mkTask('ac20-open-fence-note', openFenceBody);
+  const before = fs.readFileSync(taskPath(d), 'utf8');
+  const r = H.runJson(['note', '--id=TSK-001', 'a note'], { cwd: d, env: { NJ_NOW: LATER } });
+  T.exit('note on a file with an open fence: exit 1', r, 1);
+  T.eq('note: refused:open_fence', r.json && r.json.error, 'refused:open_fence');
+  T.eq('note: nothing written', fs.readFileSync(taskPath(d), 'utf8'), before);
+}
+
+{
+  // Frontmatter-only writes (status/tags/claim/check) never rebuild section
+  // text, so they stay unaffected even on a file with an open fence.
+  const d = mkTask('ac20-open-fence-frontmatter-unaffected', openFenceBody);
+  const r = H.runJson(['set', '--id=TSK-001', '--status=doing'], { cwd: d, env: { NJ_NOW: LATER } });
+  T.exit('--status on a file with an open fence: exit 0 (frontmatter-only)', r, 0);
+  const r2 = H.runJson(['check', '--id=TSK-001', '--item=1'], { cwd: d, env: { NJ_NOW: LATER } });
+  T.exit('check --item on a file with an open fence: exit 0 (frontmatter-only)', r2, 0);
+}
+
+{
+  // Same shape, but the fence is closed before Description's real end:
+  // no refusal.
+  const body = '# Backend API Endpoints\n\n## Description\nIntro.\n\n```\nan example\n```\n\nAfter fence.\n\n' +
+    '## Acceptance Criteria\n- [ ] keep me\n';
+  const d = mkTask('ac20-closed-fence-description', body);
+  const r = H.runJson(['set', '--id=TSK-001', '--description=New description.'], { cwd: d, env: { NJ_NOW: LATER } });
+  T.exit('set --description with a properly closed fence: exit 0 (unaffected)', r, 0);
+  T.eq('Description replaced as usual', r.json && r.json.entry && r.json.entry.id, 'TSK-001');
+}
+
+/* ---- false-refusal controls: every clean fence shape still succeeds ---- */
+
+const fenceControls: Array<[string, string]> = [
+  ['closed tilde', 'a\n~~~\ncode\n~~~\nb'],
+  ['4-backtick open/close (contains a bare ``` inside)', 'a\n````\ncode with ``` inside\n````\nb'],
+  ['indented fence', 'a\n   ```\n   code\n   ```\nb'],
+  ['info-string fence', 'a\n```ts\ncode\n```\nb'],
+  ['fence opened+closed entirely inside the section', 'a\n```\ncode\n```\nmore text b'],
+];
+for (const [label, descText] of fenceControls) {
+  const body = `# Backend API Endpoints\n\n## Description\n${descText}\n\n## Acceptance Criteria\n- [ ] keep me\n`;
+  const d = mkTask(`ac20-fence-control-${label.replace(/[^a-z0-9]+/gi, '-')}`, body);
+  const r = H.runJson(['set', '--id=TSK-001', '--add-acceptance=x'], { cwd: d, env: { NJ_NOW: LATER } });
+  T.exit(`false-refusal control (${label}): exit 0`, r, 0);
+}
+
+{
+  // CRLF line endings: a closed fence is unaffected, an unclosed one still refuses.
+  const closed = '# T\r\n\r\n## Description\r\na\r\n```\r\ncode\r\n```\r\nb\r\n\r\n## Acceptance Criteria\r\n- [ ] keep me\r\n';
+  const d1 = mkTask('ac20-crlf-closed', closed);
+  const r1 = H.runJson(['set', '--id=TSK-001', '--add-acceptance=x'], { cwd: d1, env: { NJ_NOW: LATER } });
+  T.exit('CRLF closed fence: exit 0', r1, 0);
+
+  const unclosed = '# T\r\n\r\n## Description\r\na\r\n```\r\ncode never closes\r\n\r\n## Acceptance Criteria\r\n- [ ] keep me\r\n';
+  const d2 = mkTask('ac20-crlf-unclosed', unclosed);
+  const r2 = H.runJson(['set', '--id=TSK-001', '--add-acceptance=x'], { cwd: d2, env: { NJ_NOW: LATER } });
+  T.exit('CRLF unclosed fence: exit 1', r2, 1);
+  T.eq('CRLF unclosed: refused:open_fence', r2.json && r2.json.error, 'refused:open_fence');
+}
+
+{
+  // Compat: older nanojira wrote note text with no fence validation at all,
+  // so a backlog already on disk can have a Notes entry with an unclosed
+  // fence trailing to end of file. `## Notes` is always the body's last
+  // section, so nothing with real content follows one left open there --
+  // this must NOT start refusing unrelated writes after upgrading.
+  const body = '# T\n\n## Description\nFine.\n\n## Acceptance Criteria\n- [ ] keep me\n\n' +
+    '## Notes\n- 2026-01-01T00:00:00Z alice: example\n```\nnever closed, written before this check existed\n';
+  const d1 = mkTask('ac20-legacy-note-fence-description', body);
+  const r1 = H.runJson(['set', '--id=TSK-001', '--description=New.'], { cwd: d1, env: { NJ_NOW: LATER } });
+  T.exit('compat: set --description with a legacy unclosed Notes fence: exit 0', r1, 0);
+
+  const d2 = mkTask('ac20-legacy-note-fence-acceptance', body);
+  const r2 = H.runJson(['set', '--id=TSK-001', '--add-acceptance=more'], { cwd: d2, env: { NJ_NOW: LATER } });
+  T.exit('compat: --add-acceptance with a legacy unclosed Notes fence: exit 0', r2, 0);
+
+  const d3 = mkTask('ac20-legacy-note-fence-note', body);
+  const r3 = H.runJson(['note', '--id=TSK-001', 'another note'], { cwd: d3, env: { NJ_NOW: LATER } });
+  T.exit('compat: note with a legacy unclosed Notes fence: exit 0', r3, 0);
+}
+
+{
+  // The Notes-EOF compat exemption is narrow: it only excuses a fence that
+  // opens INSIDE Notes and trails to EOF, never one that opens BEFORE Notes
+  // and is still open when the ## Notes heading itself is reached. A fix
+  // that widened the exemption to "any fence open at/entering Notes" would
+  // wrongly let this one through too. `## Notes` is the very next heading
+  // after the opener here (nothing else in between), and the write is
+  // `note` -- it only appends under the existing `## Notes`, inserting no
+  // heading of its own before it -- so only the widened-exemption mutant,
+  // not an unrelated inserted heading, could make this pass.
+  const body = '# T\n\n## Description\nFine.\n```\nnever closed before Notes\n\n' +
+    '## Notes\n- 2026-01-01T00:00:00Z alice: existing note\n';
+  const d = mkTask('ac20-fence-before-notes-still-refused', body);
+  const before = fs.readFileSync(path.join(d, 'backlog', 'tasks', 'TSK-001.md'), 'utf8');
+  const r = H.runJson(['note', '--id=TSK-001', 'another note'], { cwd: d, env: { NJ_NOW: LATER } });
+  T.exit('fence opened before ## Notes, open at the Notes heading: exit 1', r, 1);
+  T.eq('fence before Notes: refused:open_fence', r.json && r.json.error, 'refused:open_fence');
+  const got = fs.readFileSync(path.join(d, 'backlog', 'tasks', 'TSK-001.md'), 'utf8');
+  T.eq('fence before Notes: nothing written -- file is byte-identical to before', got, before);
+}
+
+/* ---- MCP: the cross-section refusal (Description broken, Acceptance    */
+/*      write) surfaces through tools/call the same as the CLI            */
+(async () => {
+  const dir = H.freshDir('ac20-mcp-open-fence');
+  const bl = path.join(dir, 'backlog');
+  const env = { NJ_NOW: LATER };
+  H.runNj(['init', '--backlog=' + bl], { cwd: dir, env, unsetEnv: ['NJ_BACKLOG'] });
+  H.runNj(['new', '--backlog=' + bl, '--type=epic', '--title=E', '--description=D.'],
+    { cwd: dir, env, unsetEnv: ['NJ_BACKLOG'] });
+  const taskFile = path.join(bl, 'tasks', 'TSK-001.md');
+  H.runNj(['new', '--backlog=' + bl, '--type=task', '--parent=EPIC-001', '--title=T',
+    '--acceptance=- [ ] keep me'], { cwd: dir, env, unsetEnv: ['NJ_BACKLOG'] });
+  const raw = fs.readFileSync(taskFile, 'utf8');
+  const brokenDescription = 'Intro.\n\n```\n## Looks like a heading\nmore\n```\n\nAfter fence.\n\n';
+  fs.writeFileSync(taskFile, raw.replace('## Description\n\n', '## Description\n' + brokenDescription));
+
+  const s = MCP.spawnServer(H.NJ_MCP as string, ['--backlog=' + bl], { cwd: dir, env });
+  try {
+    const r = await s.modernToolsCall('set', { id: 'TSK-001', 'add-acceptance': 'another' });
+    T.check('MCP: no protocol-level error', !r.error, JSON.stringify(r.error));
+    T.check('MCP: isError is true (open_fence surfaces through tools/call)',
+      r.result && r.result.isError === true, JSON.stringify(r.result));
+    const content = r.result && r.result.structuredContent;
+    T.eq('MCP: the cross-section refusal is refused:open_fence', content && content.error, 'refused:open_fence');
+  } finally {
+    await s.close();
+  }
+  T.finish();
+})();

@@ -51,33 +51,41 @@ const FENCED_ONLY =
     entry && entry._problems, []);
 }
 
-/* ---- write: the fenced region is replaced, closing fence destroyed ------ */
+/* ---- write: the region's own end (the next level-2 heading) sits past   */
+/*      the fence's closing delimiter, which is inside the replaced span   */
+/*      -- so replacing it strands the opener with nothing left to close   */
+/*      it. That RESULT leaves a fence open from the opener to EOF, the    */
+/*      exact shape TSK-053 v2 (DECISIONS 233) refuses, rather than        */
+/*      silently writing a file where every later section is invisible to  */
+/*      `check`'s own continuous fence scan. § 7's "destroys the fence     */
+/*      content" byte rule still describes what the splice itself would    */
+/*      produce; it no longer describes what reaches disk, because this    */
+/*      is exactly the result TSK-053 v2 now refuses before it is written. */
 {
   const d = fixture('det-fence-write', FENCED_ONLY);
+  const before = fs.readFileSync(path.join(d, 'backlog', TASK), 'utf8');
   const r = H.runJson(['set', '--id=TSK-001', '--description=NEW'],
     { cwd: d, env: { NJ_NOW: H.LATER_NOW } });
-  T.exit('write: set exits 0', r, 0);
-  T.check('write: changed names the role', r.json && r.json.changed.includes('description'),
-    JSON.stringify(r.json && r.json.changed));
-  const want = H.element(fm(H.LATER_NOW),
-    '# T\n\n```md\n## Description\nNEW\n\n## Acceptance Criteria\n- [ ] x\n');
+  T.exit('write: set refuses (TSK-053 v2): exit 1', r, 1);
+  T.eq('write: refused:open_fence', r.json && r.json.error, 'refused:open_fence');
   const got = fs.readFileSync(path.join(d, 'backlog', TASK), 'utf8');
-  T.eq('write: region up to the next level-2 heading replaced, closing ``` gone', got, want);
+  T.eq('write: nothing written -- file is byte-identical to before', got, before);
 }
 
-/* ---- write: fenced heading first, real heading later — first match wins - */
+/* ---- write: fenced heading first, real heading later — same shape,      */
+/*      same refusal: the fake heading's own span still strands the        */
+/*      opener with no closer before the result's next boundary.          */
 {
   const d = fixture('det-fence-first',
     '# T\n\n```md\n## Description\ninside the fence\n```\n\n## Description\nreal one\n\n' +
     '## Acceptance Criteria\n- [ ] x\n');
+  const before = fs.readFileSync(path.join(d, 'backlog', TASK), 'utf8');
   const r = H.runJson(['set', '--id=TSK-001', '--description=NEW'],
     { cwd: d, env: { NJ_NOW: H.LATER_NOW } });
-  T.exit('first match: set exits 0', r, 0);
-  const want = H.element(fm(H.LATER_NOW),
-    '# T\n\n```md\n## Description\nNEW\n\n## Description\nreal one\n\n' +
-    '## Acceptance Criteria\n- [ ] x\n');
+  T.exit('first match: set refuses (TSK-053 v2): exit 1', r, 1);
+  T.eq('first match: refused:open_fence', r.json && r.json.error, 'refused:open_fence');
   const got = fs.readFileSync(path.join(d, 'backlog', TASK), 'utf8');
-  T.eq('first match: the fenced heading is written, the real one untouched', got, want);
+  T.eq('first match: nothing written -- file is byte-identical to before', got, before);
 }
 
 T.finish();
