@@ -5,6 +5,85 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nanojira --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 4.3.0
+
+New flags for closing and picking work (`--check-all`,
+`--add-acceptance`, `release --status`, `--exclude-tag`,
+`--min-priority`), the files each write touched in its result, MCP tool
+schemas that say what a call needs, and a faster `list --ready`. No
+change is breaking, with one change of behaviour: `set --acceptance=`
+now keeps the tick on a line whose text it keeps; to untick a line,
+use `check --off`.
+
+- **Faster: `list --ready` and `list` on a large backlog with claims.**
+  The claims directory is read once per call instead of once per
+  element: on 2000 tasks, `list --ready --json` went from about 2.9 s
+  to 0.7 s. The results, `claim:symlink` included, are unchanged.
+  (TSK-043)
+- **New: `nanojira-mcp`'s tool schemas say what a call needs.** Each
+  tool has a one-line description, and each input the line
+  `nanojira <command> --help` prints for that flag. `new` requires
+  `type` and `title`; `find` and `note` require `text`. `status`,
+  `type` and `priority` list their allowed values as an `enum`;
+  `status` is the backlog's configured list, re-read on every request:
+  the server needs no restart after `statuses` changes, and a client
+  sees the new statuses once it lists the tools again. The write tools
+  take `dry-run`, and new/set/note/check/claim/release also `quiet` and
+  `fields`, each giving the same result as the CLI flag. A missing
+  required field or a value outside a list is answered by the server
+  itself, before anything runs, as an `isError` result with
+  `missing_argument` or `invalid_value`, as before, now listing every
+  such problem of the call with the allowed values. Every new 4.3.0 flag
+  above that takes a value is in the schemas; `--check-all` is CLI-only.
+  `docs/SPECIFICATION.md` § 17. (DECISIONS 219, TSK-041)
+- **New: `set`/`claim --status=done --check-all` closes an element and
+  ticks every open acceptance box in the same write.** The result names
+  the boxes it ticked in `checked`. Only with the flag, and only together
+  with the final status: a plain `--status=done` still leaves open boxes
+  and warns `done:open_acceptance`. (DECISIONS 225, knowledge4ai TSK-005)
+- **New: `--exclude-tag=<a,b>` and `--min-priority=<value>` on `next`,
+  `list` and `find`.** Leave out anything carrying one of the tags, keep
+  only that priority or higher (`low` < `normal` < `high` < `urgent`).
+  `nanojira next --as=me --exclude-tag=waiting:user --min-priority=high`
+  takes the next important item nobody is waiting on. (DECISIONS 224,
+  knowledge4ai TSK-004)
+- **`next --help` and `SKILL.md` now say first that `next` claims the
+  element it picks**, and name `list --ready` and `next --dry-run` for
+  looking without claiming. (DECISIONS 224, knowledge4ai TSK-004)
+- **Fixed: replacing the acceptance criteria no longer unticks the lines
+  you kept.** `set --acceptance=` (or `--acceptance-file=`, or
+  `acceptance` in `--input`) keeps a line ticked when its text matches a
+  ticked old line exactly; each old tick is used once. When ticks are
+  lost anyway, the result says how many in `acceptance_ticks_reset` and
+  stderr warns. (DECISIONS 223, knowledge4ai TSK-003)
+- **New: `set --add-acceptance=<text>` appends one unticked criterion**
+  and leaves the rest of the section as it was. It cannot be combined
+  with `--acceptance=` in the same call. (DECISIONS 223, knowledge4ai
+  TSK-003)
+- **New: `release --status=<value>` gives the claim up and puts the
+  element back in one call.** It takes the same values and checks as
+  `claim --status=`, and clears the assignee when it is your own name, so
+  `next` hands the element to someone else again. A plain `release` is
+  unchanged and never writes the file. Until now a released element still
+  said `status: doing` and named its builder, so it looked taken
+  although nobody held it. (DECISIONS 220, knowledge4ai TSK-001)
+- **New: every write result lists the files it wrote, `files: [{path,
+  op}]`.** Paths are relative to the backlog root, `op` is `created`,
+  `modified`, `moved` (with `from`) or `deleted`. It names the tombstone
+  `new` writes under `.nanojira/ids/`, `STATUS.md`, `TAGS.md` and both
+  sides of a move, so a pathspec commit can take exactly this call's
+  files. Claim bookkeeping and the index are never listed. It stays
+  under `--quiet`, a batch carries it once on its wrapper, and
+  `--dry-run` shows what the real call would write. A call that fails
+  after part of it landed (a `new` whose element file could not be
+  written after its tombstone was, a half-done `archive`) names what
+  landed in `files` on its failure result. A script that
+  checks for an exact set of keys now sees one more. (DECISIONS 222,
+  knowledge4ai TSK-002)
+- **Fixed: `problems.ignore` now hides `claim:stale` everywhere.** It was
+  dropped from `doctor` only; `list`, `show`, `tree` and every write
+  result still carried it in `_problems`. (DECISIONS 221)
+
 ## 4.2.0
 
 Mostly fixes, several of them security fixes: a hand-edited or cloned

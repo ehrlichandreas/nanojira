@@ -16,6 +16,7 @@ import { fail, out } from '../core/output.ts';
 import { recordChange } from '../core/on-change.ts';
 import { refreshStatus } from '../core/status.ts';
 import { refreshTags } from '../core/tags.ts';
+import { touchDelete, withFiles } from '../core/touched.ts';
 
 function removeIfEmpty(dir: string) {
   try { fs.rmdirSync(dir); } catch { /* not empty (or already gone): it stays */ }
@@ -61,15 +62,16 @@ function cmdRm(flags: Flags) {
   // it is empty — never a recursive delete of whatever else it holds (§ 12).
   for (const v of victims.slice().reverse()) {
     fs.unlinkSync(v.file);
+    touchDelete(v.file);
     const own = ctx.cfg.layout.group === 'hierarchy' ? ownFolder(v) : null;
     if (own !== null) removeIfEmpty(own);
     removeClaimDirWholesale(ctx.backlog, v.id);
   }
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
   refreshTags(ctx.backlog, ctx.cfg, ctx);
-  const built = flags.has('cascade') && kids.length > 0
+  const built = withFiles(flags.has('cascade') && kids.length > 0
     ? { ok: true, ids: victims.map((v: Element) => v.id), changed: ['deleted'], entries, _problems: [], dependents: dependents.map((d: Element) => d.id) }
-    : { ok: true, id: el.id, changed: ['deleted'], entry: entries[0], _problems: entries[0]._problems, dependents: dependents.map((d: Element) => d.id) };
+    : { ok: true, id: el.id, changed: ['deleted'], entry: entries[0], _problems: entries[0]._problems, dependents: dependents.map((d: Element) => d.id) }, ctx.backlog);
   recordChange(ctx.backlog, () => built);
   if (json) {
     out(JSON.stringify(built, null, 2));

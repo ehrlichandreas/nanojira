@@ -147,10 +147,54 @@ function allEntriesAscending(backlog: string, id: string): Entry[] {
  */
 function elementClaimLink(backlog: string, id: string): string | null {
   if (!claimsRootExists(backlog) || !idShaped(id)) return null;
-  const dir = claimsDir(backlog, id);
-  const link = internalSymlink(dir);
-  if (link !== null) return link === dir ? link : null;
-  return linkedEntry(dir);
+  return claimSnapshot(backlog).links.get(id) ?? null;
+}
+
+/**
+ * `claims/` read once per call (TSK-043): one `readdir` of the claims root,
+ * whose entry types come from the same call, plus a `readdir` of each real
+ * claim directory for a linked entry. `dirs` names the real claim
+ * directories, `links` each element's link as `elementClaimLink` reports
+ * it: the claim directory itself when it is a symlink, else a linked claim
+ * entry inside it. A linked claims root or `.nanojira/` is backlog-level:
+ * both stay empty, as `internalSymlink` made every per-element answer
+ * before. Without this, `list --ready` paid an `lstat` and a `readdir` per
+ * element per question, most of them failing with ENOENT.
+ *
+ * Built on first use and kept for the process, like `rootExistsCache`;
+ * every function below that creates or removes a claim directory drops it
+ * first (`forgetClaimSnapshot`), so a claim this process makes is seen by
+ * its own result. A change by another process during the call is seen by
+ * the next call, as a change between two per-element reads was before.
+ */
+interface ClaimSnapshot { backlog: string; dirs: Set<string>; links: Map<string, string> }
+let snapshot: ClaimSnapshot | null = null;
+
+function claimSnapshot(backlog: string): ClaimSnapshot {
+  if (snapshot !== null && snapshot.backlog === backlog) return snapshot;
+  const dirs = new Set<string>();
+  const links = new Map<string, string>();
+  const root = claimsRootDir(backlog);
+  let entries: fs.Dirent[] = [];
+  if (internalSymlink(root) === null) {
+    try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch { /* no claims root: nothing claimed */ }
+  }
+  for (const e of entries) {
+    if (e.name.startsWith('.')) continue;
+    const dir = path.join(root, e.name);
+    if (e.isSymbolicLink()) { links.set(e.name, dir); continue; }
+    if (!e.isDirectory()) continue;
+    dirs.add(e.name);
+    const entry = linkedEntry(dir);
+    if (entry !== null) links.set(e.name, entry);
+  }
+  snapshot = { backlog, dirs, links };
+  return snapshot;
+}
+
+function forgetClaimSnapshot(): void {
+  snapshot = null;
+  rootExistsCache = null;
 }
 
 /** The current holder for display (`_claim`, § 9), or null when unclaimed. */
@@ -172,6 +216,8 @@ function claimsRootExists(backlog: string): boolean {
 
 function readClaim(backlog: string, id: string): { by: string; since: string } | null {
   if (!claimsRootExists(backlog) || !idShaped(id)) return null;
+  // No real claim directory in this call's snapshot: unclaimed, no syscall.
+  if (!claimSnapshot(backlog).dirs.has(id)) return null;
   const dir = claimsDir(backlog, id);
   if (internalSymlink(dir) !== null) return null;
   const h = highestEntry(dir);
@@ -207,6 +253,7 @@ function isClaimStale(since: string, staleAfterHours: number, nowMs: number): bo
 // "directory vanished" case the `link()` below already retries ('enoent'),
 // never an internal_error (DECISIONS 215).
 function appendEntry(dir: string, baseGen: number, kind: 'claimed' | 'released', name: string, time: string): 'ok' | 'eexist' | 'enoent' | 'symlink' {
+  forgetClaimSnapshot();
   if (internalSymlink(dir, true) !== null) return 'symlink';
   claimFaultPause('claim-mkdir', dir);
   try {
@@ -322,6 +369,7 @@ function rollback(backlog: string, id: string, fromGen: number, kind: 'claimed' 
  * step 7's sweep, for `doctor` to report as `claim:orphaned` (§ 7, § 12a).
  */
 function removeClaimDirWholesale(backlog: string, id: string): void {
+  forgetClaimSnapshot();
   if (!idShaped(id)) return;
   removeClaimDirAt(claimsDir(backlog, id));
 }
@@ -341,6 +389,7 @@ function removeClaimDirWholesale(backlog: string, id: string): void {
  * found that name taken again.
  */
 function removeClaimDirAt(dir: string): string | null {
+  forgetClaimSnapshot();
   const link = internalSymlink(dir, true);
   if (link !== null) return link;
   const aside = path.join(path.dirname(dir), `.nj-rm-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
@@ -388,6 +437,7 @@ function claimAsides(backlog: string): string[] {
  * could not be put back.
  */
 function removeLeftoverAside(aside: string): { done: 'removed' | 'unlinked' | 'kept' | 'linked_root'; at: string } {
+  forgetClaimSnapshot();
   let st: fs.Stats;
   try { st = fs.lstatSync(aside); } catch { return { done: 'removed', at: aside }; } // already gone
   // `claimAsides` checked the claims root through the cache: fresh here,

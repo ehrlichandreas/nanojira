@@ -12,6 +12,7 @@ import { serialize } from './parse.ts';
 import { readElementFile, ELEMENT_FILE_CAP } from './regular-file.ts';
 import { internalSymlink, requireNoInternalSymlink } from './internal-path.ts';
 import { idShaped } from './id-shape.ts';
+import { existedBefore, touchWrite, touchRename } from './touched.ts';
 
 // -------------------------------------------------------------------- clock
 
@@ -231,6 +232,7 @@ function allocateId(idsDir: string, type: string, elements: Element[], shardSize
     }
     try {
       fs.closeSync(fs.openSync(file, 'wx'));
+      touchWrite(file, false);
       return id;
     } catch (e: any) {
       if (e.code !== 'EEXIST') throw e;
@@ -260,7 +262,9 @@ function atomicWrite(target: string, content: string) {
   if (fault === 'before-rename') {
     hardExit('fault:before-rename', 'nanojira: aborted at fault injection point before-rename');
   }
+  const existed = existedBefore(target);
   fs.renameSync(tmp, target);
+  touchWrite(target, existed);
 }
 
 /**
@@ -288,7 +292,9 @@ function mirrorWrite(target: string, content: string) {
   if (fault === 'before-rename') {
     fail('fault:before-rename', 'nanojira: aborted at fault injection point before-rename');
   }
+  const existed = existedBefore(target);
   fs.renameSync(tmp, target);
+  touchWrite(target, existed);
 }
 
 /**
@@ -307,7 +313,9 @@ function atomicReplace(target: string, content: string) {
     } finally {
       fs.closeSync(fd);
     }
+    const existed = existedBefore(target);
     fs.renameSync(tmp, target);
+    touchWrite(target, existed);
   } catch (e) {
     try { fs.unlinkSync(tmp); } catch { /* never created */ }
     throw e;
@@ -431,6 +439,7 @@ function runMove(plan: MovePlan) {
   for (const [from, to] of plan.renames) {
     fs.mkdirSync(path.dirname(to), { recursive: true });
     fs.renameSync(from, to);
+    touchRename(from, to);
   }
   for (const dir of plan.emptied) {
     try { fs.rmdirSync(dir); } catch { /* something new appeared in it: it stays */ }

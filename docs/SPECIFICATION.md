@@ -1152,8 +1152,8 @@ nanojira tags  [--json]                      every tag in use, with its carrier 
 nanojira rm    --id=TSK-009 [--cascade]
 nanojira archive --id=EPIC-001 (§ 11)
 nanojira unarchive --id=EPIC-001 (§ 11a)
-nanojira claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] [--allow-open-children] (§ 12 "Claims")
-nanojira release --id=TSK-007 [--as=<name>] (§ 12 "Claims")
+nanojira claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] [--allow-open-children] [--check-all] (§ 12 "Claims")
+nanojira release --id=TSK-007 [--as=<name>] [--status=<s>] [--allow-open-children] (§ 12 "Claims")
 nanojira next    [--as=<name>] [--status=<s>] [--type=…] [--tag=…] [--parent=…]
            [--assignee=…] [--json] (§ 12b)
 nanojira log     --id=TSK-009 [--last=N] [--json] (§ 12c)
@@ -1584,6 +1584,35 @@ model `assignee` has (§ 6).
   directory** (`--file`, by contrast, resolves against the backlog). Content is
   written as given; a level-2 heading inside the content is indistinguishable
   from a section boundary on the next read, so callers must not embed one.
+- **Replacing acceptance keeps ticks on unchanged lines** (DECISIONS 223).
+  When `set` replaces the acceptance section (`--acceptance=`,
+  `--acceptance-file=`, or `acceptance` in `--input`, string or array), a
+  new unticked checkbox line whose text after the checkbox is exactly
+  that of a ticked line in the old section is written ticked, with the
+  old line's tick character (`x` or `X`). Only the text after `[ ]`
+  counts: the list marker and indentation may differ; case and spaces
+  may not. Each old ticked line is used at most once, first new line
+  first, so two ticked `a` lines tick the first two new `a` lines and no
+  more. Every other new line is written as given: an unticked line stays
+  unticked, a line the caller ticks stays ticked. Checkbox lines inside a
+  fenced code block are examples, never matched, old or new. When old
+  ticked lines are not kept, the result carries
+  `acceptance_ticks_reset: <n>` (in a batch, on that ID's own member of
+  `results`) and a warning goes to stderr; with nothing lost the key is
+  absent. `--dry-run` reports the same. `new` has no old section, so
+  this never applies there.
+- **`nanojira set --add-acceptance=<text>`** (DECISIONS 223) appends one
+  line, `- [ ] <text>`, to the end of the acceptance section, inserting
+  the section where § 9 "Section writes" puts it when it is missing;
+  everything already in the section stays as it was, ticks included.
+  The text is trimmed; empty text or text with a line break is
+  `invalid_value`. One line per call: the flag is not repeatable (given
+  twice with different values is `invalid_value`, like every other
+  flag). Combined with `--acceptance=` or `--acceptance-file=` in the
+  same call (or `acceptance` with `add-acceptance` in `--input`, where it
+  must be a string) is `invalid_value`, nothing written, like `--tags=`
+  with `--add-tags=`. It works in a batch, appending to each ID's own
+  section. `nanojira-mcp`'s `set` tool schema carries `add-acceptance`.
 - `nanojira set --status=done` on an element with children not `done` is **refused**
   unless `--allow-open-children`; forcing it produces `done:open_children`.
   The same check, flag and refusal apply to `nanojira claim --status=done`
@@ -1591,6 +1620,24 @@ model `assignee` has (§ 6).
   is taken, so a refused call leaves no claim behind.
   `--force` has exactly one meaning: overwrite a parallel change (§ 12). It
   never weakens the parent rule.
+- **`--check-all`** (DECISIONS 225), on `set` and `claim`, only together
+  with `--status=<the last configured status>` — on `set` that status may
+  also come from `--input`. Any other combination, the flag alone
+  included, is `invalid_value` with nothing written and no claim taken.
+  It ticks, in the same write, every unticked checkbox of the acceptance
+  section (§ 5's role): boxes elsewhere in the body stay as they are, and
+  a checkbox inside a fenced code block is never ticked (as
+  `done:open_acceptance` never counts one). The result carries
+  `checked: [<text>, …]`, the text after each ticked box, trimmed, in
+  order — `[]` when nothing was open — and, when boxes were ticked,
+  `acceptance` in `changed`. A `set` that also replaces or appends to the
+  acceptance section ticks the lines it wrote too. In a batch each member
+  carries its own `checked`; `--dry-run` reports the same; `files` names
+  the element file as for any write; `--quiet` drops `checked` like the
+  other extras. It is never implicit: without the flag a final status
+  leaves the boxes, and `done:open_acceptance`, exactly as before. Not on
+  `release --status=` (closing with `set --status=<last>` already gives
+  the claim up) and not on `next`, which picks its element itself.
 - `nanojira rm` refuses while child elements exist and names them. `--cascade`
   deletes the subtree. Tombstones remain either way. If other elements
   `depends_on` the removed element, `rm` names them as a warning
@@ -1623,6 +1670,17 @@ model `assignee` has (§ 6).
 - `list` filters are validated: `--status` against the configured statuses,
   `--parent` against existence — a typo'd filter is an error (exit 1), never a
   silently empty result.
+- **`--exclude-tag=<a,b>` and `--min-priority=<value>`** (DECISIONS 224) are
+  two more filters, on `list` (with or without `--ready`), `find` and
+  `next` alike, combined with the others as an AND. `--exclude-tag` leaves
+  out every element carrying **any** of the named tags (exact match, like
+  `--tag`); naming no tag at all (`--exclude-tag=`) is `invalid_value`.
+  `--min-priority` keeps the elements of that priority or higher in the
+  fixed order `low` < `normal` < `high` < `urgent`, each element weighed
+  as the sort order below weighs it (a missing priority counts as
+  `normal`); a value outside the four is `invalid_value`, its hint naming
+  them, and `--help` lists them on the flag's line. `nanojira-mcp`'s
+  `list`, `find` and `next` tool schemas carry both fields.
 - **Sort order** of `list`, `tree` and bare `nanojira` is deterministic: priority
   weight descending (`urgent` 4, `high` 3, `normal` 2, `low` 1, missing 2),
   then `id` ascending. Never filesystem order.
@@ -1783,7 +1841,9 @@ composes with `new --input=`/`set --input=` (§ below): both are
 `invalid_value`, nothing written, when combined with `--input`.
 
 **`--quiet`** narrows a successful write result to exactly `{ok, id}`,
-**plus `_problems` when (and only when) it is non-empty.** A write with no
+**plus `_problems` when (and only when) it is non-empty**, and `files`
+(DECISIONS 222: a pathspec commit needs it most when everything else is
+trimmed away). A write with no
 open problems reports `{ok, id}`; one that leaves (or already carries) an
 open problem — `done:open_acceptance`, an `incomplete:*` code, anything
 from § 7's closed table — reports `{ok, id, _problems}`, same codes `entry`
@@ -1959,8 +2019,8 @@ and that result carries no `dry_run` key, because no dry run took place.
 requires `--fix`"): plain `doctor` never writes, so a dry run of it would
 be a silent no-op. `--dry-run` takes no value; `--dry-run=<anything>` is
 `invalid_value` ("`--dry-run` takes no value"). It is a control flag, not
-a schema field: like `--quiet`/`--fields`, it is not part of any
-`nanojira-mcp` tool schema (§ 17).
+a schema field; `nanojira-mcp` still offers it, like `--quiet`/`--fields`,
+as an extra input on its write tools (§ 17 "What a schema says").
 
 **What runs.** The whole call, unchanged: every validation and every
 refusal, ID allocation, the claim compare-and-swap, `released`/
@@ -2168,7 +2228,7 @@ through JSON instead of two flags.
 keys are `set`'s own settable fields only (`title`, `status`, `priority`,
 `assignee`, `tags`, `depends_on`, `parent` (DECISIONS 176 A),
 `description`(`-file`), `acceptance`(`-file`), `add-tags`,
-`remove-tags`) — **not** `id`/`file`:
+`remove-tags`, `add-acceptance`) — **not** `id`/`file`:
 addressing stays exactly where it is today, on the CLI (`--id=<id>`,
 `--file=<path>`, or the existing `--id=A,B,C` batch, § 9 "Batch writes"),
 unchanged. `--input` only ever supplies the field map; it composes with
@@ -2576,7 +2636,7 @@ Complete first:
   TSK-009  Registration      incomplete:acceptance
 ```
 
-`list --ready` combines with the other filters (`--tag`, `--assignee`, …).
+`list --ready` combines with the other filters (`--tag`, `--exclude-tag`, `--min-priority`, `--assignee`, …).
 `--all` includes archived elements; otherwise they are hidden from `list`,
 `tree` and the short status. Claims affect `--ready` only: `list` without
 `--ready`, `tree`, `show` and `doctor`'s exit code are unaffected by a claim
@@ -2608,6 +2668,55 @@ Writes return one result object:
 
 `_problems` is always present — empty when nothing is pending, codes only
 from the closed table (§ 7). Agents branch on codes, never on prose.
+
+**`files`** (DECISIONS 222, feedback/knowledge4ai-team TSK-002: a team
+that commits with a pathspec left out the tombstone `new` had written).
+Every write result — `init`, `new` (one element or a plan), `set`,
+`note`, `check`, `claim`, `release`, `next`, `rm`, `archive`,
+`unarchive`, `doctor --fix`, and the batch wrapper — carries `files:
+[{path, op}]`, the files this call wrote, as its last key:
+
+- `path` is relative to the backlog root, with `/` separators.
+- `op` is `created`, `modified`, `moved` or `deleted`. A `moved` entry
+  also carries `from`, the old path: `{path, op: "moved", from}`. A file
+  rewritten in place and then moved (`set --parent` under the
+  `hierarchy` layout, `archive`) is one `moved` entry; a file created and
+  then moved in the same call is `created` at its final path.
+- Covered: element files, tombstones under `.nanojira/ids/`, `STATUS.md`,
+  `TAGS.md`, and what `init` and `doctor --fix` write. Never listed:
+  `.nanojira/claims/` and `.nanojira/index.json` (both gitignored), and
+  nanojira's own scratch files (`.nj-tmp-*`, `.nj-rm-*`), which are never
+  meant to be committed.
+- Sorted by path, each path once. A call that writes nothing (a no-op
+  `set`, a plain `release`, whose claim bookkeeping is never listed)
+  carries `files: []` — the key is always present on a write result.
+- A batch (`--id=A,B,C`) carries it once, on the wrapper: `{ok, results,
+  files}`, never on a member of `results`.
+- A failure result carries `files` too whenever part of the call had
+  already landed, naming exactly what is on disk now: a `new` whose
+  tombstone was written before its element file could not be, an
+  `archive` that moved a task but not its subtask, a `new --input` plan
+  that stopped part way. A failure that wrote nothing leaves the key out.
+
+It survives `--quiet` and `--fields` (an envelope key, like `changed`),
+and `--dry-run` reports what the real call would write. A pathspec
+commit of exactly this call's files, moves included:
+
+```sh
+cd backlog
+P=$(nanojira set --id=TSK-009 --status=done --json | jq -r '.files[] | .path, .from // empty')
+[ -n "$P" ] && git add -- $P && git commit -m "TSK-009 done" -- $P
+```
+
+Run it from the backlog root: the paths are relative to it. `git add`
+comes first because a pathspec commit takes only paths git already
+knows, and a created file or a move's new place is not one yet. The
+`[ -n "$P" ]` guard matters: with `files: []` the line would end in a
+bare `git commit --`, which commits the whole index, other agents'
+staged work included. `$P` is split on whitespace by `sh` and `bash`
+(ids and paths hold none); in `zsh` write `${=P}`. A call that failed
+part way lists what landed too, so check `.ok` first if a half-done
+change should not be committed.
 `_claim` is likewise always present on every entry — derived the same way,
 never stored in the element file: `{"by": "<name>", "since": "<ISO-8601>"}`
 when claimed, `null` when not (§ 12 "Claims").
@@ -2619,13 +2728,15 @@ when claimed, `null` when not (§ 12 "Claims").
 | `list`, `show`, `find` | `{backlog, counts, entries: [{…, _problems}]}` — `find`'s shape is identical to `list`'s, no `_match` field (§ 9a); **`show` additionally carries `entry: {…, _problems}`** (DECISIONS 171 C), identical to `entries[0]`, exactly when `entries` has **exactly one** element — never when it has several (a `duplicate_id` target, `entries.length > 1`) or, hypothetically, none; `list`/`find` never carry it, since returning many entries is their own point; **`show --notes=<any value>` additionally carries `notes`/`notes_total`** on each entry (§ 9 "`--notes` / `--last`", TSK-005) — absent on every entry when `--notes` is not given, `list`/`find` never carry it either way |
 | `new`, `set`, `note`, `check`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nanojira new`/`nanojira set`, `changed` also names the section roles written (`description`, `acceptance`); for `nanojira check`, `changed` is `["body"]` or `[]` (a no-op); **`nanojira set` additionally carries `released?: "<holder>"`** (DECISIONS 171 B) when a write setting `status` to the last configured status released an existing claim — absent, not `null`, when there was no claim to release; **and `open_acceptance?: {unticked, total}`** (DECISIONS 176 B) when that same write leaves the element carrying `done:open_acceptance` — absent otherwise |
 | `archive`, `unarchive`, `rm --cascade` | `{ok, ids: […], changed: ["archived" \| "unarchived" \| "deleted"], entries: […], _problems: […]}` — for `rm --cascade` the top-level `_problems` is `[]`: the elements are gone, so their problems are too. `archive` and `unarchive` emit the union, because the elements still exist and can still carry findings. **`rm --cascade` additionally carries `dependents: […]`**, the remaining elements whose `depends_on` names a removed one — archived elements included, since they carry `depends_on:dangling` too and the agent must know it; `archive` and `unarchive` do **not** — a `depends_on` pointing into the archive is satisfied by definition (§ 11), so there is nothing to warn about and nothing an agent must act on. |
-| `claim`, `release` | `{ok, id, changed: […], entry: {…, _problems, _claim}, _problems, claim: {by, since}\|null, stolen_from?, previous_assignee?, released?}` (§ 12 "Claims") — the write-result shape plus `claim`, the element's claim state after the call; `stolen_from` names the previous holder after a `--steal`; `previous_assignee` when the claim overwrote a different `assignee`; `changed` names `assignee` and `status` when written, a `release` reports `changed: ["claim"]`; **`released?: "<holder>"`** (DECISIONS 171 B) on `claim` only, when `--status=<last>` released the very claim this same call just made — absent, not `null`, otherwise; `release` never carries it (a plain release is already reported via `claim: null`); **`open_acceptance?: {unticked, total}`** (DECISIONS 176 B) on `claim` only, same condition as `set`'s own — `release` never carries it, since `release` never writes `status` |
+| `claim`, `release` | `{ok, id, changed: […], entry: {…, _problems, _claim}, _problems, claim: {by, since}\|null, stolen_from?, previous_assignee?, released?}` (§ 12 "Claims") — the write-result shape plus `claim`, the element's claim state after the call; `stolen_from` names the previous holder after a `--steal`; `previous_assignee` when the claim overwrote a different `assignee`; `changed` names `assignee` and `status` when written, a `release` reports `changed: ["claim"]`, plus `status`/`assignee` when `--status` changed them (DECISIONS 220); **`released?: "<holder>"`** (DECISIONS 171 B) on `claim` only, when `--status=<last>` released the very claim this same call just made — absent, not `null`, otherwise; `release` never carries it (a plain release is already reported via `claim: null`); **`open_acceptance?: {unticked, total}`** (DECISIONS 176 B) on `claim`, same condition as `set`'s own, and on `release --status=<last>` (DECISIONS 220) — a plain `release` never carries it, since it never writes `status` |
 | `tree` | `{backlog, counts, entries: […]}` — **flat**, each entry carries `parent`; depth-first order conveys the tree |
 | `doctor` | `{backlog, ok, problems: [{code, severity, element?, file?, line?, message}]}` — `severity` ∈ `error`\|`warning` (the Doctor column value; `—` codes never appear as findings); element-level findings carry `element`, backlog-level ones do not |
 | bare `nanojira` | `{backlog, counts, ready: [entries ≤ 5], incomplete: [entries ≤ 5]}` |
-| `set`, `note`, `check`, `claim`, `release` with `--id=A,B,C` (two or more IDs) | `{ok, results: [{id, ok, …}]}` — the "Batch writes" wrapper (§ 9 above): `results` names every ID once preflight passes for all of them, or only the ID(s) that failed preflight if it did not; a batch-wide argument error (`unknown_field`, a repeated ID, …) instead uses this table's generic single-write failure shape, no `results` at all; a single `--id=A` is unaffected and keeps the unwrapped success shape on this table's earlier row |
+| `set`, `note`, `check`, `claim`, `release` with `--id=A,B,C` (two or more IDs) | `{ok, results: [{id, ok, …}], files}` — the "Batch writes" wrapper (§ 9 above): `results` names every ID once preflight passes for all of them, or only the ID(s) that failed preflight if it did not; a batch-wide argument error (`unknown_field`, a repeated ID, …) instead uses this table's generic single-write failure shape, no `results` at all; a single `--id=A` is unaffected and keeps the unwrapped success shape on this table's earlier row |
 
-Every row above is the **default** shape — unchanged by this round. `new`,
+Every row above is the **default** shape. Every write result also
+carries `files: [{path, op}]` as its last key (above, DECISIONS 222);
+the rows leave it out. `new`,
 `set`, `note`, `check`, `claim` and `release` additionally accept
 `--fields=<a,b,...>`/`--quiet` to shrink it (§ 9 "`--fields` / `--quiet`"),
 applied identically to a batch result's successful members.
@@ -3677,8 +3788,9 @@ itself.
 
 ```
 nanojira claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>]
-                 [--allow-open-children] [--json]
-nanojira release --id=TSK-007 [--as=<name>] [--json]
+                 [--allow-open-children] [--check-all] [--json]
+nanojira release --id=TSK-007 [--as=<name>] [--status=<s>] [--allow-open-children]
+                 [--json]
 ```
 
 (`--file=<path>` instead of `--id`, and `--backlog`, as for every write.)
@@ -3769,7 +3881,28 @@ holder, since N no longer has anything to release. `claimed H`, H ≠ N →
 `refused:claimed` naming H (a release of someone else's claim is a steal
 and must say so). Unclaimed → exit 0, nothing to do. `assignee` is **left as
 it is** — it records who worked on the element; clearing it is an explicit
-`nanojira set --assignee=`.
+`nanojira set --assignee=`. A plain release never writes the element file.
+
+**`release --status=<s>`** (DECISIONS 220, feedback/knowledge4ai-team
+TSK-001: a released element still said `status: doing` and named its
+builder, so it looked taken although nobody held it) gives the claim up
+and puts the element back in one call: `nanojira release --id=TSK-007
+--status=todo`. `--status` takes the values and checks of `claim
+--status=` — `invalid_value`, archived elements refused, and for
+`--status=done` the parent rule (`refused:children_open` unless
+`--allow-open-children`, `refused:unreadable_dir`) — all before the
+release, so a refused call releases nothing; in a batch they are
+preflight refusals. The release itself is unchanged: another holder is
+still `refused:claimed` and nothing is written; an unclaimed element is
+still released trivially, and the status is written all the same. With
+the release done, one guarded write (§ 12) sets `status` and, when
+`assignee` is the acting name, clears it: the element is ready for
+someone else again, since `next` skips one assigned to another name
+(§ 12b). Another name's `assignee` is left alone. If that write fails,
+the release is undone, as `claim`'s rollback does. `changed` names
+`claim`, then `status` and `assignee` when they changed; when neither
+does, nothing is written. `--status=<last>` carries `open_acceptance`
+as `set` does.
 
 **Final status releases the claim** (DECISIONS 171 B,
 feedback/team-b-tests TSK-013: ten of twelve stale claims found by
@@ -3896,8 +4029,14 @@ until cleanup, the same-named re-assertion audit-trail residual).
 
 ```
 nanojira next  [--as=<name>] [--status=<s>] [--type=…] [--tag=…] [--parent=…]
-         [--assignee=…] [--json]
+         [--assignee=…] [--exclude-tag=<a,b>] [--min-priority=<p>] [--json]
 ```
+
+**`next` claims the element it picks** — said first in `next --help`
+and in `SKILL.md` (DECISIONS 224). To look without claiming, use `list
+--ready` (the same candidates before the leaf-work and assignee rules
+below) or `next --dry-run` (exactly the element `next` would claim,
+nothing written). There is no `--peek`.
 
 One call that picks the highest-ranked `--ready` element and claims it —
 closing the gap between a separate `list --ready` and `claim`, where two
@@ -3918,7 +4057,8 @@ may still hand out. This rule is specific to `next`: `list --ready` and
 bare `nanojira` are **unchanged**, so a container can still appear there as
 "ready to work" exactly as before (tracked for later on TSK-043, not
 changed now) — only `next`'s own candidate set excludes it. The filters
-are `list`'s own: `--type`, `--tag`, `--parent`, and **`--assignee`** —
+are `list`'s own: `--type`, `--tag`, `--parent`, `--exclude-tag`,
+`--min-priority` (§ 9), and **`--assignee`** —
 included for the same reason `list --ready --assignee=…` already exists:
 a backlog that pre-partitions work by `assignee` (a plain field, not a
 claim) can ask `next` to pick only from one slice, without that
@@ -5175,15 +5315,26 @@ lifetime.
   valid JSON but not an object (a string, a number, `true`, `null`, an
   array) is `-32600` with `id: null`; the server keeps running.
 - **`-32602` (Invalid params) vs. a tool result with `isError`.** A
-  `tools/call` whose `arguments` fail the tool's own declared JSON
-  Schema (a required field missing, the wrong type) is rejected
-  `-32602`, **before any `dist/nanojira` child is spawned** — this is
-  structural malformation of the call itself, answered at the same
-  protocol level `-32700`/`-32600` already answer for the envelope one
-  level up. A call whose `arguments` **pass** schema validation but
-  whose content the CLI itself then rejects (`invalid_value`,
-  `refused:archived`, `not_found`, …) is never a protocol-level error —
-  it is a normal tool result, `isError: true`, below.
+  `tools/call` whose `arguments` are malformed for the tool — not an
+  object, an argument the schema does not declare, a value of the wrong
+  JSON type — is rejected `-32602`, **before any `dist/nanojira` child is
+  spawned**: structural malformation of the call itself, answered at the
+  same protocol level `-32700`/`-32600` already answer for the envelope
+  one level up. A call that is well-formed but misses a `required` field
+  or has a value outside an `enum` (§ 17 "What a schema says") is also
+  refused before any child is spawned, but as a **tool result** with
+  `isError: true` (DECISIONS 219): these are the mistakes a model makes
+  and can correct, and a protocol error is one it may never see. Its
+  `structuredContent` is the CLI's failure shape — `{ok: false, error,
+  hint?, problems}`, `error` being `missing_argument` or `invalid_value`
+  for the first problem and `hint` the CLI's own "did you mean …? Known
+  …" line for an invalid value — where `problems` lists every problem of
+  the call in order, each `{field, error}` plus `allowed` (the values the
+  field takes) on an invalid value; a second text block carries the
+  messages. A call whose `arguments` pass all of that but whose content
+  the CLI itself then rejects (`invalid_value`, `refused:archived`,
+  `not_found`, …) is never a protocol-level error either — it is a
+  normal tool result, `isError: true`, below.
 
 ### Tool surface
 
@@ -5218,6 +5369,50 @@ MCP client has the text in hand and passes it as `description`/
 tool's schema unchanged — it is already confined to the backlog by the
 same addressing rule that confines it on the CLI (§ 9: `--file` resolves
 only against already-scanned elements, never an arbitrary path).
+
+**What a schema says** (DECISIONS 219). Every tool has a one-line
+`description`, and so does every property: the CLI's own `nanojira
+<command> --help` line for that flag, without its "; allowed: …" suffix
+(the schema carries those values as an `enum`) and without the CLI's own
+wording — no `with --json:` (a tool result is always JSON), a flag named
+as the property (`id`, not `--id`), and `find`'s and `note`'s `text` as
+"the search text" and "the note text". When the flag's value is a
+vocabulary, a list (`<a,b,...>`, `<ID,...>`) or a choice
+(`none|all|last:N`), it is appended after a colon. `status`, wherever a
+tool takes it, has an `enum` of the served backlog's configured
+`statuses`; `type` one of `epic`, `task`, `subtask`; `priority` and
+`min-priority` one of `low`, `normal`, `high`, `urgent`. `required` names
+`type` and `title` on `new`, `text` on `find` and `note`, and nothing on
+any other tool. A conditional rule (a `parent` for a task or subtask,
+`text` or `item` on `check`, `file` instead of `id`) is stated in the
+tool's or the property's description and checked by the CLI, whose error
+names it, so no schema uses `anyOf`/`oneOf`. The properties are the flag
+table's (§ 9), so every field flag a command gains reaches its tool —
+`release`'s `status`, `list`/`find`/`next`'s `exclude-tag` and
+`min-priority`, `set`'s `add-acceptance` — while control flags do not:
+`--check-all` (DECISIONS 225) and `--allow-open-children` are CLI-only.
+Three control flags are extra inputs beyond the flag table: `quiet` and
+`fields` on `new`, `set`, `note`, `check`, `claim` and `release`;
+`dry-run` on those six and on `next`, `archive` and `unarchive`, and on
+`doctor` next to `fix`, so only under `--allow-destructive`. Each is
+passed on as the same CLI flag, so the result is that invocation's
+`--json` output. The server enforces what it declares, before any child
+is spawned: a missing required field or a value outside an `enum` is an
+`isError` tool result listing every such problem of the call (above). The
+configuration is read afresh for each `tools/list` and each `tools/call`:
+an edit to `statuses` shows in the next listing without a restart, and a
+call is checked against the configuration as it is at that call, never
+against what a client cached from an earlier listing. A client sees new
+statuses in the schemas once it lists the tools again: the server sends
+no `notifications/tools/list_changed`. A configuration that does not read
+cleanly (missing, invalid, a legacy backlog, one that needs a newer
+`nanojira`, not a regular file) gives `status` no `enum`, and the server
+checks no status: the call reaches the CLI, whose error says what is
+wrong. The server reads the configuration as the CLI does, through
+`readRegularFile` (DECISIONS 215): opened non-blocking and checked with
+`fstat` on the open descriptor, so a FIFO, a link to one, or a file
+swapped for one between requests is refused at once and never blocks the
+server.
 
 **The acting name.** `note`, `claim`, `release` and `next` each take an
 `as` input, defaulting to the server's own `NJ_AUTHOR` (from the

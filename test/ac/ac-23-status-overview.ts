@@ -456,6 +456,11 @@ function offFixture(label: string, statusContent?: string): Fixture {
 /* C7 — an unwritable STATUS.md never fails the write (§ 4, D95 B19)      */
 /* ===================================================================== */
 
+function withoutStatusFile(r: JsonRunResult): JsonRunResult {
+  if (!r.json || !Array.isArray(r.json.files)) return r;
+  return Object.assign({}, r, { json: Object.assign({}, r.json, { files: r.json.files.filter((f: any) => f.path !== 'STATUS.md') }) });
+}
+
 function maskJson(r: JsonRunResult, fx: Fixture) {
   let s = J(r.json);
   for (const p of [fs.realpathSync(fx.bl), fx.bl]) s = s.split(p).join('<BL>');
@@ -493,7 +498,11 @@ for (const [how, block, unblock] of UNWRITABLE_CASES) {
       T.exit(tag + ' ' + name + ': the exit code is unchanged (0)', r, t.status === null ? 0 : t.status);
       T.check(tag + ' ' + name + ': stderr carries "Warning: STATUS.md not updated (<reason>)"', WARN_RE.test(r.stderr), J(r.stderr));
       T.check(tag + ' ' + name + ': the warning is on stderr, not in the JSON stream', !WARN_RE.test(r.stdout), J(r.stdout).slice(0, 200));
-      T.eq(tag + ' ' + name + ': the --json result is unchanged', maskJson(r, fx), maskJson(t, twin));
+      // Unchanged but for `files` (DECISIONS 222), which names only what was
+      // written: STATUS.md was not, so the twin's entry for it is left out.
+      T.eq(tag + ' ' + name + ': the --json result is unchanged but for STATUS.md in files', maskJson(r, fx), maskJson(withoutStatusFile(t), twin));
+      T.check(tag + ' ' + name + ': files does not name the STATUS.md it could not write',
+        !((r.json && r.json.files) || []).some((f: any) => f.path === 'STATUS.md'), J(r.json && r.json.files));
     }
     const shown = runJ(['show', '--id=TSK-001'], fx);
     const e = shown.json && Array.isArray(shown.json.entries) ? shown.json.entries[0] : null;

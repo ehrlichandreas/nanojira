@@ -19,12 +19,13 @@ import { loadElement, deriveGraph } from '../core/load.ts';
 import { buildWriteResult, fail, out, writeFeedback } from '../core/output.ts';
 import { parseOutputOpts, emitWriteResultOpts, trimResult } from '../core/result-opts.ts';
 import { recordChange } from '../core/on-change.ts';
-import { syncH1, normalizeTitle, applySections } from '../core/parse.ts';
+import { syncH1, normalizeTitle, applySections, sectionContent, carryAcceptanceTicks, tickAllAcceptance } from '../core/parse.ts';
 import { refreshStatus } from '../core/status.ts';
 import { refreshTags, warnTagNearMatches } from '../core/tags.ts';
 import { valueHint } from '../core/suggest.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement, planMove, runMove } from '../core/store.ts';
 import { releaseUnconditional, undoRelease } from '../core/claims.ts';
+import { touchedFiles } from '../core/touched.ts';
 import { checkExplicitParent } from './cmd-new.ts';
 
 /**
@@ -45,6 +46,7 @@ function buildSetInputFlags(inputValue: string): Flags {
     if (!allowed.includes(key)) {
       fail('unknown_field', `unknown field '${key}' in --input. Nothing written.`, `Known fields: ${allowed.join(', ')}`);
     }
+    if (key === 'add-acceptance' && typeof value !== 'string') fail('invalid_value', `--input: 'add-acceptance' must be a string, one line`);
     if (key === 'acceptance' && Array.isArray(value)) {
       // Each string becomes one `- [ ] …` checkbox line, in order (DECISIONS
       // 172 item 6) — formatted here, then carried through readSectionFlags
@@ -95,7 +97,7 @@ type SetField = keyof Element | SectionRole;
 
 interface SetItem {
   el: Element; overrides: Map<string, string | string[] | undefined>; changed: SetField[]; newBody: string | undefined;
-  movePlan: ReturnType<typeof planMove> | null; moveDst: string | null;
+  movePlan: ReturnType<typeof planMove> | null; moveDst: string | null; ticksReset: number; checked: string[] | undefined;
 }
 
 /**
@@ -137,6 +139,7 @@ function cmdSet(flags: Flags) {
   const opts = parseOutputOpts(flags, json);
   const force = flags.has('force');
   const allowOpen = flags.has('allow-open-children');
+  const checkAll = flags.has('check-all');
   const ctx = context(flags);
 
   // `--input` and field flags are mutually exclusive (§ 9, DECISIONS 171 A):
@@ -154,6 +157,7 @@ function cmdSet(flags: Flags) {
     if (opts.quiet || opts.fields !== undefined) fail('invalid_value', '--input cannot be combined with --quiet or --fields');
     sourceFlags = buildSetInputFlags(inputValue);
   }
+  if (checkAll) requireCheckAllStatus(ctx, flagString(sourceFlags, 'status'));
 
   // Batch writes (§ 9): --id=A,B,C, two or more. A single --id is
   // unaffected and falls through to the unchanged path below.
@@ -170,16 +174,16 @@ function cmdSet(flags: Flags) {
         const el = resolveById(ctx, id, true);
         requireWritable(el);
         requireActive(ctx, el, 'set');
-        const { overrides, changed, newBody, movePlan, moveDst } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
+        const { overrides, changed, newBody, movePlan, moveDst, ticksReset, checked } = collectSetOverrides(ctx, el, sourceFlags, allowOpen, checkAll);
         // Rendered in preflight too, with an `updated` of the same length as
         // the write's own: refused:too_large (DECISIONS 215) writes nothing of the batch.
         if (changed.length > 0) renderElement(el, new Map(overrides).set('updated', nowIso()), newBody);
-        return { el, overrides, changed, newBody, movePlan, moveDst };
+        return { el, overrides, changed, newBody, movePlan, moveDst, ticksReset, checked };
       },
       (item) => {
         if (item.changed.length === 0) {
           const entry = entryJson(item.el, ctx.backlog, ctx.cfg);
-          return { ok: true, changed: [], entry, _problems: entry._problems };
+          return Object.assign({ ok: true, changed: [], entry, _problems: entry._problems }, checkedExtra(item.checked));
         }
         const ts = nowIso();
         item.overrides.set('updated', ts);
@@ -204,6 +208,8 @@ function cmdSet(flags: Flags) {
           { ok: true, changed: item.changed, entry, _problems: entry._problems },
           released !== undefined ? { released: released.holder } : {},
           openAcceptanceExtra(fresh, ctx.cfg, isFinal),
+          ticksResetExtra(fresh.id, item.ticksReset),
+          checkedExtra(item.checked),
         );
       },
     );
@@ -211,8 +217,9 @@ function cmdSet(flags: Flags) {
     const results = opts.quiet || opts.fields !== undefined
       ? result.results.map((r: any) => (r.ok ? trimResult(r, opts) : r))
       : result.results;
-    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
-    const wrapper = { ok: result.ok, results };
+    const files = touchedFiles(ctx.backlog);
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results, files }));
+    const wrapper = { ok: result.ok, results, files };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results as any[]) out(r.ok ? `${r.id} → ${(r.changed || []).join(', ') || 'unchanged'}` : `${r.id}: Error: ${r.error}`);
     return result.ok ? 0 : 1;
@@ -222,11 +229,12 @@ function cmdSet(flags: Flags) {
   requireWritable(el);
   requireActive(ctx, el, 'set');
 
-  const { overrides, changed, newBody, movePlan, moveDst } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
+  const { overrides, changed, newBody, movePlan, moveDst, ticksReset, checked } = collectSetOverrides(ctx, el, sourceFlags, allowOpen, checkAll);
 
   if (changed.length === 0) {
-    recordChange(ctx.backlog, () => buildWriteResult(el, [], ctx.backlog, ctx.cfg));
-    if (json) emitWriteResultOpts(true, el, [], ctx.backlog, ctx.cfg, undefined, opts);
+    const unchangedExtra = checkedExtra(checked);
+    recordChange(ctx.backlog, () => buildWriteResult(el, [], ctx.backlog, ctx.cfg, unchangedExtra));
+    if (json) emitWriteResultOpts(true, el, [], ctx.backlog, ctx.cfg, unchangedExtra, opts);
     else writeFeedback(el, ctx.cfg, `${el.id} unchanged`);
     return 0;
   }
@@ -259,7 +267,8 @@ function cmdSet(flags: Flags) {
   deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
   refreshTags(ctx.backlog, ctx.cfg, ctx);
-  const extra = Object.assign({}, released !== undefined ? { released: released.holder } : {}, openAcceptanceExtra(fresh, ctx.cfg, isFinal));
+  const extra = Object.assign({}, released !== undefined ? { released: released.holder } : {}, openAcceptanceExtra(fresh, ctx.cfg, isFinal),
+    ticksResetExtra(fresh.id, ticksReset), checkedExtra(checked));
   recordChange(ctx.backlog, () => buildWriteResult(fresh, changed, ctx.backlog, ctx.cfg, extra));
   if (json) emitWriteResultOpts(true, fresh, changed, ctx.backlog, ctx.cfg, extra, opts);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} → ${changed.map((c: SetField) => `${c}=${describeField(fresh, c)}`).join(', ')}`);
@@ -292,6 +301,42 @@ function cmdSet(flags: Flags) {
  * invalid flag value is an argument error, not one ID's problem, checked
  * once before any ID's own preflight.
  */
+/** `acceptance_ticks_reset` (§ 9, DECISIONS 223): present only when a
+ * replaced acceptance section lost ticks, with a warning on stderr. */
+function ticksResetExtra(id: string, n: number): { acceptance_ticks_reset: number } | Record<string, never> {
+  if (n === 0) return {};
+  process.stderr.write(`Warning: ${id}: ${n} ticked acceptance line${n === 1 ? '' : 's'} not kept by the new text, now unticked or gone\n`);
+  return { acceptance_ticks_reset: n };
+}
+
+/** `--check-all` (§ 9, DECISIONS 225) closes an element: only together with
+ * `--status=<last configured status>`, never on its own. */
+function requireCheckAllStatus(ctx: Context, status: string | undefined): void {
+  const last = ctx.cfg.statuses[ctx.cfg.statuses.length - 1];
+  if (status !== last) {
+    fail('invalid_value', `--check-all needs --status=${last} in the same call`,
+      'it ticks every open acceptance box as the element is closed; tick one box with nanojira check');
+  }
+}
+
+/** `checked` (DECISIONS 225): present exactly when `--check-all` was given. */
+function checkedExtra(checked: string[] | undefined): { checked: string[] } | Record<string, never> {
+  return checked === undefined ? {} : { checked };
+}
+
+/** --add-acceptance= appends one line (DECISIONS 223): never together with a
+ * replacement of the same section, never empty, never more than one line. */
+function validateAddAcceptance(flags: Flags) {
+  const add = flagString(flags, 'add-acceptance');
+  if (add === undefined) return;
+  if (flagString(flags, 'acceptance') !== undefined || flagString(flags, 'acceptance-file') !== undefined) {
+    fail('invalid_value', '--add-acceptance cannot be combined with --acceptance or --acceptance-file',
+      'use --acceptance=<text> to replace the whole section, or --add-acceptance=<text> to append one line');
+  }
+  if (add.trim() === '') fail('invalid_value', '--add-acceptance must not be empty');
+  if (/[\r\n]/.test(add)) fail('invalid_value', '--add-acceptance takes one line', 'append one line per call, or replace the section with --acceptance');
+}
+
 function validateFieldValues(ctx: Context, flags: Flags) {
   const title = flagString(flags, 'title');
   if (title !== undefined && normalizeTitle(title) === '') fail('invalid_value', '--title must not be empty');
@@ -304,6 +349,7 @@ function validateFieldValues(ctx: Context, flags: Flags) {
     fail('invalid_value', `unknown priority '${priority}'`, valueHint('priority', priority, PRIORITIES));
   }
   validateTagsCombination(flags);
+  validateAddAcceptance(flags);
 }
 
 /** --tags= replaces the whole list; --add-tags/--remove-tags change it
@@ -333,7 +379,8 @@ function applyTagsEdits(current: string[], remove: string[] | undefined, add: st
   return kept;
 }
 
-function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen: boolean) {
+function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen: boolean, checkAll = false) {
+  validateAddAcceptance(flags);
   const sections = readSectionFlags(flags);
   validateTagsCombination(flags);
   const overrides: Map<string, string | string[] | undefined> = new Map();
@@ -435,6 +482,19 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
   // Sections ride on whatever body the title sync produced, so `--title` and a
   // section write in one call compose. A role that rewrites to the identical
   // bytes is not a change (decision 17).
+  // An acceptance replacement keeps the ticks of lines it leaves as they
+  // were; --add-acceptance keeps the section and appends one unticked line
+  // (§ 9, DECISIONS 223).
+  let ticksReset = 0;
+  const addAcceptance = flagString(flags, 'add-acceptance');
+  if (addAcceptance !== undefined) {
+    const cur = sectionContent(newBody === undefined ? el.body : newBody, ctx.cfg.sections.acceptance);
+    sections.set('acceptance', (cur === null || cur === '' ? '' : cur + '\n') + `- [ ] ${addAcceptance.trim()}`);
+  } else if (sections.has('acceptance')) {
+    const carried = carryAcceptanceTicks(el.body, ctx.cfg.sections.acceptance, sections.get('acceptance') as string);
+    sections.set('acceptance', carried.content);
+    ticksReset = carried.reset;
+  }
   if (sections.size > 0) {
     const base = newBody === undefined ? el.body : newBody;
     const applied = applySections(base, sections, ctx.cfg);
@@ -442,7 +502,18 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
     changed.push(...(applied.changed as SectionRole[]));
   }
 
-  return { overrides, changed, newBody, movePlan, moveDst };
+  // --check-all (DECISIONS 225): last, so a line this call wrote is ticked too.
+  let checked: string[] | undefined;
+  if (checkAll) {
+    const ticked = tickAllAcceptance(newBody === undefined ? el.body : newBody, ctx.cfg.sections.acceptance);
+    checked = ticked.checked;
+    if (checked.length > 0) {
+      newBody = ticked.body;
+      if (!changed.includes('acceptance')) changed.push('acceptance');
+    }
+  }
+
+  return { overrides, changed, newBody, movePlan, moveDst, ticksReset, checked };
 }
 
 function isSectionRole(field: SetField): field is SectionRole {
@@ -455,4 +526,4 @@ function describeField(el: Element, field: SetField): string {
   return Array.isArray(v) ? (v.length ? v.join(',') : '(empty)') : (typeof v === 'string' && v === '' ? '(empty)' : String(v));
 }
 
-export { cmdSet, requireChildrenDone };
+export { cmdSet, requireChildrenDone, requireCheckAllStatus };

@@ -76,6 +76,9 @@ function trimResult<T extends Record<string, unknown>>(result: T, opts: OutputOp
     const out: Record<string, unknown> = { ok: result.ok, id: result.id };
     const probs = result._problems;
     if (Array.isArray(probs) && probs.length > 0) out._problems = probs;
+    // `files` survives (DECISIONS 222): a pathspec commit needs it most
+    // when the rest of the result is trimmed away.
+    if (Array.isArray(result.files)) out.files = result.files;
     return out;
   }
   if (opts.fields !== undefined) {

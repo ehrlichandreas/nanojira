@@ -12,6 +12,10 @@ import { acceptedFlagNames, flagDoc } from './cli-flags.ts';
 
 // --------------------------------------------------------------------- help
 
+/** `next` takes what it finds (§ 12b, DECISIONS 224): said first in its own
+ * `--help`, and under its synopsis in the general one. */
+const NEXT_CLAIMS = 'next claims the element it picks; to look without claiming, use list --ready or next --dry-run';
+
 const HELP = `nanojira — NanoJira, a local file-based task tool for agents
 
   nanojira --version                      print the version and exit
@@ -24,24 +28,29 @@ const HELP = `nanojira — NanoJira, a local file-based task tool for agents
                [--status=…] [--priority=…] [--tags=a,b] [--assignee=…] [--depends-on=…]
                [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=…]
   nanojira set --id=TSK-009 [--title=…] [--status=…] [--priority=…]
-               [--tags=…] [--assignee=…] [--depends-on=…] [--force] [--allow-open-children]
-               [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=…]
+               [--tags=…] [--assignee=…] [--depends-on=…] [--force] [--allow-open-children] [--check-all]
+               [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=… | --add-acceptance=…]
 
-Section writes replace the section; --<role>-file=- reads stdin.
+Section writes replace the section; --<role>-file=- reads stdin. An acceptance line whose text
+is unchanged keeps its tick; --add-acceptance appends one unticked line.
   nanojira note --id=TSK-009 ["text" | --text=… | --text-file=-|<path>] [--as=…]
   nanojira check --id=TSK-009 [--text=<substring> | --item=<n>] [--on | --off] [--force]
   nanojira show --id=TSK-009 [--notes=none|all|last:N]
   nanojira log --id=TSK-009 [--last=N]
   nanojira list [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…] [--ready] [--all]
+               [--exclude-tag=a,b] [--min-priority=…]
   nanojira find ["<text>" | --text=<t>] [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…] [--all] [--case-sensitive]
+               [--exclude-tag=a,b] [--min-priority=…]
   nanojira tree [--id=EPIC-001] [--all]
   nanojira tags                           every tag in use, with its carrier count
   nanojira rm --id=TSK-009 [--cascade]
   nanojira archive --id=EPIC-001
   nanojira unarchive --id=EPIC-001
-  nanojira claim --id=TSK-009 [--as=…] [--status=…] [--steal=<holder>]
-  nanojira release --id=TSK-009 [--as=…]
+  nanojira claim --id=TSK-009 [--as=…] [--status=…] [--steal=<holder>] [--check-all]
+  nanojira release --id=TSK-009 [--as=…] [--status=…]
   nanojira next [--as=…] [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
+               [--exclude-tag=a,b] [--min-priority=…]
+               ${NEXT_CLAIMS}
   nanojira doctor [--fix]
 
 Every command accepts --json. Write commands accept --file=<path> instead of
@@ -105,7 +114,7 @@ function synopsisFor(command: string): string[] | null {
  * `invalid_config`. */
 function closedVocab(fieldName: string, flags: Flags): string[] | null {
   if (fieldName === 'type') return TYPES;
-  if (fieldName === 'priority') return PRIORITIES;
+  if (fieldName === 'priority' || fieldName === 'min-priority') return PRIORITIES;
   if (fieldName !== 'status') return null;
   try {
     const backlog = findBacklog(flags, false);
@@ -139,7 +148,7 @@ function commandHelp(command: string, flags: Flags): string {
     return { left: `  --${displayFlagName(name)}${d.value === undefined ? '' : '=' + d.value}`, text };
   });
   const width = Math.max(...rows.map((r) => r.left.length)) + 3;
-  const lines = synopsis.slice();
+  const lines = command === 'next' ? [NEXT_CLAIMS, ''].concat(synopsis) : synopsis.slice();
   if (rows.length > 0) {
     lines.push('');
     for (const r of rows) lines.push((r.left.padEnd(width) + r.text).trimEnd());

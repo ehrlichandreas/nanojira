@@ -6,6 +6,7 @@ import type { Element, Config } from './types.ts';
 
 import { elementProblems, entryJson } from './derive.ts';
 import { sectionCheckboxCounts } from './parse.ts';
+import { touchedFiles, failureFiles } from './touched.ts';
 
 // ------------------------------------------------------------------- errors
 
@@ -24,9 +25,17 @@ const output = { json: false };
  * Paths that must not unwind through the normal error handling (fault hooks,
  * exhausted allocator) still owe --json callers a result object (§ 9).
  */
+/** A failure result plus `files` when part of the call had already landed
+ * (§ 9 "files", DECISIONS 222): a pathspec commit, or a cleanup, needs to
+ * know what is on disk now. */
+function withFailureFiles<T extends object>(res: T): T {
+  const files = failureFiles();
+  return files === undefined ? res : Object.assign({}, res, { files });
+}
+
 function hardExit(code: string, message: string): never {
   process.stderr.write(message + '\n');
-  if (output.json) process.stdout.write(JSON.stringify({ ok: false, error: code }, null, 2) + '\n');
+  if (output.json) process.stdout.write(JSON.stringify(withFailureFiles({ ok: false, error: code }), null, 2) + '\n');
   process.exit(1);
 }
 
@@ -86,7 +95,8 @@ function buildWriteResult(el: Element, changed: string[], backlog: string, cfg: 
   const entry = entryJson(el, backlog, cfg);
   // The top-level `_problems` mirrors entry._problems so an agent can branch on
   // one well-known place regardless of the command (§ 9).
-  return Object.assign({ ok: true, id: el.id, changed, entry, _problems: entry._problems }, extra || {});
+  // `files` (§ 9, DECISIONS 222): what this call wrote, last.
+  return Object.assign({ ok: true, id: el.id, changed, entry, _problems: entry._problems }, extra || {}, { files: touchedFiles(backlog) });
 }
 
 function emitWriteResult(json: boolean, el: Element, changed: string[], backlog: string, cfg: Config, extra?: object) {
@@ -101,7 +111,7 @@ function emitFailure(code: string, message: string, hint?: string) {
   if (output.json) {
     const res: { ok: boolean; error: string; hint?: string } = { ok: false, error: code };
     if (hint) res.hint = hint;
-    out(JSON.stringify(res, null, 2));
+    out(JSON.stringify(withFailureFiles(res), null, 2));
   }
   process.exitCode = 1;
 }

@@ -19,6 +19,7 @@ import { parseOutputOpts, emitWriteResultOpts, trimResult } from '../core/result
 import { refreshStatus } from '../core/status.ts';
 import { refreshTags } from '../core/tags.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement } from '../core/store.ts';
+import { touchedFiles } from '../core/touched.ts';
 
 /** The note line, and the body with it inserted (§ 10) — shared by the single and batch paths. */
 function withNote(el: Element, text: string, signer: string, ts: string): string {
@@ -135,8 +136,9 @@ function cmdNote(flags: Flags, positional: string[]) {
     const results = opts.quiet || opts.fields !== undefined
       ? result.results.map((r: any) => (r.ok ? trimResult(r, opts) : r))
       : result.results;
-    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
-    const wrapper = { ok: result.ok, results };
+    const files = touchedFiles(ctx.backlog);
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results, files }));
+    const wrapper = { ok: result.ok, results, files };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results as any[]) out(r.ok ? `${r.id} note added` : `${r.id}: Error: ${r.error}`);
     return result.ok ? 0 : 1;

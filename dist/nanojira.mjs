@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
 // src/core/args.ts
-import * as fs6 from "node:fs";
-import * as path5 from "node:path";
+import * as fs7 from "node:fs";
+import * as path6 from "node:path";
 
 // src/core/constants.ts
 var TYPE_PREFIX = { epic: "EPIC", task: "TSK", subtask: "SUB" };
@@ -143,9 +143,9 @@ var BLOCKS_READY = /* @__PURE__ */ new Set([
 var BACKLOG_LEVEL = /* @__PURE__ */ new Set(["backlog:stray_tmp", "backlog:ids_missing", "backlog:unreadable_dir", "config:invalid", "config:unknown_key", "config:unknown_code"]);
 
 // src/core/dry-run.ts
-import * as fs5 from "node:fs";
+import * as fs6 from "node:fs";
 import * as os from "node:os";
-import * as path4 from "node:path";
+import * as path5 from "node:path";
 
 // src/core/claims.ts
 import * as fs3 from "node:fs";
@@ -258,27 +258,27 @@ function claimsDir(backlog, id) {
   return path2.join(claimsRootDir(backlog), id);
 }
 function allClaimDirs(backlog) {
-  const root = claimsRootDir(backlog);
-  if (internalSymlink(root) !== null) return [];
+  const root2 = claimsRootDir(backlog);
+  if (internalSymlink(root2) !== null) return [];
   let entries;
   try {
-    entries = fs3.readdirSync(root, { withFileTypes: true });
+    entries = fs3.readdirSync(root2, { withFileTypes: true });
   } catch {
     return [];
   }
-  return entries.filter((e) => !e.name.startsWith(".") && !e.isSymbolicLink()).map((e) => ({ id: e.name, dir: path2.join(root, e.name) }));
+  return entries.filter((e) => !e.name.startsWith(".") && !e.isSymbolicLink()).map((e) => ({ id: e.name, dir: path2.join(root2, e.name) }));
 }
 function claimSymlinks(backlog) {
-  const root = claimsRootDir(backlog);
-  const link = internalSymlink(root);
+  const root2 = claimsRootDir(backlog);
+  const link = internalSymlink(root2);
   if (link !== null) return [link];
   let entries;
   try {
-    entries = fs3.readdirSync(root, { withFileTypes: true });
+    entries = fs3.readdirSync(root2, { withFileTypes: true });
   } catch {
     return [];
   }
-  const links = entries.filter((e) => !e.name.startsWith(".") && e.isSymbolicLink()).map((e) => path2.join(root, e.name));
+  const links = entries.filter((e) => !e.name.startsWith(".") && e.isSymbolicLink()).map((e) => path2.join(root2, e.name));
   for (const { dir } of allClaimDirs(backlog)) {
     const entry = linkedEntry(dir);
     if (entry !== null) links.push(entry);
@@ -349,10 +349,39 @@ function allEntriesAscending(backlog, id) {
 }
 function elementClaimLink(backlog, id) {
   if (!claimsRootExists(backlog) || !idShaped(id)) return null;
-  const dir = claimsDir(backlog, id);
-  const link = internalSymlink(dir);
-  if (link !== null) return link === dir ? link : null;
-  return linkedEntry(dir);
+  return claimSnapshot(backlog).links.get(id) ?? null;
+}
+var snapshot = null;
+function claimSnapshot(backlog) {
+  if (snapshot !== null && snapshot.backlog === backlog) return snapshot;
+  const dirs = /* @__PURE__ */ new Set();
+  const links = /* @__PURE__ */ new Map();
+  const root2 = claimsRootDir(backlog);
+  let entries = [];
+  if (internalSymlink(root2) === null) {
+    try {
+      entries = fs3.readdirSync(root2, { withFileTypes: true });
+    } catch {
+    }
+  }
+  for (const e of entries) {
+    if (e.name.startsWith(".")) continue;
+    const dir = path2.join(root2, e.name);
+    if (e.isSymbolicLink()) {
+      links.set(e.name, dir);
+      continue;
+    }
+    if (!e.isDirectory()) continue;
+    dirs.add(e.name);
+    const entry = linkedEntry(dir);
+    if (entry !== null) links.set(e.name, entry);
+  }
+  snapshot = { backlog, dirs, links };
+  return snapshot;
+}
+function forgetClaimSnapshot() {
+  snapshot = null;
+  rootExistsCache = null;
 }
 var rootExistsCache = null;
 function claimsRootExists(backlog) {
@@ -363,6 +392,7 @@ function claimsRootExists(backlog) {
 }
 function readClaim(backlog, id) {
   if (!claimsRootExists(backlog) || !idShaped(id)) return null;
+  if (!claimSnapshot(backlog).dirs.has(id)) return null;
   const dir = claimsDir(backlog, id);
   if (internalSymlink(dir) !== null) return null;
   const h = highestEntry(dir);
@@ -374,6 +404,7 @@ function isClaimStale(since, staleAfterHours, nowMs2) {
   return ageHours > staleAfterHours;
 }
 function appendEntry(dir, baseGen, kind, name, time) {
+  forgetClaimSnapshot();
   if (internalSymlink(dir, true) !== null) return "symlink";
   claimFaultPause("claim-mkdir", dir);
   try {
@@ -459,10 +490,12 @@ function rollback(backlog, id, fromGen, kind, name, time) {
   }
 }
 function removeClaimDirWholesale(backlog, id) {
+  forgetClaimSnapshot();
   if (!idShaped(id)) return;
   removeClaimDirAt(claimsDir(backlog, id));
 }
 function removeClaimDirAt(dir) {
+  forgetClaimSnapshot();
   const link = internalSymlink(dir, true);
   if (link !== null) return link;
   const aside = path2.join(path2.dirname(dir), `.nj-rm-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
@@ -512,17 +545,18 @@ function removeClaimDirAt(dir) {
   return null;
 }
 function claimAsides(backlog) {
-  const root = claimsRootDir(backlog);
-  if (internalSymlink(root) !== null) return [];
+  const root2 = claimsRootDir(backlog);
+  if (internalSymlink(root2) !== null) return [];
   let names;
   try {
-    names = fs3.readdirSync(root);
+    names = fs3.readdirSync(root2);
   } catch {
     return [];
   }
-  return names.filter((n) => n.startsWith(".nj-rm-")).sort().map((n) => path2.join(root, n));
+  return names.filter((n) => n.startsWith(".nj-rm-")).sort().map((n) => path2.join(root2, n));
 }
 function removeLeftoverAside(aside) {
+  forgetClaimSnapshot();
   let st;
   try {
     st = fs3.lstatSync(aside);
@@ -869,11 +903,18 @@ function sectionCheckboxCounts(body, names) {
   const lines = body.split("\n");
   const idx = sectionHeadingIndex(lines, names);
   if (idx === -1) return null;
-  const end = sectionEnd(lines, idx);
-  let fence = null;
   let total = 0;
   let unticked = 0;
-  for (let i = idx + 1; i < end; i++) {
+  for (const { m } of checkboxesOutsideFences(lines, idx + 1, sectionEnd(lines, idx))) {
+    total++;
+    if (m[3] === " ") unticked++;
+  }
+  return { total, unticked };
+}
+function checkboxesOutsideFences(lines, from, to) {
+  const out2 = [];
+  let fence = null;
+  for (let i = from; i < to; i++) {
     const line = lines[i];
     const fm = /^[ \t]*(`{3,}|~{3,})/.exec(line);
     if (fence) {
@@ -885,12 +926,52 @@ function sectionCheckboxCounts(body, names) {
       continue;
     }
     const m = CHECKBOX_RE.exec(line);
-    if (m) {
+    if (m) out2.push({ i, m });
+  }
+  return out2;
+}
+function tickAllAcceptance(body, names) {
+  const lines = body.split("\n");
+  const idx = sectionHeadingIndex(lines, names);
+  if (idx === -1) return { body, checked: [] };
+  const checked = [];
+  for (const { i, m } of checkboxesOutsideFences(lines, idx + 1, sectionEnd(lines, idx))) {
+    if (m[3] !== " ") continue;
+    lines[i] = `${m[1]}${m[2]} [x]${m[4]}`;
+    checked.push(m[4].trim());
+  }
+  return checked.length === 0 ? { body, checked } : { body: lines.join("\n"), checked };
+}
+function sectionContent(body, names) {
+  const lines = body.split("\n");
+  const idx = sectionHeadingIndex(lines, names);
+  if (idx === -1) return null;
+  return normalizeSectionContent(lines.slice(idx + 1, sectionEnd(lines, idx)).join("\n"));
+}
+function carryAcceptanceTicks(body, names, content) {
+  const old = body.split("\n");
+  const idx = sectionHeadingIndex(old, names);
+  const ticked = /* @__PURE__ */ new Map();
+  let total = 0;
+  if (idx !== -1) {
+    for (const { m } of checkboxesOutsideFences(old, idx + 1, sectionEnd(old, idx))) {
+      if (m[3] === " ") continue;
+      const marks = ticked.get(m[4]);
+      if (marks === void 0) ticked.set(m[4], [m[3]]);
+      else marks.push(m[3]);
       total++;
-      if (m[3] === " ") unticked++;
     }
   }
-  return { total, unticked };
+  const lines = content === "" ? [] : content.split("\n");
+  let kept = 0;
+  for (const { i, m } of checkboxesOutsideFences(lines, 0, lines.length)) {
+    const marks = ticked.get(m[4]);
+    if (marks === void 0 || marks.length === 0) continue;
+    const mark = marks.shift();
+    kept++;
+    if (m[3] === " ") lines[i] = `${m[1]}${m[2]} [${mark}]${m[4]}`;
+  }
+  return { content: lines.join("\n"), reset: total - kept };
 }
 function normalizeSectionContent(raw) {
   let t = String(raw);
@@ -1000,8 +1081,114 @@ function notesSectionBounds(lines) {
 }
 
 // src/core/store.ts
+import * as fs5 from "node:fs";
+import * as path4 from "node:path";
+
+// src/core/touched.ts
 import * as fs4 from "node:fs";
 import * as path3 from "node:path";
+var journal = /* @__PURE__ */ new Map();
+var root = null;
+function setJournalRoot(backlog) {
+  root = backlog;
+}
+function existedBefore(abs) {
+  try {
+    fs4.lstatSync(abs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+function touchWrite(abs, existed) {
+  const prev = journal.get(abs);
+  if (prev === void 0) journal.set(abs, { op: existed ? "modified" : "created" });
+  else if (prev.op === "deleted") journal.set(abs, { op: "modified" });
+}
+function touchDelete(abs) {
+  const prev = journal.get(abs);
+  if (prev !== void 0 && prev.op === "created") {
+    journal.delete(abs);
+    return;
+  }
+  if (prev !== void 0 && prev.op === "moved") {
+    journal.delete(abs);
+    touchDelete(prev.from);
+    return;
+  }
+  journal.set(abs, { op: "deleted" });
+}
+function touchMove(from, to) {
+  const prev = journal.get(from);
+  journal.delete(from);
+  if (prev !== void 0 && prev.op === "created") {
+    journal.set(to, { op: "created" });
+    return;
+  }
+  const origin = prev !== void 0 && prev.op === "moved" ? prev.from : from;
+  if (origin === to) {
+    journal.set(to, { op: "modified" });
+    return;
+  }
+  journal.set(to, { op: "moved", from: origin });
+}
+function touchDeleteTree(abs) {
+  let st;
+  try {
+    st = fs4.lstatSync(abs);
+  } catch {
+    return;
+  }
+  if (!st.isDirectory()) {
+    touchDelete(abs);
+    return;
+  }
+  for (const n of fs4.readdirSync(abs).sort()) touchDeleteTree(path3.join(abs, n));
+}
+function touchRename(from, to) {
+  let st;
+  try {
+    st = fs4.lstatSync(to);
+  } catch {
+    return;
+  }
+  if (!st.isDirectory()) {
+    touchMove(from, to);
+    return;
+  }
+  for (const n of fs4.readdirSync(to).sort()) touchRename(path3.join(from, n), path3.join(to, n));
+}
+function listed(rel) {
+  if (rel === "" || rel.startsWith("..") || path3.isAbsolute(rel)) return false;
+  if (rel === V3_INDEX_REL || rel === LEGACY_INDEX_REL || rel === ".nanojira/claims" || rel.startsWith(".nanojira/claims/")) return false;
+  const base = rel.slice(rel.lastIndexOf("/") + 1);
+  return !base.startsWith(".nj-tmp-") && !base.startsWith(".nj-rm-");
+}
+function touchedFiles(backlog) {
+  const rel = (abs) => path3.relative(backlog, abs).split(path3.sep).join("/");
+  const out2 = [];
+  for (const [abs, e] of journal) {
+    const p = rel(abs);
+    if (!listed(p)) continue;
+    if (e.op === "moved") {
+      const from = rel(e.from);
+      out2.push(listed(from) ? { path: p, op: "moved", from } : { path: p, op: "created" });
+    } else {
+      out2.push({ path: p, op: e.op });
+    }
+  }
+  return out2.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+}
+function failureFiles() {
+  if (root === null || journal.size === 0) return void 0;
+  const files = touchedFiles(root);
+  return files.length > 0 ? files : void 0;
+}
+function withFiles(result, backlog) {
+  return Object.assign({}, result, { files: touchedFiles(backlog) });
+}
+
+// src/core/store.ts
 function pinnedNow() {
   const pinned = process.env.NJ_NOW;
   if (pinned === void 0 || pinned === "") return null;
@@ -1025,7 +1212,7 @@ function nowMs() {
 }
 function mtimeIso(file) {
   try {
-    return new Date(fs4.statSync(file).mtime).toISOString().replace(/\.\d{3}Z$/, "Z");
+    return new Date(fs5.statSync(file).mtime).toISOString().replace(/\.\d{3}Z$/, "Z");
   } catch {
     return "1970-01-01T00:00:00Z";
   }
@@ -1034,30 +1221,30 @@ function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 function idsSymlinks(dir, shardSize) {
-  const root = internalSymlink(dir);
-  if (root !== null) return [root];
+  const root2 = internalSymlink(dir);
+  if (root2 !== null) return [root2];
   const links = [];
   if (!shardSize) return links;
   let types;
   try {
-    types = fs4.readdirSync(dir, { withFileTypes: true });
+    types = fs5.readdirSync(dir, { withFileTypes: true });
   } catch {
     return links;
   }
   for (const te of types) {
     if (te.name.startsWith(".") || !(te.isDirectory() || te.isSymbolicLink())) continue;
-    const typeDir = path3.join(dir, te.name);
+    const typeDir = path4.join(dir, te.name);
     if (te.isSymbolicLink()) {
       links.push(typeDir);
       continue;
     }
     let buckets;
     try {
-      buckets = fs4.readdirSync(typeDir, { withFileTypes: true });
+      buckets = fs5.readdirSync(typeDir, { withFileTypes: true });
     } catch {
       continue;
     }
-    for (const be of buckets) if (!be.name.startsWith(".") && be.isSymbolicLink()) links.push(path3.join(typeDir, be.name));
+    for (const be of buckets) if (!be.name.startsWith(".") && be.isSymbolicLink()) links.push(path4.join(typeDir, be.name));
   }
   return links.sort();
 }
@@ -1067,7 +1254,7 @@ function readTombstones(dir, shardSize) {
   if (!shardSize) {
     let names;
     try {
-      names = fs4.readdirSync(dir);
+      names = fs5.readdirSync(dir);
     } catch {
       return out2;
     }
@@ -1079,17 +1266,17 @@ function readTombstones(dir, shardSize) {
   }
   let types;
   try {
-    types = fs4.readdirSync(dir, { withFileTypes: true });
+    types = fs5.readdirSync(dir, { withFileTypes: true });
   } catch {
     return out2;
   }
   for (const te of types) {
     const t = te.name;
     if (t.startsWith(".") || te.isSymbolicLink()) continue;
-    const typeDir = path3.join(dir, t);
+    const typeDir = path4.join(dir, t);
     let buckets;
     try {
-      buckets = fs4.readdirSync(typeDir, { withFileTypes: true });
+      buckets = fs5.readdirSync(typeDir, { withFileTypes: true });
     } catch {
       continue;
     }
@@ -1098,7 +1285,7 @@ function readTombstones(dir, shardSize) {
       if (b.startsWith(".") || be.isSymbolicLink()) continue;
       let names;
       try {
-        names = fs4.readdirSync(path3.join(typeDir, b));
+        names = fs5.readdirSync(path4.join(typeDir, b));
       } catch {
         continue;
       }
@@ -1120,18 +1307,18 @@ function bucketName(n, shardSize) {
 }
 var TOMBSTONE_ID_RE = /^(EPIC|TSK|SUB)-(\d+)$/;
 function tombstoneLocation(idsDir, id, shardSize) {
-  if (!shardSize) return { dir: idsDir, file: path3.join(idsDir, id) };
+  if (!shardSize) return { dir: idsDir, file: path4.join(idsDir, id) };
   const m = TOMBSTONE_ID_RE.exec(id);
   const prefix = m ? m[1] : id;
   const n = m ? parseInt(m[2], 10) : 0;
-  const dir = path3.join(idsDir, prefix, bucketName(n, shardSize));
-  return { dir, file: path3.join(dir, id) };
+  const dir = path4.join(idsDir, prefix, bucketName(n, shardSize));
+  return { dir, file: path4.join(dir, id) };
 }
 function highestShardedMax(idsDir, prefix) {
-  const typeDir = path3.join(idsDir, prefix);
+  const typeDir = path4.join(idsDir, prefix);
   let buckets;
   try {
-    buckets = fs4.readdirSync(typeDir).filter((b) => !b.startsWith("."));
+    buckets = fs5.readdirSync(typeDir).filter((b) => !b.startsWith("."));
   } catch {
     return 0;
   }
@@ -1140,7 +1327,7 @@ function highestShardedMax(idsDir, prefix) {
   const hi = buckets[buckets.length - 1];
   let names;
   try {
-    names = fs4.readdirSync(path3.join(typeDir, hi));
+    names = fs5.readdirSync(path4.join(typeDir, hi));
   } catch {
     return 0;
   }
@@ -1157,8 +1344,8 @@ function highestShardedMax(idsDir, prefix) {
 }
 function allocateId(idsDir, type, elements, shardSize) {
   const prefix = TYPE_PREFIX[type];
-  requireNoInternalSymlink(shardSize ? path3.join(idsDir, prefix) : idsDir, "allocating a new id");
-  fs4.mkdirSync(idsDir, { recursive: true });
+  requireNoInternalSymlink(shardSize ? path4.join(idsDir, prefix) : idsDir, "allocating a new id");
+  fs5.mkdirSync(idsDir, { recursive: true });
   let max = 0;
   const consider = (id) => {
     if (!idShaped(id)) return;
@@ -1180,10 +1367,11 @@ function allocateId(idsDir, type, elements, shardSize) {
     const { dir, file } = tombstoneLocation(idsDir, id, shardSize);
     if (dir !== idsDir) {
       requireNoInternalSymlink(dir, "allocating a new id");
-      fs4.mkdirSync(dir, { recursive: true });
+      fs5.mkdirSync(dir, { recursive: true });
     }
     try {
-      fs4.closeSync(fs4.openSync(file, "wx"));
+      fs5.closeSync(fs5.openSync(file, "wx"));
+      touchWrite(file, false);
       return id;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
@@ -1193,65 +1381,71 @@ function allocateId(idsDir, type, elements, shardSize) {
   return hardExit("id_allocation_failed", `nanojira: id allocation failed after 100 retries (${prefix})`);
 }
 function atomicWrite(target, content) {
-  const dir = path3.dirname(target);
-  const tmp = path3.join(dir, `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
+  const dir = path4.dirname(target);
+  const tmp = path4.join(dir, `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
   const fault = process.env.NJ_FAULT;
-  const fd = fs4.openSync(tmp, "wx");
+  const fd = fs5.openSync(tmp, "wx");
   try {
-    fs4.writeFileSync(fd, content, "utf8");
+    fs5.writeFileSync(fd, content, "utf8");
     if (fault === "after-tmp-write") {
-      fs4.closeSync(fd);
+      fs5.closeSync(fd);
       hardExit("fault:after-tmp-write", "nanojira: aborted at fault injection point after-tmp-write");
     }
-    fs4.fsyncSync(fd);
+    fs5.fsyncSync(fd);
   } finally {
     try {
-      fs4.closeSync(fd);
+      fs5.closeSync(fd);
     } catch {
     }
   }
   if (fault === "before-rename") {
     hardExit("fault:before-rename", "nanojira: aborted at fault injection point before-rename");
   }
-  fs4.renameSync(tmp, target);
+  const existed = existedBefore(target);
+  fs5.renameSync(tmp, target);
+  touchWrite(target, existed);
 }
 function mirrorWrite(target, content) {
-  const dir = path3.dirname(target);
-  const tmp = path3.join(dir, `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
+  const dir = path4.dirname(target);
+  const tmp = path4.join(dir, `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
   const fault = process.env.NJ_FAULT;
-  const fd = fs4.openSync(tmp, "wx");
+  const fd = fs5.openSync(tmp, "wx");
   try {
-    fs4.writeFileSync(fd, content, "utf8");
+    fs5.writeFileSync(fd, content, "utf8");
     if (fault === "after-tmp-write") {
-      fs4.closeSync(fd);
+      fs5.closeSync(fd);
       fail("fault:after-tmp-write", "nanojira: aborted at fault injection point after-tmp-write");
     }
-    fs4.fsyncSync(fd);
+    fs5.fsyncSync(fd);
   } finally {
     try {
-      fs4.closeSync(fd);
+      fs5.closeSync(fd);
     } catch {
     }
   }
   if (fault === "before-rename") {
     fail("fault:before-rename", "nanojira: aborted at fault injection point before-rename");
   }
-  fs4.renameSync(tmp, target);
+  const existed = existedBefore(target);
+  fs5.renameSync(tmp, target);
+  touchWrite(target, existed);
 }
 function atomicReplace(target, content) {
-  const tmp = path3.join(path3.dirname(target), `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
+  const tmp = path4.join(path4.dirname(target), `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
   try {
-    const fd = fs4.openSync(tmp, "wx");
+    const fd = fs5.openSync(tmp, "wx");
     try {
-      fs4.writeFileSync(fd, content, "utf8");
-      fs4.fsyncSync(fd);
+      fs5.writeFileSync(fd, content, "utf8");
+      fs5.fsyncSync(fd);
     } finally {
-      fs4.closeSync(fd);
+      fs5.closeSync(fd);
     }
-    fs4.renameSync(tmp, target);
+    const existed = existedBefore(target);
+    fs5.renameSync(tmp, target);
+    touchWrite(target, existed);
   } catch (e) {
     try {
-      fs4.unlinkSync(tmp);
+      fs5.unlinkSync(tmp);
     } catch {
     }
     throw e;
@@ -1259,11 +1453,11 @@ function atomicReplace(target, content) {
 }
 function compareGuard(el, force, backlog, hint, catchable) {
   if (process.env.NJ_FAULT === "before-compare" && backlog) {
-    const marker = path3.join(backlog, ".nj-fault-go");
+    const marker = path4.join(backlog, ".nj-fault-go");
     const ready = process.env.NJ_FAULT_READY;
     if (ready) {
       try {
-        fs4.writeFileSync(ready, el.id + "\n");
+        fs5.writeFileSync(ready, el.id + "\n");
       } catch (e) {
         const msg = `nanojira: before-compare could not write NJ_FAULT_READY ${ready}: ${e.message}`;
         if (catchable) fail("fault:before-compare", msg);
@@ -1271,7 +1465,7 @@ function compareGuard(el, force, backlog, hint, catchable) {
       }
     }
     const deadline = Date.now() + 1e4;
-    while (!fs4.existsSync(marker)) {
+    while (!fs5.existsSync(marker)) {
       if (Date.now() >= deadline) {
         const msg = "nanojira: before-compare timed out after 10s waiting for .nj-fault-go";
         if (catchable) fail("fault:before-compare", msg);
@@ -1308,7 +1502,7 @@ function planMove(src, dst) {
   const visit = (from, to) => {
     let target;
     try {
-      target = fs4.lstatSync(to);
+      target = fs5.lstatSync(to);
     } catch (e) {
       if (e.code === "ENOENT") {
         plan.renames.push([from, to]);
@@ -1319,7 +1513,7 @@ function planMove(src, dst) {
     }
     let source;
     try {
-      source = fs4.lstatSync(from);
+      source = fs5.lstatSync(from);
     } catch {
       plan.conflicts.push(to);
       return;
@@ -1329,7 +1523,7 @@ function planMove(src, dst) {
       plan.conflicts.push(to);
       return;
     }
-    for (const n of fs4.readdirSync(from).sort()) visit(path3.join(from, n), path3.join(to, n));
+    for (const n of fs5.readdirSync(from).sort()) visit(path4.join(from, n), path4.join(to, n));
     plan.emptied.push(from);
   };
   visit(src, dst);
@@ -1337,12 +1531,13 @@ function planMove(src, dst) {
 }
 function runMove(plan) {
   for (const [from, to] of plan.renames) {
-    fs4.mkdirSync(path3.dirname(to), { recursive: true });
-    fs4.renameSync(from, to);
+    fs5.mkdirSync(path4.dirname(to), { recursive: true });
+    fs5.renameSync(from, to);
+    touchRename(from, to);
   }
   for (const dir of plan.emptied) {
     try {
-      fs4.rmdirSync(dir);
+      fs5.rmdirSync(dir);
     } catch {
     }
   }
@@ -1359,7 +1554,7 @@ function renderElement(el, fieldOverrides, bodyOverride) {
 }
 function makeFolder(dir) {
   try {
-    fs4.mkdirSync(dir, { recursive: true });
+    fs5.mkdirSync(dir, { recursive: true });
   } catch (e) {
     if (!e || e.code !== "EEXIST" && e.code !== "ENOENT" && e.code !== "ENOTDIR") throw e;
     const block = inTheWay(dir);
@@ -1372,14 +1567,14 @@ function makeFolder(dir) {
 }
 function inTheWay(dir) {
   const chain = [];
-  for (let p = path3.resolve(dir); ; p = path3.dirname(p)) {
+  for (let p = path4.resolve(dir); ; p = path4.dirname(p)) {
     chain.unshift(p);
-    if (path3.dirname(p) === p) break;
+    if (path4.dirname(p) === p) break;
   }
   for (const p of chain) {
     let st;
     try {
-      st = fs4.lstatSync(p);
+      st = fs5.lstatSync(p);
     } catch {
       return null;
     }
@@ -1387,7 +1582,7 @@ function inTheWay(dir) {
     if (!st.isSymbolicLink()) return { at: p, link: false };
     let toDir = false;
     try {
-      toDir = fs4.statSync(p).isDirectory();
+      toDir = fs5.statSync(p).isDirectory();
     } catch {
     }
     if (!toDir) return { at: p, link: true };
@@ -1464,8 +1659,10 @@ function entryJson(el, backlog, cfg) {
   e.file = el.file;
   const claim2 = readClaim(backlog, el.id);
   const probs = elementProblems(el, cfg.problems.ignore);
-  if (claim2 && isClaimStale(claim2.since, cfg.claims.staleAfterHours, nowMs())) probs.push("claim:stale");
-  if (elementClaimLink(backlog, el.id) !== null) probs.push("claim:symlink");
+  const fresh = [];
+  if (claim2 && isClaimStale(claim2.since, cfg.claims.staleAfterHours, nowMs())) fresh.push("claim:stale");
+  if (elementClaimLink(backlog, el.id) !== null) fresh.push("claim:symlink");
+  for (const c of fresh) if (!cfg.problems.ignore.includes(c)) probs.push(c);
   e._problems = probs.sort();
   e._claim = claim2;
   return e;
@@ -1498,9 +1695,13 @@ function fail(code, message, hint) {
   throw new Fail(message, hint, code);
 }
 var output = { json: false };
+function withFailureFiles(res) {
+  const files = failureFiles();
+  return files === void 0 ? res : Object.assign({}, res, { files });
+}
 function hardExit(code, message) {
   process.stderr.write(message + "\n");
-  if (output.json) process.stdout.write(JSON.stringify({ ok: false, error: code }, null, 2) + "\n");
+  if (output.json) process.stdout.write(JSON.stringify(withFailureFiles({ ok: false, error: code }), null, 2) + "\n");
   process.exit(1);
 }
 process.stdout.on("error", (err) => {
@@ -1533,7 +1734,7 @@ function writeFeedback(el, cfg, headline) {
 }
 function buildWriteResult(el, changed, backlog, cfg, extra) {
   const entry = entryJson(el, backlog, cfg);
-  return Object.assign({ ok: true, id: el.id, changed, entry, _problems: entry._problems }, extra || {});
+  return Object.assign({ ok: true, id: el.id, changed, entry, _problems: entry._problems }, extra || {}, { files: touchedFiles(backlog) });
 }
 function emitWriteResult(json, el, changed, backlog, cfg, extra) {
   if (!json) return;
@@ -1547,7 +1748,7 @@ function emitFailure(code, message, hint) {
   if (output.json) {
     const res = { ok: false, error: code };
     if (hint) res.hint = hint;
-    out(JSON.stringify(res, null, 2));
+    out(JSON.stringify(withFailureFiles(res), null, 2));
   }
   process.exitCode = 1;
 }
@@ -1613,43 +1814,43 @@ function deepToReal(v) {
   }
   return v;
 }
-function isInside(p, root) {
-  if (p === root) return "";
-  const prefix = root.endsWith(path4.sep) ? root : root + path4.sep;
+function isInside(p, root2) {
+  if (p === root2) return "";
+  const prefix = root2.endsWith(path5.sep) ? root2 : root2 + path5.sep;
   return p.startsWith(prefix) ? p.slice(prefix.length) : null;
 }
 function realpathLoose(p) {
   try {
-    return fs5.realpathSync.native(p);
+    return fs6.realpathSync.native(p);
   } catch {
   }
   try {
-    return path4.join(fs5.realpathSync.native(path4.dirname(p)), path4.basename(p));
+    return path5.join(fs6.realpathSync.native(path5.dirname(p)), path5.basename(p));
   } catch {
-    return path4.resolve(p);
+    return path5.resolve(p);
   }
 }
 function intoSandbox(p) {
   if (state.sandbox === null || state.real === null) return p;
-  let rel = isInside(path4.resolve(p), path4.resolve(state.real));
+  let rel = isInside(path5.resolve(p), path5.resolve(state.real));
   if (rel === null) rel = isInside(realpathLoose(p), realpathLoose(state.real));
   for (const [name, target] of state.followed) {
     if (rel !== null) break;
     const inner = isInside(realpathLoose(p), target);
-    if (inner !== null) rel = inner === "" ? name : path4.join(name, inner);
+    if (inner !== null) rel = inner === "" ? name : path5.join(name, inner);
   }
   if (rel === null) return p;
-  return rel === "" ? state.sandbox : path4.join(state.sandbox, rel);
+  return rel === "" ? state.sandbox : path5.join(state.sandbox, rel);
 }
 function copyTimes(dst, st) {
-  fs5.utimesSync(dst, st.atimeMs / 1e3, st.mtimeMs / 1e3);
+  fs6.utimesSync(dst, st.atimeMs / 1e3, st.mtimeMs / 1e3);
 }
 function followedNames(real) {
   let folders = { ...DEFAULT_CONFIG.layout.folders };
   for (const rel of [V3_CONFIG_REL, LEGACY_CONFIG_REL]) {
     let raw;
     try {
-      raw = readRegularFile(path4.join(real, rel), TEXT_FILE_CAP);
+      raw = readRegularFile(path5.join(real, rel), TEXT_FILE_CAP);
     } catch (e) {
       if (e && e.code === "ENOENT") continue;
       break;
@@ -1666,7 +1867,7 @@ function followedNames(real) {
 }
 function isDirTarget(p) {
   try {
-    return fs5.statSync(p).isDirectory();
+    return fs6.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -1674,63 +1875,63 @@ function isDirTarget(p) {
 function isScratch(st) {
   return state.scratchId !== null && st.dev === state.scratchId.dev && st.ino === state.scratchId.ino;
 }
-function copyEntry(src, dst, rel, root, follow) {
+function copyEntry(src, dst, rel, root2, follow) {
   let st;
   try {
-    st = fs5.lstatSync(src);
+    st = fs6.lstatSync(src);
   } catch {
     return;
   }
-  if (st.isDirectory()) return isScratch(st) ? void 0 : copyDir(src, dst, rel, root, st);
+  if (st.isDirectory()) return isScratch(st) ? void 0 : copyDir(src, dst, rel, root2, st);
   if (st.isSymbolicLink() && follow !== void 0 && follow(rel)) {
     if (isDirTarget(src)) {
-      const target = fs5.realpathSync.native(src);
+      const target = fs6.realpathSync.native(src);
       state.followed.set(rel, target);
-      return copyDir(target, dst, rel, target, fs5.statSync(target));
+      return copyDir(target, dst, rel, target, fs6.statSync(target));
     }
   }
   if (st.isSymbolicLink() && !rel.startsWith(".") && isDirTarget(src)) {
-    const standIn = path4.join(state.sandbox + ".links", String(state.standIns.size));
-    fs5.mkdirSync(standIn, { recursive: true });
-    fs5.symlinkSync(standIn, dst);
+    const standIn = path5.join(state.sandbox + ".links", String(state.standIns.size));
+    fs6.mkdirSync(standIn, { recursive: true });
+    fs6.symlinkSync(standIn, dst);
     state.links.set(rel, standIn);
     state.standIns.add(rel);
     return;
   }
   if (st.isSymbolicLink()) {
-    const target = fs5.readlinkSync(src);
-    const outside = !path4.isAbsolute(target) && isInside(path4.resolve(path4.dirname(src), target), root) === null;
-    const written = outside ? path4.resolve(path4.dirname(src), target) : target;
-    fs5.symlinkSync(written, dst);
+    const target = fs6.readlinkSync(src);
+    const outside = !path5.isAbsolute(target) && isInside(path5.resolve(path5.dirname(src), target), root2) === null;
+    const written = outside ? path5.resolve(path5.dirname(src), target) : target;
+    fs6.symlinkSync(written, dst);
     state.links.set(rel, written);
     return;
   }
   if (!st.isFile()) {
     if (!rel.startsWith(".") || rel === V3_CONFIG_REL || rel === LEGACY_CONFIG_REL) {
-      const original = path4.resolve(src);
-      fs5.symlinkSync(original, dst);
+      const original = path5.resolve(src);
+      fs6.symlinkSync(original, dst);
       state.nonRegular.set(rel, original);
     }
     return;
   }
   try {
-    fs5.copyFileSync(src, dst, fs5.constants.COPYFILE_FICLONE);
+    fs6.copyFileSync(src, dst, fs6.constants.COPYFILE_FICLONE);
   } catch {
-    fs5.writeFileSync(dst, "");
+    fs6.writeFileSync(dst, "");
   }
-  fs5.chmodSync(dst, st.mode & 4095);
+  fs6.chmodSync(dst, st.mode & 4095);
   copyTimes(dst, st);
 }
-function copyDir(src, dst, rel, root, st, follow) {
-  fs5.mkdirSync(dst);
+function copyDir(src, dst, rel, root2, st, follow) {
+  fs6.mkdirSync(dst);
   let names;
   try {
-    names = fs5.readdirSync(src);
+    names = fs6.readdirSync(src);
   } catch {
     names = null;
   }
-  for (const n of names || []) copyEntry(path4.join(src, n), path4.join(dst, n), rel === "" ? n : rel + "/" + n, root, rel === "" ? follow : void 0);
-  fs5.chmodSync(dst, st.mode & 4095);
+  for (const n of names || []) copyEntry(path5.join(src, n), path5.join(dst, n), rel === "" ? n : rel + "/" + n, root2, rel === "" ? follow : void 0);
+  fs6.chmodSync(dst, st.mode & 4095);
   copyTimes(dst, st);
 }
 function sandboxFor(real) {
@@ -1741,19 +1942,19 @@ function sandboxFor(real) {
   }
   const tmp = os.tmpdir();
   try {
-    const scratch = fs5.mkdtempSync(path4.join(fs5.realpathSync.native(tmp), "nj-dry-run-"));
+    const scratch = fs6.mkdtempSync(path5.join(fs6.realpathSync.native(tmp), "nj-dry-run-"));
     state.scratch = scratch;
-    const sst = fs5.statSync(scratch);
+    const sst = fs6.statSync(scratch);
     state.scratchId = { dev: sst.dev, ino: sst.ino };
     state.real = real;
-    state.sandbox = path4.join(scratch, path4.basename(real) || "backlog");
+    state.sandbox = path5.join(scratch, path5.basename(real) || "backlog");
     let st;
     try {
-      st = fs5.statSync(real);
+      st = fs6.statSync(real);
     } catch {
       st = null;
     }
-    if (st !== null && st.isDirectory()) copyDir(real, state.sandbox, "", path4.resolve(real), st, followedNames(real));
+    if (st !== null && st.isDirectory()) copyDir(real, state.sandbox, "", path5.resolve(real), st, followedNames(real));
   } catch (e) {
     removeScratch();
     state.real = null;
@@ -1768,44 +1969,44 @@ function removeScratch() {
   const scratch = state.scratch;
   state.scratch = null;
   try {
-    fs5.rmSync(scratch, { recursive: true, force: true });
+    fs6.rmSync(scratch, { recursive: true, force: true });
     return;
   } catch {
   }
   const open = (d) => {
     try {
-      fs5.chmodSync(d, 448);
+      fs6.chmodSync(d, 448);
     } catch {
       return;
     }
     let names;
     try {
-      names = fs5.readdirSync(d);
+      names = fs6.readdirSync(d);
     } catch {
       return;
     }
     for (const n of names) {
-      const p = path4.join(d, n);
+      const p = path5.join(d, n);
       try {
-        if (fs5.lstatSync(p).isDirectory()) open(p);
+        if (fs6.lstatSync(p).isDirectory()) open(p);
       } catch {
       }
     }
   };
   open(scratch);
   try {
-    fs5.rmSync(scratch, { recursive: true, force: true });
+    fs6.rmSync(scratch, { recursive: true, force: true });
   } catch (e) {
     process.stderr.write(`Warning: dry run scratch copy not removed: ${scratch} (${e && e.message ? e.message : e})
 `);
   }
 }
-function snapshot(root, sandbox) {
+function snapshot2(root2, sandbox) {
   const out2 = /* @__PURE__ */ new Map();
-  if (root === null) return out2;
+  if (root2 === null) return out2;
   let st;
   try {
-    st = fs5.statSync(root);
+    st = fs6.statSync(root2);
   } catch {
     return out2;
   }
@@ -1814,22 +2015,22 @@ function snapshot(root, sandbox) {
   const walk = (dir, rel) => {
     let names;
     try {
-      names = fs5.readdirSync(dir);
+      names = fs6.readdirSync(dir);
     } catch {
       return;
     }
     for (const n of names) {
-      const p = path4.join(dir, n);
+      const p = path5.join(dir, n);
       const r = rel === "" ? n : rel + "/" + n;
       let s;
       try {
-        s = fs5.lstatSync(p);
+        s = fs6.lstatSync(p);
       } catch {
         continue;
       }
       if (s.isSymbolicLink() && state.followed.has(r)) {
         try {
-          s = fs5.statSync(p);
+          s = fs6.statSync(p);
         } catch {
         }
       }
@@ -1838,14 +2039,14 @@ function snapshot(root, sandbox) {
         out2.set(r, { kind: "dir", content: null });
         walk(p, r);
       } else if (s.isSymbolicLink()) {
-        const target = fs5.readlinkSync(p);
+        const target = fs6.readlinkSync(p);
         if (sandbox && state.nonRegular.get(r) === target) continue;
         out2.set(r, { kind: "symlink", content: target });
         if (sandbox && state.standIns.has(r)) walk(p, r);
       } else if (s.isFile()) {
         let c;
         try {
-          c = fs5.readFileSync(p, "utf8");
+          c = fs6.readFileSync(p, "utf8");
         } catch {
           c = null;
         }
@@ -1853,12 +2054,12 @@ function snapshot(root, sandbox) {
       }
     }
   };
-  walk(root, "");
+  walk(root2, "");
   return out2;
 }
 function diffTrees() {
-  const before = snapshot(state.real, false);
-  const after = snapshot(state.sandbox, true);
+  const before = snapshot2(state.real, false);
+  const after = snapshot2(state.sandbox, true);
   const paths = Array.from(/* @__PURE__ */ new Set([...before.keys(), ...after.keys()])).sort((a, b) => a < b ? -1 : a > b ? 1 : 0);
   const changes = [];
   const del = (p, n) => changes.push({ path: p, kind: n.kind, op: "delete", before: n.content, after: null });
@@ -1936,7 +2137,7 @@ function displayFlagName(name) {
 }
 function sameValue(name, a, b) {
   if (a === b) return true;
-  return name === "backlog" && typeof a === "string" && typeof b === "string" && a !== "" && b !== "" && path5.resolve(a) === path5.resolve(b);
+  return name === "backlog" && typeof a === "string" && typeof b === "string" && a !== "" && b !== "" && path6.resolve(a) === path6.resolve(b);
 }
 function parseArgs(argv) {
   const flags = /* @__PURE__ */ new Map();
@@ -2003,7 +2204,7 @@ function parseListFlag(flags, name) {
 }
 function readStdin() {
   try {
-    return fs6.readFileSync(0, "utf8");
+    return fs7.readFileSync(0, "utf8");
   } catch (e) {
     return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, "pipe the text in, or pass a path with --<role>-file=<path>");
   }
@@ -2045,7 +2246,7 @@ function readSectionFlags(flags) {
     }
     let raw;
     try {
-      raw = fs6.readFileSync(s.file, "utf8");
+      raw = fs7.readFileSync(s.file, "utf8");
     } catch (e) {
       fail(
         "not_found",
@@ -2059,20 +2260,22 @@ function readSectionFlags(flags) {
 }
 
 // src/commands/cmd-archive.ts
-import * as fs12 from "node:fs";
-import * as path12 from "node:path";
+import * as fs13 from "node:fs";
+import * as path13 from "node:path";
 
 // src/core/flag-table.ts
 var str = (name) => ({ name, kind: "string" });
 var bool = (name) => ({ name, kind: "boolean" });
 var FLAG_TABLE = {
-  list: { fields: [str("status"), str("type"), str("tag"), str("parent"), str("assignee")] },
+  list: { fields: [str("status"), str("type"), str("tag"), str("parent"), str("assignee"), str("exclude-tag"), str("min-priority")] },
   find: { fields: [
     str("status"),
     str("type"),
     str("tag"),
     str("parent"),
     str("assignee"),
+    str("exclude-tag"),
+    str("min-priority"),
     bool("case-sensitive"),
     { name: "text", kind: "string", positional: true }
   ] },
@@ -2086,14 +2289,14 @@ var FLAG_TABLE = {
   // --add-tags/--remove-tags (DECISIONS 163 B): an incremental alternative
   // to --tags=, set-only, hyphenated like case-sensitive/allow-open-children
   // (no pre-existing Element field to normalise onto, unlike depends-on).
-  set: { fields: [str("id"), str("file")].concat(SETTABLE_FIELDS.map(str), [str("add-tags"), str("remove-tags")]) },
+  set: { fields: [str("id"), str("file")].concat(SETTABLE_FIELDS.map(str), [str("add-tags"), str("remove-tags"), str("add-acceptance")]) },
   note: { fields: [str("id"), str("file"), str("as"), { name: "text", kind: "string", positional: true }] },
   check: { fields: [str("id"), str("file"), str("text"), str("item"), bool("on"), bool("off")] },
   claim: { fields: [str("id"), str("file"), str("as"), str("steal"), str("status")] },
-  release: { fields: [str("id"), str("file"), str("as")] },
+  release: { fields: [str("id"), str("file"), str("as"), str("status")] },
   // No id/file (§ 12b "Not applicable"): `next` picks its own target, the
   // same reason `new` has neither.
-  next: { fields: [str("as"), str("status"), str("type"), str("tag"), str("parent"), str("assignee")] },
+  next: { fields: [str("as"), str("status"), str("type"), str("tag"), str("parent"), str("assignee"), str("exclude-tag"), str("min-priority")] },
   archive: { fields: [str("id"), str("file")] },
   unarchive: { fields: [str("id"), str("file")] },
   doctor: { fields: [bool("fix")] },
@@ -2127,7 +2330,7 @@ var CLI_SPEC = {
   // are not settable fields.
   set: {
     fields: cliFieldNames("set").filter((f) => f !== "id" && f !== "file"),
-    controls: ["json", "force", "allow-open-children", "id", "file", "input", "quiet", "fields"],
+    controls: ["json", "force", "allow-open-children", "check-all", "id", "file", "input", "quiet", "fields"],
     write: true
   },
   note: { fields: [], controls: [...OUTPUT, "force", "text", "text-file", ...cliFieldNames("note")], write: true },
@@ -2142,8 +2345,9 @@ var CLI_SPEC = {
   archive: { fields: [], controls: ["json", ...cliFieldNames("archive")], write: true },
   unarchive: { fields: [], controls: ["json", ...cliFieldNames("unarchive")], write: true },
   // Only `status` in "Known fields:", as the original error text had it.
-  claim: { fields: ["status"], controls: [...OUTPUT, ...cliFieldNames("claim").filter((f) => f !== "status"), "allow-open-children"], write: true },
-  release: { fields: [], controls: [...OUTPUT, ...cliFieldNames("release")], write: true },
+  claim: { fields: ["status"], controls: [...OUTPUT, ...cliFieldNames("claim").filter((f) => f !== "status"), "allow-open-children", "check-all"], write: true },
+  // Only `status` in "Known fields:", as for claim.
+  release: { fields: ["status"], controls: [...OUTPUT, ...cliFieldNames("release").filter((f) => f !== "status"), "allow-open-children"], write: true },
   next: { fields: cliFieldNames("next"), controls: ["json"], write: true },
   doctor: { fields: [], controls: ["json", "dry-run", ...cliFieldNames("doctor")], write: false }
 };
@@ -2171,7 +2375,7 @@ function refuseStrayPositionals(command, positional) {
     "flags go before `--`; write every flag as --name or --name=value"
   );
 }
-var BOOLEAN_CONTROLS = /* @__PURE__ */ new Set(["json", "quiet", "force", "allow-open-children", "ready", "all"]);
+var BOOLEAN_CONTROLS = /* @__PURE__ */ new Set(["json", "quiet", "force", "allow-open-children", "check-all", "ready", "all"]);
 function isBooleanFlag(command, name) {
   if (BOOLEAN_CONTROLS.has(name)) return true;
   return Object.hasOwn(FLAG_TABLE, command) && commandFields(command).some((f) => f.name === name && f.kind === "boolean");
@@ -2189,7 +2393,9 @@ var FILTER = {
   type: doc("only elements of this type", "<value>"),
   tag: doc("only elements carrying this tag", "<tag>"),
   parent: doc("only direct children of this element", "<id>"),
-  assignee: doc("only elements assigned to this name", "<name>")
+  assignee: doc("only elements assigned to this name", "<name>"),
+  "exclude-tag": doc("leave out elements carrying any of these tags", "<a,b,...>"),
+  "min-priority": doc("only elements of this priority or higher", "<value>")
 };
 var BATCH_ID = doc("the element to act on; A,B,C applies the same write to each", "<id>");
 var FLAG_DOCS = {
@@ -2198,10 +2404,11 @@ var FLAG_DOCS = {
   json: doc("print the result as JSON"),
   backlog: doc("use this backlog (else NJ_BACKLOG, else the upward search)", "<path>"),
   "dry-run": doc("run against a scratch copy; nothing is written"),
-  quiet: doc("with --json: print only {ok, id}, plus _problems when non-empty"),
+  quiet: doc("with --json: print only {ok, id, files}, plus _problems when non-empty"),
   fields: doc("with --json: keep only these entry fields, in this order", "<a,b,...>"),
   force: doc("overwrite a parallel change"),
   "allow-open-children": doc("allow the final status while children are still open"),
+  "check-all": doc("with --status=<final status>: tick every open acceptance box in the same write"),
   input: doc("read the fields as one JSON object from a file, - for stdin", "<path|->"),
   as: doc("act as this name", "<name>"),
   title: doc("the title", "<text>"),
@@ -2218,6 +2425,7 @@ var FLAG_DOCS = {
   "description-file": doc("the Description section from a file, - for stdin", "<path|->"),
   acceptance: doc("the Acceptance Criteria section", "<text>"),
   "acceptance-file": doc("the Acceptance Criteria section from a file, - for stdin", "<path|->"),
+  "add-acceptance": doc("append one unticked Acceptance Criteria line, keep the rest", "<text>"),
   ready: doc("only elements ready to start"),
   all: doc("include archived elements")
 };
@@ -2256,7 +2464,11 @@ var COMMAND_DOCS = {
     steal: doc("take over the claim this holder has", "<holder>"),
     status: doc("also set this status", "<value>")
   },
-  release: { id: BATCH_ID, as: doc("release the claim held under this name", "<name>") },
+  release: {
+    id: BATCH_ID,
+    as: doc("release the claim held under this name", "<name>"),
+    status: doc("also set this status, and clear the assignee if it is this name", "<value>")
+  },
   next: {
     ...FILTER,
     as: doc("claim as this name", "<name>"),
@@ -2275,16 +2487,16 @@ function flagDoc(command, name) {
 }
 
 // src/core/context.ts
-import * as fs9 from "node:fs";
-import * as path9 from "node:path";
+import * as fs10 from "node:fs";
+import * as path10 from "node:path";
 
 // src/core/config.ts
-import * as fs7 from "node:fs";
+import * as fs8 from "node:fs";
 import * as os2 from "node:os";
-import * as path6 from "node:path";
+import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.2.0";
+var VERSION = "4.3.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -2458,7 +2670,7 @@ function readLayout(lay) {
 }
 function loadConfig(backlog, legacy) {
   const rel = legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL;
-  const file = path6.join(backlog, rel);
+  const file = path7.join(backlog, rel);
   let raw;
   try {
     raw = readRegularFile(file, TEXT_FILE_CAP);
@@ -2500,13 +2712,13 @@ function sourceName(src) {
   return src.kind === "flag" ? "--backlog" : src.kind === "env" ? "NJ_BACKLOG" : src.file;
 }
 function holdsBacklog(dir) {
-  return fs7.existsSync(path6.join(dir, V3_CONFIG_REL)) || fs7.existsSync(path6.join(dir, LEGACY_CONFIG_REL));
+  return fs8.existsSync(path7.join(dir, V3_CONFIG_REL)) || fs8.existsSync(path7.join(dir, LEGACY_CONFIG_REL));
 }
 function claim(dir, src, lenient) {
   const shown = src.kind === "njrc" ? escapeInvisible(dir) : dir;
   if (!isDir(dir)) fail(SOURCE_CODE[src.kind], `no backlog at ${shown} (from ${sourceName(src)})`);
   if (lenient || holdsBacklog(dir)) return dir;
-  if (fs7.existsSync(path6.join(dir, V3_DIR_REL))) {
+  if (fs8.existsSync(path7.join(dir, V3_DIR_REL))) {
     fail(
       "backlog_without_config",
       `${shown} exists but has no ${V3_CONFIG_REL}`,
@@ -2533,33 +2745,33 @@ function explicitLocation(flags) {
   return null;
 }
 function njrcLocation(dir) {
-  const file = path6.join(dir, ".njrc");
+  const file = path7.join(dir, ".njrc");
   const raw = readNjrc(file);
   if (raw === null) return null;
   const value = parseNjrc(file, raw).get("backlog");
   if (value === void 0) return null;
-  const expanded = value.startsWith("~/") ? path6.join(os2.homedir(), value.slice(2)) : value;
-  return { dir: path6.resolve(dir, expanded), src: { kind: "njrc", file } };
+  const expanded = value.startsWith("~/") ? path7.join(os2.homedir(), value.slice(2)) : value;
+  return { dir: path7.resolve(dir, expanded), src: { kind: "njrc", file } };
 }
 function readNjrc(file) {
   let link;
   try {
-    link = fs7.lstatSync(file);
+    link = fs8.lstatSync(file);
   } catch (e) {
-    return searchMiss(e, path6.dirname(file));
+    return searchMiss(e, path7.dirname(file));
   }
   const bad = (reason, hint) => fail("invalid_njrc", `invalid .njrc at ${file}: ${reason}`, hint);
   checkOwner(link.uid, bad);
-  njrcSwapFaultHook(path6.dirname(file));
+  njrcSwapFaultHook(path7.dirname(file));
   let fd;
   try {
-    fd = fs7.openSync(file, fs7.constants.O_RDONLY | fs7.constants.O_NONBLOCK);
+    fd = fs8.openSync(file, fs8.constants.O_RDONLY | fs8.constants.O_NONBLOCK);
   } catch (e) {
     if (e.code === "ELOOP") return bad("it is a symlink loop (ELOOP)");
     if (e.code === "ENOENT") {
       let fresh;
       try {
-        fresh = fs7.lstatSync(file);
+        fresh = fs8.lstatSync(file);
       } catch {
         return null;
       }
@@ -2570,7 +2782,7 @@ function readNjrc(file) {
   try {
     let st;
     try {
-      st = fs7.fstatSync(fd);
+      st = fs8.fstatSync(fd);
     } catch (e) {
       return bad(`cannot stat it -- ${e.code || e.message}`);
     }
@@ -2578,20 +2790,20 @@ function readNjrc(file) {
     if (!st.isFile()) return bad(st.isDirectory() ? "it is a directory, not a file" : "it is not a regular file");
     let raw;
     try {
-      raw = fs7.readFileSync(fd, "utf8");
+      raw = fs8.readFileSync(fd, "utf8");
     } catch (e) {
       return bad(`cannot read it -- ${e.code || e.message}`);
     }
     return raw.startsWith("\uFEFF") ? raw.slice(1) : raw;
   } finally {
-    fs7.closeSync(fd);
+    fs8.closeSync(fd);
   }
 }
 function njrcSwapFaultHook(dir) {
   if (process.env.NJ_FAULT !== "njrc-swap") return;
-  const marker = path6.join(dir, ".nj-fault-go");
+  const marker = path7.join(dir, ".nj-fault-go");
   const deadline = Date.now() + 1e4;
-  while (!fs7.existsSync(marker)) {
+  while (!fs8.existsSync(marker)) {
     if (Date.now() >= deadline) return;
     sleepMs(50);
   }
@@ -2633,12 +2845,12 @@ function parseNjrc(file, raw) {
 function initLocation(flags) {
   const explicit = explicitLocation(flags);
   if (explicit !== null) return explicit.dir;
-  for (let dir = workingDir(); ; dir = path6.dirname(dir)) {
+  for (let dir = workingDir(); ; dir = path7.dirname(dir)) {
     const rc = njrcLocation(dir);
     if (rc !== null) return rc.dir;
-    if (path6.dirname(dir) === dir) break;
+    if (path7.dirname(dir) === dir) break;
   }
-  return path6.join(workingDir(), "backlog");
+  return path7.join(workingDir(), "backlog");
 }
 function workingDir() {
   try {
@@ -2648,7 +2860,7 @@ function workingDir() {
   }
 }
 function fromCwd(p) {
-  return path6.isAbsolute(p) ? path6.resolve(p) : path6.resolve(workingDir(), p);
+  return path7.isAbsolute(p) ? path7.resolve(p) : path7.resolve(workingDir(), p);
 }
 function oneLine(e) {
   const msg = e && e.message ? String(e.message) : String(e);
@@ -2657,10 +2869,10 @@ function oneLine(e) {
 function findBacklog(flags, lenient) {
   const explicit = explicitLocation(flags);
   if (explicit !== null) return claim(explicit.dir, explicit.src, lenient);
-  for (let dir = workingDir(); ; dir = path6.dirname(dir)) {
+  for (let dir = workingDir(); ; dir = path7.dirname(dir)) {
     const rc = njrcLocation(dir);
     if (rc !== null) return claim(rc.dir, rc.src, lenient);
-    const candidate = path6.join(dir, "backlog");
+    const candidate = path7.join(dir, "backlog");
     if (searchIsDir(candidate)) {
       if (lenient || holdsBacklog(candidate)) return candidate;
       fail(
@@ -2669,7 +2881,7 @@ function findBacklog(flags, lenient) {
         "run `nanojira doctor` \u2014 it tolerates the missing file and reports config:invalid"
       );
     }
-    if (path6.dirname(dir) === dir) break;
+    if (path7.dirname(dir) === dir) break;
   }
   return fail(
     "no_backlog",
@@ -2679,7 +2891,7 @@ function findBacklog(flags, lenient) {
 }
 function isDir(p) {
   try {
-    return fs7.statSync(p).isDirectory();
+    return fs8.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -2690,21 +2902,21 @@ function searchMiss(e, dir) {
 }
 function searchIsDir(p) {
   try {
-    return fs7.statSync(p).isDirectory();
+    return fs8.statSync(p).isDirectory();
   } catch (e) {
-    return searchMiss(e, path6.dirname(p)) ?? false;
+    return searchMiss(e, path7.dirname(p)) ?? false;
   }
 }
 function isLegacyBacklog(backlog) {
-  return fs7.existsSync(path6.join(backlog, LEGACY_CONFIG_REL));
+  return fs8.existsSync(path7.join(backlog, LEGACY_CONFIG_REL));
 }
 
 // src/core/load.ts
-import * as path8 from "node:path";
+import * as path9 from "node:path";
 
 // src/core/layout.ts
-import * as fs8 from "node:fs";
-import * as path7 from "node:path";
+import * as fs9 from "node:fs";
+import * as path8 from "node:path";
 var INTERNAL_DIRS = [".ids", ".nanojira"];
 var TOP_LEVEL_DOCS = /* @__PURE__ */ new Set(["README.md", "STATUS.md", "TAGS.md"]);
 var ID_FOLDER = ID_SHAPE;
@@ -2718,7 +2930,7 @@ function scanBacklog(backlog, layout) {
   const readEntries = (dir) => {
     let entries;
     try {
-      entries = fs8.readdirSync(dir, { withFileTypes: true });
+      entries = fs9.readdirSync(dir, { withFileTypes: true });
     } catch (e) {
       if (e.code !== "ENOENT") unreadable.push({ dir, reason: e.code || e.message });
       return [];
@@ -2727,7 +2939,7 @@ function scanBacklog(backlog, layout) {
   };
   const walk = (dir, folder, entries) => {
     for (const e of entries) {
-      const abs = path7.join(dir, e.name);
+      const abs = path8.join(dir, e.name);
       if (e.isDirectory()) {
         if (e.name.startsWith(".")) continue;
         dirs.push(abs);
@@ -2743,11 +2955,11 @@ function scanBacklog(backlog, layout) {
   for (const n of roleNames) {
     const e = top.find((t) => foldEq(t.name, n));
     if (e === void 0) continue;
-    const abs = path7.join(backlog, e.name);
+    const abs = path8.join(backlog, e.name);
     if (e.isSymbolicLink()) {
       let st;
       try {
-        st = fs8.statSync(abs);
+        st = fs9.statSync(abs);
       } catch (err) {
         unreadable.push({ dir: abs, reason: err.code === "ENOENT" ? "dangling symlink" : err.code || err.message });
         continue;
@@ -2764,21 +2976,21 @@ function scanBacklog(backlog, layout) {
   }
   walk(backlog, "", top.filter((e) => !isRoleName(e.name)));
   for (const n of INTERNAL_DIRS) {
-    const abs = path7.join(backlog, n);
+    const abs = path8.join(backlog, n);
     if (isDirectory(abs)) dirs.push(abs);
   }
   return { files, dirs, unreadable };
 }
 function isDirectory(p) {
   try {
-    return fs8.statSync(p).isDirectory();
+    return fs9.statSync(p).isDirectory();
   } catch {
     return false;
   }
 }
 function folderOf(backlog, file) {
-  const rel = path7.relative(backlog, path7.dirname(file));
-  return rel === "" ? "" : rel.split(path7.sep).join("/");
+  const rel = path8.relative(backlog, path8.dirname(file));
+  return rel === "" ? "" : rel.split(path8.sep).join("/");
 }
 function inArchive(folder, layout) {
   const a = layout.folders.archive;
@@ -2829,14 +3041,14 @@ function misplacedCode(layout) {
 }
 function ownFolder(el) {
   if (el.type !== "epic" && el.type !== "task") return null;
-  const dir = path7.dirname(el.file);
-  return path7.basename(dir) === el.id ? dir : null;
+  const dir = path8.dirname(el.file);
+  return path8.basename(dir) === el.id ? dir : null;
 }
 function removeEmptiedIdFolders(backlog, dirs) {
   for (const start of dirs) {
-    for (let d = start; d !== backlog && d.startsWith(backlog + path7.sep) && ID_FOLDER.test(path7.basename(d)); d = path7.dirname(d)) {
+    for (let d = start; d !== backlog && d.startsWith(backlog + path8.sep) && ID_FOLDER.test(path8.basename(d)); d = path8.dirname(d)) {
       try {
-        fs8.rmdirSync(d);
+        fs9.rmdirSync(d);
       } catch {
         break;
       }
@@ -2846,7 +3058,7 @@ function removeEmptiedIdFolders(backlog, dirs) {
 
 // src/core/load.ts
 function unreadableElement(file, folder, cfg, err) {
-  const base = path8.basename(file, ".md");
+  const base = path9.basename(file, ".md");
   const pm = /^(EPIC|TSK|SUB)-/.exec(base);
   const ts = mtimeIso(file);
   const byFolder = cfg.layout.group === "type" ? Object.keys(TYPE_FOLDER_ROLE).find((t) => foldEq(cfg.layout.folders[TYPE_FOLDER_ROLE[t]], folder)) || null : null;
@@ -3002,7 +3214,7 @@ function loadElement(file, backlog, cfg, folder = folderOf(backlog, file)) {
   const p = parseFile(raw);
   const problems = /* @__PURE__ */ new Set();
   for (const d of p.problems) problems.add(d.code);
-  const base = path8.basename(file, ".md");
+  const base = path9.basename(file, ".md");
   const skeleton = {
     file,
     folder,
@@ -3183,6 +3395,7 @@ function deriveGraph(elements, idsDir, cfg) {
 // src/core/context.ts
 function context(flags, opts) {
   const backlog = sandboxFor(findBacklog(flags, Boolean(opts && opts.lenient)));
+  setJournalRoot(backlog);
   const legacy = isLegacyBacklog(backlog);
   if (legacy && !(opts && opts.lenient)) {
     fail(
@@ -3200,10 +3413,10 @@ function context(flags, opts) {
     );
   }
   if (errors.length > 0 && !(opts && opts.tolerateConfig)) {
-    const configFile = path9.join(backlog, legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
+    const configFile = path10.join(backlog, legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
     fail("invalid_config", `invalid configuration in ${configFile}: ${errors[0]}`, "run `nanojira doctor` for the full report");
   }
-  const idsDir = path9.join(backlog, legacy ? LEGACY_IDS_REL : V3_IDS_REL);
+  const idsDir = path10.join(backlog, legacy ? LEGACY_IDS_REL : V3_IDS_REL);
   const loadedAt = Date.now();
   const { elements, scan } = loadBacklog(backlog, config, idsDir);
   return { backlog, cfg: config, configErrors: errors, configWarnings: warnings, elements, scan, loadedAt, legacy, idsDir };
@@ -3219,20 +3432,20 @@ function resolveTarget(ctx, flags, forWrite) {
   const id = flagString(flags, "id");
   if (file !== void 0 && id !== void 0) fail("invalid_target", "use either --id or --file, not both");
   if (file !== void 0) {
-    const abs = intoSandbox(path9.isAbsolute(file) ? file : path9.resolve(ctx.backlog, file));
+    const abs = intoSandbox(path10.isAbsolute(file) ? file : path10.resolve(ctx.backlog, file));
     const real = (p) => {
       try {
-        return fs9.realpathSync.native(p);
+        return fs10.realpathSync.native(p);
       } catch {
       }
-      const dir = path9.dirname(p);
+      const dir = path10.dirname(p);
       let rdir;
       try {
-        rdir = fs9.realpathSync.native(dir);
+        rdir = fs10.realpathSync.native(dir);
       } catch {
-        rdir = path9.resolve(dir);
+        rdir = path10.resolve(dir);
       }
-      return path9.join(rdir, path9.basename(p));
+      return path10.join(rdir, path10.basename(p));
     };
     const want = real(abs);
     const el = ctx.elements.find((e) => real(e.file) === want);
@@ -3288,7 +3501,7 @@ ${names}`,
 }
 function requireNoUnreadableDirs(ctx, verb) {
   if (ctx.scan.unreadable.length === 0) return;
-  const names = ctx.scan.unreadable.map((u) => `  ${path9.relative(ctx.backlog, u.dir)}`).join("\n");
+  const names = ctx.scan.unreadable.map((u) => `  ${path10.relative(ctx.backlog, u.dir)}`).join("\n");
   fail(
     "refused:unreadable_dir",
     `${verb} is refused while the backlog contains an unreadable directory \u2014 files inside it are not seen, so no subtree can be determined:
@@ -3303,12 +3516,12 @@ function requireActive(ctx, el, verb) {
 }
 function archivedRoot(ctx, el) {
   const seen = /* @__PURE__ */ new Set([el.id]);
-  let root = el;
+  let root2 = el;
   for (; ; ) {
-    const parent = root.parent === null ? void 0 : ctx.elements.find((e) => e.id === root.parent);
-    if (!parent || !parent.archived || seen.has(parent.id)) return root;
+    const parent = root2.parent === null ? void 0 : ctx.elements.find((e) => e.id === root2.parent);
+    if (!parent || !parent.archived || seen.has(parent.id)) return root2;
     seen.add(parent.id);
-    root = parent;
+    root2 = parent;
   }
 }
 function unarchiveCalls(ctx, els) {
@@ -3447,10 +3660,10 @@ function fireRecordedChange() {
 }
 
 // src/core/status.ts
-import * as fs10 from "node:fs";
-import * as path10 from "node:path";
+import * as fs11 from "node:fs";
+import * as path11 from "node:path";
 function statusPath(backlog) {
-  return path10.join(backlog, "STATUS.md");
+  return path11.join(backlog, "STATUS.md");
 }
 function renderStatus(elements, cfg) {
   const sections = new Map(cfg.statuses.map((s) => [s, []]));
@@ -3461,7 +3674,7 @@ function renderStatus(elements, cfg) {
     (list === void 0 ? other : list).push(el);
   }
   const line = (el) => {
-    const link = (el.folder === "" ? "" : el.folder + "/") + path10.basename(el.file);
+    const link = (el.folder === "" ? "" : el.folder + "/") + path11.basename(el.file);
     return `- [${el.id}](${link})` + (el.title === "" ? "" : " " + el.title);
   };
   const block = (name, els) => [`## ${name} (${els.length})`].concat(els.length > 0 ? ["", ...els.slice().sort(compareElements).map(line)] : []).join("\n");
@@ -3490,7 +3703,7 @@ function refreshStatus(backlog, cfg, ctx) {
       if (had !== void 0) {
         let ctime = Infinity;
         try {
-          ctime = fs10.statSync(file).ctimeMs;
+          ctime = fs11.statSync(file).ctimeMs;
         } catch {
         }
         if (ctime < cutoff) return had;
@@ -3515,8 +3728,8 @@ function refreshStatus(backlog, cfg, ctx) {
 }
 
 // src/core/tags.ts
-import * as fs11 from "node:fs";
-import * as path11 from "node:path";
+import * as fs12 from "node:fs";
+import * as path12 from "node:path";
 
 // src/core/suggest.ts
 var SYNONYMS = {
@@ -3573,7 +3786,7 @@ function listHint(label, value, allowed) {
 
 // src/core/tags.ts
 function tagsPath(backlog) {
-  return path11.join(backlog, "TAGS.md");
+  return path12.join(backlog, "TAGS.md");
 }
 function tagCounts(elements) {
   const counts = /* @__PURE__ */ new Map();
@@ -3614,7 +3827,7 @@ function refreshTags(backlog, cfg, ctx) {
       if (had !== void 0) {
         let ctime = Infinity;
         try {
-          ctime = fs11.statSync(file).ctimeMs;
+          ctime = fs12.statSync(file).ctimeMs;
         } catch {
         }
         if (ctime < cutoff) return had;
@@ -3677,11 +3890,11 @@ function warnTagNearMatches(newTags, priorTags) {
 // src/commands/cmd-archive.ts
 var STABLE_HINT = "retry once the backlog is stable \u2014 archive takes no --force";
 function archiveFlat(ctx, subtree, ts) {
-  const archiveDir = path12.join(ctx.backlog, ctx.cfg.layout.folders.archive);
-  fs12.mkdirSync(archiveDir, { recursive: true });
-  const plan = subtree.map((e) => ({ el: e, target: path12.join(archiveDir, path12.basename(e.file)) }));
+  const archiveDir = path13.join(ctx.backlog, ctx.cfg.layout.folders.archive);
+  fs13.mkdirSync(archiveDir, { recursive: true });
+  const plan = subtree.map((e) => ({ el: e, target: path13.join(archiveDir, path13.basename(e.file)) }));
   for (const { target } of plan) {
-    if (fs12.existsSync(target)) {
+    if (fs13.existsSync(target)) {
       fail(
         "exists",
         `${target} already exists \u2014 refusing to overwrite; nothing was moved`,
@@ -3693,7 +3906,8 @@ function archiveFlat(ctx, subtree, ts) {
   const moved = [];
   for (const { el: e, target } of plan) {
     atomicWrite(target, renderElement(e, /* @__PURE__ */ new Map([["archived", ts], ["updated", ts]]), void 0));
-    fs12.unlinkSync(e.file);
+    fs13.unlinkSync(e.file);
+    touchMove(e.file, target);
     moved.push(loadElement(target, ctx.backlog, ctx.cfg));
   }
   return moved;
@@ -3710,14 +3924,14 @@ function archiveHierarchy(ctx, el, subtree, ts) {
   if (el.type !== "subtask") {
     const own = ownFolder(el);
     if (own === null) return refuse(`${el.file} does not lie in a folder of its own named ${el.id}/`);
-    const inside = (f) => f.startsWith(own + path12.sep);
+    const inside = (f) => f.startsWith(own + path13.sep);
     const outside = subtree.filter((e) => !inside(e.file));
     if (outside.length > 0) refuse(`part of its subtree lies outside ${own}/: ${outside.map((e) => e.id).join(", ")}`);
     const foreign = ctx.elements.filter((e) => inside(e.file) && !subtree.includes(e));
     if (foreign.length > 0) refuse(`${own}/ also holds files of other elements: ${foreign.map((e) => e.id).join(", ")}`);
     src = own;
   }
-  const dst = path12.join(ctx.backlog, ctx.cfg.layout.folders.archive, path12.relative(ctx.backlog, src));
+  const dst = path13.join(ctx.backlog, ctx.cfg.layout.folders.archive, path13.relative(ctx.backlog, src));
   const plan = planMove(src, dst);
   if (plan.conflicts.length > 0) {
     fail(
@@ -3729,7 +3943,7 @@ function archiveHierarchy(ctx, el, subtree, ts) {
   for (const e of subtree) compareGuard(e, false, ctx.backlog, STABLE_HINT);
   for (const e of subtree) atomicWrite(e.file, renderElement(e, /* @__PURE__ */ new Map([["archived", ts], ["updated", ts]]), void 0));
   runMove(plan);
-  return subtree.map((e) => loadElement(path12.join(dst, path12.relative(src, e.file)), ctx.backlog, ctx.cfg));
+  return subtree.map((e) => loadElement(path13.join(dst, path13.relative(src, e.file)), ctx.backlog, ctx.cfg));
 }
 function cmdArchive(flags) {
   checkCommandFlags(flags, "archive");
@@ -3760,13 +3974,13 @@ ${names}`,
   deriveGraph(ctx.elements.filter((e) => !subtree.includes(e)).concat(moved), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
   refreshTags(ctx.backlog, ctx.cfg, ctx);
-  const built = {
+  const built = withFiles({
     ok: true,
     ids: moved.map((m) => m.id),
     changed: ["archived"],
     entries: moved.map((m) => entryJson(m, ctx.backlog, ctx.cfg)),
     _problems: Array.from(new Set(moved.flatMap((m) => elementProblems(m, ctx.cfg.problems.ignore)))).sort()
-  };
+  }, ctx.backlog);
   recordChange(ctx.backlog, () => built);
   if (json) {
     out(JSON.stringify(built, null, 2));
@@ -3849,6 +4063,7 @@ function trimResult(result, opts) {
     const out2 = { ok: result.ok, id: result.id };
     const probs = result._problems;
     if (Array.isArray(probs) && probs.length > 0) out2._problems = probs;
+    if (Array.isArray(result.files)) out2.files = result.files;
     return out2;
   }
   if (opts.fields !== void 0) {
@@ -3959,8 +4174,9 @@ function cmdCheck(flags) {
       refreshTags(ctx.backlog, ctx.cfg, ctx);
     }
     const results = opts.quiet || opts.fields !== void 0 ? result.results.map((r) => r.ok ? trimResult(r, opts) : r) : result.results;
-    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
-    const wrapper = { ok: result.ok, results };
+    const files = touchedFiles(ctx.backlog);
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results, files }));
+    const wrapper = { ok: result.ok, results, files };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results) out(r.ok ? `${r.id} ${wantOn ? "checked" : "unchecked"}` : `${r.id}: Error: ${r.error}`);
     return result.ok ? 0 : 1;
@@ -4022,20 +4238,20 @@ function actingNameForRead() {
 }
 
 // src/commands/cmd-set.ts
-import * as path14 from "node:path";
+import * as path15 from "node:path";
 
 // src/core/input.ts
-import * as fs13 from "node:fs";
+import * as fs14 from "node:fs";
 function readInputText(value) {
   if (value === "-") {
     try {
-      return fs13.readFileSync(0, "utf8");
+      return fs14.readFileSync(0, "utf8");
     } catch (e) {
       return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, "pipe the JSON in, or pass a path with --input=<path>");
     }
   }
   try {
-    return fs13.readFileSync(value, "utf8");
+    return fs14.readFileSync(value, "utf8");
   } catch (e) {
     return fail("not_found", `--input: cannot read '${value}' \u2014 ${e.message}`);
   }
@@ -4049,12 +4265,12 @@ function parseInputJson(raw) {
 }
 
 // src/commands/cmd-new.ts
-import * as fs14 from "node:fs";
-import * as path13 from "node:path";
+import * as fs15 from "node:fs";
+import * as path14 from "node:path";
 function collidesCaseInsensitively(dir, name) {
   let names;
   try {
-    names = fs14.readdirSync(dir);
+    names = fs15.readdirSync(dir);
   } catch {
     return false;
   }
@@ -4182,8 +4398,8 @@ function cmdNew(flags) {
   let id, dir, file;
   for (let attempt = 0; ; attempt++) {
     id = allocateId(ctx.idsDir, type, ctx.elements, ctx.cfg.ids.shardSize);
-    dir = path13.join(ctx.backlog, ...newPlace(ctx, type, id, parent).split("/"));
-    file = path13.join(dir, id + ".md");
+    dir = path14.join(ctx.backlog, ...newPlace(ctx, type, id, parent).split("/"));
+    file = path14.join(dir, id + ".md");
     if (!collidesCaseInsensitively(dir, id + ".md")) break;
     if (attempt >= 100) return hardExit("id_allocation_failed", `nanojira: id allocation failed after 100 retries (${id} collides with an existing file)`);
   }
@@ -4204,9 +4420,9 @@ function cmdNew(flags) {
 }
 var REAL_ID_SHAPE = new RegExp("^(" + Object.values(TYPE_PREFIX).join("|") + ")-\\d+$");
 var PLAN_ALLOWED_KEYS = /* @__PURE__ */ new Set([...NEW_FIELDS, "ref"]);
-function failAtPath(code, message, path18) {
+function failAtPath(code, message, path19) {
   const e = new Fail(message, void 0, code);
-  e.failedAt = path18;
+  e.failedAt = path19;
   throw e;
 }
 function flattenPlan(nodes, basePath, parentIndex, out2) {
@@ -4252,7 +4468,7 @@ function collectNodeSections(raw, nodePath, stdinState) {
         stdinState.consumed = true;
         let stdinText;
         try {
-          stdinText = fs14.readFileSync(0, "utf8");
+          stdinText = fs15.readFileSync(0, "utf8");
         } catch (e) {
           return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`);
         }
@@ -4261,7 +4477,7 @@ function collectNodeSections(raw, nodePath, stdinState) {
       }
       let text;
       try {
-        text = fs14.readFileSync(filePath, "utf8");
+        text = fs15.readFileSync(filePath, "utf8");
       } catch (e) {
         return fail("not_found", `'${role}-file': cannot read '${filePath}' \u2014 ${e.message}`);
       }
@@ -4387,6 +4603,8 @@ function emitPlanFailure(e, failedAt, extra, backlog) {
     res.refs = extra.refs;
   }
   res.failed_at = failedAt;
+  const files = extra && backlog !== void 0 ? touchedFiles(backlog) : failureFiles();
+  if (files !== void 0) res.files = files;
   if (extra && backlog !== void 0) recordChange(backlog, () => res);
   if (output.json) out(JSON.stringify(res, null, 2));
   return 1;
@@ -4447,8 +4665,8 @@ function cmdNewInput(ctx, inputValue) {
       let id = "", dir = "", file = "";
       for (let attempt = 0; ; attempt++) {
         id = allocateId(liveCtx.idsDir, v.type, liveCtx.elements, liveCtx.cfg.ids.shardSize);
-        dir = path13.join(liveCtx.backlog, ...newPlace(liveCtx, v.type, id, parentId).split("/"));
-        file = path13.join(dir, id + ".md");
+        dir = path14.join(liveCtx.backlog, ...newPlace(liveCtx, v.type, id, parentId).split("/"));
+        file = path14.join(dir, id + ".md");
         if (!collidesCaseInsensitively(dir, id + ".md")) break;
         if (attempt >= 100) return hardExit("id_allocation_failed", `nanojira: id allocation failed after 100 retries (${id} collides with an existing file)`);
       }
@@ -4497,7 +4715,7 @@ function cmdNewInput(ctx, inputValue) {
     return 0;
   }
   const refsObj = Object.fromEntries(refRealId);
-  const built = { ok: true, ids: created, entries, refs: refsObj, _problems: [] };
+  const built = withFiles({ ok: true, ids: created, entries, refs: refsObj, _problems: [] }, ctx.backlog);
   recordChange(ctx.backlog, () => built);
   if (output.json) {
     out(JSON.stringify(built, null, 2));
@@ -4519,6 +4737,7 @@ function buildSetInputFlags(inputValue) {
     if (!allowed.includes(key)) {
       fail("unknown_field", `unknown field '${key}' in --input. Nothing written.`, `Known fields: ${allowed.join(", ")}`);
     }
+    if (key === "add-acceptance" && typeof value !== "string") fail("invalid_value", `--input: 'add-acceptance' must be a string, one line`);
     if (key === "acceptance" && Array.isArray(value)) {
       for (const line of value) if (typeof line !== "string") fail("invalid_value", `--input: 'acceptance' array items must be strings`);
       synFlags.set(key, value.map((s) => `- [ ] ${s}`).join("\n"));
@@ -4562,9 +4781,9 @@ function reparentMove(ctx, el, newParentId) {
   const shadow = { ...el, parent: newParentId };
   byId.set(el.id, shadow);
   const dir = expectedPlace(shadow, byId, ctx.cfg.layout);
-  if (el.type === "subtask") return { src: el.file, dst: path14.join(ctx.backlog, dir, path14.basename(el.file)) };
+  if (el.type === "subtask") return { src: el.file, dst: path15.join(ctx.backlog, dir, path15.basename(el.file)) };
   const own = ownFolder(el);
-  return { src: own, dst: path14.join(ctx.backlog, dir) };
+  return { src: own, dst: path15.join(ctx.backlog, dir) };
 }
 function setsFinalStatus(ctx, overrides) {
   return overrides.get("status") === ctx.cfg.statuses[ctx.cfg.statuses.length - 1];
@@ -4575,6 +4794,7 @@ function cmdSet(flags) {
   const opts = parseOutputOpts(flags, json);
   const force = flags.has("force");
   const allowOpen = flags.has("allow-open-children");
+  const checkAll = flags.has("check-all");
   const ctx = context(flags);
   const inputValue = flagString(flags, "input");
   let sourceFlags = flags;
@@ -4585,6 +4805,7 @@ function cmdSet(flags) {
     if (opts.quiet || opts.fields !== void 0) fail("invalid_value", "--input cannot be combined with --quiet or --fields");
     sourceFlags = buildSetInputFlags(inputValue);
   }
+  if (checkAll) requireCheckAllStatus(ctx, flagString(sourceFlags, "status"));
   const batchIds = parseBatchIds(flags);
   if (batchIds !== null) {
     if (flagString(flags, "file") !== void 0) fail("invalid_target", "use either --id or --file, not both");
@@ -4595,14 +4816,14 @@ function cmdSet(flags) {
         const el2 = resolveById(ctx, id, true);
         requireWritable(el2);
         requireActive(ctx, el2, "set");
-        const { overrides: overrides2, changed: changed2, newBody: newBody2, movePlan: movePlan2, moveDst: moveDst2 } = collectSetOverrides(ctx, el2, sourceFlags, allowOpen);
+        const { overrides: overrides2, changed: changed2, newBody: newBody2, movePlan: movePlan2, moveDst: moveDst2, ticksReset: ticksReset2, checked: checked2 } = collectSetOverrides(ctx, el2, sourceFlags, allowOpen, checkAll);
         if (changed2.length > 0) renderElement(el2, new Map(overrides2).set("updated", nowIso()), newBody2);
-        return { el: el2, overrides: overrides2, changed: changed2, newBody: newBody2, movePlan: movePlan2, moveDst: moveDst2 };
+        return { el: el2, overrides: overrides2, changed: changed2, newBody: newBody2, movePlan: movePlan2, moveDst: moveDst2, ticksReset: ticksReset2, checked: checked2 };
       },
       (item) => {
         if (item.changed.length === 0) {
           const entry2 = entryJson(item.el, ctx.backlog, ctx.cfg);
-          return { ok: true, changed: [], entry: entry2, _problems: entry2._problems };
+          return Object.assign({ ok: true, changed: [], entry: entry2, _problems: entry2._problems }, checkedExtra(item.checked));
         }
         const ts2 = nowIso();
         item.overrides.set("updated", ts2);
@@ -4622,7 +4843,9 @@ function cmdSet(flags) {
         return Object.assign(
           { ok: true, changed: item.changed, entry, _problems: entry._problems },
           released2 !== void 0 ? { released: released2.holder } : {},
-          openAcceptanceExtra(fresh2, ctx.cfg, isFinal2)
+          openAcceptanceExtra(fresh2, ctx.cfg, isFinal2),
+          ticksResetExtra(fresh2.id, item.ticksReset),
+          checkedExtra(item.checked)
         );
       }
     );
@@ -4631,8 +4854,9 @@ function cmdSet(flags) {
       refreshTags(ctx.backlog, ctx.cfg, ctx);
     }
     const results = opts.quiet || opts.fields !== void 0 ? result.results.map((r) => r.ok ? trimResult(r, opts) : r) : result.results;
-    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
-    const wrapper = { ok: result.ok, results };
+    const files = touchedFiles(ctx.backlog);
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results, files }));
+    const wrapper = { ok: result.ok, results, files };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results) out(r.ok ? `${r.id} \u2192 ${(r.changed || []).join(", ") || "unchanged"}` : `${r.id}: Error: ${r.error}`);
     return result.ok ? 0 : 1;
@@ -4640,10 +4864,11 @@ function cmdSet(flags) {
   const el = resolveTarget(ctx, flags, true);
   requireWritable(el);
   requireActive(ctx, el, "set");
-  const { overrides, changed, newBody, movePlan, moveDst } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
+  const { overrides, changed, newBody, movePlan, moveDst, ticksReset, checked } = collectSetOverrides(ctx, el, sourceFlags, allowOpen, checkAll);
   if (changed.length === 0) {
-    recordChange(ctx.backlog, () => buildWriteResult(el, [], ctx.backlog, ctx.cfg));
-    if (json) emitWriteResultOpts(true, el, [], ctx.backlog, ctx.cfg, void 0, opts);
+    const unchangedExtra = checkedExtra(checked);
+    recordChange(ctx.backlog, () => buildWriteResult(el, [], ctx.backlog, ctx.cfg, unchangedExtra));
+    if (json) emitWriteResultOpts(true, el, [], ctx.backlog, ctx.cfg, unchangedExtra, opts);
     else writeFeedback(el, ctx.cfg, `${el.id} unchanged`);
     return 0;
   }
@@ -4667,11 +4892,49 @@ function cmdSet(flags) {
   deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
   refreshTags(ctx.backlog, ctx.cfg, ctx);
-  const extra = Object.assign({}, released !== void 0 ? { released: released.holder } : {}, openAcceptanceExtra(fresh, ctx.cfg, isFinal));
+  const extra = Object.assign(
+    {},
+    released !== void 0 ? { released: released.holder } : {},
+    openAcceptanceExtra(fresh, ctx.cfg, isFinal),
+    ticksResetExtra(fresh.id, ticksReset),
+    checkedExtra(checked)
+  );
   recordChange(ctx.backlog, () => buildWriteResult(fresh, changed, ctx.backlog, ctx.cfg, extra));
   if (json) emitWriteResultOpts(true, fresh, changed, ctx.backlog, ctx.cfg, extra, opts);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} \u2192 ${changed.map((c) => `${c}=${describeField(fresh, c)}`).join(", ")}`);
   return 0;
+}
+function ticksResetExtra(id, n) {
+  if (n === 0) return {};
+  process.stderr.write(`Warning: ${id}: ${n} ticked acceptance line${n === 1 ? "" : "s"} not kept by the new text, now unticked or gone
+`);
+  return { acceptance_ticks_reset: n };
+}
+function requireCheckAllStatus(ctx, status) {
+  const last = ctx.cfg.statuses[ctx.cfg.statuses.length - 1];
+  if (status !== last) {
+    fail(
+      "invalid_value",
+      `--check-all needs --status=${last} in the same call`,
+      "it ticks every open acceptance box as the element is closed; tick one box with nanojira check"
+    );
+  }
+}
+function checkedExtra(checked) {
+  return checked === void 0 ? {} : { checked };
+}
+function validateAddAcceptance(flags) {
+  const add = flagString(flags, "add-acceptance");
+  if (add === void 0) return;
+  if (flagString(flags, "acceptance") !== void 0 || flagString(flags, "acceptance-file") !== void 0) {
+    fail(
+      "invalid_value",
+      "--add-acceptance cannot be combined with --acceptance or --acceptance-file",
+      "use --acceptance=<text> to replace the whole section, or --add-acceptance=<text> to append one line"
+    );
+  }
+  if (add.trim() === "") fail("invalid_value", "--add-acceptance must not be empty");
+  if (/[\r\n]/.test(add)) fail("invalid_value", "--add-acceptance takes one line", "append one line per call, or replace the section with --acceptance");
 }
 function validateFieldValues(ctx, flags) {
   const title = flagString(flags, "title");
@@ -4685,6 +4948,7 @@ function validateFieldValues(ctx, flags) {
     fail("invalid_value", `unknown priority '${priority}'`, valueHint("priority", priority, PRIORITIES));
   }
   validateTagsCombination(flags);
+  validateAddAcceptance(flags);
 }
 function validateTagsCombination(flags) {
   const direct = flagString(flags, "tags");
@@ -4703,7 +4967,8 @@ function applyTagsEdits(current, remove, add) {
   for (const t of add) if (!kept.includes(t)) kept.push(t);
   return kept;
 }
-function collectSetOverrides(ctx, el, flags, allowOpen) {
+function collectSetOverrides(ctx, el, flags, allowOpen, checkAll = false) {
+  validateAddAcceptance(flags);
   const sections = readSectionFlags(flags);
   validateTagsCombination(flags);
   const overrides = /* @__PURE__ */ new Map();
@@ -4738,7 +5003,7 @@ function collectSetOverrides(ctx, el, flags, allowOpen) {
           );
         }
         movePlan = plan;
-        moveDst = el.type === "subtask" ? move.dst : path14.join(move.dst, path14.basename(el.file));
+        moveDst = el.type === "subtask" ? move.dst : path15.join(move.dst, path15.basename(el.file));
       }
     }
   }
@@ -4790,13 +5055,32 @@ function collectSetOverrides(ctx, el, flags, allowOpen) {
       changed.push("depends_on");
     }
   }
+  let ticksReset = 0;
+  const addAcceptance = flagString(flags, "add-acceptance");
+  if (addAcceptance !== void 0) {
+    const cur = sectionContent(newBody === void 0 ? el.body : newBody, ctx.cfg.sections.acceptance);
+    sections.set("acceptance", (cur === null || cur === "" ? "" : cur + "\n") + `- [ ] ${addAcceptance.trim()}`);
+  } else if (sections.has("acceptance")) {
+    const carried = carryAcceptanceTicks(el.body, ctx.cfg.sections.acceptance, sections.get("acceptance"));
+    sections.set("acceptance", carried.content);
+    ticksReset = carried.reset;
+  }
   if (sections.size > 0) {
     const base = newBody === void 0 ? el.body : newBody;
     const applied = applySections(base, sections, ctx.cfg);
     if (applied.body !== base) newBody = applied.body;
     changed.push(...applied.changed);
   }
-  return { overrides, changed, newBody, movePlan, moveDst };
+  let checked;
+  if (checkAll) {
+    const ticked = tickAllAcceptance(newBody === void 0 ? el.body : newBody, ctx.cfg.sections.acceptance);
+    checked = ticked.checked;
+    if (checked.length > 0) {
+      newBody = ticked.body;
+      if (!changed.includes("acceptance")) changed.push("acceptance");
+    }
+  }
+  return { overrides, changed, newBody, movePlan, moveDst, ticksReset, checked };
 }
 function isSectionRole(field) {
   return field === "description" || field === "acceptance";
@@ -4814,7 +5098,7 @@ function requireClaimFits(el, name, status, ts) {
   if (status !== void 0) probe.set("status", status);
   renderElement(el, probe, void 0);
 }
-function claimOne(ctx, el, name, status, steal, ts) {
+function claimOne(ctx, el, name, status, steal, ts, checkAll = false) {
   const decide = (h) => {
     const held = h && h.kind === "claimed" ? h.name : null;
     if (steal !== void 0) {
@@ -4839,13 +5123,16 @@ function claimOne(ctx, el, name, status, steal, ts) {
   const changed = [];
   if (el.assignee !== name) changed.push("assignee");
   if (status !== void 0 && status !== el.status) changed.push("status");
+  const ticked = checkAll ? tickAllAcceptance(el.body, ctx.cfg.sections.acceptance) : null;
+  const newBody = ticked !== null && ticked.checked.length > 0 ? ticked.body : void 0;
+  if (newBody !== void 0) changed.push("acceptance");
   const overrides = /* @__PURE__ */ new Map([["assignee", name], ["updated", ts]]);
   if (status !== void 0) overrides.set("status", status);
   const isFinalStatus = status !== void 0 && status === ctx.cfg.statuses[ctx.cfg.statuses.length - 1];
   const released = isFinalStatus ? releaseUnconditional(ctx.backlog, el.id, ts) : void 0;
   try {
     compareGuard(el, false, ctx.backlog, STABLE_HINT2, true);
-    mirrorWrite(el.file, renderElement(el, overrides, void 0));
+    mirrorWrite(el.file, renderElement(el, overrides, newBody));
   } catch (e) {
     if (released !== void 0) undoRelease(ctx.backlog, el.id, released.holder, ts);
     if (!landedSteal) {
@@ -4864,7 +5151,8 @@ function claimOne(ctx, el, name, status, steal, ts) {
     stolenFrom !== void 0 ? { stolen_from: stolenFrom } : {},
     previousAssignee !== void 0 ? { previous_assignee: previousAssignee } : {},
     released !== void 0 ? { released: released.holder } : {},
-    openAcceptanceExtra(fresh, ctx.cfg, isFinalStatus)
+    openAcceptanceExtra(fresh, ctx.cfg, isFinalStatus),
+    ticked !== null ? { checked: ticked.checked } : {}
   );
 }
 function cmdClaim(flags) {
@@ -4880,6 +5168,8 @@ function cmdClaim(flags) {
   }
   const steal = flagString(flags, "steal");
   const allowOpen = flags.has("allow-open-children");
+  const checkAll = flags.has("check-all");
+  if (checkAll) requireCheckAllStatus(ctx, status);
   const batchIds = parseBatchIds(flags);
   if (batchIds !== null) {
     const result = runBatch(
@@ -4893,15 +5183,16 @@ function cmdClaim(flags) {
         requireClaimFits(el2, name, status, nowIso());
         return el2;
       },
-      (el2) => claimOne(ctx, el2, name, status, steal, nowIso())
+      (el2) => claimOne(ctx, el2, name, status, steal, nowIso(), checkAll)
     );
     if (result.anyWritten) {
       refreshStatus(ctx.backlog, ctx.cfg, ctx);
       refreshTags(ctx.backlog, ctx.cfg, ctx);
     }
     const results = opts.quiet || opts.fields !== void 0 ? result.results.map((r) => r.ok ? trimResult(r, opts) : r) : result.results;
-    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
-    const wrapper = { ok: result.ok, results };
+    const files = touchedFiles(ctx.backlog);
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results, files }));
+    const wrapper = { ok: result.ok, results, files };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results) out(r.ok ? `${r.id} claimed by ${name}` : `${r.id}: Error: ${r.error}`);
     return result.ok ? 0 : 1;
@@ -4911,10 +5202,10 @@ function cmdClaim(flags) {
   requireActive(ctx, el, "claim");
   if (status === "done") requireChildrenDone(ctx, el, allowOpen, "claim");
   const ts = nowIso();
-  const single = claimOne(ctx, el, name, status, steal, ts);
+  const single = claimOne(ctx, el, name, status, steal, ts, checkAll);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
   refreshTags(ctx.backlog, ctx.cfg, ctx);
-  const built = Object.assign({ ok: single.ok, id: el.id }, single);
+  const built = withFiles(Object.assign({ ok: single.ok, id: el.id }, single), ctx.backlog);
   recordChange(ctx.backlog, () => built);
   if (json) {
     const final = opts.quiet || opts.fields !== void 0 ? trimResult(built, opts) : built;
@@ -4957,6 +5248,18 @@ function applyFilters(elements, flags, cfg) {
   }
   const assignee = flagString(flags, "assignee");
   if (assignee !== void 0) list = list.filter((e) => e.assignee === assignee);
+  const exclude = parseListFlag(flags, "exclude-tag");
+  if (exclude !== void 0) {
+    if (exclude.length === 0) fail("invalid_value", "--exclude-tag needs at least one tag", "give the tags to leave out, comma-separated");
+    list = list.filter((e) => !e.tags.some((t) => exclude.includes(t)));
+  }
+  const minPriority = flagString(flags, "min-priority");
+  if (minPriority !== void 0) {
+    if (!PRIORITIES.includes(minPriority)) {
+      fail("invalid_value", `unknown priority '${minPriority}'`, valueHint("priority", minPriority, PRIORITIES));
+    }
+    list = list.filter((e) => priorityWeight(e.priority) >= PRIORITY_WEIGHT[minPriority]);
+  }
   return list.sort(compareElements);
 }
 function cmdList(flags) {
@@ -5041,8 +5344,8 @@ function cmdFind(flags, positional) {
 }
 
 // src/commands/cmd-doctor.ts
-import * as fs15 from "node:fs";
-import * as path15 from "node:path";
+import * as fs16 from "node:fs";
+import * as path16 from "node:path";
 
 // src/core/readme-texts.ts
 var V2_README = `# Backlog
@@ -5108,11 +5411,11 @@ function collectFindings(ctx) {
     findings.push({
       code: "backlog:legacy_layout",
       severity: "error",
-      file: path15.join(ctx.backlog, LEGACY_CONFIG_REL),
+      file: path16.join(ctx.backlog, LEGACY_CONFIG_REL),
       message: `the backlog is in the v2 (legacy) layout (${LEGACY_CONFIG_REL}, ${LEGACY_IDS_REL}/) \u2014 \`nanojira doctor --fix\` migrates it to .nanojira/`
     });
   }
-  const configFile = path15.join(ctx.backlog, ctx.legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
+  const configFile = path16.join(ctx.backlog, ctx.legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
   for (const e of ctx.configErrors) {
     findings.push({ code: "config:invalid", severity: "error", file: configFile, message: e });
   }
@@ -5147,7 +5450,7 @@ function collectFindings(ctx) {
   for (const file of claimAsides(ctx.backlog)) {
     let link = false;
     try {
-      link = fs15.lstatSync(file).isSymbolicLink();
+      link = fs16.lstatSync(file).isSymbolicLink();
     } catch {
       continue;
     }
@@ -5163,7 +5466,7 @@ function collectFindings(ctx) {
     findings.push({
       code: "backlog:claims_unignored",
       severity: "warning",
-      file: path15.join(ctx.backlog, ".gitignore"),
+      file: path16.join(ctx.backlog, ".gitignore"),
       message: ".nanojira/claims/ exists but .gitignore has no line that is exactly '.nanojira/claims/'"
     });
   }
@@ -5173,8 +5476,8 @@ function collectFindings(ctx) {
   const tombs = readTombstones(ctx.idsDir, ctx.cfg.ids.shardSize);
   const idsLink = idsSymlinks(ctx.idsDir, ctx.cfg.ids.shardSize)[0] ?? null;
   if (ctx.elements.length > 0 && (tombs.size === 0 || idsLink !== null)) {
-    const rel = path15.relative(ctx.backlog, ctx.idsDir) + "/";
-    const what = idsLink === null ? `${rel} is missing or empty` : idsLink.startsWith(ctx.idsDir + path15.sep) ? `part of ${rel} (${shownName(idsLink)}) is behind a symlink, which nanojira does not follow,` : `${rel} is behind a symlink (${shownName(idsLink)}), which nanojira does not follow,`;
+    const rel = path16.relative(ctx.backlog, ctx.idsDir) + "/";
+    const what = idsLink === null ? `${rel} is missing or empty` : idsLink.startsWith(ctx.idsDir + path16.sep) ? `part of ${rel} (${shownName(idsLink)}) is behind a symlink, which nanojira does not follow,` : `${rel} is behind a symlink (${shownName(idsLink)}), which nanojira does not follow,`;
     findings.push({ code: "backlog:ids_missing", severity: "error", file: ctx.idsDir, message: `${what} while element files exist \u2014 the never-reuse guarantee is not in force` });
   }
   if (ctx.configErrors.length === 0) {
@@ -5186,15 +5489,15 @@ function collectFindings(ctx) {
         code: "backlog:ids_layout_mismatch",
         severity: "error",
         file: ctx.idsDir,
-        message: `${path15.relative(ctx.backlog, ctx.idsDir)}/ is laid out ${actual} on disk but the configuration wants ${want} \u2014 \`nanojira doctor --fix\` moves the tombstones`
+        message: `${path16.relative(ctx.backlog, ctx.idsDir)}/ is laid out ${actual} on disk but the configuration wants ${want} \u2014 \`nanojira doctor --fix\` moves the tombstones`
       });
     }
   }
   if (ctx.configErrors.length === 0 && ctx.cfg.layout.statusFile && !statusIsFresh(ctx.backlog, ctx.elements, ctx.cfg)) {
-    findings.push({ code: "backlog:status_stale", severity: "warning", file: path15.join(ctx.backlog, "STATUS.md"), message: "STATUS.md is missing or differs from a fresh rendering \u2014 `nanojira doctor --fix` regenerates it" });
+    findings.push({ code: "backlog:status_stale", severity: "warning", file: path16.join(ctx.backlog, "STATUS.md"), message: "STATUS.md is missing or differs from a fresh rendering \u2014 `nanojira doctor --fix` regenerates it" });
   }
   if (ctx.configErrors.length === 0 && ctx.cfg.layout.tagsFile && !tagsIsFresh(ctx.backlog, ctx.elements, ctx.cfg)) {
-    findings.push({ code: "backlog:tags_stale", severity: "warning", file: path15.join(ctx.backlog, "TAGS.md"), message: "TAGS.md is missing or differs from a fresh rendering \u2014 `nanojira doctor --fix` regenerates it" });
+    findings.push({ code: "backlog:tags_stale", severity: "warning", file: path16.join(ctx.backlog, "TAGS.md"), message: "TAGS.md is missing or differs from a fresh rendering \u2014 `nanojira doctor --fix` regenerates it" });
   }
   if (ctx.cfg.problems.ignore.length === 0) return findings;
   const ignore = new Set(ctx.cfg.problems.ignore);
@@ -5205,11 +5508,11 @@ function strayTmpFiles(dirs) {
   for (const dir of dirs) {
     let names;
     try {
-      names = fs15.readdirSync(dir);
+      names = fs16.readdirSync(dir);
     } catch {
       continue;
     }
-    for (const n of names.sort()) if (n.startsWith(".nj-tmp-")) found.push(path15.join(dir, n));
+    for (const n of names.sort()) if (n.startsWith(".nj-tmp-")) found.push(path16.join(dir, n));
   }
   return found;
 }
@@ -5219,9 +5522,9 @@ function claimsScanDirs(backlog) {
 }
 function collectClaimFindings(ctx) {
   const findings = [];
-  const root = claimsRootDir(ctx.backlog);
+  const root2 = claimsRootDir(ctx.backlog);
   for (const link of claimSymlinks(ctx.backlog)) {
-    const below = path15.relative(root, link).split(path15.sep);
+    const below = path16.relative(root2, link).split(path16.sep);
     const el = below[0] === ".." || below[0] === "" ? void 0 : ctx.elements.find((e) => e.id === below[0]);
     findings.push(Object.assign({ code: "claim:symlink", severity: "error" }, el ? { element: el.id } : {}, {
       file: link,
@@ -5263,14 +5566,14 @@ var CLAIMS_GITIGNORE_LINE = ".nanojira/claims/";
 function gitignoreHasClaimsLine(backlog) {
   let content;
   try {
-    content = readRegularFile(path15.join(backlog, ".gitignore"), TEXT_FILE_CAP);
+    content = readRegularFile(path16.join(backlog, ".gitignore"), TEXT_FILE_CAP);
   } catch {
     return false;
   }
   return content.split("\n").some((l) => l.replace(/\r$/, "") === CLAIMS_GITIGNORE_LINE);
 }
 function claimsNeedGitignoreLine(backlog) {
-  return fs15.existsSync(claimsRootDir(backlog)) && !gitignoreHasClaimsLine(backlog);
+  return fs16.existsSync(claimsRootDir(backlog)) && !gitignoreHasClaimsLine(backlog);
 }
 function appendGitignoreLine(content, line) {
   if (content === "") return line + "\n";
@@ -5279,7 +5582,7 @@ function appendGitignoreLine(content, line) {
   return content + "\n" + line + "\n";
 }
 function backlogLabel(backlog) {
-  const rel = path15.relative(workingDir(), toReal(backlog));
+  const rel = path16.relative(workingDir(), toReal(backlog));
   return (rel === "" ? "." : rel) + "/";
 }
 function describeFinding(code, el, dupGroups, cfg) {
@@ -5359,7 +5662,7 @@ function cmdDoctor(flags) {
     out(`${backlogLabel(ctx.backlog)}: ${ctx.elements.length} entries, ${errors.length} error${errors.length === 1 ? "" : "s"}, ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`);
     if (findings.length > 0) out("");
     for (const f of findings) {
-      const where = f.element ? f.element : path15.relative(ctx.backlog, f.file);
+      const where = f.element ? f.element : path16.relative(ctx.backlog, f.file);
       const line = f.line ? ` (line ${f.line})` : "";
       out(`${f.severity === "error" ? "ERROR  " : "WARNING"} ${where}: ${f.message}${line}`);
     }
@@ -5368,7 +5671,7 @@ function cmdDoctor(flags) {
 }
 function fixSkip(el, notes) {
   if (el.problems.has("file:unreadable")) {
-    notes.push(`${path15.basename(el.file)}: cannot be read \u2014 not touched by --fix`);
+    notes.push(`${path16.basename(el.file)}: cannot be read \u2014 not touched by --fix`);
     return true;
   }
   if (el.problems.has("frontmatter:unreadable")) {
@@ -5405,14 +5708,15 @@ function makeFixCtx(flags) {
       if (k === from) {
         mtimes.delete(k);
         mtimes.set(to, v);
-      } else if (k.startsWith(from + path15.sep)) {
+      } else if (k.startsWith(from + path16.sep)) {
         mtimes.delete(k);
         mtimes.set(to + k.slice(from.length), v);
       }
     }
   };
   const rename = (from, to) => {
-    fs15.renameSync(from, to);
+    fs16.renameSync(from, to);
+    touchRename(from, to);
     rekey(from, to);
   };
   const move = (plan) => {
@@ -5423,39 +5727,40 @@ function makeFixCtx(flags) {
 }
 function fixStep0(ctx, fc) {
   const backlog = ctx.backlog;
-  const v3Config = path15.join(backlog, V3_CONFIG_REL);
-  const v3Ids = path15.join(backlog, V3_IDS_REL);
-  if (fs15.existsSync(v3Config) || fs15.existsSync(v3Ids)) {
+  const v3Config = path16.join(backlog, V3_CONFIG_REL);
+  const v3Ids = path16.join(backlog, V3_IDS_REL);
+  if (fs16.existsSync(v3Config) || fs16.existsSync(v3Ids)) {
     fc.notes.push(`both the v2 and the v3 place exist (${LEGACY_CONFIG_REL} / ${LEGACY_IDS_REL} and ${V3_CONFIG_REL} / ${V3_IDS_REL}) \u2014 ambiguous, nothing moved; remove one copy by hand and run \`nanojira doctor --fix\` again`);
     return;
   }
   for (const dir of [V3_DIR_REL, LEGACY_IDS_REL]) {
-    const link = internalSymlink(path15.join(backlog, dir));
+    const link = internalSymlink(path16.join(backlog, dir));
     if (link !== null) {
       noteSymlink(fc, link);
       return;
     }
   }
-  fs15.mkdirSync(path15.join(backlog, V3_DIR_REL), { recursive: true });
-  fc.rename(path15.join(backlog, LEGACY_CONFIG_REL), v3Config);
-  fc.rename(path15.join(backlog, LEGACY_IDS_REL), v3Ids);
-  const legacyIndex = path15.join(backlog, LEGACY_INDEX_REL);
-  if (fs15.existsSync(legacyIndex)) fs15.unlinkSync(legacyIndex);
+  fs16.mkdirSync(path16.join(backlog, V3_DIR_REL), { recursive: true });
+  fc.rename(path16.join(backlog, LEGACY_CONFIG_REL), v3Config);
+  fc.rename(path16.join(backlog, LEGACY_IDS_REL), v3Ids);
+  const legacyIndex = path16.join(backlog, LEGACY_INDEX_REL);
+  if (fs16.existsSync(legacyIndex)) fs16.unlinkSync(legacyIndex);
   fc.actions.push(`migrated the legacy layout: ${LEGACY_CONFIG_REL} \u2192 ${V3_CONFIG_REL}, ${LEGACY_IDS_REL}/ \u2192 ${V3_IDS_REL}/`);
 }
 function fixStrayIds(ctx, fc) {
   const backlog = ctx.backlog;
-  const strayDir = path15.join(backlog, LEGACY_IDS_REL);
-  if (!fs15.existsSync(strayDir)) return;
+  const strayDir = path16.join(backlog, LEGACY_IDS_REL);
+  if (!fs16.existsSync(strayDir)) return;
   const strayLink = internalSymlink(strayDir);
   if (strayLink !== null) {
     noteSymlink(fc, strayLink);
     return;
   }
   const stray = readTombstones(strayDir);
-  const real = readTombstones(path15.join(backlog, V3_IDS_REL), ctx.cfg.ids.shardSize);
+  const real = readTombstones(path16.join(backlog, V3_IDS_REL), ctx.cfg.ids.shardSize);
   for (const id of stray) if (!real.has(id)) return;
-  fs15.rmSync(strayDir, { recursive: true, force: true });
+  touchDeleteTree(strayDir);
+  fs16.rmSync(strayDir, { recursive: true, force: true });
   fc.notes.push(`removed the stray top-level ${LEGACY_IDS_REL}/ (every tombstone in it was already in ${V3_IDS_REL}/, \xA7 14 step 0)`);
 }
 var TOMBSTONE_RE = /^(EPIC|TSK|SUB)-(\d+)$/;
@@ -5463,7 +5768,7 @@ function detectIdsLayout(idsDir) {
   if (internalSymlink(idsDir) !== null) return "empty";
   let entries;
   try {
-    entries = fs15.readdirSync(idsDir, { withFileTypes: true });
+    entries = fs16.readdirSync(idsDir, { withFileTypes: true });
   } catch {
     return "empty";
   }
@@ -5488,7 +5793,7 @@ function fixIdsLayout(ctx, fc) {
   let moved = 0;
   if (!wantSharded) {
     for (const prefix of Object.keys(PREFIX_TYPE)) {
-      const typeDir = path15.join(idsDir, prefix);
+      const typeDir = path16.join(idsDir, prefix);
       const typeLink = internalSymlink(typeDir);
       if (typeLink !== null) {
         noteSymlink(fc, typeLink);
@@ -5496,13 +5801,13 @@ function fixIdsLayout(ctx, fc) {
       }
       let buckets;
       try {
-        buckets = fs15.readdirSync(typeDir);
+        buckets = fs16.readdirSync(typeDir);
       } catch {
         continue;
       }
       for (const b of buckets) {
         if (b.startsWith(".")) continue;
-        const bucketDir = path15.join(typeDir, b);
+        const bucketDir = path16.join(typeDir, b);
         const bucketLink = internalSymlink(bucketDir);
         if (bucketLink !== null) {
           noteSymlink(fc, bucketLink);
@@ -5510,34 +5815,35 @@ function fixIdsLayout(ctx, fc) {
         }
         let names;
         try {
-          names = fs15.readdirSync(bucketDir);
+          names = fs16.readdirSync(bucketDir);
         } catch {
           continue;
         }
         for (const n of names) {
           if (n.startsWith(".")) continue;
-          const target = path15.join(idsDir, n);
-          if (fs15.existsSync(target)) {
-            fc.notes.push(`${path15.join(prefix, b, n)}: cannot move to the flat layout \u2014 ${n} already exists there`);
+          const target = path16.join(idsDir, n);
+          if (fs16.existsSync(target)) {
+            fc.notes.push(`${path16.join(prefix, b, n)}: cannot move to the flat layout \u2014 ${n} already exists there`);
             continue;
           }
-          fs15.renameSync(path15.join(bucketDir, n), target);
+          fs16.renameSync(path16.join(bucketDir, n), target);
+          touchRename(path16.join(bucketDir, n), target);
           moved++;
         }
         try {
-          fs15.rmdirSync(bucketDir);
+          fs16.rmdirSync(bucketDir);
         } catch {
         }
       }
       try {
-        fs15.rmdirSync(typeDir);
+        fs16.rmdirSync(typeDir);
       } catch {
       }
     }
   } else {
     let entries;
     try {
-      entries = fs15.readdirSync(idsDir);
+      entries = fs16.readdirSync(idsDir);
     } catch {
       entries = [];
     }
@@ -5550,21 +5856,22 @@ function fixIdsLayout(ctx, fc) {
         noteSymlink(fc, dirLink);
         continue;
       }
-      if (fs15.existsSync(file)) {
-        fc.notes.push(`${n}: cannot move to the sharded layout \u2014 already exists at ${path15.relative(idsDir, file)}`);
+      if (fs16.existsSync(file)) {
+        fc.notes.push(`${n}: cannot move to the sharded layout \u2014 already exists at ${path16.relative(idsDir, file)}`);
         continue;
       }
-      fs15.mkdirSync(dir, { recursive: true });
-      fs15.renameSync(path15.join(idsDir, n), file);
+      fs16.mkdirSync(dir, { recursive: true });
+      fs16.renameSync(path16.join(idsDir, n), file);
+      touchRename(path16.join(idsDir, n), file);
       moved++;
     }
   }
   if (moved > 0) {
-    fc.actions.push(`moved ${moved} tombstone${moved === 1 ? "" : "s"} in ${path15.relative(ctx.backlog, idsDir)}/ to the ${wantSharded ? "sharded" : "flat"} layout`);
+    fc.actions.push(`moved ${moved} tombstone${moved === 1 ? "" : "s"} in ${path16.relative(ctx.backlog, idsDir)}/ to the ${wantSharded ? "sharded" : "flat"} layout`);
   }
 }
 function fixGitignore(backlog, fc, verbose) {
-  const p = path15.join(backlog, ".gitignore");
+  const p = path16.join(backlog, ".gitignore");
   let content;
   try {
     content = readRegularFile(p, TEXT_FILE_CAP);
@@ -5589,7 +5896,7 @@ function fixGitignore(backlog, fc, verbose) {
   fc.actions.push(`.gitignore: replaced the '${LEGACY_INDEX_REL}' line with '${V3_INDEX_REL}'`);
 }
 function fixReadme(backlog, fc, verbose) {
-  const p = path15.join(backlog, "README.md");
+  const p = path16.join(backlog, "README.md");
   let content;
   try {
     content = readRegularFile(p, TEXT_FILE_CAP);
@@ -5644,13 +5951,13 @@ function fixStep2(fc) {
       fc.notes.push(`${el.file}: not renamed \u2014 its id ${JSON.stringify(el.id)} is not of the form EPIC-<n>, TSK-<n> or SUB-<n> (\xA7 6); fix the id by hand`);
       continue;
     }
-    const target = path15.join(path15.dirname(el.file), el.id + ".md");
-    if (fs15.existsSync(target)) {
-      fc.notes.push(`${el.file}: cannot rename to ${path15.basename(target)} \u2014 target exists`);
+    const target = path16.join(path16.dirname(el.file), el.id + ".md");
+    if (fs16.existsSync(target)) {
+      fc.notes.push(`${el.file}: cannot rename to ${path16.basename(target)} \u2014 target exists`);
       continue;
     }
     fc.rename(el.file, target);
-    fc.actions.push(`renamed ${path15.basename(el.file)} \u2192 ${path15.basename(target)}`);
+    fc.actions.push(`renamed ${path16.basename(el.file)} \u2192 ${path16.basename(target)}`);
   }
   return { ...fc, stage: 3 };
 }
@@ -5688,9 +5995,9 @@ function fixStep3(fc) {
           continue;
         }
         const src = own === null ? el.file : own;
-        const dst = own === null ? path15.join(ctx.backlog, dir, path15.basename(el.file)) : path15.join(ctx.backlog, dir);
+        const dst = own === null ? path16.join(ctx.backlog, dir, path16.basename(el.file)) : path16.join(ctx.backlog, dir);
         const shown = (dir === "" ? "." : dir) + "/";
-        if (layout.group === "type") fs15.mkdirSync(path15.dirname(dst), { recursive: true });
+        if (layout.group === "type") fs16.mkdirSync(path16.dirname(dst), { recursive: true });
         const plan = planMove(src, dst);
         if (plan.conflicts.length > 0) {
           fc.notes.push(`${el.id}: cannot move into ${shown} \u2014 target exists`);
@@ -5698,7 +6005,7 @@ function fixStep3(fc) {
           continue;
         }
         fc.move(plan);
-        left.add(path15.dirname(src));
+        left.add(path16.dirname(src));
         fc.actions.push(own === null ? `moved ${el.id} \u2192 ${shown}` : `moved ${el.id} with its folder \u2192 ${shown}`);
         moved = true;
         break;
@@ -5709,7 +6016,7 @@ function fixStep3(fc) {
   return { ...fc, stage: 4 };
 }
 function folderArchivedAgrees(elements, own, expectArchived) {
-  const prefix = own + path15.sep;
+  const prefix = own + path16.sep;
   return elements.every((e) => !e.file.startsWith(prefix) || (e.archived || e.archivedAt !== null) === expectArchived);
 }
 function chainProblem(el) {
@@ -5730,7 +6037,7 @@ function fixStep4(fc) {
     for (const link of links) noteSymlink(fc, link);
     return { ...fc, stage: 5 };
   }
-  fs15.mkdirSync(dir, { recursive: true });
+  fs16.mkdirSync(dir, { recursive: true });
   const tombs = readTombstones(dir, shardSize);
   let created = 0;
   for (const el of ctx.elements) {
@@ -5741,15 +6048,16 @@ function fixStep4(fc) {
       noteSymlink(fc, tlink);
       continue;
     }
-    if (tdir !== dir) fs15.mkdirSync(tdir, { recursive: true });
+    if (tdir !== dir) fs16.mkdirSync(tdir, { recursive: true });
     try {
-      fs15.closeSync(fs15.openSync(file, "wx"));
+      fs16.closeSync(fs16.openSync(file, "wx"));
+      touchWrite(file, false);
       created++;
     } catch {
     }
   }
   if (created > 0) {
-    fc.actions.push(`created ${created} missing tombstone${created === 1 ? "" : "s"} in ${path15.relative(ctx.backlog, dir)}/`);
+    fc.actions.push(`created ${created} missing tombstone${created === 1 ? "" : "s"} in ${path16.relative(ctx.backlog, dir)}/`);
     fc.notes.push("tombstones for already-deleted IDs cannot be recovered \u2014 the never-reuse guarantee is void for those numbers");
   }
   return { ...fc, stage: 5 };
@@ -5787,11 +6095,11 @@ function fixStep6(fc) {
 function fixStep7(fc) {
   const ctx = fc.reload();
   for (const file of strayTmpFiles(ctx.scan.dirs.concat(claimsScanDirs(ctx.backlog)))) {
-    fs15.unlinkSync(file);
-    fc.actions.push(`removed stray temp file ${path15.relative(ctx.backlog, file)}`);
+    fs16.unlinkSync(file);
+    fc.actions.push(`removed stray temp file ${path16.relative(ctx.backlog, file)}`);
   }
   for (const aside of claimAsides(ctx.backlog)) {
-    const rel = path15.relative(ctx.backlog, aside);
+    const rel = path16.relative(ctx.backlog, aside);
     const { done, at } = removeLeftoverAside(aside);
     if (done === "removed") {
       fc.actions.push(`removed the stray claim directory ${rel} an interrupted removal left`);
@@ -5799,9 +6107,9 @@ function fixStep7(fc) {
       fc.actions.push(`removed the stray symlink ${rel} an interrupted removal left`);
       fc.notes.push(`${rel} was a symlink: only the link itself was removed, nothing behind it was followed or deleted`);
     } else if (done === "linked_root") {
-      fc.notes.push(`${path15.relative(ctx.backlog, at)} not removed \u2014 the claims folder (or .nanojira/) is a symlink, so nothing was followed or deleted through it; replace the link with a real directory, then run doctor --fix again`);
+      fc.notes.push(`${path16.relative(ctx.backlog, at)} not removed \u2014 the claims folder (or .nanojira/) is a symlink, so nothing was followed or deleted through it; replace the link with a real directory, then run doctor --fix again`);
     } else {
-      fc.notes.push(`${path15.relative(ctx.backlog, at)} not removed \u2014 it holds something other than claim entries; check it and remove it by hand`);
+      fc.notes.push(`${path16.relative(ctx.backlog, at)} not removed \u2014 it holds something other than claim entries; check it and remove it by hand`);
     }
   }
   return { ...fc, stage: 8 };
@@ -5819,11 +6127,11 @@ function fixStep7a(fc) {
       noteSymlink(fc, left);
       continue;
     }
-    if (fs15.existsSync(dir)) continue;
+    if (fs16.existsSync(dir)) continue;
     fc.actions.push(holder !== null ? `${id}: released ${holder}` : `removed the orphaned claim directory for ${id}`);
   }
   if (claimsNeedGitignoreLine(ctx.backlog)) {
-    const p = path15.join(ctx.backlog, ".gitignore");
+    const p = path16.join(ctx.backlog, ".gitignore");
     let content;
     try {
       content = readRegularFile(p, TEXT_FILE_CAP);
@@ -5890,7 +6198,7 @@ function doctorFix(flags, json) {
 }
 function fixReport(json, actions, notes, ctx, findings) {
   const errors = findings.filter((f) => f.severity === "error");
-  const built = { backlog: ctx.backlog, ok: errors.length === 0, fixed: actions, notes, problems: findings };
+  const built = { backlog: ctx.backlog, ok: errors.length === 0, fixed: actions, notes, problems: findings, files: touchedFiles(ctx.backlog) };
   if (actions.length > 0) recordChange(ctx.backlog, () => built);
   if (json) {
     out(JSON.stringify(built, null, 2));
@@ -5902,7 +6210,7 @@ function fixReport(json, actions, notes, ctx, findings) {
     const warnings = findings.filter((f) => f.severity === "warning");
     out(`${backlogLabel(ctx.backlog)}: ${ctx.elements.length} entries, ${errors.length} error${errors.length === 1 ? "" : "s"}, ${warnings.length} warning${warnings.length === 1 ? "" : "s"} remaining`);
     for (const f of findings) {
-      const where = f.element ? f.element : path15.relative(ctx.backlog, f.file);
+      const where = f.element ? f.element : path16.relative(ctx.backlog, f.file);
       out(`${f.severity === "error" ? "ERROR  " : "WARNING"} ${where}: ${f.message}`);
     }
   }
@@ -5910,27 +6218,27 @@ function fixReport(json, actions, notes, ctx, findings) {
 }
 
 // src/commands/cmd-init.ts
-import * as fs16 from "node:fs";
-import * as path16 from "node:path";
+import * as fs17 from "node:fs";
+import * as path17 from "node:path";
 function probeCreatable(target) {
-  let dir = path16.dirname(target);
+  let dir = path17.dirname(target);
   for (; ; ) {
     let st;
     try {
-      st = fs16.statSync(dir);
+      st = fs17.statSync(dir);
     } catch {
       st = null;
     }
     if (st !== null) {
       if (!st.isDirectory()) fail("io_error", `cannot create the backlog at ${target}: ENOTDIR: not a directory, mkdir '${target}'`);
       try {
-        fs16.accessSync(dir, fs16.constants.W_OK | fs16.constants.X_OK);
+        fs17.accessSync(dir, fs17.constants.W_OK | fs17.constants.X_OK);
       } catch (e) {
         fail("io_error", `cannot create the backlog at ${target}: ${oneLine(e)}`);
       }
       return;
     }
-    const up = path16.dirname(dir);
+    const up = path17.dirname(dir);
     if (up === dir) return;
     dir = up;
   }
@@ -5939,27 +6247,29 @@ function cmdInit(flags) {
   checkCommandFlags(flags, "init");
   const json = flags.has("json");
   const target = initLocation(flags);
-  if (fs16.existsSync(target)) fail("exists", `${target} already exists`);
+  if (fs17.existsSync(target)) fail("exists", `${target} already exists`);
   if (isDryRun()) probeCreatable(target);
   const backlog = sandboxFor(target);
+  setJournalRoot(backlog);
   try {
-    fs16.mkdirSync(backlog, { recursive: true });
+    fs17.mkdirSync(backlog, { recursive: true });
     for (const d of ["epics", "tasks", "subtasks", "archive", V3_IDS_REL]) {
-      fs16.mkdirSync(path16.join(backlog, d), { recursive: true });
+      fs17.mkdirSync(path17.join(backlog, d), { recursive: true });
     }
     const { claims, problems, ids, ...written } = DEFAULT_CONFIG;
     void claims;
     void problems;
     void ids;
-    fs16.writeFileSync(path16.join(backlog, ".nanojira", "config.json"), JSON.stringify(written, null, 2) + "\n", "utf8");
-    fs16.writeFileSync(path16.join(backlog, ".gitignore"), ".nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n", "utf8");
-    fs16.writeFileSync(path16.join(backlog, "README.md"), V3_README, "utf8");
+    fs17.writeFileSync(path17.join(backlog, ".nanojira", "config.json"), JSON.stringify(written, null, 2) + "\n", "utf8");
+    fs17.writeFileSync(path17.join(backlog, ".gitignore"), ".nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n", "utf8");
+    fs17.writeFileSync(path17.join(backlog, "README.md"), V3_README, "utf8");
+    for (const f of [path17.join(".nanojira", "config.json"), ".gitignore", "README.md"]) touchWrite(path17.join(backlog, f), false);
   } catch (e) {
     fail("io_error", `cannot create the backlog at ${backlog}: ${oneLine(e)}`);
   }
   refreshStatus(backlog, { ...DEFAULT_CONFIG });
   refreshTags(backlog, { ...DEFAULT_CONFIG });
-  const built = { ok: true, backlog, changed: ["created"] };
+  const built = withFiles({ ok: true, backlog, changed: ["created"] }, backlog);
   recordChange(backlog, () => built);
   if (json) out(JSON.stringify(built, null, 2));
   else {
@@ -6070,7 +6380,7 @@ function cmdNext(flags) {
     }
     refreshStatus(ctx.backlog, ctx.cfg, ctx);
     refreshTags(ctx.backlog, ctx.cfg, ctx);
-    const built = Object.assign({ ok: single.ok, id: el.id }, single, { skipped });
+    const built = withFiles(Object.assign({ ok: single.ok, id: el.id }, single, { skipped }), ctx.backlog);
     recordChange(ctx.backlog, () => built);
     if (json) {
       out(JSON.stringify(built, null, 2));
@@ -6088,7 +6398,7 @@ function cmdNext(flags) {
 }
 
 // src/commands/cmd-note.ts
-import * as fs17 from "node:fs";
+import * as fs18 from "node:fs";
 function withNote(el, text, signer, ts) {
   const line = renderNoteLine(ts, signer, text);
   let body = el.body;
@@ -6150,7 +6460,7 @@ function resolveNoteText(flags, positional) {
 }
 function readTextFile(filePath) {
   try {
-    return fs17.readFileSync(filePath, "utf8");
+    return fs18.readFileSync(filePath, "utf8");
   } catch (e) {
     return fail(
       "not_found",
@@ -6193,8 +6503,9 @@ function cmdNote(flags, positional) {
       refreshTags(ctx.backlog, ctx.cfg, ctx);
     }
     const results = opts.quiet || opts.fields !== void 0 ? result.results.map((r) => r.ok ? trimResult(r, opts) : r) : result.results;
-    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
-    const wrapper = { ok: result.ok, results };
+    const files = touchedFiles(ctx.backlog);
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results, files }));
+    const wrapper = { ok: result.ok, results, files };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results) out(r.ok ? `${r.id} note added` : `${r.id}: Error: ${r.error}`);
     return result.ok ? 0 : 1;
@@ -6218,7 +6529,29 @@ function cmdNote(flags, positional) {
 }
 
 // src/commands/cmd-release.ts
-function releaseOne(ctx, el, name, ts) {
+var STABLE_HINT3 = "the element changed in parallel \u2014 retry once it is stable";
+function statusOverrides(el, name, status, ts) {
+  const overrides = /* @__PURE__ */ new Map();
+  const changed = [];
+  if (status !== el.status) {
+    overrides.set("status", status);
+    changed.push("status");
+  }
+  if (el.assignee !== "" && el.assignee === name) {
+    overrides.set("assignee", void 0);
+    changed.push("assignee");
+  }
+  if (changed.length > 0) overrides.set("updated", ts);
+  return { overrides, changed };
+}
+function requireStatusWritable(ctx, el, name, status, allowOpen, ts) {
+  requireWritable(el);
+  requireActive(ctx, el, "release");
+  if (status === "done") requireChildrenDone(ctx, el, allowOpen, "release");
+  const { overrides } = statusOverrides(el, name, status, ts);
+  if (overrides.size > 0) renderElement(el, overrides, void 0);
+}
+function releaseOne(ctx, el, name, status, ts) {
   const decide = (h) => {
     const held = h && h.kind === "claimed" ? h.name : null;
     if (held === null) return { terminal: true };
@@ -6235,8 +6568,29 @@ function releaseOne(ctx, el, name, ts) {
     }
   }
   const changed = t.ok ? ["claim"] : [];
-  const entry = entryJson(el, ctx.backlog, ctx.cfg);
-  return { ok: true, changed, entry, _problems: entry._problems, claim: null };
+  if (status === void 0) {
+    const entry2 = entryJson(el, ctx.backlog, ctx.cfg);
+    return { ok: true, changed, entry: entry2, _problems: entry2._problems, claim: null };
+  }
+  const write = statusOverrides(el, name, status, ts);
+  if (write.changed.length > 0) {
+    try {
+      compareGuard(el, false, ctx.backlog, STABLE_HINT3, true);
+      mirrorWrite(el.file, renderElement(el, write.overrides, void 0));
+    } catch (e) {
+      if (t.ok) undoRelease(ctx.backlog, el.id, name, ts);
+      throw e;
+    }
+    changed.push(...write.changed);
+  }
+  const fresh = write.changed.length > 0 ? loadElement(el.file, ctx.backlog, ctx.cfg) : el;
+  if (fresh !== el) deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg);
+  const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
+  const isFinalStatus = status === ctx.cfg.statuses[ctx.cfg.statuses.length - 1];
+  return Object.assign(
+    { ok: true, changed, entry, _problems: entry._problems, claim: null },
+    openAcceptanceExtra(fresh, ctx.cfg, isFinalStatus)
+  );
 }
 function cmdRelease(flags) {
   checkCommandFlags(flags, "release");
@@ -6245,47 +6599,68 @@ function cmdRelease(flags) {
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
   const name = resolveActingName(flags, true);
+  const status = flagString(flags, "status");
+  if (status !== void 0 && !ctx.cfg.statuses.includes(status)) {
+    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses));
+  }
+  const allowOpen = flags.has("allow-open-children");
   const batchIds = parseBatchIds(flags);
   if (batchIds !== null) {
     const result = runBatch(
       batchIds,
       (id) => {
         const el2 = resolveById(ctx, id, true);
+        if (status !== void 0) requireStatusWritable(ctx, el2, name, status, allowOpen, nowIso());
         requireTransitionable(ctx.backlog, el2.id);
         return el2;
       },
-      (el2) => releaseOne(ctx, el2, name, nowIso())
+      (el2) => releaseOne(ctx, el2, name, status, nowIso())
     );
+    if (result.anyWritten && status !== void 0) {
+      refreshStatus(ctx.backlog, ctx.cfg, ctx);
+      refreshTags(ctx.backlog, ctx.cfg, ctx);
+    }
     const results = opts.quiet || opts.fields !== void 0 ? result.results.map((r) => r.ok ? trimResult(r, opts) : r) : result.results;
-    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
-    const wrapper = { ok: result.ok, results };
+    const files = touchedFiles(ctx.backlog);
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results, files }));
+    const wrapper = { ok: result.ok, results, files };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else {
       for (const r of result.results) {
-        out(r.ok === false ? `${r.id}: Error: ${r.error}` : (r.changed || []).length > 0 ? `${r.id} released by ${name}` : `${r.id} is already unclaimed`);
+        out(r.ok === false ? `${r.id}: Error: ${r.error}` : releasedLine(r.id, r.changed || [], name, status));
       }
     }
     return result.ok ? 0 : 1;
   }
   const el = resolveTarget(ctx, flags, true);
   const ts = nowIso();
-  const single = releaseOne(ctx, el, name, ts);
-  const built = Object.assign({ ok: single.ok, id: el.id }, single);
+  if (status !== void 0) requireStatusWritable(ctx, el, name, status, allowOpen, ts);
+  const single = releaseOne(ctx, el, name, status, ts);
+  if (status !== void 0 && single.changed.some((c) => c !== "claim")) {
+    refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    refreshTags(ctx.backlog, ctx.cfg, ctx);
+  }
+  const built = withFiles(Object.assign({ ok: single.ok, id: el.id }, single), ctx.backlog);
   recordChange(ctx.backlog, () => built);
   if (json) {
     const final = opts.quiet || opts.fields !== void 0 ? trimResult(built, opts) : built;
     out(JSON.stringify(final, null, 2));
   } else {
-    out(single.changed.length > 0 ? `${el.id} released by ${name}` : `${el.id} is already unclaimed`);
+    out(releasedLine(el.id, single.changed, name, status));
+    if (status !== void 0) for (const code of single._problems) out(`\u26A0 ${el.id}: ${code}`);
   }
   return 0;
 }
+function releasedLine(id, changed, name, status) {
+  if (status === void 0) return changed.length > 0 ? `${id} released by ${name}` : `${id} is already unclaimed`;
+  return changed.includes("claim") ? `${id} released by ${name} (status: ${status})` : `${id} is already unclaimed (status: ${status})`;
+}
 
 // src/commands/cmd-rm.ts
-import * as fs18 from "node:fs";
+import * as fs19 from "node:fs";
 function removeIfEmpty(dir) {
   try {
-    fs18.rmdirSync(dir);
+    fs19.rmdirSync(dir);
   } catch {
   }
 }
@@ -6323,14 +6698,15 @@ ${archivedVictims.map((v) => "  " + v.id).join("\n")}`,
   const dependents = ctx.elements.filter((e) => !victimIds.has(e.id) && e.depends_on.some((d) => victimIds.has(d))).sort(compareElements);
   const entries = victims.map((v) => entryJson(v, ctx.backlog, ctx.cfg));
   for (const v of victims.slice().reverse()) {
-    fs18.unlinkSync(v.file);
+    fs19.unlinkSync(v.file);
+    touchDelete(v.file);
     const own = ctx.cfg.layout.group === "hierarchy" ? ownFolder(v) : null;
     if (own !== null) removeIfEmpty(own);
     removeClaimDirWholesale(ctx.backlog, v.id);
   }
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
   refreshTags(ctx.backlog, ctx.cfg, ctx);
-  const built = flags.has("cascade") && kids.length > 0 ? { ok: true, ids: victims.map((v) => v.id), changed: ["deleted"], entries, _problems: [], dependents: dependents.map((d) => d.id) } : { ok: true, id: el.id, changed: ["deleted"], entry: entries[0], _problems: entries[0]._problems, dependents: dependents.map((d) => d.id) };
+  const built = withFiles(flags.has("cascade") && kids.length > 0 ? { ok: true, ids: victims.map((v) => v.id), changed: ["deleted"], entries, _problems: [], dependents: dependents.map((d) => d.id) } : { ok: true, id: el.id, changed: ["deleted"], entry: entries[0], _problems: entries[0]._problems, dependents: dependents.map((d) => d.id) }, ctx.backlog);
   recordChange(ctx.backlog, () => built);
   if (json) {
     out(JSON.stringify(built, null, 2));
@@ -6528,8 +6904,8 @@ function cmdTree(flags) {
 }
 
 // src/commands/cmd-unarchive.ts
-import * as path17 from "node:path";
-var STABLE_HINT3 = "retry once the backlog is stable \u2014 unarchive takes no --force";
+import * as path18 from "node:path";
+var STABLE_HINT4 = "retry once the backlog is stable \u2014 unarchive takes no --force";
 var FIX_HINT = "run `nanojira doctor --fix` to move the files into their places, then unarchive again";
 function orderedSubtree(ctx, el) {
   const children = /* @__PURE__ */ new Map();
@@ -6559,7 +6935,7 @@ function buildUnits(stillArchived, hierarchy) {
   for (const e of stillArchived) {
     const own = hierarchy ? ownFolder(e) : null;
     const src = own !== null ? own : e.file;
-    if (covered.some((d) => src === d || src.startsWith(d + path17.sep))) continue;
+    if (covered.some((d) => src === d || src.startsWith(d + path18.sep))) continue;
     units.push({ e, src, dir: own !== null });
     if (own !== null) covered.push(own);
   }
@@ -6567,8 +6943,8 @@ function buildUnits(stillArchived, hierarchy) {
 }
 function unitTarget(backlog, byId, layout, u) {
   const dirRel = placeOf(u.e, byId, layout, false);
-  const dir = path17.join(backlog, dirRel);
-  return u.dir ? dir : path17.join(dir, path17.basename(u.e.file));
+  const dir = path18.join(backlog, dirRel);
+  return u.dir ? dir : path18.join(dir, path18.basename(u.e.file));
 }
 function cmdUnarchive(flags) {
   checkCommandFlags(flags, "unarchive");
@@ -6600,7 +6976,7 @@ function cmdUnarchive(flags) {
   if (hierarchy) {
     for (const u of units) {
       if (!u.dir) continue;
-      const prefix = u.src + path17.sep;
+      const prefix = u.src + path18.sep;
       const foreign = ctx.elements.filter((x) => x.file.startsWith(prefix) && !full.includes(x));
       if (foreign.length > 0) {
         refuse(`${u.src} also holds files of other elements: ${foreign.map((f) => f.id).join(", ")}`);
@@ -6621,36 +6997,36 @@ function cmdUnarchive(flags) {
   for (const e of stillArchived) renderElement(e, /* @__PURE__ */ new Map([["archived", void 0], ["updated", ts]]), void 0);
   for (const e of stillArchived) removeClaimDirWholesale(ctx.backlog, e.id);
   for (const e of stillArchived) {
-    compareGuard(e, false, ctx.backlog, STABLE_HINT3);
+    compareGuard(e, false, ctx.backlog, STABLE_HINT4);
     atomicWrite(e.file, renderElement(e, /* @__PURE__ */ new Map([["archived", void 0], ["updated", ts]]), void 0));
   }
   const emptiedFrom = /* @__PURE__ */ new Set();
   for (const { u, plan } of plans) {
     runMove(plan);
-    emptiedFrom.add(path17.dirname(u.src));
+    emptiedFrom.add(path18.dirname(u.src));
   }
   removeEmptiedIdFolders(ctx.backlog, emptiedFrom);
   const moved = stillArchived.map((e) => {
     const own = units.find((u) => u.e.id === e.id);
     if (own) {
       const target2 = unitTarget(ctx.backlog, byId, layout, own);
-      return loadElement(own.dir ? path17.join(target2, path17.basename(e.file)) : target2, ctx.backlog, ctx.cfg);
+      return loadElement(own.dir ? path18.join(target2, path18.basename(e.file)) : target2, ctx.backlog, ctx.cfg);
     }
-    const covering = units.find((u) => u.dir && e.file.startsWith(u.src + path17.sep));
+    const covering = units.find((u) => u.dir && e.file.startsWith(u.src + path18.sep));
     const target = covering ? unitTarget(ctx.backlog, byId, layout, covering) : e.file;
-    const file = covering ? path17.join(target, path17.relative(covering.src, e.file)) : target;
+    const file = covering ? path18.join(target, path18.relative(covering.src, e.file)) : target;
     return loadElement(file, ctx.backlog, ctx.cfg);
   });
   deriveGraph(ctx.elements.filter((e) => !stillArchived.includes(e)).concat(moved), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
   refreshTags(ctx.backlog, ctx.cfg, ctx);
-  const built = {
+  const built = withFiles({
     ok: true,
     ids: moved.map((m) => m.id),
     changed: ["unarchived"],
     entries: moved.map((m) => entryJson(m, ctx.backlog, ctx.cfg)),
     _problems: Array.from(new Set(moved.flatMap((m) => elementProblems(m, ctx.cfg.problems.ignore)))).sort()
-  };
+  }, ctx.backlog);
   recordChange(ctx.backlog, () => built);
   if (json) {
     out(JSON.stringify(built, null, 2));
@@ -6661,6 +7037,7 @@ function cmdUnarchive(flags) {
 }
 
 // src/core/help.ts
+var NEXT_CLAIMS = "next claims the element it picks; to look without claiming, use list --ready or next --dry-run";
 var HELP = `nanojira \u2014 NanoJira, a local file-based task tool for agents
 
   nanojira --version                      print the version and exit
@@ -6673,24 +7050,29 @@ var HELP = `nanojira \u2014 NanoJira, a local file-based task tool for agents
                [--status=\u2026] [--priority=\u2026] [--tags=a,b] [--assignee=\u2026] [--depends-on=\u2026]
                [--description=\u2026 | --description-file=\u2026] [--acceptance=\u2026 | --acceptance-file=\u2026]
   nanojira set --id=TSK-009 [--title=\u2026] [--status=\u2026] [--priority=\u2026]
-               [--tags=\u2026] [--assignee=\u2026] [--depends-on=\u2026] [--force] [--allow-open-children]
-               [--description=\u2026 | --description-file=\u2026] [--acceptance=\u2026 | --acceptance-file=\u2026]
+               [--tags=\u2026] [--assignee=\u2026] [--depends-on=\u2026] [--force] [--allow-open-children] [--check-all]
+               [--description=\u2026 | --description-file=\u2026] [--acceptance=\u2026 | --acceptance-file=\u2026 | --add-acceptance=\u2026]
 
-Section writes replace the section; --<role>-file=- reads stdin.
+Section writes replace the section; --<role>-file=- reads stdin. An acceptance line whose text
+is unchanged keeps its tick; --add-acceptance appends one unticked line.
   nanojira note --id=TSK-009 ["text" | --text=\u2026 | --text-file=-|<path>] [--as=\u2026]
   nanojira check --id=TSK-009 [--text=<substring> | --item=<n>] [--on | --off] [--force]
   nanojira show --id=TSK-009 [--notes=none|all|last:N]
   nanojira log --id=TSK-009 [--last=N]
   nanojira list [--status=\u2026] [--type=\u2026] [--tag=\u2026] [--parent=\u2026] [--assignee=\u2026] [--ready] [--all]
+               [--exclude-tag=a,b] [--min-priority=\u2026]
   nanojira find ["<text>" | --text=<t>] [--status=\u2026] [--type=\u2026] [--tag=\u2026] [--parent=\u2026] [--assignee=\u2026] [--all] [--case-sensitive]
+               [--exclude-tag=a,b] [--min-priority=\u2026]
   nanojira tree [--id=EPIC-001] [--all]
   nanojira tags                           every tag in use, with its carrier count
   nanojira rm --id=TSK-009 [--cascade]
   nanojira archive --id=EPIC-001
   nanojira unarchive --id=EPIC-001
-  nanojira claim --id=TSK-009 [--as=\u2026] [--status=\u2026] [--steal=<holder>]
-  nanojira release --id=TSK-009 [--as=\u2026]
+  nanojira claim --id=TSK-009 [--as=\u2026] [--status=\u2026] [--steal=<holder>] [--check-all]
+  nanojira release --id=TSK-009 [--as=\u2026] [--status=\u2026]
   nanojira next [--as=\u2026] [--status=\u2026] [--type=\u2026] [--tag=\u2026] [--parent=\u2026] [--assignee=\u2026]
+               [--exclude-tag=a,b] [--min-priority=\u2026]
+               ${NEXT_CLAIMS}
   nanojira doctor [--fix]
 
 Every command accepts --json. Write commands accept --file=<path> instead of
@@ -6739,7 +7121,7 @@ function synopsisFor(command) {
 }
 function closedVocab(fieldName, flags) {
   if (fieldName === "type") return TYPES;
-  if (fieldName === "priority") return PRIORITIES;
+  if (fieldName === "priority" || fieldName === "min-priority") return PRIORITIES;
   if (fieldName !== "status") return null;
   try {
     const backlog = findBacklog(flags, false);
@@ -6762,7 +7144,7 @@ function commandHelp(command, flags) {
     return { left: `  --${displayFlagName(name)}${d.value === void 0 ? "" : "=" + d.value}`, text };
   });
   const width = Math.max(...rows.map((r) => r.left.length)) + 3;
-  const lines = synopsis.slice();
+  const lines = command === "next" ? [NEXT_CLAIMS, ""].concat(synopsis) : synopsis.slice();
   if (rows.length > 0) {
     lines.push("");
     for (const r of rows) lines.push((r.left.padEnd(width) + r.text).trimEnd());

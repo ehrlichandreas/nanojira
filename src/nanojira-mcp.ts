@@ -19,8 +19,11 @@
 import * as path from 'path';
 import { spawn } from 'child_process';
 import { parseArgs } from './core/args.ts';
-import { findBacklog } from './core/config.ts';
+import { flagDoc } from './core/cli-flags.ts';
+import { findBacklog, isLegacyBacklog, loadConfig } from './core/config.ts';
+import { PRIORITIES, TYPES } from './core/constants.ts';
 import { Fail } from './core/output.ts';
+import { valueHint } from './core/suggest.ts';
 import type { FieldSpec } from './core/flag-table.ts';
 import { commandFields } from './core/flag-table.ts';
 import { VERSION } from './core/version.ts';
@@ -39,6 +42,41 @@ const SERVER_VERSION = VERSION;
 const TOOL_NAMES = ['list', 'show', 'find', 'tree', 'new', 'set', 'note',
   'check', 'claim', 'release', 'next', 'log', 'archive', 'unarchive', 'doctor'];
 
+// Each tool's one-line description (§ 17 "Tool surface"), which also
+// states the conditional rules `required` cannot (a parent for a task or
+// subtask, check's text or item; `file` instead of `id` is in that
+// property's own line). A property's description comes from the CLI's own
+// `<command> --help` line for that flag (`flagDoc`), so the two cannot
+// drift (TSK-041, DECISIONS 219); `propertyDescription` below.
+const TOOL_DESCRIPTIONS: Record<string, string> = {
+  list: 'List the live elements, optionally filtered.',
+  show: 'Show one element in full: its fields, sections and notes.',
+  find: 'Find the elements whose title or sections contain a text, with the same filters as list.',
+  tree: 'Show the epic > task > subtask tree, or only the part below one element.',
+  new: 'Create an epic, task or subtask; a task needs a parent epic, a subtask a parent task.',
+  set: 'Change fields or sections of an element, or of several.',
+  note: 'Append a signed, timestamped note to an element.',
+  check: 'Tick or untick one acceptance criterion of an element, chosen by text or by item.',
+  claim: 'Claim an element for a name, optionally setting its status.',
+  release: 'Release a claim held under a name.',
+  next: 'Claim the highest-priority ready element in one call; none_ready when there is none.',
+  log: "Show an element's history: creation, claims, releases and notes.",
+  archive: 'Move a done element and its whole subtree into the archive folder.',
+  unarchive: 'Move an archived element and its archived subtree back to their active places.',
+  doctor: 'Check the backlog and report every problem found; fix, offered only when the server allows destructive tools, repairs what it can.',
+};
+
+// The fields no call can do without (`required`, § 17). Only these: every
+// other "needs one of" rule (`id` or `file`, `text` or `item`) stays
+// with the CLI, whose error names it, so no schema needs a combinator.
+const REQUIRED: Record<string, string[]> = { new: ['type', 'title'], find: ['text'], note: ['text'] };
+
+// The control flags a tool call may also pass (TSK-041): `quiet`/`fields`
+// where the CLI command takes them, `dry-run` on every write. The result
+// is still exactly that CLI invocation's `--json` output.
+const SHRINKABLE = ['new', 'set', 'note', 'check', 'claim', 'release'];
+const WRITES = [...SHRINKABLE, 'next', 'archive', 'unarchive'];
+
 /** `doctor`'s `fix` field exists in its schema only when the server was
  * launched with `--allow-destructive` (§ 17): the gate is schema-level,
  * not a runtime check inside the tool. Every other tool's fields are its
@@ -48,8 +86,53 @@ const TOOL_NAMES = ['list', 'show', 'find', 'tree', 'new', 'set', 'note',
  * has the text in hand anyway (TSK-035, DECISIONS 214). `file` stays: it
  * addresses an already-scanned element, never an arbitrary path. */
 function toolFields(name: string, allowDestructive: boolean): FieldSpec[] {
-  if (name === 'doctor' && !allowDestructive) return [];
-  return commandFields(name).filter((f) => !f.name.endsWith('-file'));
+  if (name === 'doctor') return allowDestructive ? [...commandFields(name), { name: 'dry-run', kind: 'boolean' }] : [];
+  const fields = commandFields(name).filter((f) => !f.name.endsWith('-file'));
+  if (SHRINKABLE.includes(name)) fields.push({ name: 'quiet', kind: 'boolean' }, { name: 'fields', kind: 'string' });
+  if (WRITES.includes(name)) fields.push({ name: 'dry-run', kind: 'boolean' });
+  return fields;
+}
+
+/** The served backlog's configured statuses, read afresh for every
+ * `tools/list` and `tools/call`, so a config edit shows without a
+ * restart, and a call is checked against the config as it is now, never
+ * against what a client cached from an earlier listing (TSK-041). Null —
+ * no `enum`, nothing checked here — when the config does not read
+ * cleanly (missing, invalid, a legacy backlog, needs a newer nanojira, not
+ * a regular file): the call then reaches the CLI, whose error says why.
+ * `loadConfig` reads through `readRegularFile` (DECISIONS 215): opened
+ * non-blocking and checked with `fstat` on the open descriptor, so a
+ * FIFO, or a file swapped for one, is refused, never waited on. */
+function configuredStatuses(backlog: string): string[] | null {
+  try {
+    if (isLegacyBacklog(backlog)) return null;
+    const { config, errors, needsNewerNj } = loadConfig(backlog);
+    return errors.length === 0 && !needsNewerNj ? config.statuses : null;
+  } catch {
+    return null;
+  }
+}
+
+/** A field's closed vocabulary, the same lists the CLI checks against. */
+function allowedValues(field: string, statuses: string[] | null): string[] | null {
+  if (field === 'status') return statuses;
+  if (field === 'type') return TYPES;
+  if (field === 'priority' || field === 'min-priority') return PRIORITIES;
+  return null;
+}
+
+/* The CLI lines that word around a positional argument the tool does not have. */
+const MCP_TEXT: Record<string, string> = { 'find.text': 'the search text', 'note.text': 'the note text' };
+
+/** A property's description: the CLI's `--help` line for the flag, minus
+ * the CLI-isms (a tool result is always JSON, so `with --json: ` goes; a
+ * flag named as `--name` is the property `name`), plus the flag's value
+ * when it is a vocabulary — a list (`<a,b,...>`) or a choice
+ * (`none|all|last:N`) — which the description would otherwise lose. */
+function propertyDescription(tool: string, field: string): string {
+  const d = flagDoc(tool, field);
+  const text = (MCP_TEXT[`${tool}.${field}`] ?? d.text).replace(/^with --json: /, '').replace(/--([a-z][a-z-]*)/g, '$1');
+  return d.value !== undefined && /[,|]/.test(d.value) ? `${text}: ${d.value}` : text;
 }
 
 /* Per-call timeout (TSK-035): a child that never finishes would otherwise
@@ -72,16 +155,42 @@ function callTimeoutMs(): number {
   return (CALL_MARGIN_S + hookS) * 1000;
 }
 
-function inputSchema(fields: FieldSpec[]) {
-  const properties: Record<string, { type: string }> = {};
-  for (const f of fields) properties[f.name] = { type: f.kind === 'boolean' ? 'boolean' : 'string' };
-  return { type: 'object', properties, additionalProperties: false };
+interface Problem { field: string; error: 'missing_argument' | 'invalid_value'; message: string; allowed?: string[]; hint?: string }
+
+/** The tool result for a call the server refuses before spawning: the
+ * CLI's failure shape (`ok`, `error`, `hint`) for the first problem, and
+ * `problems` listing each one, with `allowed` on an invalid value. The
+ * second text block carries the messages, as a CLI failure's stderr. */
+function refusal(problems: Problem[]) {
+  const first = problems[0];
+  const body: Record<string, unknown> = { ok: false, error: first.error };
+  if (first.hint !== undefined) body.hint = first.hint;
+  body.problems = problems.map((p) => (p.allowed === undefined ? { field: p.field, error: p.error } : { field: p.field, error: p.error, allowed: p.allowed }));
+  const text = problems.map((p) => `Error: ${p.message}${p.hint !== undefined ? '\n' + p.hint : ''}`).join('\n');
+  return { content: [{ type: 'text', text: JSON.stringify(body) }, { type: 'text', text }], structuredContent: body, isError: true };
 }
 
-function buildToolList(allowDestructive: boolean) {
+function inputSchema(name: string, fields: FieldSpec[], statuses: string[] | null) {
+  const properties: Record<string, { type: string; description: string; enum?: string[] }> = {};
+  for (const f of fields) {
+    const p: { type: string; description: string; enum?: string[] } = {
+      type: f.kind === 'boolean' ? 'boolean' : 'string',
+      description: propertyDescription(name, f.name),
+    };
+    const values = allowedValues(f.name, statuses);
+    if (values) p.enum = values.slice();
+    properties[f.name] = p;
+  }
+  const required = REQUIRED[name] ? { required: REQUIRED[name].slice() } : {};
+  return { type: 'object', properties, ...required, additionalProperties: false };
+}
+
+function buildToolList(allowDestructive: boolean, backlog: string) {
+  const statuses = configuredStatuses(backlog);
   return TOOL_NAMES.map((name) => ({
     name,
-    inputSchema: inputSchema(toolFields(name, allowDestructive)),
+    description: TOOL_DESCRIPTIONS[name],
+    inputSchema: inputSchema(name, toolFields(name, allowDestructive), statuses),
   }));
 }
 
@@ -186,6 +295,30 @@ function main() {
         respondError(id, -32602, `Invalid params: '${key}' must be a ${f.kind === 'string' ? 'string' : 'boolean'}`);
         return;
       }
+    }
+    // The rest of the declared schema (§ 17): `required`, then `enum`,
+    // before any child spawns. These are the mistakes an agent makes and
+    // can fix, so they come back as a tool result the model sees
+    // (isError), in the CLI's own failure shape, every problem of the
+    // call at once (DECISIONS 219).
+    const problems: Problem[] = [];
+    for (const key of REQUIRED[name] || []) {
+      if (!(key in args)) problems.push({ field: key, error: 'missing_argument', message: `tool '${name}' requires '${key}'` });
+    }
+    const statuses = configuredStatuses(backlog);
+    for (const f of fields) {
+      const values = f.name in args ? allowedValues(f.name, statuses) : null;
+      if (values && !values.includes(args[f.name])) {
+        problems.push({
+          field: f.name, error: 'invalid_value', allowed: values.slice(),
+          message: `'${f.name}' must be one of: ${values.join(', ')} (got ${JSON.stringify(args[f.name])})`,
+          hint: valueHint(f.name === 'min-priority' ? 'priority' : f.name as 'status' | 'type' | 'priority', String(args[f.name]), values),
+        });
+      }
+    }
+    if (problems.length > 0) {
+      respond(id, refusal(problems));
+      return;
     }
 
     // Every field, a positional one (note/find `text`) included, goes as
@@ -338,7 +471,7 @@ function main() {
         });
         return;
       case 'tools/list':
-        respond(id, { tools: buildToolList(allowDestructive) });
+        respond(id, { tools: buildToolList(allowDestructive, backlog) });
         return;
       case 'tools/call':
         handleToolsCall(id, params);

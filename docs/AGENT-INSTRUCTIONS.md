@@ -17,7 +17,10 @@ and subtasks, one Markdown file per element, committed alongside the code.
   a doc or a prior response.
 - To pick up the next piece of work yourself: `nanojira next --as=<your-name>
   --status=doing --json` — picks the highest-priority ready item and
-  claims it in one call, so two agents never pick the same one. If
+  claims it in one call, so two agents never pick the same one.
+  `next` always claims: to look first, use `nanojira list --ready` or
+  `nanojira next --dry-run`. `--exclude-tag=<a,b>` and
+  `--min-priority=<value>` narrow what it may pick. If
   nothing is ready, it reports `none_ready`; that's a normal outcome; ask
   for more work or stop. Reach for `nanojira claim --id=<id> --as=<your-name>`
   instead when you already know which specific element you want (someone
@@ -49,13 +52,26 @@ and subtasks, one Markdown file per element, committed alongside the code.
   --id=<id> --add-tags=<a,b>` / `--remove-tags=<c,d>` instead of
   `--tags=`, which replaces the whole list. Never combine `--tags=` with
   either in the same call (rejected) — pick one or the other.
+- To add one acceptance criterion: `nanojira set --id=<id>
+  --add-acceptance="<text>"` appends it unticked and leaves the others,
+  ticks included. A full `--acceptance=` replace keeps ticks only on lines
+  whose text is unchanged; `acceptance_ticks_reset` in the result says
+  how many ticks it dropped.
 - When you're done with a claimed element, mark it `nanojira set --id=<id>
   --status=done` (or `nanojira claim --id=<id> --as=<your-name>
   --status=done` in one call) — reaching the last configured status
   releases your own claim automatically, reported as `released:
   "<your-name>"`; there's no separate `nanojira release` to remember afterward.
   If you're stopping *without* finishing, release explicitly instead:
-  `nanojira release --id=<id> --as=<your-name>`, so someone else can claim it.
+  `nanojira release --id=<id> --as=<your-name> --status=<first status>`
+  puts it back and clears your own assignee in the same call, so someone
+  else can claim it (plain `release` gives up the claim only).
+- Committing backlog changes in a shared checkout? Every write result
+  lists what it wrote in `files: [{path, op}]` (paths relative to the
+  backlog root, `from` on a move); from the backlog root, `git add --`
+  then `git commit -- ` exactly those paths (and nothing when the list
+  is empty) instead of `git add backlog/`, which sweeps up other agents'
+  work. `docs/GUIDE.md` § 5 has the recipe.
 - Running nanojira alongside an external coordination system (a team/chat
   board, ticket tracker, anything outside nanojira itself)? Update nanojira
   first — status, acceptance, notes — and only report completion on the

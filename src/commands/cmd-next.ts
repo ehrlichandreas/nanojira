@@ -19,6 +19,7 @@ import { refreshStatus } from '../core/status.ts';
 import { refreshTags } from '../core/tags.ts';
 import { nowIso } from '../core/store.ts';
 import { valueHint } from '../core/suggest.ts';
+import { withFiles } from '../core/touched.ts';
 import { applyFilters, availableToActor } from './cmd-list.ts';
 import { claimOne } from './cmd-claim.ts';
 import { requireChildrenDone } from './cmd-set.ts';
@@ -76,7 +77,7 @@ function cmdNext(flags: Flags) {
 
     refreshStatus(ctx.backlog, ctx.cfg, ctx);
     refreshTags(ctx.backlog, ctx.cfg, ctx);
-    const built = Object.assign({ ok: (single as any).ok, id: el.id }, single, { skipped });
+    const built = withFiles(Object.assign({ ok: (single as any).ok, id: el.id }, single, { skipped }), ctx.backlog);
     recordChange(ctx.backlog, () => built);
     if (json) {
       out(JSON.stringify(built, null, 2));

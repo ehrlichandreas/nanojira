@@ -41,7 +41,7 @@ const CLI_SPEC: Record<string, CliSpec> = {
   // are not settable fields.
   set: {
     fields: cliFieldNames('set').filter((f) => f !== 'id' && f !== 'file'),
-    controls: ['json', 'force', 'allow-open-children', 'id', 'file', 'input', 'quiet', 'fields'],
+    controls: ['json', 'force', 'allow-open-children', 'check-all', 'id', 'file', 'input', 'quiet', 'fields'],
     write: true,
   },
   note: { fields: [], controls: [...OUTPUT, 'force', 'text', 'text-file', ...cliFieldNames('note')], write: true },
@@ -56,8 +56,9 @@ const CLI_SPEC: Record<string, CliSpec> = {
   archive: { fields: [], controls: ['json', ...cliFieldNames('archive')], write: true },
   unarchive: { fields: [], controls: ['json', ...cliFieldNames('unarchive')], write: true },
   // Only `status` in "Known fields:", as the original error text had it.
-  claim: { fields: ['status'], controls: [...OUTPUT, ...cliFieldNames('claim').filter((f) => f !== 'status'), 'allow-open-children'], write: true },
-  release: { fields: [], controls: [...OUTPUT, ...cliFieldNames('release')], write: true },
+  claim: { fields: ['status'], controls: [...OUTPUT, ...cliFieldNames('claim').filter((f) => f !== 'status'), 'allow-open-children', 'check-all'], write: true },
+  // Only `status` in "Known fields:", as for claim.
+  release: { fields: ['status'], controls: [...OUTPUT, ...cliFieldNames('release').filter((f) => f !== 'status'), 'allow-open-children'], write: true },
   next: { fields: cliFieldNames('next'), controls: ['json'], write: true },
   doctor: { fields: [], controls: ['json', 'dry-run', ...cliFieldNames('doctor')], write: false },
 };
@@ -99,7 +100,7 @@ function refuseStrayPositionals(command: string, positional: string[]): void {
 }
 
 /** The control flags that take no value; `--dry-run` is checked by `checkFlags` itself. */
-const BOOLEAN_CONTROLS = new Set(['json', 'quiet', 'force', 'allow-open-children', 'ready', 'all']);
+const BOOLEAN_CONTROLS = new Set(['json', 'quiet', 'force', 'allow-open-children', 'check-all', 'ready', 'all']);
 
 function isBooleanFlag(command: string, name: string): boolean {
   if (BOOLEAN_CONTROLS.has(name)) return true;
@@ -134,6 +135,8 @@ const FILTER: Record<string, FlagDoc> = {
   tag: doc('only elements carrying this tag', '<tag>'),
   parent: doc('only direct children of this element', '<id>'),
   assignee: doc('only elements assigned to this name', '<name>'),
+  'exclude-tag': doc('leave out elements carrying any of these tags', '<a,b,...>'),
+  'min-priority': doc('only elements of this priority or higher', '<value>'),
 };
 
 const BATCH_ID = doc('the element to act on; A,B,C applies the same write to each', '<id>');
@@ -145,10 +148,11 @@ const FLAG_DOCS: Record<string, FlagDoc> = {
   json: doc('print the result as JSON'),
   backlog: doc('use this backlog (else NJ_BACKLOG, else the upward search)', '<path>'),
   'dry-run': doc('run against a scratch copy; nothing is written'),
-  quiet: doc('with --json: print only {ok, id}, plus _problems when non-empty'),
+  quiet: doc('with --json: print only {ok, id, files}, plus _problems when non-empty'),
   fields: doc('with --json: keep only these entry fields, in this order', '<a,b,...>'),
   force: doc('overwrite a parallel change'),
   'allow-open-children': doc('allow the final status while children are still open'),
+  'check-all': doc('with --status=<final status>: tick every open acceptance box in the same write'),
   input: doc('read the fields as one JSON object from a file, - for stdin', '<path|->'),
   as: doc('act as this name', '<name>'),
   title: doc('the title', '<text>'),
@@ -165,6 +169,7 @@ const FLAG_DOCS: Record<string, FlagDoc> = {
   'description-file': doc('the Description section from a file, - for stdin', '<path|->'),
   acceptance: doc('the Acceptance Criteria section', '<text>'),
   'acceptance-file': doc('the Acceptance Criteria section from a file, - for stdin', '<path|->'),
+  'add-acceptance': doc('append one unticked Acceptance Criteria line, keep the rest', '<text>'),
   ready: doc('only elements ready to start'),
   all: doc('include archived elements'),
 };
@@ -205,7 +210,11 @@ const COMMAND_DOCS: Record<string, Record<string, FlagDoc>> = {
     steal: doc('take over the claim this holder has', '<holder>'),
     status: doc('also set this status', '<value>'),
   },
-  release: { id: BATCH_ID, as: doc('release the claim held under this name', '<name>') },
+  release: {
+    id: BATCH_ID,
+    as: doc('release the claim held under this name', '<name>'),
+    status: doc('also set this status, and clear the assignee if it is this name', '<value>'),
+  },
   next: {
     ...FILTER,
     as: doc('claim as this name', '<name>'),

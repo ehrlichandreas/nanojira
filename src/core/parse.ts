@@ -287,11 +287,21 @@ function sectionCheckboxCounts(body: string, names: string[]): { total: number; 
   const lines = body.split('\n');
   const idx = sectionHeadingIndex(lines, names);
   if (idx === -1) return null;
-  const end = sectionEnd(lines, idx);
-  let fence: { ch: string; len: number } | null = null;
   let total = 0;
   let unticked = 0;
-  for (let i = idx + 1; i < end; i++) {
+  for (const { m } of checkboxesOutsideFences(lines, idx + 1, sectionEnd(lines, idx))) {
+    total++;
+    if (m[3] === ' ') unticked++;
+  }
+  return { total, unticked };
+}
+
+/** The checkbox lines in `lines[from..to)`, skipping fenced code blocks: a
+ * checkbox inside a fence is an example, not a criterion. */
+function checkboxesOutsideFences(lines: string[], from: number, to: number): { i: number; m: RegExpExecArray }[] {
+  const out: { i: number; m: RegExpExecArray }[] = [];
+  let fence: { ch: string; len: number } | null = null;
+  for (let i = from; i < to; i++) {
     const line = lines[i];
     const fm = /^[ \t]*(`{3,}|~{3,})/.exec(line);
     if (fence) {
@@ -300,9 +310,68 @@ function sectionCheckboxCounts(body: string, names: string[]): { total: number; 
     }
     if (fm) { fence = { ch: fm[1][0], len: fm[1].length }; continue; }
     const m = CHECKBOX_RE.exec(line);
-    if (m) { total++; if (m[3] === ' ') unticked++; }
+    if (m) out.push({ i, m });
   }
-  return { total, unticked };
+  return out;
+}
+
+/** `--check-all` (§ 9, DECISIONS 225): every unticked checkbox in the
+ * acceptance section ticked `x`, fenced ones skipped, the rest of the body
+ * untouched. `checked` is each ticked line's text after the checkbox,
+ * trimmed, in order; `[]` (and `body` itself) when nothing was open. */
+function tickAllAcceptance(body: string, names: string[]): { body: string; checked: string[] } {
+  const lines = body.split('\n');
+  const idx = sectionHeadingIndex(lines, names);
+  if (idx === -1) return { body, checked: [] };
+  const checked: string[] = [];
+  for (const { i, m } of checkboxesOutsideFences(lines, idx + 1, sectionEnd(lines, idx))) {
+    if (m[3] !== ' ') continue;
+    lines[i] = `${m[1]}${m[2]} [x]${m[4]}`;
+    checked.push(m[4].trim());
+  }
+  return checked.length === 0 ? { body, checked } : { body: lines.join('\n'), checked };
+}
+
+/** A section's content as `writeSection` takes it (trailing blank lines
+ * dropped), or `null` when the body has no such section. */
+function sectionContent(body: string, names: string[]): string | null {
+  const lines = body.split('\n');
+  const idx = sectionHeadingIndex(lines, names);
+  if (idx === -1) return null;
+  return normalizeSectionContent(lines.slice(idx + 1, sectionEnd(lines, idx)).join('\n'));
+}
+
+/**
+ * Replacing the acceptance section keeps ticks (§ 9, DECISIONS 223): a new
+ * unticked line whose text after the checkbox is exactly that of a ticked
+ * line in `body`'s section is written ticked, with the old line's tick
+ * character. Each old ticked line is used at most once, first match first.
+ * `reset` counts the old ticked lines no new line kept.
+ */
+function carryAcceptanceTicks(body: string, names: string[], content: string): { content: string; reset: number } {
+  const old = body.split('\n');
+  const idx = sectionHeadingIndex(old, names);
+  const ticked = new Map<string, string[]>();
+  let total = 0;
+  if (idx !== -1) {
+    for (const { m } of checkboxesOutsideFences(old, idx + 1, sectionEnd(old, idx))) {
+      if (m[3] === ' ') continue;
+      const marks = ticked.get(m[4]);
+      if (marks === undefined) ticked.set(m[4], [m[3]]);
+      else marks.push(m[3]);
+      total++;
+    }
+  }
+  const lines = content === '' ? [] : content.split('\n');
+  let kept = 0;
+  for (const { i, m } of checkboxesOutsideFences(lines, 0, lines.length)) {
+    const marks = ticked.get(m[4]);
+    if (marks === undefined || marks.length === 0) continue;
+    const mark = marks.shift() as string;
+    kept++;
+    if (m[3] === ' ') lines[i] = `${m[1]}${m[2]} [${mark}]${m[4]}`;
+  }
+  return { content: lines.join('\n'), reset: total - kept };
 }
 
 function normalizeSectionContent(raw: string) {
@@ -462,5 +531,5 @@ function notesSectionBounds(lines: string[]): { headingLine: number; endLine: nu
   return { headingLine, endLine };
 }
 
-export { parseFile, serialize, h1Of, syncH1, sectionPresent, sectionHasCheckbox, sectionCheckboxCounts, CHECKBOX_RE, normalizeTitle, normalizeSectionContent, applySections, parseNotes, renderNoteLine, notesSectionBounds };
+export { parseFile, serialize, h1Of, syncH1, sectionPresent, sectionHasCheckbox, sectionCheckboxCounts, sectionContent, carryAcceptanceTicks, tickAllAcceptance, CHECKBOX_RE, normalizeTitle, normalizeSectionContent, applySections, parseNotes, renderNoteLine, notesSectionBounds };
 export type { NoteLine };

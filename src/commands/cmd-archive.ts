@@ -18,6 +18,7 @@ import { recordChange } from '../core/on-change.ts';
 import { refreshStatus } from '../core/status.ts';
 import { refreshTags } from '../core/tags.ts';
 import { nowIso, atomicWrite, compareGuard, planMove, runMove, renderElement } from '../core/store.ts';
+import { touchMove, withFiles } from '../core/touched.ts';
 
 const STABLE_HINT = 'retry once the backlog is stable — archive takes no --force';
 
@@ -44,6 +45,7 @@ function archiveFlat(ctx: Context, subtree: Element[], ts: string): Element[] {
   for (const { el: e, target } of plan) {
     atomicWrite(target, renderElement(e, new Map([['archived', ts], ['updated', ts]]), undefined));
     fs.unlinkSync(e.file);
+    touchMove(e.file, target);
     moved.push(loadElement(target, ctx.backlog, ctx.cfg));
   }
   return moved;
@@ -124,11 +126,11 @@ function cmdArchive(flags: Flags) {
   deriveGraph(ctx.elements.filter((e: Element) => !subtree.includes(e)).concat(moved), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
   refreshTags(ctx.backlog, ctx.cfg, ctx);
-  const built = {
+  const built = withFiles({
     ok: true, ids: moved.map((m) => m.id), changed: ['archived'],
     entries: moved.map((m) => entryJson(m, ctx.backlog, ctx.cfg)),
     _problems: Array.from(new Set(moved.flatMap((m) => elementProblems(m, ctx.cfg.problems.ignore)))).sort(),
-  };
+  }, ctx.backlog);
   recordChange(ctx.backlog, () => built);
   if (json) {
     out(JSON.stringify(built, null, 2));

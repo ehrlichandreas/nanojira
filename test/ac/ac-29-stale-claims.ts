@@ -305,4 +305,33 @@ for (const [label, claims] of E5_CASES) {
     !!te && Array.isArray(te._problems) && te._problems.includes('claim:stale'), J(te));
 }
 
+/* ===================================================================== */
+/* E9 — problems.ignore suppresses claim:stale everywhere (§ 7 "What      */
+/* 'suppressed everywhere' means"): not only in doctor, also in every     */
+/* entry's _problems and in a write's text feedback. It was dropped from  */
+/* doctor only (DECISIONS 221).                                           */
+/* ===================================================================== */
+{
+  const x = model('ac29-e9-ignore');
+  const cfg = readConfig(x);
+  cfg.problems = { ignore: ['claim:stale'] };
+  writeConfig(x, cfg);
+  claimAt(x, 'TSK-001', 'alice', minus(NOW_REF, 25));
+  const o = { cwd: x.dir, env: at(NOW_REF) };
+  const d = runJ(['doctor'], o);
+  T.check('E9 doctor: claim:stale ignored', !(H.doctorSet(d) || []).includes('claim:stale:warning'), J(d.json && d.json.problems));
+  const show = runJ(['show', '--id=TSK-001'], o);
+  T.check('E9 show: claim:stale ignored', !!show.json && !(show.json.entries[0]._problems || []).includes('claim:stale'), J(show.json));
+  const list = runJ(['list'], o);
+  const le = (list.json && list.json.entries || []).find((e: any) => e.id === 'TSK-001');
+  T.check('E9 list: claim:stale ignored', !!le && !(le._problems || []).includes('claim:stale'), J(le));
+  const t = runJ(['tree'], o);
+  const te = (t.json && t.json.entries || []).find((e: any) => e.id === 'TSK-001');
+  T.check('E9 tree: claim:stale ignored', !!te && !(te._problems || []).includes('claim:stale'), J(te));
+  const w = runJ(['set', '--id=TSK-001', '--priority=high'], o);
+  T.check('E9 set --json: claim:stale ignored in the write result', Array.isArray(w.json && w.json._problems) && !w.json._problems.includes('claim:stale'), J(w.json));
+  const wt = run(['set', '--id=TSK-001', '--priority=low'], o);
+  T.check('E9 set text: no claim:stale line', !wt.stdout.includes('claim:stale'), J(wt.stdout));
+}
+
 T.finish();

@@ -170,7 +170,7 @@ function sectionE() {
   {
     const r = runJ(['set', `--id=${t}`, '--status=doing', '--quiet'], { cwd: x.dir });
     T.exit('E1 set --quiet exits 0', r, 0);
-    T.eq('E1 shape is exactly {ok, id} (no open problems)', Object.keys(r.json).sort(), ['id', 'ok']);
+    T.eq('E1 shape is exactly {ok, id, files} (no open problems)', Object.keys(r.json).sort(), ['files', 'id', 'ok']);
     T.eq('E1 id', r.json.id, t);
     T.eq('E1 ok', r.json.ok, true);
   }
@@ -179,7 +179,7 @@ function sectionE() {
     // (§ 9, DECISIONS 176 B) — a non-empty _problems must survive --quiet.
     const r = runJ(['set', `--id=${t}`, '--status=done', '--quiet'], { cwd: x.dir });
     T.exit('E2 set --status=done --quiet exits 0', r, 0);
-    T.eq('E2 shape is {ok, id, _problems} — warnings survive --quiet', Object.keys(r.json).sort(), ['_problems', 'id', 'ok']);
+    T.eq('E2 shape is {ok, id, _problems, files} — warnings survive --quiet', Object.keys(r.json).sort(), ['_problems', 'files', 'id', 'ok']);
     T.check('E2 _problems names done:open_acceptance', r.json._problems.includes('done:open_acceptance'), J(r.json));
   }
   {
@@ -189,7 +189,7 @@ function sectionE() {
     runJ(['set', `--id=${t2}`, '--status=doing'], { cwd: x.dir });
     const r = runJ(['set', `--id=${t2}`, '--status=doing', '--quiet'], { cwd: x.dir });
     T.exit('E3 no-op set --quiet exits 0', r, 0);
-    T.eq('E3 no-op shape is exactly {ok, id}', Object.keys(r.json).sort(), ['id', 'ok']);
+    T.eq('E3 no-op shape is exactly {ok, id, files}', Object.keys(r.json).sort(), ['files', 'id', 'ok']);
   }
 }
 
@@ -203,11 +203,11 @@ function sectionF() {
   const t = newTask(x, e);
   const r = runJ(['claim', `--id=${t}`, '--as=agent-1', '--quiet'], { cwd: x.dir });
   T.exit('F1 claim --quiet exits 0', r, 0);
-  T.eq('F1 shape is exactly {ok, id} — claim/changed dropped too', Object.keys(r.json).sort(), ['id', 'ok']);
+  T.eq('F1 shape is exactly {ok, id, files} — claim/changed dropped too', Object.keys(r.json).sort(), ['files', 'id', 'ok']);
 
   const rel = runJ(['release', `--id=${t}`, '--as=agent-1', '--quiet'], { cwd: x.dir });
   T.exit('F2 release --quiet exits 0', rel, 0);
-  T.eq('F2 shape is exactly {ok, id}', Object.keys(rel.json).sort(), ['id', 'ok']);
+  T.eq('F2 shape is exactly {ok, id, files}', Object.keys(rel.json).sort(), ['files', 'id', 'ok']);
 }
 
 /* ------------------------------------------------------------------ */
@@ -275,7 +275,7 @@ function sectionI() {
   const r = runJ(['set', `--id=${t}`, '--status=doing'], { cwd: x.dir });
   T.exit('I1 plain set exits 0', r, 0);
   T.sameSet('I1 full envelope keys, unchanged by this feature existing',
-    Object.keys(r.json), ['ok', 'id', 'changed', 'entry', '_problems']);
+    Object.keys(r.json), ['ok', 'id', 'changed', 'entry', '_problems', 'files']);
   T.sameSet('I1 full entry keys, unchanged', Object.keys(r.json.entry),
     ['id', 'type', 'parent', 'title', 'status', 'priority', 'tags', 'depends_on', 'created', 'updated', 'file', '_problems', '_claim']);
 }
@@ -380,7 +380,7 @@ function sectionKR() {
     T.exit('S1 note --quiet exits 0', r, 0);
     // `e` carries an open incomplete:description from newEpic() never
     // giving one -- confirms a non-empty _problems survives --quiet here too.
-    T.eq('S1 shape keeps the open _problems warning', Object.keys(r.json).sort(), ['_problems', 'id', 'ok']);
+    T.eq('S1 shape keeps the open _problems warning', Object.keys(r.json).sort(), ['_problems', 'files', 'id', 'ok']);
     T.check('S1 _problems names incomplete:description', r.json._problems.includes('incomplete:description'), JSON.stringify(r.json));
   }
 }

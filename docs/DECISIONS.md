@@ -5185,6 +5185,303 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        (DECISIONS 215), except the configuration. With the link removed
        again, section J is red 3 of 429.
 
+219. **`nanojira-mcp`'s tool schemas say what a call needs** (2026-10-18,
+     TSK-041, for 4.3.0; survey #3 point 8, left out of TSK-035/DECISIONS
+     214; design approved by the Lead; rebased onto 4.3.0 and revised
+     after review on 2026-10-20).
+     - The gap: every `inputSchema` was a bare list of typed properties.
+       No description, no `required`, no `enum`, and no way for a write
+       tool to ask for `--quiet`, `--fields` or `--dry-run`. An agent
+       learnt the rules from failed calls.
+     - Descriptions: a property's is `flagDoc`'s text, the line
+       `<command> --help` prints, so the two cannot drift; the tool's
+       own is a fixed one-liner in `nanojira-mcp.ts`. The "; allowed:"
+       suffix is left out because the `enum` carries it. Review: the
+       CLI's own wording is dropped (`with --json: `, `--` before a flag
+       name, "instead of the positional argument" on `find`/`note`
+       `text`), and a value vocabulary with `,` or `|` is appended
+       (`show` `notes`: `none|all|last:N`; the comma-separated lists), as
+       the bare text lost it. A tool description no longer repeats what
+       a property says (`list`'s filter names, `set`'s `A,B,C`).
+       `tools/list` is 11704 bytes on the default config (3493 before
+       TSK-041, 10816 at the first version, 11636 after the rebase alone,
+       which brought the 4.3.0 flags).
+     - `required` only where no call can do without the field: `new`
+       `type`/`title`, `find` and `note` `text`. "`id` or `file`"
+       and "`text` or `item`" would need `anyOf`, which some
+       tool-calling APIs refuse at the top level of an input schema; the
+       CLI's error already names them, and the tool's description (a parent
+       for a task or subtask, check's text or item) or the property's
+       (`file` "instead of id") states them up front.
+     - `enum`: `type`, `priority` and `min-priority` from `constants.ts`,
+       `status` from the served backlog's config, read on every
+       `tools/list` and `tools/call` (one small file per request; the
+       child reads it again anyway). So a status added after a client
+       cached its listing still passes, and one removed is refused with
+       the list as it is now (Lead's note). No `listChanged` (Lead): a
+       client sees new statuses in the schemas when it lists again. A
+       config that does not read cleanly gives no status enum and no
+       server-side status check, so the CLI's `invalid_config` (or
+       `legacy_layout`, `needs_newer_nj`) still reaches the caller
+       unchanged. The config is read by `loadConfig`, through
+       `readRegularFile` (DECISIONS 215): opened `O_NONBLOCK`, checked with
+       `fstat` on the descriptor. The first version `stat`ed the path and
+       then read it by path, a window in which a swap to a FIFO hung the
+       whole server (Reviewer's race); on the 4.3.0 base that guard was
+       redundant and is gone.
+     - The schemas follow the flag table: `release` `status`,
+       `exclude-tag`/`min-priority` and `add-acceptance` reached them with
+       the rebase, untouched here; `--check-all` is a control flag like
+       `--allow-open-children` and stays CLI-only (Lead, DECISIONS 225).
+     - `quiet`/`fields` on exactly the tools whose CLI command takes
+       them (`cli-flags.ts`: new, set, note, check, claim, release);
+       `dry-run` on every write; `doctor`'s only beside `fix`, since
+       `--dry-run` without `--fix` is `invalid_value`. Kept out of
+       `flag-table.ts`: they are control flags there (§ 9), and the
+       table's other readers must not see them. `quiet`'s line now says
+       `files` stays (DECISIONS 222), on the CLI too.
+     - Enforcement (revised after review, Lead): the first version
+       answered a missing required field or a value outside an `enum` with
+       `-32602`. The MCP schema types say a tool's own errors belong in
+       the result with `isError`, or the model never sees them; these are
+       exactly the mistakes a model corrects. So they are now an `isError`
+       result built by the server before any child spawns, in the CLI's
+       failure shape (`ok`, `error`: `missing_argument` or
+       `invalid_value`, `hint` with `valueHint`'s did-you-mean), plus
+       `problems`, every problem of the call with `allowed` on an invalid
+       value (cheap: the checks just do not stop at the first). `-32602`
+       stays for what the CLI could never have been asked: an argument the
+       schema does not declare, a wrong JSON type, `arguments` not an
+       object. A required field given as `""` passes (`required` is
+       presence) and the CLI refuses it as before.
+     - Tests: `test/edge/mcp-schemas.ts` (530 checks). The first version
+       was red before 222 of 304. The review round added: no CLI-ism in
+       any description, the vocabularies, `min-priority`'s enum, the
+       `isError` refusals with every problem listed and the did-you-mean
+       hint, `-32602` for an unknown argument, a wrong type and
+       `check-all`, the 4.3.0 flags (S9), and S8 legs for a link to a
+       FIFO and a directory; red on the rebased first version (9873b8e)
+       for 101 checks. The S8 swap race (review R1): `config.json` is a
+       symlink a separate process re-points in a tight loop between a
+       regular file and a FIFO, by rename, while 3000 `tools/list`
+       requests run, each to be answered within 3 s; at the end a writer
+       open of the FIFO frees a server blocked on it. It kills the first
+       version's shape, a `stat` of the path and then a read by path
+       (Reviewer's mutant m15: red 5 of 5 runs, the server hung after at
+       most 4 answers), and passes on `readRegularFile` (5 of 5, about 2
+       to 3 s). Mutation-tested too: `loadConfig` reading by path
+       (`readFileSync`) instead of `readRegularFile` turns 6 S8 checks red.
+
+220. **`release --status=<value>`, and no warning for an active status
+     without a claim** (2026-10-20, TSK-044; feedback/knowledge4ai-team
+     TSK-001).
+     - The report: a builder released an element it had picked up by
+       accident, and the file still said `status: doing` and named the
+       builder. `list` and the board showed it as in progress although
+       nobody held it; the Lead reset it with `set --status=todo
+       --assignee=`. By design `release` never writes the element file
+       (§ 12a), and nothing flagged the state left behind.
+     - The choice: `release --status=<value>`, with the values and checks
+       of `claim --status=` (`invalid_value`, `refused:archived`, the
+       parent rule for `done`), all before the release, so a refused call
+       releases nothing. After the release, one guarded write sets the
+       status and clears the assignee when it is the acting name; a failed
+       write undoes the release, as `claim`'s rollback does. Without the
+       assignee cleared the element is not ready in one call after all:
+       `next` skips an element assigned to another name (D158 PA-5), so
+       nobody else would get it. Another name's assignee stays: it is not
+       the releaser's to clear. The release rules are unchanged: another
+       holder is `refused:claimed` with nothing written, and an unclaimed
+       element gets its status written all the same. Plain `release` is
+       unchanged and still never writes the file.
+     - Not done: a doctor warning for an element in an active status (not
+       the first, not the last) with an assignee and no claim. Our own
+       documented workflow produces exactly that state on purpose: a
+       review is assigned to the reviewer (docs/AGENT-INSTRUCTIONS.md) and sits
+       in `review` unclaimed until the reviewer picks it up, and `blocked`
+       with its assignee kept is the same case. The warning would fire on
+       every such element, so it would be noise and get switched off.
+     - Tests: `test/ac/ac-65-release-status.ts` (43 checks), red on
+       v4.2.0; `ac-64`'s pinned flag list for `release` gains `status`
+       and `allow-open-children`.
+
+221. **`problems.ignore` suppresses `claim:stale` in `_problems` too**
+     (2026-10-20, found while doing TSK-044).
+     - The gap: `entryJson` adds `claim:stale` and `claim:symlink` after
+       the ignore filter, since both are computed fresh from the claims
+       directory rather than stored on the element. So an ignored
+       `claim:stale` left `doctor` but stayed in every entry's
+       `_problems` (`list`, `show`, `tree`, write results), against § 7's
+       "suppressed everywhere". Present on v4.2.0.
+     - The fix: the two fresh codes go through the same ignore list.
+       `claim:symlink` is an error and can never be ignored (§ 5), so for
+       it nothing changes; it is filtered only to keep one rule.
+     - Tests: ac-29 section E9 (doctor, show, list, tree, a write
+       result, a write's text), red 4 of 53 on v4.2.0.
+
+222. **Every write result lists the files it wrote: `files: [{path, op}]`**
+     (2026-10-20, TSK-045; feedback/knowledge4ai-team TSK-002).
+     - The report: in a shared checkout the team commits with a pathspec,
+       never `git add backlog/`, which would sweep up other agents' work.
+       `new` also writes its tombstone under `.nanojira/ids/`, which no
+       result named, so their Lead committed two subtasks without them.
+       `STATUS.md`, `TAGS.md` and the files `set --parent` moves under
+       `hierarchy` raise the same question.
+     - How: a per-process journal (`core/touched.ts`). The few places that
+       write — `store.ts`'s atomic writes and moves, the tombstone
+       allocation, `init`, and the `doctor --fix` steps that write, rename
+       or remove directly — record each path once it has landed, and a
+       command appends the collapsed list to its result just before
+       printing it. A folder moved in one `rename` is listed file by file.
+       Repeated touches of one path collapse: written then moved is one
+       `moved`, created then moved is `created` at the new place, moved
+       then deleted is the old path deleted. The CLI is one process per
+       call and `nanojira-mcp` spawns one per tool call, so one journal
+       per process is one per call. Under `--dry-run` the writes land in
+       the copy, and the paths, relative to the copy's root, read as the
+       real call's.
+     - Choices (Lead accepted): `files` is an envelope key, so `--fields`
+       (which narrows only `entry`) keeps it, as it keeps `changed`;
+       `--quiet` keeps it too. A move carries `from`, the old path, since
+       a pathspec commit needs both sides. A batch carries it once, on the
+       wrapper: `STATUS.md` belongs to the whole call. No write means
+       `files: []`, never an absent key. Never listed: `.nanojira/claims/`
+       and `.nanojira/index.json` (gitignored), and the `.nj-tmp-*`/
+       `.nj-rm-*` scratch files `doctor --fix` removes, never in git, where
+       a pathspec naming them would fail.
+     - Failures (review R1): a call can fail after part of it landed. `new`
+       writes its tombstone before the element file; `archive` moves a
+       task, then its subtasks; `set --parent` under `hierarchy` rewrites
+       the file, then moves it. So the shared failure path
+       (`emitFailure`, which also prints the top-level catch's
+       `internal_error`, and `hardExit`) adds `files` whenever the
+       journal names a file, relative to the backlog root `context()` or
+       `init` recorded. A failure that wrote nothing leaves the key out,
+       as before; a plan that stopped part way keeps `files` as it had it.
+     - The recipe (review R2): `git commit -- <paths>` alone fails for a
+       created file or a move's new place ("pathspec … did not match any
+       file(s) known to git"), so the documented recipe runs `git add --`
+       first, from the backlog root. It is guarded with `[ -n "$P" ]`:
+       an empty list would leave a bare `git commit --`, which commits
+       the whole index.
+     - Tests: `test/ac/ac-66-write-files.ts` (140 checks) snapshots the
+       real backlog around each call and requires `files` to name exactly
+       what changed on disk, for every writer, both layouts, a batch,
+       `--quiet`, `--fields`, `--dry-run` and the hook's stdin; red on
+       79a4e74. Pinned key sets in ac-31, ac-59, ac-61 and ac-63 gain
+       `files`. ac-23's C7 (STATUS.md cannot be written) compares the
+       result with its twin's but for `STATUS.md` in `files`, and checks
+       that `files` does not name the overview it failed to write. Mutation-tested: without the move recording, or without
+       `--quiet` keeping `files`, AC-66 fails.
+       `test/ac/ac-67-files-git.ts` uses `git status` as the oracle: four
+       calls that fail part way (`new` and `archive` with a read-only
+       folder, `set --parent` and `new` into a read-only epic folder under
+       `hierarchy`) must name exactly what git sees changed, red on
+       94ee7a9; and the recipe itself, run on `new`, a plan, `archive`,
+       `unarchive`, `rm` and `set --parent`, must commit exactly the
+       call's files and leave another agent's staged file staged, and
+       commit nothing after a no-op.
+
+223. **Replacing acceptance keeps ticks on unchanged lines;
+     `acceptance_ticks_reset`; `set --add-acceptance=`** (2026-10-20,
+     TSK-046; feedback/knowledge4ai-team TSK-003).
+     - The report: to add one criterion, a Lead ran `set --acceptance=`
+       with the whole list plus the new line, as `- [ ]` lines. Every
+       ticked criterion came back unticked and nothing said so. Our own
+       Lead lost ticks the same way re-scoping TSK-044.
+     - Replace semantics (Lead settled): a new line whose text after the
+       checkbox exactly matches a ticked old line stays ticked; each old
+       ticked line is used at most once; every other line starts as the
+       caller wrote it. "Exactly" is the regex group after `[ ]`/`[x]`,
+       leading space included, so a reworded line, a case change or a
+       trailing space loses its tick. The list marker and indentation
+       are not part of the text: `1. [ ] a` keeps the tick of `- [x] a`.
+       The old tick character is kept. A line the caller ticks in the new
+       text stays ticked and, when it matches, uses up an old tick, so
+       `acceptance_ticks_reset` counts only ticks that really went away.
+       Fenced checkboxes are skipped on both sides, as
+       `done:open_acceptance` already skips them.
+     - `acceptance_ticks_reset: <n>` is present only when n > 0, on the
+       single result or the batch member, plus a stderr warning in both
+       output modes, like the tag near-match warning. `--quiet` drops it,
+       as it drops `released` and `open_acceptance`.
+     - `--add-acceptance=<text>` (choices mine): not repeatable, since
+       every other flag refuses a second, different value, and one line
+       per call keeps the flag the "add one" path the report asked for;
+       several lines remain a replace. Trimmed; empty or multi-line text is
+       `invalid_value`. Combined with `--acceptance`/`--acceptance-file`
+       (or both keys in `--input`) it is `invalid_value`, as `--tags` with
+       `--add-tags` is (DECISIONS 163 B). In `--input` it must be a string,
+       not an array. It reaches `nanojira-mcp`'s `set` schema through the
+       flag table.
+     - Tests: `test/ac/ac-68-acceptance-ticks.ts` (51 checks): kept and
+       lost ticks, duplicates, exact matching, list markers and tick
+       character, fences, `--acceptance-file`, `--input` string and
+       array, batch, `--dry-run`, the stderr warning, `--add-acceptance`
+       (with and without a section, via `--input`, in a batch) and every
+       refusal; red on 0c52b90. ac-64's pinned `set` flag list gains
+       `add-acceptance`. Mutation-tested: an old tick used more than once,
+       or the single-ID path skipping the `--add-acceptance` checks, fails
+       AC-68.
+
+224. **`--exclude-tag=` and `--min-priority=` filters; `next` says it
+     claims** (2026-10-20, TSK-047; feedback/knowledge4ai-team TSK-004).
+     - The report: builders wanted the next item not tagged
+       `waiting:user` and at least `high`. `--tag=` only selects, so they
+       read `list --ready` and claimed by hand, the race `next` exists to
+       close. One builder ran `next` to have a look and claimed an item
+       it never meant to take.
+     - Both filters live in `applyFilters`, which `list`, `find` and
+       `next` share, so they behave the same on all three (Lead left plain
+       `list` to me: yes, and `find` with it, since § 9a defines `find`'s
+       filters as `list`'s). `--exclude-tag` takes a list, like `--tags`,
+       and excludes on any match; an empty list is `invalid_value`, since
+       `--exclude-tag=` reading as "exclude nothing" would hide a script's
+       empty variable. `--min-priority` uses the sort's own weights, so a
+       missing or unknown priority counts as `normal` there exactly as it
+       sorts; a value outside the four priorities is `invalid_value`
+       with `valueHint`'s list, and `--help` names them through
+       `closedVocab`.
+     - `next --help` starts with one line saying `next` claims the
+       element it picks and naming `list --ready` and `next --dry-run`;
+       the general `--help` carries the same line under `next`'s synopsis,
+       from one constant. `SKILL.md`'s Next work entry opens with it; it
+       had to shrink elsewhere to stay within AC-56's 4000-character
+       budget. No `--peek` alias (Lead settled): `--dry-run` already is one.
+     - Tests: `test/ac/ac-69-next-filters.ts` (40 checks): both filters on
+       `list --ready`, plain `list`, `find` and `next` (including
+       `--dry-run` and `none_ready`), the refusals with their hint, the
+       help lines and the `SKILL.md` entry; red on 0aafd61. ac-64's
+       pinned filter list gains both flags.
+
+225. **`--check-all`: close and tick every open acceptance box in one
+     write** (2026-10-20, TSK-048; feedback/knowledge4ai-team TSK-005).
+     - The report: closing took one `check` per criterion, then `set
+       --status=done`; skipping the checks left `done:open_acceptance`.
+     - Lead settled: opt-in only, together with `--status=<last
+       configured status>` on `set` and `claim`, `invalid_value`
+       otherwise; fenced boxes skipped; the result names what was ticked
+       (`checked`, `[]` when nothing was open); never implicit, so
+       `done:open_acceptance` keeps its meaning; batch, `--dry-run` and
+       `files` behave as for any write.
+     - Choices mine: only the acceptance section is ticked, not every box
+       in the body — `done:open_acceptance` measures that section, and a
+       checklist in a description is not a criterion. `checked` holds the
+       text after the box, trimmed, the same text `check --text=` matches
+       against. It is a control flag like `--allow-open-children`, so
+       `nanojira-mcp`'s schemas do not carry it, as they do not carry that
+       one. On `set` it runs after the section writes, so a line written
+       by `--acceptance`/`--add-acceptance` in the same call is ticked
+       too. Not on `release --status=`: a final `set --status=<last>` already
+       gives the claim up, so `release` adds nothing there. Not on `next`,
+       where the caller has not seen what it would tick.
+       `--quiet` drops `checked`, as it drops `released`.
+     - Tests: `test/ac/ac-70-check-all.ts` (37 checks): `set`, `claim`,
+       `--input`, a replace in the same call, batch on both, `--dry-run`,
+       nothing open, never implicit, every refusal (and `release`/`next`
+       rejecting the flag), `--help`; red on 6c9f48b. ac-64's and
+       boolean-flag-values' pins for `set` and `claim` gain `check-all`.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

@@ -39,8 +39,8 @@ const str = (name: string): FieldSpec => ({ name, kind: 'string' });
 const bool = (name: string): FieldSpec => ({ name, kind: 'boolean' });
 
 const FLAG_TABLE: Record<string, CommandSpec> = {
-  list: { fields: [str('status'), str('type'), str('tag'), str('parent'), str('assignee')] },
-  find: { fields: [str('status'), str('type'), str('tag'), str('parent'), str('assignee'), bool('case-sensitive'),
+  list: { fields: [str('status'), str('type'), str('tag'), str('parent'), str('assignee'), str('exclude-tag'), str('min-priority')] },
+  find: { fields: [str('status'), str('type'), str('tag'), str('parent'), str('assignee'), str('exclude-tag'), str('min-priority'), bool('case-sensitive'),
     { name: 'text', kind: 'string', positional: true }] },
   show: { fields: [str('id'), str('file'), str('notes')] },
   log: { fields: [str('id'), str('file'), str('last')] },
@@ -52,14 +52,14 @@ const FLAG_TABLE: Record<string, CommandSpec> = {
   // --add-tags/--remove-tags (DECISIONS 163 B): an incremental alternative
   // to --tags=, set-only, hyphenated like case-sensitive/allow-open-children
   // (no pre-existing Element field to normalise onto, unlike depends-on).
-  set: { fields: [str('id'), str('file')].concat(SETTABLE_FIELDS.map(str), [str('add-tags'), str('remove-tags')]) },
+  set: { fields: [str('id'), str('file')].concat(SETTABLE_FIELDS.map(str), [str('add-tags'), str('remove-tags'), str('add-acceptance')]) },
   note: { fields: [str('id'), str('file'), str('as'), { name: 'text', kind: 'string', positional: true }] },
   check: { fields: [str('id'), str('file'), str('text'), str('item'), bool('on'), bool('off')] },
   claim: { fields: [str('id'), str('file'), str('as'), str('steal'), str('status')] },
-  release: { fields: [str('id'), str('file'), str('as')] },
+  release: { fields: [str('id'), str('file'), str('as'), str('status')] },
   // No id/file (§ 12b "Not applicable"): `next` picks its own target, the
   // same reason `new` has neither.
-  next: { fields: [str('as'), str('status'), str('type'), str('tag'), str('parent'), str('assignee')] },
+  next: { fields: [str('as'), str('status'), str('type'), str('tag'), str('parent'), str('assignee'), str('exclude-tag'), str('min-priority')] },
   archive: { fields: [str('id'), str('file')] },
   unarchive: { fields: [str('id'), str('file')] },
   doctor: { fields: [bool('fix')] },

@@ -3,7 +3,7 @@ name: nanojira
 description: "A local, file-based task tool for agents: read, claim, update, close and note backlog elements (epics/tasks/subtasks) under a plain-Markdown backlog/ folder, no server or database. Use whenever an agent needs to track its own work, pick up the next ready item, or report on backlog state. Not for a team's existing issue tracker (Jira, GitHub Issues, Linear, ...) - nanojira is its own, separate backlog; do not point it at one of those."
 license: MIT
 metadata:
-  version: "4.2.0"
+  version: "4.3.0"
 ---
 
 # nanojira (NanoJira)
@@ -25,9 +25,9 @@ the stable contract: `nanojira list --json`, `nanojira show --id=<id> --json`.
 
 ### The daily loop
 
-- **Next work**: `nanojira next --as=<name> --status=<doing-like status> --json` claims the
-  highest-priority ready item in the same call. `{"ok": false, "error": "none_ready"}` is a
-  normal outcome, not a failure to retry.
+- **Next work**: `nanojira next` claims the element it picks, the top ready one (only looking:
+  `list --ready`, `next --dry-run`). Add `--as=<name> --status=<doing-like status> --json`.
+  `none_ready` is normal, not a failure to retry.
 - **A specific element**: `nanojira claim --id=<id> --as=<name>`.
 - **Read before writing**: `show --id=<id> --json`, then `set --id=<id> --status=...
   [--title= --priority= --tags= --assignee= --depends-on= --description= --acceptance=]` —
@@ -37,7 +37,8 @@ the stable contract: `nanojira list --json`, `nanojira show --id=<id> --json`.
 - **Probe first**: `--dry-run` on any write (`doctor --fix` too) returns the real result plus
   `changes` (every file it would touch) and writes nothing; ids it shows are not reserved.
 - **Finish**: `set --id=<id> --status=<final status>` releases the claim in the same write;
-  to step away unfinished, `release --id=<id> --as=<name>`.
+  to step away unfinished, `release --id=<id> --as=<name> --status=<first status>` puts it
+  back (and clears your own assignee) in the same call.
 - **Acceptance**: tick with `check --id=<id> --text="<substring>"`, never by hand.
 - **Notes**: `note --id=<id> --text="..." --as=<name>` (or `--text-file=<path|->`);
   `show --id=<id> --notes=last:N` prints only the newest `N`.

@@ -340,6 +340,33 @@ returns `{"ok": false, "error": "<code>", "hint": "…"}` on stdout with exit 1
 `_problems`, never on prose. Exit codes: `0` success, `1` failed, `2` only
 from `doctor`: at least one error finding.
 
+### Committing exactly what a write touched
+
+Every write result names the files it wrote in `files`, relative to the
+backlog root: the element file, a new tombstone under `.nanojira/ids/`,
+`STATUS.md`, `TAGS.md`, and both sides of a move (`from` is the old
+path). In a checkout others work in too, commit those and nothing else:
+
+```sh
+cd backlog
+P=$(nanojira set --id=TSK-009 --status=done --json | jq -r '.files[] | .path, .from // empty')
+[ -n "$P" ] && git add -- $P && git commit -m "TSK-009 done" -- $P
+```
+
+Run it from the backlog root: the paths are relative to it. `git add`
+comes first because a pathspec commit takes only paths git already
+knows, and a created file or a move's new place is not one yet. The
+`[ -n "$P" ]` guard matters: with `files: []` the line would end in a
+bare `git commit --`, which commits the whole index, other agents'
+staged work included. `$P` is split on whitespace by `sh` and `bash`
+(ids and paths hold none); in `zsh` write `${=P}`. A call that failed
+part way lists what landed too, so check `.ok` first if a half-done
+change should not be committed.
+
+`files` stays under `--quiet`, a batch carries it once on its wrapper,
+and a write that changed nothing reports `files: []`. Claim bookkeeping
+under `.nanojira/claims/` is gitignored and never listed.
+
 ## 6. Descriptions and acceptance criteria
 
 `--description` and `--acceptance` write the configured sections of the body
@@ -359,6 +386,17 @@ printf 'Line one\nLine two\n' | nanojira set --id=TSK-002 --description-file=-  
 - Everything else in the body — your own sections, `## Notes` — stays byte
   for byte. Don't put a `## ` heading inside the content: it would read as
   the next section.
+- Replacing the acceptance criteria keeps the ticks of the lines you left
+  alone: a new `- [ ] …` line whose text matches a ticked old line exactly
+  stays ticked. If ticked lines were reworded or dropped, the result says
+  how many with `acceptance_ticks_reset` and stderr warns.
+- To add one criterion without touching the rest, append it:
+
+  ```sh
+  nanojira set --id=TSK-002 --add-acceptance="Logs the retry count"
+  ```
+
+  One line per call, never together with `--acceptance=`.
 
 ## 7. Layouts
 
@@ -604,6 +642,20 @@ $ nanojira release --id=TSK-001 --as=bob
 TSK-001 released by bob
 ```
 
+Stepping away unfinished, put the element back in the same call with
+`--status`: the status is written, and the assignee is cleared when it is
+your own name, so `next` hands the element to someone else again:
+
+```sh
+$ nanojira claim --id=TSK-001 --as=alice --status=doing
+TSK-001 claimed by alice (status: doing)
+$ nanojira release --id=TSK-001 --as=alice --status=todo
+TSK-001 released by alice (status: todo)
+```
+
+`--status` takes the same values and checks as `claim --status=`; a
+plain `release` still leaves the file alone.
+
 The human line after a `--steal` does **not** name who it was stolen
 from — that's `stolen_from` in the `--json` result only (§ 9's JSON
 shapes table). A human watching the terminal sees only that the claim
@@ -660,7 +712,8 @@ changed hands, not to whom it previously belonged.
 
 `list --ready` then `claim` by hand leaves a gap: two callers can read the
 same top candidate before either claims it. `nanojira next` closes it — one
-call picks the highest-ranked `--ready` element and claims it:
+call picks the highest-ranked `--ready` element and claims it. **`next`
+always claims**: to look first, run `list --ready` or `next --dry-run`.
 
 ```sh
 $ nanojira next --as=alice --status=doing
@@ -672,7 +725,17 @@ TSK-001 claimed by alice (status: doing)
 - **`--status=<s>`** claims and sets status in the same write, exactly
   as `claim --status=` does; omit it and status is left alone.
 - **Filters** are `list`'s own: `--type`, `--tag`, `--parent`,
-  `--assignee` — narrow which candidates `next` will even consider.
+  `--assignee`, `--exclude-tag`, `--min-priority` — narrow which
+  candidates `next` will even consider. To skip anything waiting on the
+  user and take only important work:
+
+  ```sh
+  $ nanojira next --as=alice --exclude-tag=waiting:user --min-priority=high
+  ```
+
+  `--exclude-tag=a,b` leaves out an element carrying any of the tags;
+  `--min-priority=high` keeps `high` and `urgent`. Both work on `list`
+  (with or without `--ready`) and `find` too.
 - **Respects an existing `assignee` by default.** An element already
   assigned to someone else is never a candidate — `next` never hands out
   work a human or a prior `claim`/`next` explicitly gave to a specific
@@ -888,6 +951,14 @@ $ <dest>/bin/nanojira-mcp --backlog=./backlog [--allow-destructive]
   offered.** `archive`/`unarchive` are offered ungated (both reversible);
   `doctor --fix` only exists as a tool when the server was started with
   `--allow-destructive`.
+- Each tool's schema says what a call needs: every input has a
+  description (its `--help` line), `new` requires `type` and `title`,
+  `find` and `note` require `text`, and `status` (your configured list,
+  re-read on every request), `type` and `priority` list their allowed
+  values. A call that misses a required field or uses a value outside
+  the list is refused before anything runs, as a tool result with
+  `isError` that names every problem and the allowed values. The write tools also take `dry-run`, and new, set, note,
+  check, claim and release take `quiet` and `fields`, as on the CLI.
 - A minimal client config — the shape only; where this goes is your MCP
   client's own concern, not `nanojira`'s:
   ```json
@@ -1112,6 +1183,19 @@ warning about history):
 These three can never fire on the same element at once: each needs a
 different checkbox count to be true (zero, none-at-all, or at-least-one-
 unticked).
+
+When the work really is finished, close it and tick what is still open
+in one call — never implicitly, only with `--check-all`:
+
+```sh
+$ nanojira set --id=TSK-001 --status=done --check-all --json
+{ "ok": true, "id": "TSK-001", "changed": ["status", "acceptance"], "...": "...",
+  "checked": ["Logs the retry count", "Documented in the guide"] }
+```
+
+`checked` names each box it ticked (`[]` if none was open). The same
+flag works on `claim --status=done`; it is refused without the final
+status, and boxes inside a code fence are never ticked.
 
 **If upgrading surfaces a flood of these on old `done` elements** that
 simply predate the check — tick the boxes, archive the finished epics

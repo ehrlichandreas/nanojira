@@ -24,6 +24,7 @@ import { refreshStatus } from '../core/status.ts';
 import { refreshTags, warnTagNearMatches } from '../core/tags.ts';
 import { nowIso, allocateId, atomicWrite, makeFolder, requireWithinCap } from '../core/store.ts';
 import { requireIdShaped } from '../core/id-shape.ts';
+import { failureFiles, touchedFiles, withFiles } from '../core/touched.ts';
 
 /** Whether `dir` already holds a file named `name`, comparing case-insensitively. */
 function collidesCaseInsensitively(dir: string, name: string): boolean {
@@ -513,6 +514,9 @@ function emitPlanFailure(e: Fail, failedAt: string, extra?: { created: string[];
   if (e.hint) res.hint = e.hint;
   if (extra) { res.created = extra.created; res.refs = extra.refs; }
   res.failed_at = failedAt;
+  // What the plan wrote before it stopped (DECISIONS 222): a pathspec commit of the part that landed.
+  const files = extra && backlog !== undefined ? touchedFiles(backlog) : failureFiles();
+  if (files !== undefined) res.files = files;
   // A plan that stopped part way has still written `created` (§ 9
   // "`NJ_ON_CHANGE`"): the hook hears about it, with this very result.
   if (extra && backlog !== undefined) recordChange(backlog, () => res);
@@ -673,7 +677,7 @@ function cmdNewInput(ctx: Context, inputValue: string) {
   }
 
   const refsObj = Object.fromEntries(refRealId);
-  const built = { ok: true, ids: created, entries, refs: refsObj, _problems: [] };
+  const built = withFiles({ ok: true, ids: created, entries, refs: refsObj, _problems: [] }, ctx.backlog);
   recordChange(ctx.backlog, () => built);
   if (output.json) {
     out(JSON.stringify(built, null, 2));

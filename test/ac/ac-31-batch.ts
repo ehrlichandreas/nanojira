@@ -372,44 +372,44 @@ function topKeys(json: any) { return json ? Object.keys(json).sort() : null; }
 {
   const x = model('ac31-h16-set');
   const r1 = runJ(['set', '--id=TSK-001,TSK-002', '--priority=high'], { cwd: x.dir, env: at(NOW) });
-  T.eq('H16 set (runtime completion): top-level keys are exactly [ok, results]', topKeys(r1.json), ['ok', 'results']);
+  T.eq('H16 set (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
   const y = model('ac31-h16-set-abort');
   const r2 = runJ(['set', '--id=TSK-001,TSK-999', '--priority=high'], { cwd: y.dir, env: at(NOW) });
-  T.eq('H16 set (preflight abort): top-level keys are exactly [ok, results]', topKeys(r2.json), ['ok', 'results']);
+  T.eq('H16 set (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
 }
 {
   const x = model('ac31-h16-note');
   const r1 = runJ(['note', '--id=TSK-001,TSK-002', 'shared note'], { cwd: x.dir, env: at(NOW) });
-  T.eq('H16 note (runtime completion): top-level keys are exactly [ok, results]', topKeys(r1.json), ['ok', 'results']);
+  T.eq('H16 note (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
   const y = model('ac31-h16-note-abort');
   const r2 = runJ(['note', '--id=TSK-001,TSK-999', 'shared note'], { cwd: y.dir, env: at(NOW) });
-  T.eq('H16 note (preflight abort): top-level keys are exactly [ok, results]', topKeys(r2.json), ['ok', 'results']);
+  T.eq('H16 note (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
 }
 {
   const x = model('ac31-h16-check');
   const r1 = runJ(['check', '--id=TSK-001,TSK-002', '--text=It works', '--on'], { cwd: x.dir, env: at(NOW) });
-  T.eq('H16 check (runtime completion): top-level keys are exactly [ok, results]', topKeys(r1.json), ['ok', 'results']);
+  T.eq('H16 check (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
   const y = model('ac31-h16-check-abort');
   const r2 = runJ(['check', '--id=TSK-001,TSK-999', '--text=It works', '--on'], { cwd: y.dir, env: at(NOW) });
-  T.eq('H16 check (preflight abort): top-level keys are exactly [ok, results]', topKeys(r2.json), ['ok', 'results']);
+  T.eq('H16 check (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
 }
 {
   const x = model('ac31-h16-claim');
   const r1 = runJ(['claim', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: at(NOW) });
-  T.eq('H16 claim (runtime completion): top-level keys are exactly [ok, results]', topKeys(r1.json), ['ok', 'results']);
+  T.eq('H16 claim (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
   const y = model('ac31-h16-claim-abort');
   const r2 = runJ(['claim', '--id=TSK-001,TSK-999', '--as=alice'], { cwd: y.dir, env: at(NOW) });
-  T.eq('H16 claim (preflight abort): top-level keys are exactly [ok, results]', topKeys(r2.json), ['ok', 'results']);
+  T.eq('H16 claim (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
 }
 {
   const x = model('ac31-h16-release');
   ok(run(['claim', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: at(NOW) }), 'alice claims TSK-001,TSK-002 for H16');
   const r1 = runJ(['release', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: later() });
-  T.eq('H16 release (runtime completion): top-level keys are exactly [ok, results]', topKeys(r1.json), ['ok', 'results']);
+  T.eq('H16 release (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
   const y = model('ac31-h16-release-abort');
   ok(run(['claim', '--id=TSK-001', '--as=alice'], { cwd: y.dir, env: at(NOW) }), 'alice claims TSK-001 for H16 abort');
   const r2 = runJ(['release', '--id=TSK-001,TSK-999', '--as=alice'], { cwd: y.dir, env: later() });
-  T.eq('H16 release (preflight abort): top-level keys are exactly [ok, results]', topKeys(r2.json), ['ok', 'results']);
+  T.eq('H16 release (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
 }
 
 /* ===================================================================== */

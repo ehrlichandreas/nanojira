@@ -13,6 +13,7 @@ import { compareElements } from './derive.ts';
 import { intoSandbox, sandboxFor } from './dry-run.ts';
 import { loadBacklog } from './load.ts';
 import { fail } from './output.ts';
+import { setJournalRoot } from './touched.ts';
 
 // ------------------------------------------------------------------ context
 
@@ -24,6 +25,7 @@ function context(flags: Flags, opts?: { lenient?: boolean; tolerateConfig?: bool
   // During a dry run, a scratch copy (§ 9 "`--dry-run`") — every command
   // below this point reads and writes it, never the real backlog.
   const backlog = sandboxFor(findBacklog(flags, Boolean(opts && opts.lenient)));
+  setJournalRoot(backlog);
   const legacy = isLegacyBacklog(backlog);
   if (legacy && !(opts && opts.lenient)) {
     fail('legacy_layout', `${backlog} is a legacy (v2) backlog — every command but \`doctor\` refuses it`,

@@ -2,7 +2,7 @@
   "name": "nanojira",
   "private": true,
   "type": "module",
-  "version": "4.2.0",
+  "version": "4.3.0",
   "description": "NanoJira: a local, file-based task tool for agents.",
   "engines": {
     "node": ">=24"

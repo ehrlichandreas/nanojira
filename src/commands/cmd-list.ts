@@ -5,12 +5,12 @@
 import type { Flags, Element, Config } from '../core/types.ts';
 
 import { actingNameForRead } from '../core/actor.ts';
-import { flagString } from '../core/args.ts';
+import { flagString, parseListFlag } from '../core/args.ts';
 import { checkCommandFlags } from '../core/cli-flags.ts';
 import { readClaim } from '../core/claims.ts';
-import { TYPES } from '../core/constants.ts';
+import { TYPES, PRIORITIES, PRIORITY_WEIGHT } from '../core/constants.ts';
 import { context } from '../core/context.ts';
-import { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } from '../core/derive.ts';
+import { priorityWeight, elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } from '../core/derive.ts';
 import { fail, out, printEntryLine } from '../core/output.ts';
 import { valueHint } from '../core/suggest.ts';
 
@@ -52,6 +52,21 @@ function applyFilters(elements: Element[], flags: Flags, cfg: Config) {
   }
   const assignee = flagString(flags, 'assignee');
   if (assignee !== undefined) list = list.filter((e) => e.assignee === assignee);
+  // --exclude-tag/--min-priority (§ 9, DECISIONS 224): leave out an element
+  // carrying any of the tags; keep only that priority or higher, weighed
+  // exactly as the sort order weighs it (an unknown priority as `normal`).
+  const exclude = parseListFlag(flags, 'exclude-tag');
+  if (exclude !== undefined) {
+    if (exclude.length === 0) fail('invalid_value', '--exclude-tag needs at least one tag', 'give the tags to leave out, comma-separated');
+    list = list.filter((e) => !e.tags.some((t) => exclude.includes(t)));
+  }
+  const minPriority = flagString(flags, 'min-priority');
+  if (minPriority !== undefined) {
+    if (!PRIORITIES.includes(minPriority)) {
+      fail('invalid_value', `unknown priority '${minPriority}'`, valueHint('priority', minPriority, PRIORITIES));
+    }
+    list = list.filter((e) => priorityWeight(e.priority) >= PRIORITY_WEIGHT[minPriority]);
+  }
   return list.sort(compareElements);
 }
 

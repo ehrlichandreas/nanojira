@@ -18,7 +18,7 @@ const T = H.T;
 const BOOLEANS: Record<string, string[]> = {
   init: ['json', 'dry-run'],
   new: ['json', 'quiet', 'dry-run'],
-  set: ['json', 'force', 'allow-open-children', 'quiet', 'dry-run'],
+  set: ['json', 'force', 'allow-open-children', 'check-all', 'quiet', 'dry-run'],
   note: ['json', 'quiet', 'force', 'dry-run'],
   check: ['on', 'off', 'json', 'quiet', 'force', 'dry-run'],
   show: ['json'],
@@ -30,8 +30,8 @@ const BOOLEANS: Record<string, string[]> = {
   rm: ['cascade', 'json', 'dry-run'],
   archive: ['json', 'dry-run'],
   unarchive: ['json', 'dry-run'],
-  claim: ['json', 'quiet', 'allow-open-children', 'dry-run'],
-  release: ['json', 'quiet', 'dry-run'],
+  claim: ['json', 'quiet', 'allow-open-children', 'check-all', 'dry-run'],
+  release: ['json', 'quiet', 'allow-open-children', 'dry-run'],
   next: ['json', 'dry-run'],
   doctor: ['fix', 'json', 'dry-run'],
 };

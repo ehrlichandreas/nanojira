@@ -708,7 +708,7 @@ if (typeof process.getuid === 'function' && process.getuid() !== 0) {
     const rq = hooked(fq.d, fq.cap, ['set', '--id=TSK-001', '--status=doing', '--quiet', '--dry-run', '--json']);
     const jq = parse(rq);
     T.exit('K dry run --quiet: exit 0', rq, 0);
-    T.eq('K dry run --quiet: keys are exactly {ok, id, dry_run, changes}', jq && Object.keys(jq), ['ok', 'id', 'dry_run', 'changes']);
+    T.eq('K dry run --quiet: keys are exactly {ok, id, files, dry_run, changes}', jq && Object.keys(jq), ['ok', 'id', 'files', 'dry_run', 'changes']);
     T.check('K dry run --quiet: changes name the element file', jq && jq.changes.some((c: any) => c.path === 'tasks/TSK-001.md' && c.op === 'modify'), jq && jq.changes);
     T.eq('K dry run --quiet: the hook never fired', calls(fq.cap).length, 0);
     T.eq('K dry run --quiet: the real tree is unchanged', snapshot(fq.d), before);

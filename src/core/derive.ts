@@ -105,9 +105,13 @@ function entryJson(el: Element, backlog: string, cfg: Config): EntryJson {
   // order (_problems before _claim) matches the pre-existing EntryJson shape.
   const claim = readClaim(backlog, el.id);
   const probs = elementProblems(el, cfg.problems.ignore);
-  if (claim && isClaimStale(claim.since, cfg.claims.staleAfterHours, nowMs())) probs.push('claim:stale');
+  const fresh: string[] = [];
+  if (claim && isClaimStale(claim.since, cfg.claims.staleAfterHours, nowMs())) fresh.push('claim:stale');
   // claim:symlink (§ 7, DECISIONS 215), element-level: computed fresh the same way.
-  if (elementClaimLink(backlog, el.id) !== null) probs.push('claim:symlink');
+  if (elementClaimLink(backlog, el.id) !== null) fresh.push('claim:symlink');
+  // problems.ignore applies to these too: suppressed everywhere, not only
+  // in doctor (§ 7, DECISIONS 221).
+  for (const c of fresh) if (!cfg.problems.ignore.includes(c)) probs.push(c);
   e._problems = probs.sort();
   e._claim = claim;
   return e as EntryJson;
@@ -140,4 +144,4 @@ function openAcceptanceExtra(el: Element, cfg: Config, isFinal: boolean): { open
   return counts ? { open_acceptance: counts } : {};
 }
 
-export { elementProblems, isIncomplete, isReady, hasOpenChild, compareElements, entryJson, countsOf, openAcceptanceExtra };
+export { priorityWeight, elementProblems, isIncomplete, isReady, hasOpenChild, compareElements, entryJson, countsOf, openAcceptanceExtra };

@@ -17,6 +17,7 @@ import { CHECKBOX_RE } from '../core/parse.ts';
 import { refreshStatus } from '../core/status.ts';
 import { refreshTags } from '../core/tags.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement } from '../core/store.ts';
+import { touchedFiles } from '../core/touched.ts';
 
 // CHECKBOX_RE (core/parse.ts): after optional leading whitespace, a list
 // marker (-, *, +, or an ordered <digits>. / <digits>)), one space, then
@@ -137,8 +138,9 @@ function cmdCheck(flags: Flags) {
     const results = opts.quiet || opts.fields !== undefined
       ? result.results.map((r: any) => (r.ok ? trimResult(r, opts) : r))
       : result.results;
-    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
-    const wrapper = { ok: result.ok, results };
+    const files = touchedFiles(ctx.backlog);
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results, files }));
+    const wrapper = { ok: result.ok, results, files };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results as any[]) out(r.ok ? `${r.id} ${wantOn ? 'checked' : 'unchecked'}` : `${r.id}: Error: ${r.error}`);
     return result.ok ? 0 : 1;

@@ -15,6 +15,7 @@ import { recordChange } from '../core/on-change.ts';
 import { V3_README } from '../core/readme-texts.ts';
 import { refreshStatus } from '../core/status.ts';
 import { refreshTags } from '../core/tags.ts';
+import { setJournalRoot, touchWrite, withFiles } from '../core/touched.ts';
 
 /**
  * A dry run creates its backlog in a scratch directory, so the real
@@ -49,6 +50,7 @@ function cmdInit(flags: Flags) {
   // During a dry run, a path in a scratch directory that does not exist yet
   // (§ 9 "`--dry-run`"); the real target is never created.
   const backlog = sandboxFor(target);
+  setJournalRoot(backlog);
 
   // A parent that is a file, or one the user may not write, is `io_error`:
   // one line naming the path and the OS reason, never a stack (DECISIONS 93 F4).
@@ -70,6 +72,7 @@ function cmdInit(flags: Flags) {
     fs.writeFileSync(path.join(backlog, '.nanojira', 'config.json'), JSON.stringify(written, null, 2) + '\n', 'utf8');
     fs.writeFileSync(path.join(backlog, '.gitignore'), '.nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n', 'utf8');
     fs.writeFileSync(path.join(backlog, 'README.md'), V3_README, 'utf8');
+    for (const f of [path.join('.nanojira', 'config.json'), '.gitignore', 'README.md']) touchWrite(path.join(backlog, f), false);
   } catch (e: any) {
     fail('io_error', `cannot create the backlog at ${backlog}: ${oneLine(e)}`);
   }
@@ -77,7 +80,7 @@ function cmdInit(flags: Flags) {
   refreshStatus(backlog, { ...DEFAULT_CONFIG });
   refreshTags(backlog, { ...DEFAULT_CONFIG });
 
-  const built = { ok: true, backlog, changed: ['created'] };
+  const built = withFiles({ ok: true, backlog, changed: ['created'] }, backlog);
   recordChange(backlog, () => built);
   if (json) out(JSON.stringify(built, null, 2));
   else {

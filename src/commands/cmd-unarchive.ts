@@ -18,6 +18,7 @@ import { refreshStatus } from '../core/status.ts';
 import { refreshTags } from '../core/tags.ts';
 import { nowIso, atomicWrite, compareGuard, planMove, runMove, renderElement } from '../core/store.ts';
 import { loadElement } from '../core/load.ts';
+import { withFiles } from '../core/touched.ts';
 
 const STABLE_HINT = 'retry once the backlog is stable — unarchive takes no --force';
 const FIX_HINT = 'run `nanojira doctor --fix` to move the files into their places, then unarchive again';
@@ -171,11 +172,11 @@ function cmdUnarchive(flags: Flags) {
   deriveGraph(ctx.elements.filter((e: Element) => !stillArchived.includes(e)).concat(moved), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
   refreshTags(ctx.backlog, ctx.cfg, ctx);
-  const built = {
+  const built = withFiles({
     ok: true, ids: moved.map((m) => m.id), changed: ['unarchived'],
     entries: moved.map((m) => entryJson(m, ctx.backlog, ctx.cfg)),
     _problems: Array.from(new Set(moved.flatMap((m) => elementProblems(m, ctx.cfg.problems.ignore)))).sort(),
-  };
+  }, ctx.backlog);
   recordChange(ctx.backlog, () => built);
   if (json) {
     out(JSON.stringify(built, null, 2));

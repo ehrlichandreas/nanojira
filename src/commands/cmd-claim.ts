@@ -20,7 +20,9 @@ import { refreshStatus } from '../core/status.ts';
 import { refreshTags } from '../core/tags.ts';
 import { compareGuard, mirrorWrite, nowIso, renderElement } from '../core/store.ts';
 import { valueHint } from '../core/suggest.ts';
-import { requireChildrenDone } from './cmd-set.ts';
+import { touchedFiles, withFiles } from '../core/touched.ts';
+import { requireChildrenDone, requireCheckAllStatus } from './cmd-set.ts';
+import { tickAllAcceptance } from '../core/parse.ts';
 
 const STABLE_HINT = 'the element changed in parallel — nanojira claim takes no --force; retry once it is stable';
 
@@ -37,7 +39,7 @@ function requireClaimFits(el: Element, name: string, status: string | undefined,
 }
 
 /** The claim CAS loop, mirror write and rollback for one element — already catchable (mirrorWrite), so the single and batch paths share it unchanged. */
-function claimOne(ctx: Context, el: Element, name: string, status: string | undefined, steal: string | undefined, ts: string) {
+function claimOne(ctx: Context, el: Element, name: string, status: string | undefined, steal: string | undefined, ts: string, checkAll = false) {
   const decide = (h: Entry | null) => {
     const held = h && h.kind === 'claimed' ? h.name : null;
     if (steal !== undefined) {
@@ -69,6 +71,10 @@ function claimOne(ctx: Context, el: Element, name: string, status: string | unde
   const changed: string[] = [];
   if (el.assignee !== name) changed.push('assignee');
   if (status !== undefined && status !== el.status) changed.push('status');
+  // --check-all (§ 12a, DECISIONS 225): the open acceptance boxes ticked in this same write.
+  const ticked = checkAll ? tickAllAcceptance(el.body, ctx.cfg.sections.acceptance) : null;
+  const newBody = ticked !== null && ticked.checked.length > 0 ? ticked.body : undefined;
+  if (newBody !== undefined) changed.push('acceptance');
 
   const overrides = new Map<string, string | string[] | undefined>([['assignee', name], ['updated', ts]]);
   if (status !== undefined) overrides.set('status', status);
@@ -82,7 +88,7 @@ function claimOne(ctx: Context, el: Element, name: string, status: string | unde
 
   try {
     compareGuard(el, false, ctx.backlog, STABLE_HINT, true);
-    mirrorWrite(el.file, renderElement(el, overrides, undefined));
+    mirrorWrite(el.file, renderElement(el, overrides, newBody));
   } catch (e) {
     if (released !== undefined) undoRelease(ctx.backlog, el.id, released.holder, ts);
     // A landed steal is never rolled back (§ 12a): reported as
@@ -106,6 +112,7 @@ function claimOne(ctx: Context, el: Element, name: string, status: string | unde
     previousAssignee !== undefined ? { previous_assignee: previousAssignee } : {},
     released !== undefined ? { released: released.holder } : {},
     openAcceptanceExtra(fresh, ctx.cfg, isFinalStatus),
+    ticked !== null ? { checked: ticked.checked } : {},
   );
 }
 
@@ -124,6 +131,8 @@ function cmdClaim(flags: Flags) {
   }
   const steal = flagString(flags, 'steal');
   const allowOpen = flags.has('allow-open-children');
+  const checkAll = flags.has('check-all');
+  if (checkAll) requireCheckAllStatus(ctx, status);
 
   // Batch writes (§ 9): --id=A,B,C, two or more. A single --id is
   // unaffected and falls through to the unchanged path below.
@@ -140,14 +149,15 @@ function cmdClaim(flags: Flags) {
         requireClaimFits(el, name, status, nowIso());
         return el;
       },
-      (el) => claimOne(ctx, el, name, status, steal, nowIso()),
+      (el) => claimOne(ctx, el, name, status, steal, nowIso(), checkAll),
     );
     if (result.anyWritten) { refreshStatus(ctx.backlog, ctx.cfg, ctx); refreshTags(ctx.backlog, ctx.cfg, ctx); }
     const results = opts.quiet || opts.fields !== undefined
       ? result.results.map((r: any) => (r.ok ? trimResult(r, opts) : r))
       : result.results;
-    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results }));
-    const wrapper = { ok: result.ok, results };
+    const files = touchedFiles(ctx.backlog);
+    if (result.anyWritten) recordChange(ctx.backlog, () => ({ ok: result.ok, results: result.results, files }));
+    const wrapper = { ok: result.ok, results, files };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results as any[]) out(r.ok ? `${r.id} claimed by ${name}` : `${r.id}: Error: ${r.error}`);
     return result.ok ? 0 : 1;
@@ -161,14 +171,14 @@ function cmdClaim(flags: Flags) {
   if (status === 'done') requireChildrenDone(ctx, el, allowOpen, 'claim');
 
   const ts = nowIso();
-  const single = claimOne(ctx, el, name, status, steal, ts);
+  const single = claimOne(ctx, el, name, status, steal, ts, checkAll);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
   refreshTags(ctx.backlog, ctx.cfg, ctx);
   // Field order: `ok` then `id`, matching every other single-ID JSON
   // shape (rm, set, note, check) — Object.assign keeps a key already in
   // the target at its target position, so pre-seeding both here (not
   // just `id`) is what keeps `ok` first.
-  const built = Object.assign({ ok: (single as any).ok, id: el.id }, single);
+  const built = withFiles(Object.assign({ ok: (single as any).ok, id: el.id }, single), ctx.backlog);
   recordChange(ctx.backlog, () => built);
   if (json) {
     const final = opts.quiet || opts.fields !== undefined ? trimResult(built, opts) : built;

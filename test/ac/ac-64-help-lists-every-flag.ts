@@ -43,13 +43,13 @@ const COMMANDS = ['status', 'init', 'new', 'set', 'note', 'check', 'show', 'log'
 // changes only what --help shows, never what a command accepts.
 const OUT = ['json', 'quiet', 'fields'];
 const SECTIONS = ['description', 'description-file', 'acceptance', 'acceptance-file'];
-const FILTERS = ['status', 'type', 'tag', 'parent', 'assignee'];
+const FILTERS = ['status', 'type', 'tag', 'parent', 'assignee', 'exclude-tag', 'min-priority'];
 const PINNED: Record<string, string[]> = {
   status: ['backlog', 'json'],
   init: ['backlog', 'json', 'dry-run'],
   new: ['backlog', 'dry-run', ...OUT, 'input', 'type', 'parent', 'title', 'status', 'priority', 'assignee', 'tags', 'depends_on', ...SECTIONS],
-  set: ['backlog', 'dry-run', ...OUT, 'input', 'id', 'file', 'force', 'allow-open-children',
-    'title', 'parent', 'status', 'priority', 'assignee', 'tags', 'depends_on', ...SECTIONS, 'add-tags', 'remove-tags'],
+  set: ['backlog', 'dry-run', ...OUT, 'input', 'id', 'file', 'force', 'allow-open-children', 'check-all',
+    'title', 'parent', 'status', 'priority', 'assignee', 'tags', 'depends_on', ...SECTIONS, 'add-tags', 'remove-tags', 'add-acceptance'],
   note: ['backlog', 'dry-run', ...OUT, 'id', 'file', 'as', 'force', 'text', 'text-file'],
   check: ['backlog', 'dry-run', ...OUT, 'id', 'file', 'force', 'text', 'item', 'on', 'off'],
   show: ['backlog', 'json', 'id', 'file', 'notes'],
@@ -61,8 +61,8 @@ const PINNED: Record<string, string[]> = {
   rm: ['backlog', 'dry-run', 'json', 'id', 'file', 'cascade'],
   archive: ['backlog', 'dry-run', 'json', 'id', 'file'],
   unarchive: ['backlog', 'dry-run', 'json', 'id', 'file'],
-  claim: ['backlog', 'dry-run', ...OUT, 'id', 'file', 'as', 'steal', 'status', 'allow-open-children'],
-  release: ['backlog', 'dry-run', ...OUT, 'id', 'file', 'as'],
+  claim: ['backlog', 'dry-run', ...OUT, 'id', 'file', 'as', 'steal', 'status', 'allow-open-children', 'check-all'],
+  release: ['backlog', 'dry-run', ...OUT, 'id', 'file', 'as', 'status', 'allow-open-children'],
   next: ['backlog', 'dry-run', 'json', 'as', ...FILTERS],
   doctor: ['backlog', 'dry-run', 'json', 'fix'],
 };

@@ -373,7 +373,7 @@ function sectionC() {
 
 function sectionD() {
   const q = probe({ label: 'd-quiet', setup: BASE, args: () => ['set', '--id=TSK-002', '--status=doing', '--quiet'] });
-  T.eq('D --quiet: {ok, id} plus dry_run and changes', Object.keys(q.dry.json || {}), ['ok', 'id', 'dry_run', 'changes']);
+  T.eq('D --quiet: {ok, id, files} plus dry_run and changes', Object.keys(q.dry.json || {}), ['ok', 'id', 'files', 'dry_run', 'changes']);
   T.check('D --quiet: changes still carry contents', q.dry.json && q.dry.json.changes.length > 0 && typeof q.dry.json.changes[0].after === 'string', J(q.dry.json));
   const f = probe({ label: 'd-fields', setup: BASE, args: () => ['set', '--id=TSK-002', '--status=doing', '--fields=id,status'] });
   T.eq('D --fields: entry projected as in a real call', Object.keys((f.dry.json && f.dry.json.entry) || {}), ['id', 'status']);

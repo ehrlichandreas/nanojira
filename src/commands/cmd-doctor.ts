@@ -28,6 +28,7 @@ import { V2_README, V3_README } from '../core/readme-texts.ts';
 import { statusIsFresh, refreshStatus } from '../core/status.ts';
 import { tagsIsFresh, refreshTags } from '../core/tags.ts';
 import { nowIso, nowMs, mtimeIso, idsSymlinks, readTombstones, tombstoneLocation, atomicWrite, planMove, runMove, renderElement } from '../core/store.ts';
+import { touchedFiles, touchWrite, touchDeleteTree, touchRename } from '../core/touched.ts';
 
 // ------------------------------------------------------------------- doctor
 
@@ -385,6 +386,7 @@ function makeFixCtx(flags: Flags): FixCtx<0> {
   };
   const rename = (from: string, to: string) => {
     fs.renameSync(from, to);
+    touchRename(from, to);
     rekey(from, to);
   };
   // Step 3's moves: a file, or a whole folder with everything in it.
@@ -454,6 +456,7 @@ function fixStrayIds(ctx: Context, fc: FixShared) {
   const stray = readTombstones(strayDir);
   const real = readTombstones(path.join(backlog, V3_IDS_REL), ctx.cfg.ids.shardSize);
   for (const id of stray) if (!real.has(id)) return;
+  touchDeleteTree(strayDir);
   fs.rmSync(strayDir, { recursive: true, force: true });
   fc.notes.push(`removed the stray top-level ${LEGACY_IDS_REL}/ (every tombstone in it was already in ${V3_IDS_REL}/, § 14 step 0)`);
 }
@@ -519,6 +522,7 @@ function fixIdsLayout(ctx: Context, fc: FixShared) {
           const target = path.join(idsDir, n);
           if (fs.existsSync(target)) { fc.notes.push(`${path.join(prefix, b, n)}: cannot move to the flat layout — ${n} already exists there`); continue; }
           fs.renameSync(path.join(bucketDir, n), target);
+          touchRename(path.join(bucketDir, n), target);
           moved++;
         }
         // Only an EMPTY bucket is removed -- a left-alone collision (just
@@ -540,6 +544,7 @@ function fixIdsLayout(ctx: Context, fc: FixShared) {
       if (fs.existsSync(file)) { fc.notes.push(`${n}: cannot move to the sharded layout — already exists at ${path.relative(idsDir, file)}`); continue; }
       fs.mkdirSync(dir, { recursive: true });
       fs.renameSync(path.join(idsDir, n), file);
+      touchRename(path.join(idsDir, n), file);
       moved++;
     }
   }
@@ -801,7 +806,7 @@ function fixStep4(fc: FixCtx<4>): FixCtx<5> {
     const tlink = tdir === dir ? null : internalSymlink(tdir);
     if (tlink !== null) { noteSymlink(fc, tlink); continue; }
     if (tdir !== dir) fs.mkdirSync(tdir, { recursive: true });
-    try { fs.closeSync(fs.openSync(file, 'wx')); created++; } catch { /* raced */ }
+    try { fs.closeSync(fs.openSync(file, 'wx')); touchWrite(file, false); created++; } catch { /* raced */ }
   }
   if (created > 0) {
     fc.actions.push(`created ${created} missing tombstone${created === 1 ? '' : 's'} in ${path.relative(ctx.backlog, dir)}/`);
@@ -1023,7 +1028,7 @@ function doctorFix(flags: Flags, json: boolean) {
 function fixReport(json: boolean, actions: string[], notes: string[], ctx: Context, findings: Finding[]) {
   const errors = findings.filter((f) => f.severity === 'error');
 
-  const built = { backlog: ctx.backlog, ok: errors.length === 0, fixed: actions, notes, problems: findings };
+  const built = { backlog: ctx.backlog, ok: errors.length === 0, fixed: actions, notes, problems: findings, files: touchedFiles(ctx.backlog) };
   // Only a --fix that actually repaired something is a write (§ 9 "`NJ_ON_CHANGE`").
   if (actions.length > 0) recordChange(ctx.backlog, () => built);
   if (json) {
