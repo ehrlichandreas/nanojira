@@ -50,11 +50,11 @@ const PLAIN = [
   'legacy_layout', 'unknown_command', 'missing_argument',
   'missing_value', 'invalid_value', 'invalid_target', 'not_found',
   'duplicate_id', 'exists', 'changed_in_parallel', 'id_allocation_failed',
-  'internal_error', 'ambiguous_target', 'none_ready',
+  'internal_error', 'ambiguous_target', 'none_ready', 'unexpected_argument',
 ];
 const REFUSED = ['unreadable', 'unreadable_dir', 'archived', 'children_open',
   'has_children', 'not_done', 'parent_archived', 'misplaced', 'not_archived',
-  'claimed'];
+  'claimed', 'invalid_id', 'symlink', 'too_large'];
 const HOOKS = ['before-compare', 'after-tmp-write', 'before-rename'];
 const CLOSED = new Set(PLAIN
   .concat(REFUSED.map(r => 'refused:' + r))
@@ -155,6 +155,8 @@ function expectFailure(desc: string, args: string[], opts: RunOpts | undefined, 
   expectFailure('unknown subcommand', ['bogus', '--json'], { cwd: d }, 'unknown_command');
   expectFailure('unknown field flag', ['set', '--id=TSK-001', '--statuss=done', '--json'],
     { cwd: d }, 'unknown_field');
+  expectFailure('a positional on a command that takes none', ['set', '--id=TSK-001', '--json', 'status=done'],
+    { cwd: d }, 'unexpected_argument');
   expectFailure('missing required argument', ['set', '--status=doing', '--json'],
     { cwd: d }, 'missing_argument');
   expectFailure('flag without a value', ['set', '--json', '--id=TSK-001', '--title'],
@@ -214,7 +216,7 @@ function expectFailure(desc: string, args: string[], opts: RunOpts | undefined, 
 }
 
 {
-  // An archived element is read-only in round one (§ 9).
+  // An archived element is read-only (§ 9) until `unarchive` (§ 11a).
   const d = H.mkBacklog({
     label: 'ac20-archived',
     files: {

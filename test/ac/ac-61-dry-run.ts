@@ -21,11 +21,20 @@
  * Sections: A every supported command, success; B refusals return the
  * real call's code; C read commands and plain `doctor` reject the flag;
  * D `--quiet`/`--fields` compose; E prose output; F `--file=<abs path>`;
- * G an unreadable directory (skipped as root).
+ * G an unreadable directory (skipped as root); H a layout folder, or an ID
+ * folder under `hierarchy`, that is a symlink to a directory outside the
+ * backlog: the dry run writes nothing there either (TSK-042, DECISIONS
+ * 218), while the real call still writes through it (DECISIONS 105);
+ * I `$TMPDIR` inside the backlog or inside a linked layout folder's target:
+ * the copy leaves its own scratch folder out instead of copying itself
+ * into itself (DECISIONS 218); J a FIFO as `config.json`, or among the
+ * element files: the dry run is refused like the real call instead of
+ * blocking on it or leaving it out of the copy (DECISIONS 215, 218).
  */
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
+import { spawnSync } from 'child_process';
 import * as H from '../lib/harness.ts';
 const T = H.T;
 
@@ -431,6 +440,209 @@ function sectionG() {
   }
 }
 
+/* ------------------------------------------------------------------ */
+/* H. A top-level folder symlinked outside the backlog (TSK-042)       */
+/* ------------------------------------------------------------------ */
+
+/** contents(), but a symlink at the backlog's top level that points at a
+ * directory is walked as that directory: the real call writes through it
+ * (DECISIONS 105), so that is where its changes are. */
+function contentsFollowTop(root: string): Map<string, Node> {
+  const out = new Map<string, Node>();
+  const visit = (p: string, rel: string, top: boolean) => {
+    let st = fs.lstatSync(p);
+    if (top && st.isSymbolicLink()) { try { st = fs.statSync(p); } catch { /* dangling */ } }
+    if (st.isDirectory()) {
+      out.set(rel, { kind: 'dir', content: null });
+      for (const n of fs.readdirSync(p)) visit(path.join(p, n), rel === '.' ? n : rel + '/' + n, rel === '.');
+    } else if (st.isSymbolicLink()) out.set(rel, { kind: 'symlink', content: fs.readlinkSync(p) });
+    else out.set(rel, { kind: 'file', content: fs.readFileSync(p, 'utf8') });
+  };
+  visit(root, '.', false);
+  return out;
+}
+
+function sectionH() {
+  /** Moves backlog/<name> to <dir>/outside/<name> and links it back. */
+  const linkOut = (name: string, absolute: boolean) => (dir: string) => {
+    const b = backlogOf(dir), o = path.join(dir, 'outside');
+    fs.mkdirSync(o, { recursive: true });
+    fs.renameSync(path.join(b, name), path.join(o, name));
+    fs.symlinkSync(absolute ? path.join(o, name) : path.join('..', 'outside', name), path.join(b, name));
+  };
+  const NEW = ['new', '--type=task', '--parent=EPIC-001', '--title=dry', '--description=D.', '--acceptance=- [ ] x'];
+  const SET = ['set', '--id=TSK-001', '--status=doing'];
+  const CLAIM = ['claim', '--id=TSK-002', '--as=agent'];
+  // A configured folder name; linked under another case it is still read
+  // (matched case-insensitively, DECISIONS 105) — `set` rewrites a file in
+  // it, while `new` places under the configured spelling.
+  const WORK = (dir: string) => base(dir, (d) => setConfig(d, (c) => { c.layout = { folders: { tasks: 'work' } }; }));
+  const linkWork = (dir: string) => {
+    linkOut('work', true)(dir);
+    fs.renameSync(path.join(backlogOf(dir), 'work'), path.join(backlogOf(dir), 'Work'));
+  };
+  // [label, fixture, layout change, args]: every call writes into the
+  // linked folder.
+  // --file= naming the element by its real path behind the link.
+  const CLAIM_FILE = (dir: string) => ['claim', '--file=' + path.join(dir, 'outside', 'tasks', 'TSK-002.md'), '--as=agent'];
+  const cases: Array<[string, (dir: string) => void, (dir: string) => void, string[] | ((dir: string) => string[])]> = [
+    ['tasks, relative link: new', BASE, linkOut('tasks', false), NEW],
+    ['tasks, absolute link: new', BASE, linkOut('tasks', true), NEW],
+    ['tasks, absolute link: set', BASE, linkOut('tasks', true), SET],
+    ['tasks, absolute link: claim', BASE, linkOut('tasks', true), CLAIM],
+    ['tasks, relative link: claim --file=<path behind the link>', BASE, linkOut('tasks', false), CLAIM_FILE],
+    ['configured folder work: new', WORK, linkOut('work', true), NEW],
+    ['configured folder work, linked as Work: set', WORK, linkWork, SET],
+  ];
+  for (const [clabel, setup, restructure, argsOf] of cases) {
+    const argsFor = (dir: string) => (typeof argsOf === 'function' ? argsOf(dir) : argsOf);
+    const label = 'H ' + clabel;
+    const dryDir = H.freshDir('h-dry'), realDir = H.freshDir('h-real');
+    fromTemplate(setup, dryDir); restructure(dryDir);
+    fromTemplate(setup, realDir); restructure(realDir);
+    const tmp = H.freshDir('h-tmpdir');
+    const outside = (dir: string) => path.join(dir, 'outside');
+    const outBefore = fingerprint(outside(dryDir));
+    const blBefore = fingerprint(backlogOf(dryDir));
+    const before = contentsFollowTop(backlogOf(dryDir));
+    const realOutBefore = fingerprint(outside(realDir));
+    const dry = runJ(argsFor(dryDir).concat(['--dry-run']), dryDir, { env: { TMPDIR: tmp } });
+    const real = runJ(argsFor(realDir), realDir);
+    T.eq(`${label}: the dry run writes nothing in the linked folder`, fingerprintDiff(outBefore, fingerprint(outside(dryDir))), []);
+    T.eq(`${label}: the backlog itself stays byte-identical`, fingerprintDiff(blBefore, fingerprint(backlogOf(dryDir))), []);
+    T.eq(`${label}: no scratch copy left in TMPDIR`, fs.readdirSync(tmp), []);
+    T.eq(`${label}: exit code is the real call's (0)`, [dry.status, real.status], [0, 0]);
+    T.check(`${label}: dry_run is true`, !!dry.json && dry.json.dry_run === true, J(dry.json));
+    T.eq(`${label}: changes equals what the real call changed`, J(dry.json && dry.json.changes),
+      J(expectedChanges(before, contentsFollowTop(backlogOf(realDir)))));
+    T.check(`${label}: the real call wrote through the link (DECISIONS 105)`,
+      fingerprintDiff(realOutBefore, fingerprint(outside(realDir))).length > 0, '');
+  }
+
+  // Below the top level a directory symlink is never followed by the scan
+  // (DECISIONS 91 B11), but `hierarchy` still places a new child in its
+  // parent's ID folder through one. The dry run reports that write and
+  // makes it in the scratch copy only.
+  const HIER = (dir: string) => {
+    base(dir, (d) => setConfig(d, (c) => { c.layout = { group: 'hierarchy' }; }));
+    const b = backlogOf(dir), o = path.join(dir, 'outside');
+    fs.mkdirSync(o);
+    // EPIC-001.md stays readable at the top level; its ID folder moves out.
+    fs.renameSync(path.join(b, 'EPIC-001', 'EPIC-001.md'), path.join(b, 'EPIC-001.md'));
+    fs.renameSync(path.join(b, 'EPIC-001'), path.join(o, 'EPIC-001'));
+    fs.symlinkSync(path.join('..', 'outside', 'EPIC-001'), path.join(b, 'EPIC-001'));
+  };
+  const hl = 'H hierarchy, ID folder EPIC-001 linked out: new';
+  const dryDir = H.freshDir('h-hier-dry'), realDir = H.freshDir('h-hier-real');
+  HIER(dryDir); HIER(realDir);
+  const tmp = H.freshDir('h-hier-tmpdir');
+  const outBefore = fingerprint(path.join(dryDir, 'outside'));
+  const blBefore = fingerprint(backlogOf(dryDir));
+  const realOutBefore = fingerprint(path.join(realDir, 'outside'));
+  const dry = runJ(NEW.concat(['--dry-run']), dryDir, { env: { TMPDIR: tmp } });
+  const real = runJ(NEW, realDir);
+  T.eq(`${hl}: the dry run writes nothing in the linked folder`, fingerprintDiff(outBefore, fingerprint(path.join(dryDir, 'outside'))), []);
+  T.eq(`${hl}: the backlog itself stays byte-identical`, fingerprintDiff(blBefore, fingerprint(backlogOf(dryDir))), []);
+  T.eq(`${hl}: no scratch copy left in TMPDIR`, fs.readdirSync(tmp), []);
+  T.eq(`${hl}: exit code is the real call's (0)`, [dry.status, real.status], [0, 0]);
+  const created = fingerprintDiff(realOutBefore, fingerprint(path.join(realDir, 'outside')));
+  T.check(`${hl}: the real call wrote through the link`, created.some((l) => l.includes('EPIC-001/TSK-004/TSK-004.md')), J(created));
+  const changes = (dry.json && dry.json.changes) || [];
+  T.eq(`${hl}: changes names the write through the link, and nothing else in it`,
+    changes.filter((c: any) => c.path.startsWith('EPIC-001/')).map((c: any) => c.op + ' ' + c.kind + ' ' + c.path),
+    ['create dir EPIC-001/TSK-004', 'create file EPIC-001/TSK-004/TSK-004.md']);
+}
+
+/* ------------------------------------------------------------------ */
+/* I. $TMPDIR inside what is copied (DECISIONS 218)                    */
+/* ------------------------------------------------------------------ */
+
+function sectionI() {
+  const linkTasks = (dir: string) => {
+    const b = backlogOf(dir), o = path.join(dir, 'outside');
+    fs.mkdirSync(o);
+    fs.renameSync(path.join(b, 'tasks'), path.join(o, 'tasks'));
+    fs.symlinkSync(path.join('..', 'outside', 'tasks'), path.join(b, 'tasks'));
+    fs.mkdirSync(path.join(o, 'tasks', 'tmp'));
+  };
+  const dotTmp = (dir: string) => { fs.mkdirSync(path.join(backlogOf(dir), '.tmp')); };
+  const cases: Array<[string, (dir: string) => void, string, string]> = [
+    ['I TMPDIR inside the linked tasks target', linkTasks, 'outside/tasks/tmp', 'outside'],
+    ['I TMPDIR inside the backlog (.tmp)', dotTmp, 'backlog/.tmp', 'backlog'],
+  ];
+  const NEW = ['new', '--type=task', '--parent=EPIC-001', '--title=dry', '--description=D.', '--acceptance=- [ ] x'];
+  for (const [label, restructure, tmpRel, watched] of cases) {
+    const dryDir = H.freshDir('i-dry'), realDir = H.freshDir('i-real');
+    fromTemplate(BASE, dryDir); restructure(dryDir);
+    fromTemplate(BASE, realDir); restructure(realDir);
+    const tmp = path.join(dryDir, tmpRel);
+    // The scratch folder comes and goes inside $TMPDIR, so only that one
+    // directory's own entry (its mtime) may differ afterwards.
+    const fp = () => { const m = fingerprint(path.join(dryDir, watched)); m.delete(path.relative(path.join(dryDir, watched), tmp)); return m; };
+    const fpBefore = fp();
+    const before = contentsFollowTop(backlogOf(dryDir));
+    const dry = runJ(NEW.concat(['--dry-run']), dryDir, { env: { TMPDIR: tmp } });
+    const real = runJ(NEW, realDir);
+    T.eq(`${label}: exit codes (dry, real) are both 0`, [dry.status, real.status], [0, 0]);
+    T.check(`${label}: no io_error from a copy of the copy`, !(dry.json && dry.json.error), J(dry.json) + ' ' + dry.stderr.slice(0, 300));
+    T.eq(`${label}: ${watched}/ stays byte-identical`, fingerprintDiff(fpBefore, fp()), []);
+    T.eq(`${label}: no scratch copy left in TMPDIR`, fs.readdirSync(tmp), []);
+    T.eq(`${label}: changes equals what the real call changed`, J(dry.json && dry.json.changes),
+      J(expectedChanges(before, contentsFollowTop(backlogOf(realDir)))));
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* J. A FIFO as the configuration (DECISIONS 215, 218)                 */
+/* ------------------------------------------------------------------ */
+
+/** The dry run reads the configured folder names before it copies
+ * anything (DECISIONS 218); a FIFO there must be refused like the real
+ * call refuses it (`invalid_config`, DECISIONS 215), never block on the
+ * open. The fingerprint helpers read every file, so they are not used on
+ * this tree. */
+function sectionJ() {
+  if (process.platform === 'win32') { T.notCovered('J a FIFO config.json', 'no mkfifo on Windows'); return; }
+  const fifo = (dir: string): string | null => {
+    const file = path.join(backlogOf(dir), '.nanojira', 'config.json');
+    fs.rmSync(file);
+    return spawnSync('mkfifo', [file]).status === 0 ? file : null;
+  };
+  const dryDir = H.freshDir('j-dry'), realDir = H.freshDir('j-real');
+  fromTemplate(BASE, dryDir); fromTemplate(BASE, realDir);
+  const dryCfg = fifo(dryDir), realCfg = fifo(realDir);
+  if (dryCfg === null || realCfg === null) { T.notCovered('J a FIFO config.json', 'mkfifo failed'); return; }
+  const tmp = H.freshDir('j-tmpdir');
+  const SET = ['set', '--id=TSK-001', '--title=renamed', '--json'];
+  const opts = (cwd: string, extra: Record<string, string>) => ({ cwd, timeout: 20000, env: Object.assign({}, ENV, extra), unsetEnv: ['NJ_BACKLOG'] });
+  const dry = H.runJson(SET.concat(['--dry-run']), opts(dryDir, { TMPDIR: tmp }));
+  const real = H.runJson(SET, opts(realDir, {}));
+  T.check('J FIFO config.json, --dry-run: returns instead of hanging', dry.status !== null, H.describeRun(dry));
+  T.eq('J FIFO config.json: the real call is invalid_config', [real.status, real.json && real.json.error], [1, 'invalid_config']);
+  T.eq('J FIFO config.json, --dry-run: the same exit code and error as the real call',
+    [dry.status, dry.json && dry.json.error], [real.status, real.json && real.json.error]);
+  T.eq('J FIFO config.json, --dry-run: the same stderr (paths mapped)', dry.stderr, real.stderr.split(realDir).join(dryDir));
+  T.check('J FIFO config.json, --dry-run: it is still the FIFO', fs.lstatSync(dryCfg).isFIFO(), '');
+  T.eq('J FIFO config.json, --dry-run: no scratch copy left in TMPDIR', fs.readdirSync(tmp), []);
+
+  // A FIFO among the element files is a stub (`file:unreadable`) for the
+  // real call, so `rm` is refused; the copy must hold something that reads
+  // the same way, not leave it out.
+  const eDry = H.freshDir('j-el-dry'), eReal = H.freshDir('j-el-real');
+  fromTemplate(BASE, eDry); fromTemplate(BASE, eReal);
+  for (const d of [eDry, eReal]) spawnSync('mkfifo', [path.join(backlogOf(d), 'tasks', 'TSK-009.md')]);
+  const RM = ['rm', '--id=TSK-002', '--json'];
+  const tmp2 = H.freshDir('j-el-tmpdir');
+  const rDry = H.runJson(RM.concat(['--dry-run']), opts(eDry, { TMPDIR: tmp2 }));
+  const rReal = H.runJson(RM, opts(eReal, {}));
+  T.check('J FIFO element file, --dry-run: returns instead of hanging', rDry.status !== null, H.describeRun(rDry));
+  T.eq('J FIFO element file: the real rm is refused:unreadable', [rReal.status, rReal.json && rReal.json.error], [1, 'refused:unreadable']);
+  T.eq('J FIFO element file, --dry-run: the same exit code and error as the real call',
+    [rDry.status, rDry.json && rDry.json.error], [rReal.status, rReal.json && rReal.json.error]);
+  T.eq('J FIFO element file, --dry-run: the same stderr (paths mapped)', rDry.stderr, rReal.stderr.split(eReal).join(eDry));
+  T.eq('J FIFO element file, --dry-run: no scratch copy left in TMPDIR', fs.readdirSync(tmp2), []);
+}
+
 sectionA();
 sectionB();
 sectionC();
@@ -438,4 +650,7 @@ sectionD();
 sectionE();
 sectionF();
 sectionG();
+sectionH();
+sectionI();
+sectionJ();
 T.finish();

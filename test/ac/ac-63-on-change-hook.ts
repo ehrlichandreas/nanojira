@@ -24,6 +24,11 @@
  *      no-hook twin; the hook's stdout lands on stderr, never on stdout.
  *   F. timeout: a hung hook and everything it started are killed;
  *      a bad NJ_ON_CHANGE_TIMEOUT is invalid_env with nothing written.
+ *   F2. work the hook backgrounds without leaving its process group ends
+ *      when the hook does (TSK-036): one that keeps nanojira's stderr no
+ *      longer holds the caller, one with its output redirected no longer
+ *      runs on, and each kill is one warning line; work that leaves the
+ *      group outlives the wait, as § 9 says, with no warning.
  *   G. recursion guard: a hook that itself runs `nanojira note` does not
  *      fire again, even when it re-exports NJ_ON_CHANGE; the hook sees a
  *      consistent backlog.
@@ -425,6 +430,67 @@ for (const w of WRITERS) {
   const rk = hooked(ok.d, ok.cap, ['set', '--id=TSK-001', '--status=doing'], { NJ_ON_CHANGE_TIMEOUT: '86400' });
   T.exit('F timeout 86400 is accepted', rk, 0);
   T.eq('F timeout 86400: fired', calls(ok.cap).length, 1);
+}
+
+/* ---------------------------------------------------------------- */
+/* F2. backgrounded work in the hook's group (TSK-036)               */
+/* ---------------------------------------------------------------- */
+{
+  /* sh exits at once in all three. Before TSK-036 nanojira stopped
+   * caring when sh exited: a job left in the hook's group ran on, and one
+   * still holding nanojira's stderr held every caller reading that pipe
+   * (an MCP call, spawnSync, `$(… 2>&1)`) until it ended. */
+  const pidIn = (cap: string, name: string): number => {
+    try { return Number(fs.readFileSync(path.join(cap, name), 'utf8').trim()); } catch { return 0; }
+  };
+  const goneSoon = (pid: number): boolean => {
+    for (let i = 0; i < 30; i++) {
+      try { process.kill(pid, 0); } catch { return true; }
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+    }
+    return false;
+  };
+  const reap = (pid: number) => { if (pid > 0) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } } };
+  const LEFT = 'Warning: NJ_ON_CHANGE hook left background work in its process group, which was killed (use setsid to keep it); the write itself succeeded and is unchanged\n';
+  {
+    const { d, cap } = fixture('f2-holder');
+    const r = H.runNj(['set', '--id=TSK-001', '--status=doing', '--json'],
+      { cwd: d, env: { NJ_ON_CHANGE: 'sleep 20 & echo $! > "$AC63_CAP/bgpid"', AC63_CAP: cap }, timeout: 60000 });
+    const pid = pidIn(cap, 'bgpid');
+    T.exit('F2 a job backgrounded on the inherited stderr: exit 0', r, 0);
+    // 12 s: a loaded pool stretches nj's own start; the job's 20 s stays out of reach.
+    T.check('F2 ... the call returns, not after the job\'s 20 s', (r.ms || 0) < 12000, r.ms + ' ms');
+    T.check('F2 ... the hook recorded the job\'s pid', pid > 0, '');
+    T.check('F2 ... and the job is gone', pid > 0 && goneSoon(pid), 'pid ' + pid);
+    T.eq('F2 ... one warning line names the kill', r.stderr, LEFT);
+    reap(pid);
+  }
+  {
+    const { d, cap } = fixture('f2-quiet');
+    const r = H.runNj(['set', '--id=TSK-001', '--status=doing', '--json'],
+      { cwd: d, env: { NJ_ON_CHANGE: 'sleep 30 >/dev/null 2>&1 & echo $! > "$AC63_CAP/bgpid"', AC63_CAP: cap }, timeout: 60000 });
+    const pid = pidIn(cap, 'bgpid');
+    T.exit('F2 a job backgrounded with its output redirected: exit 0', r, 0);
+    T.check('F2 ... the hook recorded the job\'s pid', pid > 0, '');
+    T.check('F2 ... the job does not outlive the hook: it stayed in the hook\'s group', pid > 0 && goneSoon(pid), 'pid ' + pid);
+    T.eq('F2 ... one warning line names the kill', r.stderr, LEFT);
+    reap(pid);
+  }
+  {
+    const { d, cap } = fixture('f2-escaped');
+    const esc = path.join(H.freshDir('ac63-f2-esc'), 'escape.mjs');
+    fs.writeFileSync(esc, "import { spawn } from 'node:child_process';\nimport fs from 'node:fs';\n" +
+      "const c = spawn('sleep', ['30'], { detached: true, stdio: 'ignore' });\nc.unref();\nfs.writeFileSync(process.argv[2], String(c.pid));\n");
+    const r = H.runNj(['set', '--id=TSK-001', '--status=doing', '--json'],
+      { cwd: d, env: { NJ_ON_CHANGE: '"$AC63_NODE" "$AC63_ESC" "$AC63_CAP/escpid"', AC63_CAP: cap, AC63_NODE: process.execPath, AC63_ESC: esc }, timeout: 60000 });
+    const pid = pidIn(cap, 'escpid');
+    T.exit('F2 control, a job that leaves the hook\'s group: exit 0', r, 0);
+    let alive = false;
+    try { process.kill(pid, 0); alive = pid > 0; } catch { /* gone */ }
+    T.check('F2 control ... outlives the wait, as § 9 says', alive, 'pid ' + pid);
+    T.eq('F2 control ... and no warning: nothing was left in the group', r.stderr, '');
+    reap(pid);
+  }
 }
 
 /* ---------------------------------------------------------------- */

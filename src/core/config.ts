@@ -11,6 +11,7 @@ import { flagString } from './args.ts';
 import { DEFAULT_CONFIG, FOLDER_ROLES, GROUPS, SEVERITY, V3_DIR_REL, V3_CONFIG_REL, LEGACY_CONFIG_REL } from './constants.ts';
 import { fail } from './output.ts';
 import { sleepMs } from './store.ts';
+import { readRegularFile, TEXT_FILE_CAP } from './regular-file.ts';
 import { VERSION, parseVersionTuple, compareVersionTuples } from './version.ts';
 
 // ------------------------------------------------------------ configuration
@@ -227,9 +228,12 @@ function loadConfig(backlog: string, legacy?: boolean) {
   const file = path.join(backlog, rel);
   let raw;
   try {
-    raw = fs.readFileSync(file, 'utf8');
-  } catch {
-    return { config: DEFAULT_CONFIG, errors: [`${rel} is missing`], warnings: [], needsNewerNj: null };
+    raw = readRegularFile(file, TEXT_FILE_CAP);
+  } catch (e: any) {
+    // A FIFO, a device or an oversized file is never read (DECISIONS 215);
+    // anything but a plain absence says what it is.
+    const why = e && e.code === 'ENOENT' ? 'is missing' : `cannot be read — ${e && e.message ? e.message : String(e)}`;
+    return { config: DEFAULT_CONFIG, errors: [`${rel} ${why}`], warnings: [], needsNewerNj: null };
   }
   let obj;
   try {

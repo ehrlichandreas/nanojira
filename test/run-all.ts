@@ -15,8 +15,10 @@
  * test/README.md) is held back and run alone, one at a time, after the pool
  * has drained. A file marked `@slow` is started first, so the longest files
  * do not begin late and stretch the pool (DECISIONS 201); this changes the
- * dispatch order only, never the print order. `--jobs=1` is the old strictly
- * serial loop: collected order, markers irrelevant, byte-identical output.
+ * dispatch order only, never the print order. `--jobs=1` runs one file at a
+ * time in collected order, markers irrelevant, through the pool's own runner
+ * (TSK-029): its output is the old serial loop's except for a file that
+ * times out or passes MAX_BUFFER (DECISIONS 193).
  *
  * One private run root per run, shared by every file, is each file's
  * NJ_TEST_ROOT and TMPDIR; a run that leaves anything in it fails, listing
@@ -25,7 +27,7 @@
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { spawn, spawnSync } from 'child_process';
+import { spawn, type ChildProcess } from 'child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -116,10 +118,15 @@ const CHILD_ENV = Object.assign({}, process.env, { NJ_TEST_ROOT: RUN_ROOT, TMPDI
 
 const TIMEOUT_MS = 600000;
 /* A file still running TIMEOUT_MS after it started is a FAIL, whatever it
- * exits with later (TSK-028): the pool sends SIGTERM, then SIGKILL after
- * KILL_GRACE_MS; the serial path (spawnSync, which cannot escalate) kills
- * with SIGKILL at once. The harness installs no signal handler, so for a
- * harness file both end it at once anyway. */
+ * exits with later (TSK-028). The kill goes to the file's whole process
+ * group (TSK-029): SIGTERM, then SIGKILL after KILL_GRACE_MS, and SIGKILL
+ * at once to whatever of the group outlives the file itself -- a
+ * grandchild that ignores SIGTERM (a hook, a sleep, a nanojira call) would
+ * otherwise run on, or hold the file's pipes open and hang the run. The
+ * harness installs no signal handler, so a harness file ends at the
+ * SIGTERM. Both phases kill the same way: the serial phase runs its files
+ * one at a time through runAsync() too, since spawnSync can neither
+ * escalate nor reach a grandchild. */
 const KILL_GRACE_MS = 10000;
 const timedOutNote = (how: string) => 'run-all: timed out after ' + (TIMEOUT_MS / 1000) + ' s; killed (' + how + ')\n';
 const withNote = (text: string, note: string) => text + (text === '' || text.endsWith('\n') ? '' : '\n') + note;
@@ -132,53 +139,68 @@ function argvFor(t: string): string[] {
   return [path.join(ROOT, t)].concat(NJ ? [NJ] : []);
 }
 
-function runSync(t: string): Result {
-  const r = spawnSync(NODE, argvFor(t), {
-    encoding: 'utf8',
-    env: CHILD_ENV,
-    timeout: TIMEOUT_MS,
-    killSignal: 'SIGKILL',
-    maxBuffer: MAX_BUFFER,
-  });
-  const out = (r.stdout || '') + (r.stderr || '');
-  if ((r.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT') return { status: null, out: withNote(out, timedOutNote('SIGKILL')) };
-  return { status: r.status, out };
+/* Each file runs as the leader of its own process group (detached: setsid
+ * on POSIX), so a kill can reach everything it started: signalTree() sends
+ * to -pid. On Windows a detached child gets its own console and there are
+ * no process groups to signal, so there the kill reaches the file only. A
+ * group of its own also means a Ctrl-C at the terminal, or a SIGTERM to the
+ * gate's process group, no longer reaches the files directly: run-all
+ * passes it on with SIGKILL to every live group, then dies of it itself
+ * (onRunAllSignal below). A SIGKILL to run-all itself cannot be passed on. */
+const GROUPS = process.platform !== 'win32';
+const live = new Set<ChildProcess>();
+function signalTree(child: ChildProcess, sig: NodeJS.Signals) {
+  try {
+    if (GROUPS && child.pid) process.kill(-child.pid, sig);
+    else child.kill(sig);
+  } catch { /* already gone */ }
 }
+function onRunAllSignal(sig: NodeJS.Signals) {
+  for (const child of live) signalTree(child, 'SIGKILL');
+  for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.removeAllListeners(s);
+  process.kill(process.pid, sig);
+}
+if (GROUPS) for (const s of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(s, onRunAllSignal);
 
-/* The async twin of runSync(), kept to spawnSync's observable contract so a
- * file's verdict cannot depend on which phase ran it: stdin closed at once,
- * stdout then stderr (not interleaved), a null status once either stream
- * passes MAX_BUFFER, and a spawn error is an empty-output null status. On
- * the timeout both give a null status and a "timed out" line; runSync kills
- * with SIGKILL, this one with SIGTERM, then SIGKILL after KILL_GRACE_MS. */
+/* Kept to spawnSync's observable contract (the serial loop used spawnSync
+ * until TSK-029), so a file's verdict cannot depend on which phase ran it:
+ * stdin closed at once, stdout then stderr (not interleaved), a null status
+ * once either stream passes MAX_BUFFER, and a spawn error is an
+ * empty-output null status. A timeout gives a null status and a "timed out"
+ * line. A timeout or an overflow stops the file's group: SIGTERM, then
+ * SIGKILL after KILL_GRACE_MS, and SIGKILL as soon as the file is gone. */
 function runAsync(t: string): Promise<Result> {
   return new Promise((resolve) => {
-    const child = spawn(NODE, argvFor(t), { env: CHILD_ENV, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(NODE, argvFor(t), { env: CHILD_ENV, stdio: ['pipe', 'pipe', 'pipe'], detached: GROUPS });
+    live.add(child);
     const out: Buffer[] = [], err: Buffer[] = [];
-    let outLen = 0, errLen = 0, done = false, timedOut = false;
+    let outLen = 0, errLen = 0, done = false, timedOut = false, stopping = false;
     let grace: NodeJS.Timeout | undefined;
-    const kill = (sig: NodeJS.Signals = 'SIGTERM') => { try { child.kill(sig); } catch { /* already gone */ } };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      kill('SIGTERM');
-      grace = setTimeout(() => kill('SIGKILL'), KILL_GRACE_MS);
-    }, TIMEOUT_MS);
+    const stop = () => {
+      if (stopping) return;
+      stopping = true;
+      signalTree(child, 'SIGTERM');
+      grace = setTimeout(() => signalTree(child, 'SIGKILL'), KILL_GRACE_MS);
+    };
+    const timer = setTimeout(() => { timedOut = true; stop(); }, TIMEOUT_MS);
     child.stdin.on('error', () => { /* child exited before reading stdin */ });
     child.stdin.end();
-    child.stdout.on('data', (b: Buffer) => { outLen += b.length; if (outLen > MAX_BUFFER) kill(); else out.push(b); });
-    child.stderr.on('data', (b: Buffer) => { errLen += b.length; if (errLen > MAX_BUFFER) kill(); else err.push(b); });
+    child.stdout.on('data', (b: Buffer) => { outLen += b.length; if (outLen > MAX_BUFFER) stop(); else out.push(b); });
+    child.stderr.on('data', (b: Buffer) => { errLen += b.length; if (errLen > MAX_BUFFER) stop(); else err.push(b); });
     const finish = (status: number | null, text: string) => {
       if (done) return;
       done = true;
+      live.delete(child);
       clearTimeout(timer);
       if (grace) clearTimeout(grace);
       resolve({ status, out: text });
     };
     child.on('error', () => finish(null, ''));
     child.on('close', (code, signal) => {
+      if (stopping) signalTree(child, 'SIGKILL');   // what of the group outlived the file
       const overflow = outLen > MAX_BUFFER || errLen > MAX_BUFFER;
       const text = Buffer.concat(out).toString('utf8') + Buffer.concat(err).toString('utf8');
-      if (timedOut) finish(null, withNote(text, timedOutNote('SIGTERM, then SIGKILL after ' + (KILL_GRACE_MS / 1000) + ' s')));
+      if (timedOut) finish(null, withNote(text, timedOutNote('SIGTERM to its process group, then SIGKILL after ' + (KILL_GRACE_MS / 1000) + ' s')));
       else finish(signal || overflow ? null : code, text);
     });
   });
@@ -232,13 +254,13 @@ async function runPool(indices: number[], order: number[]) {
 
 const all = tests.map((_, i) => i);
 if (JOBS === 1) {
-  for (const i of all) report(i, await timed(tests[i], 'serial', () => runSync(tests[i])));
+  for (const i of all) report(i, await timed(tests[i], 'serial', () => runAsync(tests[i])));
 } else {
   const serial = all.filter((i) => hasMark(tests[i], 'serial'));
   const pooled = all.filter((i) => !serial.includes(i));
   const slow = pooled.map((_, k) => k).filter((k) => hasMark(tests[pooled[k]], 'slow'));
   await runPool(pooled, slow.concat(pooled.map((_, k) => k).filter((k) => !slow.includes(k))));
-  for (const i of serial) report(i, await timed(tests[i], 'serial', () => runSync(tests[i])));
+  for (const i of serial) report(i, await timed(tests[i], 'serial', () => runAsync(tests[i])));
 }
 if (process.env.NJ_TEST_TIMES) {
   fs.writeFileSync(process.env.NJ_TEST_TIMES, 'file\tphase\tstart_ms\tms\n' + times.sort((a, b) => b.ms - a.ms)

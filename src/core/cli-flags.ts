@@ -13,7 +13,8 @@
 import type { Flags } from './types.ts';
 
 import { allowedControlSet, checkFlags } from './args.ts';
-import { FLAG_TABLE, cliFieldNames } from './flag-table.ts';
+import { FLAG_TABLE, cliFieldNames, commandFields } from './flag-table.ts';
+import { fail } from './output.ts';
 
 interface CliSpec {
   /** The names `checkFlags` reports as "Known fields:" on an unknown flag. */
@@ -48,14 +49,14 @@ const CLI_SPEC: Record<string, CliSpec> = {
   show: { fields: [], controls: ['json', ...cliFieldNames('show')], write: false },
   log: { fields: [], controls: ['json', ...cliFieldNames('log')], write: false },
   list: { fields: [], controls: ['json', 'ready', 'all', ...cliFieldNames('list')], write: false },
-  find: { fields: [], controls: ['json', 'all', ...cliFieldNames('find')], write: false },
+  find: { fields: [], controls: ['json', 'all', 'text', ...cliFieldNames('find')], write: false },
   tree: { fields: [], controls: ['json', 'all', ...cliFieldNames('tree')], write: false },
   tags: { fields: [], controls: ['json'], write: false },
   rm: { fields: [], controls: ['json', ...cliFieldNames('rm')], write: true },
   archive: { fields: [], controls: ['json', ...cliFieldNames('archive')], write: true },
   unarchive: { fields: [], controls: ['json', ...cliFieldNames('unarchive')], write: true },
   // Only `status` in "Known fields:", as the original error text had it.
-  claim: { fields: ['status'], controls: [...OUTPUT, ...cliFieldNames('claim').filter((f) => f !== 'status')], write: true },
+  claim: { fields: ['status'], controls: [...OUTPUT, ...cliFieldNames('claim').filter((f) => f !== 'status'), 'allow-open-children'], write: true },
   release: { fields: [], controls: [...OUTPUT, ...cliFieldNames('release')], write: true },
   next: { fields: cliFieldNames('next'), controls: ['json'], write: true },
   doctor: { fields: [], controls: ['json', 'dry-run', ...cliFieldNames('doctor')], write: false },
@@ -72,6 +73,37 @@ function cliSpec(command: string): CliSpec {
 function checkCommandFlags(flags: Flags, command: string): void {
   const s = cliSpec(command);
   checkFlags(flags, s.fields, new Set(s.controls), s.write);
+  // A flag that takes no value is given on its own (TSK-034 F3): commands
+  // test only whether it is present, so `--cascade=false` would cascade.
+  for (const [name, value] of flags) {
+    if (value !== true && isBooleanFlag(command, name)) {
+      fail('invalid_value', `--${name} takes no value`, `pass --${name} on its own`);
+    }
+  }
+}
+
+/**
+ * Only `note` and `find` take a positional (their flag table's
+ * `positional: true` field). On every other command a positional is a
+ * mistake — a flag after `--`, or `status=done` without its `--` — and
+ * would otherwise be dropped while a write reports success, so it is
+ * refused, naming the token (TSK-034). An unknown command word is left to
+ * `unknown_command`.
+ */
+function refuseStrayPositionals(command: string, positional: string[]): void {
+  if (positional.length === 0 || !Object.hasOwn(CLI_SPEC, command)) return;
+  if (Object.hasOwn(FLAG_TABLE, command) && commandFields(command).some((f) => f.positional)) return;
+  const shown = command === 'status' ? 'nanojira' : `nanojira ${command}`;
+  fail('unexpected_argument', `unexpected argument '${positional[0]}' — ${shown} takes no positional argument`,
+    'flags go before `--`; write every flag as --name or --name=value');
+}
+
+/** The control flags that take no value; `--dry-run` is checked by `checkFlags` itself. */
+const BOOLEAN_CONTROLS = new Set(['json', 'quiet', 'force', 'allow-open-children', 'ready', 'all']);
+
+function isBooleanFlag(command: string, name: string): boolean {
+  if (BOOLEAN_CONTROLS.has(name)) return true;
+  return Object.hasOwn(FLAG_TABLE, command) && commandFields(command).some((f) => f.name === name && f.kind === 'boolean');
 }
 
 /** Every flag name `command` accepts, as `checkCommandFlags` sees them
@@ -164,7 +196,7 @@ const COMMAND_DOCS: Record<string, Record<string, FlagDoc>> = {
     last: doc('show only the last N events', '<N>'),
   },
   list: FILTER,
-  find: { ...FILTER, 'case-sensitive': doc('match the text with exact case') },
+  find: { ...FILTER, 'case-sensitive': doc('match the text with exact case'), text: doc('the search text, instead of the positional argument', '<text>') },
   tree: { id: doc('show only this element and what is below it', '<id>') },
   rm: { cascade: doc('also remove every element below this one') },
   claim: {
@@ -196,4 +228,4 @@ function flagDoc(command: string, name: string): FlagDoc {
 }
 
 export type { CliSpec, FlagDoc };
-export { checkCommandFlags, acceptedFlagNames, flagDoc };
+export { checkCommandFlags, refuseStrayPositionals, acceptedFlagNames, flagDoc };

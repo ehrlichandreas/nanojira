@@ -117,6 +117,10 @@ function warn(what: string) {
  * `--json` caller's stdout stays exactly the one JSON document. The hook
  * runs in its own process group, so a timeout kills everything it started
  * (SIGKILL to the group), and nanojira's exit code is never changed by it.
+ * The same kill follows the hook's own exit (TSK-036, DECISIONS 217): work
+ * it backgrounded without leaving its group ends with it, as § 9 says,
+ * instead of running on with nanojira's stderr and holding every caller
+ * that reads that pipe (an MCP call, `$(… 2>&1)`) until it ends.
  */
 function fireRecordedChange(): void {
   if (armed === null || pending === null) return;
@@ -146,6 +150,10 @@ function fireRecordedChange(): void {
     if (child.pid === undefined) return;
     try { process.kill(-child.pid, 'SIGKILL'); } catch { /* already gone */ }
   };
+  const groupAlive = (): boolean => {
+    if (child.pid === undefined) return false;
+    try { process.kill(-child.pid, 0); return true; } catch { return false; }
+  };
   // nanojira interrupted while waiting: take the hook's group down with it
   // rather than leave it running unbounded, then die of the same signal.
   const onSignal = (sig: NodeJS.Signals) => {
@@ -167,9 +175,16 @@ function fireRecordedChange(): void {
   child.on('exit', (code, signal) => {
     if (settled) return;
     settle();
+    // Anything still in the group was backgrounded without leaving it: it
+    // dies now (§ 9), and says so, since a hook author may have meant it
+    // to outlive nanojira (`nohup cmd &` and `( cmd & )` stay in the group).
+    // Not after a timeout: that kill already happened and has its warning.
+    const leftWork = !timedOut && groupAlive();
+    killGroup();
     if (timedOut) warn(`timed out after ${timeoutS}s and was killed`);
     else if (signal !== null) warn(`was killed by ${signal}`);
     else if (code !== 0) warn(`exited with status ${code}${code === 127 ? ' (command not found)' : ''}`);
+    if (leftWork) warn('left background work in its process group, which was killed (use setsid to keep it)');
   });
   // A hook that never reads stdin may exit before the result is written:
   // EPIPE here is the hook's choice, not a failure of anything.

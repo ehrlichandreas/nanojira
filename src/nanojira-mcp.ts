@@ -41,11 +41,35 @@ const TOOL_NAMES = ['list', 'show', 'find', 'tree', 'new', 'set', 'note',
 
 /** `doctor`'s `fix` field exists in its schema only when the server was
  * launched with `--allow-destructive` (§ 17): the gate is schema-level,
- * not a runtime check inside the tool. Every other tool's fields are
- * exactly its flag-table entry. */
+ * not a runtime check inside the tool. Every other tool's fields are its
+ * flag-table entry minus the `*-file` fields (`description-file`,
+ * `acceptance-file`): those read any path the caller names, which would
+ * let a tool call copy a local file into the backlog, and an MCP client
+ * has the text in hand anyway (TSK-035, DECISIONS 214). `file` stays: it
+ * addresses an already-scanned element, never an arbitrary path. */
 function toolFields(name: string, allowDestructive: boolean): FieldSpec[] {
-  if (name !== 'doctor') return commandFields(name);
-  return allowDestructive ? commandFields('doctor') : [];
+  if (name === 'doctor' && !allowDestructive) return [];
+  return commandFields(name).filter((f) => !f.name.endsWith('-file'));
+}
+
+/* Per-call timeout (TSK-035): a child that never finishes would otherwise
+ * hold its call, and with it the client, for good. CALL_MARGIN_S is far
+ * beyond any real call; a write's NJ_ON_CHANGE hook runs inside the child
+ * for up to NJ_ON_CHANGE_TIMEOUT seconds (default 10), so that is added
+ * when a hook is set. A child past it gets SIGTERM (nanojira passes that
+ * on to a running hook's group), then SIGKILL after KILL_GRACE_MS. */
+const CALL_MARGIN_S = 60;
+const KILL_GRACE_MS = 5000;
+/* How long a call waits for the child's stderr to end once the child has
+ * exited and its stdout has ended. Whatever nanojira itself wrote is in the
+ * pipe by then; only a process it left behind (a hook job that left the
+ * hook's group, `setsid`) can hold the pipe longer, and the call must not
+ * wait for that one (D214, TSK-035 review). */
+const STDERR_DRAIN_MS = 200;
+function callTimeoutMs(): number {
+  const raw = process.env.NJ_ON_CHANGE_TIMEOUT;
+  const hookS = !process.env.NJ_ON_CHANGE ? 0 : raw !== undefined && /^[1-9][0-9]*$/.test(raw) ? Math.min(Number(raw), 86400) : 10;
+  return (CALL_MARGIN_S + hookS) * 1000;
 }
 
 function inputSchema(fields: FieldSpec[]) {
@@ -122,12 +146,14 @@ function main() {
   // addendum 9b3d0de, replacing the earlier `.cjs` sibling lookup, D179).
   const njPath = path.join(path.dirname(path.resolve(process.argv[1])), 'nanojira.mjs');
 
-  // Children spawned for in-flight tool calls, so a disconnect (stdin
-  // closes) can clean them up instead of leaving zombies — distinct from
-  // `notifications/cancelled` (§ 17), which is a no-op for a still-running
-  // call: cancelling a write mid-flight would be exactly the half-done
-  // state § 12's compare-before-write exists to prevent.
+  // Children spawned for in-flight tool calls. A disconnect (stdin
+  // closes) lets them finish and answer, then the process exits: killing a
+  // write mid-flight would be exactly the half-done state § 12's
+  // compare-before-write exists to prevent — the same reason
+  // `notifications/cancelled` (§ 17) is a no-op for a still-running call.
+  // The per-call timeout bounds the wait (TSK-035).
   const liveChildren = new Set<import('child_process').ChildProcess>();
+  const timeoutMs = callTimeoutMs();
 
   function send(obj: object) { process.stdout.write(JSON.stringify(obj) + '\n'); }
 
@@ -162,45 +188,98 @@ function main() {
       }
     }
 
+    // Every field, a positional one (note/find `text`) included, goes as
+    // `--name=value`: a value is never parsed as a flag that way. A bare
+    // positional starting with `--` would be (`--text-file=<path>` read
+    // a local file into the note, TSK-035).
     const flagArgs: string[] = [];
-    const positionals: string[] = [];
     for (const f of fields) {
       if (!(f.name in args)) continue;
       const v = args[f.name];
-      if (f.positional) { positionals.push(String(v)); continue; }
       if (f.kind === 'boolean') { if (v) flagArgs.push(`--${f.name}`); continue; }
       flagArgs.push(`--${f.name}=${v}`);
     }
     // `--backlog` explicit on every spawn (§ 17 "Confinement is mechanical,
     // not incidental"), `--json` always, so the child's stdout is exactly
     // the object this call returns as `structuredContent`.
-    const childArgv = [njPath, name, ...flagArgs, `--backlog=${backlog}`, '--json', ...positionals];
+    const childArgv = [njPath, name, ...flagArgs, `--backlog=${backlog}`, '--json'];
 
-    const child = spawn(process.execPath, childArgv, { env: process.env });
+    // stdin ignored: no tool reads it, and a pipe never closed would hang
+    // any child that tried (TSK-035).
+    const child = spawn(process.execPath, childArgv, { env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
     liveChildren.add(child);
     let out = '';
     let err = '';
-    child.stdout.on('data', (c) => { out += c; });
-    child.stderr.on('data', (c) => { err += c; });
+    let answered = false;
+    let finished = false;
+    let grace: NodeJS.Timeout | undefined;
+    let drain: NodeJS.Timeout | undefined;
+    const answer = (fn: () => void) => {
+      if (answered) return;
+      answered = true;
+      clearTimeout(timer);
+      fn();
+    };
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      liveChildren.delete(child);
+      if (grace) clearTimeout(grace);
+      if (drain) clearTimeout(drain);
+      exitWhenIdle();
+    };
+    const timer = setTimeout(() => {
+      answer(() => respondError(id, -32603, `Internal error: nanojira did not finish within ${timeoutMs / 1000} s; killed`));
+      try { child.kill('SIGTERM'); } catch { /* already gone */ }
+      grace = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* already gone */ } }, KILL_GRACE_MS);
+    }, timeoutMs);
+    // Decoded by the stream, so a multibyte character split across two
+    // chunks arrives whole (TSK-035).
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', (c: string) => { out += c; });
+    // Still read after the answer, so a writer left holding the pipe never
+    // blocks on a full one; kept only until the answer.
+    child.stderr.on('data', (c: string) => { if (!answered) err += c; });
     child.on('error', (e) => {
-      liveChildren.delete(child);
-      respondError(id, -32603, `Internal error: failed to spawn nanojira: ${e.message}`);
+      answer(() => respondError(id, -32603, `Internal error: failed to spawn nanojira: ${e.message}`));
+      done();
     });
-    child.on('close', (code) => {
-      liveChildren.delete(child);
-      let parsed: unknown = null;
-      try { parsed = JSON.parse(out); } catch { /* leave null; stderr below explains */ }
-      if (parsed === null) {
-        respondError(id, -32603, `Internal error: nanojira exited ${code} without parsable --json output: ${err.slice(0, 500)}`);
-        return;
-      }
-      const isError = code !== 0;
-      respond(id, {
-        content: [{ type: 'text', text: JSON.stringify(parsed) }],
-        structuredContent: parsed,
-        isError,
+    // Finished = the child has exited AND its stdout has ended (its whole
+    // result is in), not 'close', which also waits for stderr: a process
+    // the child left holding stderr would otherwise hold the call, and
+    // turn a write that succeeded into the timeout's -32603 (D214).
+    let exitCode: number | null | undefined;
+    let stdoutEnded = false;
+    let stderrEnded = false;
+    const settle = () => {
+      if (exitCode === undefined || !stdoutEnded || finished) return;
+      if (!stderrEnded && !drain) { drain = setTimeout(() => { stderrEnded = true; settle(); }, STDERR_DRAIN_MS); return; }
+      if (!stderrEnded) return;
+      complete(exitCode);
+    };
+    child.on('exit', (code) => { exitCode = code; settle(); });
+    child.stdout.on('end', () => { stdoutEnded = true; settle(); });
+    child.stderr.on('end', () => { stderrEnded = true; settle(); });
+    child.on('close', (code) => { exitCode = exitCode === undefined ? code : exitCode; stdoutEnded = true; stderrEnded = true; settle(); });
+    const complete = (code: number | null) => {
+      answer(() => {
+        let parsed: unknown = null;
+        try { parsed = JSON.parse(out); } catch { /* leave null; stderr below explains */ }
+        if (parsed === null) {
+          respondError(id, -32603, `Internal error: nanojira exited ${code} without parsable --json output: ${err.slice(0, 500)}`);
+          return;
+        }
+        const isError = code !== 0;
+        // A failure's message (`Error: …` and its hint) is on stderr, never
+        // in the --json body; a second text block carries it, the body
+        // itself stays exactly the CLI's (TSK-035).
+        const content = [{ type: 'text', text: JSON.stringify(parsed) }];
+        if (isError && err.trim() !== '') content.push({ type: 'text', text: err.trim().slice(0, 4000) });
+        respond(id, { content, structuredContent: parsed, isError });
       });
-    });
+      done();
+    };
   }
 
   function handleLine(line: string) {
@@ -211,8 +290,12 @@ function main() {
       respondError(null, -32700, 'Parse error');
       return;
     }
-    if (msg === null || typeof msg !== 'object' || Array.isArray(msg) || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
-      respondError('id' in (msg || {}) ? msg.id : null, -32600, 'Invalid Request');
+    // A string, a number, `true`, null or an array is valid JSON but no
+    // request: `'id' in` a primitive throws, which crashed the server
+    // (TSK-035).
+    const isObject = msg !== null && typeof msg === 'object' && !Array.isArray(msg);
+    if (!isObject || msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
+      respondError(isObject && 'id' in msg ? msg.id : null, -32600, 'Invalid Request');
       return;
     }
     const hasId = 'id' in msg;
@@ -277,9 +360,14 @@ function main() {
       if (line.trim() !== '') handleLine(line);
     }
   });
+  let stdinEnded = false;
+  function exitWhenIdle() {
+    // Once the last answer is flushed: a pipe write is asynchronous on Windows.
+    if (stdinEnded && liveChildren.size === 0) process.stdout.write('', () => process.exit(0));
+  }
   process.stdin.on('end', () => {
-    for (const child of liveChildren) { try { child.kill('SIGKILL'); } catch { /* already gone */ } }
-    process.exit(0);
+    stdinEnded = true;
+    exitWhenIdle();
   });
 }
 

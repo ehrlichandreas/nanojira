@@ -111,6 +111,7 @@ const SEVERITY: Record<string, string | null> = {
   'claim:mismatch': 'warning',
   'claim:orphaned': 'warning',
   'claim:stale': 'warning',
+  'claim:symlink': 'error',
   'backlog:claims_unignored': 'warning',
   'acceptance:no_checkbox': 'warning',
   'done:no_acceptance': 'warning',

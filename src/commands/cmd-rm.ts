@@ -6,8 +6,9 @@ import type { Flags, Element, EntryJson } from '../core/types.ts';
 
 import * as fs from 'fs';
 import { checkCommandFlags } from '../core/cli-flags.ts';
-import { removeClaimDirWholesale } from '../core/claims.ts';
-import { context, resolveTarget, requireNoStubs, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
+import { removeClaimDirWholesale, requireRealClaimDirs } from '../core/claims.ts';
+import { requireIdShaped } from '../core/id-shape.ts';
+import { context, resolveTarget, requireNoStubs, requireNoUnreadableDirs, requireActive, unarchiveHint } from '../core/context.ts';
 import { compareElements, entryJson } from '../core/derive.ts';
 import { ownFolder } from '../core/layout.ts';
 import { descendants } from '../core/load.ts';
@@ -27,7 +28,7 @@ function cmdRm(flags: Flags) {
   requireNoStubs(ctx, 'rm');
   requireNoUnreadableDirs(ctx, 'rm');
   const el = resolveTarget(ctx, flags, true);
-  requireActive(el, 'rm');
+  requireActive(ctx, el, 'rm');
   const kids = descendants(ctx, el);
 
   if (kids.length > 0 && !flags.has('cascade')) {
@@ -40,8 +41,13 @@ function cmdRm(flags: Flags) {
   const archivedVictims = victims.filter((v: Element) => v.archived);
   if (archivedVictims.length > 0) {
     fail('refused:archived', `the subtree contains archived elements — refusing to delete:\n${archivedVictims.map((v: Element) => '  ' + v.id).join('\n')}`,
-      'archived elements are read-only in round one');
+      unarchiveHint(ctx, archivedVictims));
   }
+  // Each id names a claim directory removed below (§ 12a): a malformed one
+  // must never become that path, nor may a directory behind a symlink be
+  // emptied (DECISIONS 215).
+  requireIdShaped(victims.map((v: Element) => v.id), 'rm');
+  requireRealClaimDirs(ctx.backlog, victims.map((v: Element) => v.id), 'rm');
   const victimIds = new Set(victims.map((v: Element) => v.id));
   // Removing an element leaves depends_on:dangling behind on its dependents;
   // name them rather than let doctor be the first to mention it (§ 9).

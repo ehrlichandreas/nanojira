@@ -4,6 +4,7 @@
 
 import type { Flags, Element } from '../core/types.ts';
 
+import { flagString } from '../core/args.ts';
 import { checkCommandFlags } from '../core/cli-flags.ts';
 import { applyFilters } from './cmd-list.ts';
 import { context } from '../core/context.ts';
@@ -27,8 +28,16 @@ function matchContext(el: Element, needle: string, fold: (s: string) => string):
 
 function cmdFind(flags: Flags, positional: string[]) {
   checkCommandFlags(flags, 'find');
-  if (positional.length === 0) fail('missing_argument', 'nanojira find needs the search text as an argument', 'nanojira find "<text>"');
-  const text = positional.join(' ');
+  // `--text=<t>` is the same search text as the positional form (TSK-035):
+  // a text that starts with `--` can only be given that way, and
+  // nanojira-mcp always passes it that way. One or the other, not both,
+  // the rule note's own text sources follow.
+  const textFlag = flagString(flags, 'text');
+  if (textFlag !== undefined && positional.length > 0) {
+    fail('invalid_value', 'the search text was given both as an argument and with --text', 'pass it one way: nanojira find "<text>" or nanojira find --text=<text>');
+  }
+  if (textFlag === undefined && positional.length === 0) fail('missing_argument', 'nanojira find needs the search text as an argument', 'nanojira find "<text>" (or --text=<text>)');
+  const text = textFlag !== undefined ? textFlag : positional.join(' ');
   // The literal empty string is a caller's mistake, not "find nothing" (the
   // same reading --as= and check --text= already get, DECISIONS 119/129).
   if (text === '') fail('invalid_value', '<text> must not be empty');

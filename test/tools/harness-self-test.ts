@@ -21,8 +21,12 @@
  *      ratio 2.5 under a 15-way parallel load (Reviewer-found, D210);
  *   7. runPathAsync's maxBuffer overflow surfaces as status:null +
  *      `missing`, the same shape sync's own spawn-error path uses,
- *      instead of silently truncating output.
+ *      instead of silently truncating output;
+ *   8. a child that ignores SIGTERM is still stopped, on an overflow and
+ *      on the timeout alike: SIGKILL after the kill grace (TSK-030).
  */
+import fs from 'fs';
+import path from 'path';
 import * as H from '../lib/harness.ts';
 const T = H.T;
 
@@ -226,6 +230,47 @@ async function main() {
     T.check('self-test: a maxBuffer overflow sets `missing`, not truncated output',
       typeof r.missing === 'string' && r.missing.includes('maxBuffer') && r.stdout === '' && r.stderr === '',
       JSON.stringify(r));
+  }
+
+  /* 8. A child that ignores SIGTERM is stopped anyway (TSK-030): the
+   * overflow and the timeout send SIGTERM, then SIGKILL after the kill
+   * grace (opts.killGraceMs, shortened here; default 10 s like run-all's
+   * pool). The child writes its pid first, so the test can check it is
+   * gone. A guard ends the wait on a red run, which used to hang for good:
+   * the ignored SIGTERM was the only signal, so 'close' never came. */
+  {
+    const dir = H.freshDir('t030-stubborn');
+    const stubborn = (name: string, body: string) => {
+      const p = path.join(dir, name + '.mjs');
+      fs.writeFileSync(p, "import fs from 'node:fs';\nprocess.on('SIGTERM', () => {});\n" +
+        'fs.writeFileSync(' + JSON.stringify(path.join(dir, name + '.pid')) + ', String(process.pid));\n' + body);
+      return p;
+    };
+    const legs: [string, string, H.RunOpts][] = [
+      ['an overflow', stubborn('flood', "const b = Buffer.alloc(65536, 120);\n" +
+        "const w = () => { while (process.stdout.write(b)); process.stdout.once('drain', w); };\nw();\n"),
+        { maxBuffer: 4096, killGraceMs: 300 }],
+      ['the timeout', stubborn('hang', 'setInterval(() => {}, 1000);\n'), { timeout: 300, killGraceMs: 300 }],
+    ];
+    for (const [what, script, opts] of legs) {
+      const pidFile = script.replace(/\.mjs$/, '.pid');
+      const t0 = Date.now();
+      const r = await Promise.race([H.runPathAsync(script, [], opts), delay(8000).then(() => null)]);
+      const ms = Date.now() - t0;
+      const pid = fs.existsSync(pidFile) ? Number(fs.readFileSync(pidFile, 'utf8')) : 0;
+      let alive = false;
+      if (pid) { try { process.kill(pid, 0); alive = true; } catch { /* gone */ } }
+      if (alive) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
+      const detail = ms + ' ms; pid ' + pid + '; ' + JSON.stringify(r && Object.assign({}, r, { stdout: r.stdout.length + ' bytes' }));
+      T.check('self-test: ' + what + ' ends the run of a child that ignores SIGTERM', r !== null, detail);
+      T.check('self-test: ... soon after the grace', ms < 5000, detail);
+      T.check('self-test: ... and the child is gone', pid > 0 && !alive, detail);
+      T.eq('self-test: ... killed by SIGKILL', r && r.signal, 'SIGKILL');
+      if (what === 'an overflow') {
+        T.check('self-test: ... and the result still names maxBuffer exceeded',
+          !!r && r.status === null && typeof r.missing === 'string' && r.missing.includes('maxBuffer exceeded'), detail);
+      }
+    }
   }
 
   T.finish();

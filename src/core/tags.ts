@@ -22,6 +22,7 @@ import * as path from 'path';
 import { scanBacklog } from './layout.ts';
 import { loadElement } from './load.ts';
 import { atomicReplace } from './store.ts';
+import { readRegularFile } from './regular-file.ts';
 import { osaDistance } from './suggest.ts';
 
 // --------------------------------------------------------------------- render
@@ -55,9 +56,12 @@ function renderTags(elements: Element[], cfg: Config): string {
 
 /** What `doctor` compares against, from elements it has already loaded. */
 function tagsIsFresh(backlog: string, elements: Element[], cfg: Config): boolean {
+  const fresh = renderTags(elements, cfg);
   let current;
-  try { current = fs.readFileSync(tagsPath(backlog), 'utf8'); } catch { return false; }
-  return current === renderTags(elements, cfg);
+  // Never more than the fresh rendering's own size: a larger file cannot be
+  // equal to it, and a FIFO or device never blocks the read (DECISIONS 215).
+  try { current = readRegularFile(tagsPath(backlog), Buffer.byteLength(fresh)); } catch { return false; }
+  return current === fresh;
 }
 
 // ---------------------------------------------------------------------- write
@@ -89,7 +93,7 @@ function refreshTags(backlog: string, cfg: Config, ctx?: Context): boolean {
     });
     const fresh = renderTags(elements, cfg);
     let current = null;
-    try { current = fs.readFileSync(tagsPath(backlog), 'utf8'); } catch { /* missing or not a file: rewrite */ }
+    try { current = readRegularFile(tagsPath(backlog), Buffer.byteLength(fresh)); } catch { /* missing, not a regular file, or larger: rewrite */ }
     if (current === fresh) return false;
     atomicReplace(tagsPath(backlog), fresh);
     return true;

@@ -63,8 +63,8 @@ function cmdList(flags: Flags) {
 
   if (flags.has('ready')) {
     const actor = actingNameForRead();
-    const ready = filtered.filter((e) => isReady(e, ctx.cfg) && availableToActor(ctx.backlog, e.id, actor));
-    const blocked = filtered.filter((e) => !isReady(e, ctx.cfg) && e.status === ctx.cfg.statuses[0] && isIncomplete(e));
+    const ready = filtered.filter((e) => isReady(e, ctx.cfg, ctx.backlog) && availableToActor(ctx.backlog, e.id, actor));
+    const blocked = filtered.filter((e) => !isReady(e, ctx.cfg, ctx.backlog) && e.status === ctx.cfg.statuses[0] && isIncomplete(e));
     if (flags.has('json')) {
       out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map((e) => entryJson(e, ctx.backlog, ctx.cfg)) }, null, 2));
       return 0;

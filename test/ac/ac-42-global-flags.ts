@@ -188,15 +188,19 @@ function run(args: string[], cwd: string) { return H.runNj(args, { cwd, unsetEnv
 }
 
 /* ===================================================================== */
-/* G8 — repeated/conflicting --backlog: last occurrence wins, regardless */
-/* of position relative to the command word                              */
+/* G8 — repeated --backlog, regardless of position relative to the      */
+/* command word: two different values are refused (TSK-034 F11; was      */
+/* last-wins), the same value twice is accepted                          */
 /* ===================================================================== */
 {
   const x1 = fixture('ac42-g8a');
   const x2 = fixture('ac42-g8b');
   const r = H.runJson(['--backlog=' + x1.bl, 'list', '--backlog=' + x2.bl], { cwd: x1.dir, unsetEnv: ['NJ_BACKLOG'] });
-  T.exit('G8 two conflicting --backlog, pre- and post-command: exit 0', r, 0);
-  T.eq('G8 the LAST --backlog wins (the one after the command)', r.json && r.json.backlog, x2.bl);
+  T.exit('G8 two conflicting --backlog, pre- and post-command: exit 1', r, 1);
+  T.eq('G8 a conflicting --backlog is invalid_value', r.json && r.json.error, 'invalid_value');
+  const same = H.runJson(['--backlog=' + x2.bl, 'list', '--backlog=' + x2.bl], { cwd: x1.dir, unsetEnv: ['NJ_BACKLOG'] });
+  T.exit('G8 the same --backlog twice, pre- and post-command: exit 0', same, 0);
+  T.eq('G8 the same --backlog twice is that backlog', same.json && same.json.backlog, x2.bl);
 }
 
 T.finish();

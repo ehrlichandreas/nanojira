@@ -7,7 +7,7 @@ import type { Flags, Element, Context } from '../core/types.ts';
 import { resolveActingName } from '../core/actor.ts';
 import { checkCommandFlags } from '../core/cli-flags.ts';
 import type { Entry } from '../core/claims.ts';
-import { transition } from '../core/claims.ts';
+import { requireTransitionable, transition } from '../core/claims.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { context, requireTargetFlagSyntax, resolveTarget, resolveById } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
@@ -55,7 +55,11 @@ function cmdRelease(flags: Flags) {
   if (batchIds !== null) {
     const result = runBatch<Element, object>(
       batchIds,
-      (id) => resolveById(ctx, id, true),
+      (id) => {
+        const el = resolveById(ctx, id, true);
+        requireTransitionable(ctx.backlog, el.id);
+        return el;
+      },
       (el) => releaseOne(ctx, el, name, nowIso()),
     );
     const results = opts.quiet || opts.fields !== undefined

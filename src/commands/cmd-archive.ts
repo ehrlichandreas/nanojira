@@ -7,7 +7,8 @@ import type { Flags, Element, Context } from '../core/types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { checkCommandFlags } from '../core/cli-flags.ts';
-import { removeClaimDirWholesale } from '../core/claims.ts';
+import { removeClaimDirWholesale, requireRealClaimDirs } from '../core/claims.ts';
+import { requireIdShaped } from '../core/id-shape.ts';
 import { context, resolveTarget, requireWritable, requireNoStubs, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
 import { elementProblems, entryJson } from '../core/derive.ts';
 import { ownFolder } from '../core/layout.ts';
@@ -94,7 +95,7 @@ function cmdArchive(flags: Flags) {
   requireNoStubs(ctx, 'archive');
   requireNoUnreadableDirs(ctx, 'archive');
   const el = resolveTarget(ctx, flags, true);
-  requireActive(el, 'archive');
+  requireActive(ctx, el, 'archive');
 
   const subtree = [el].concat(descendants(ctx, el)).filter((e: Element) => !e.archived);
   const open = subtree.filter((e: Element) => e.status !== 'done');
@@ -104,8 +105,16 @@ function cmdArchive(flags: Flags) {
       'finish them first; there is no --force for archiving');
   }
   for (const e of subtree) requireWritable(e);
+  // Each id names a claim directory removed below (§ 12a): a malformed one
+  // must never become that path, nor may a directory behind a symlink be
+  // emptied (DECISIONS 215).
+  requireIdShaped(subtree.map((e: Element) => e.id), 'archive');
+  requireRealClaimDirs(ctx.backlog, subtree.map((e: Element) => e.id), 'archive');
 
   const ts = nowIso();
+  // Every rewritten file must fit the element-file cap (DECISIONS 215):
+  // all of them checked before the first move.
+  for (const e of subtree) renderElement(e, new Map([['archived', ts], ['updated', ts]]), undefined);
   const moved = ctx.cfg.layout.group === 'hierarchy'
     ? archiveHierarchy(ctx, el, subtree, ts)
     : archiveFlat(ctx, subtree, ts);

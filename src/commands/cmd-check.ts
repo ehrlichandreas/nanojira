@@ -110,20 +110,23 @@ function cmdCheck(flags: Flags) {
   const batchIds = parseBatchIds(flags);
   if (batchIds !== null) {
     const ts = nowIso();
-    const result = runBatch<CheckItem, object>(
+    const result = runBatch<{ prepared: CheckItem; content: string | null }, object>(
       batchIds,
       (id) => {
         const el = resolveById(ctx, id, true);
         requireWritable(el);
-        requireActive(el, 'check');
-        return prepareCheck(el, text, item, wantOn);
+        requireActive(ctx, el, 'check');
+        const prepared = prepareCheck(el, text, item, wantOn);
+        // Rendered in preflight: refused:too_large (DECISIONS 215) writes nothing of the batch.
+        const content = prepared.newBody === null ? null : renderElement(el, new Map([['updated', ts]]), prepared.newBody);
+        return { prepared, content };
       },
-      (prepared) => {
-        if (prepared.newBody === null) {
+      ({ prepared, content }) => {
+        if (content === null) {
           const entry = entryJson(prepared.el, ctx.backlog, ctx.cfg);
           return { ok: true, changed: [], entry, _problems: entry._problems };
         }
-        guardedWriteCatchable(prepared.el, renderElement(prepared.el, new Map([['updated', ts]]), prepared.newBody), flags.has('force'), ctx.backlog);
+        guardedWriteCatchable(prepared.el, content, flags.has('force'), ctx.backlog);
         const fresh = loadElement(prepared.el.file, ctx.backlog, ctx.cfg);
         deriveGraph(ctx.elements.map((e: Element) => (e.file === prepared.el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
         const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
@@ -143,7 +146,7 @@ function cmdCheck(flags: Flags) {
 
   const el = resolveTarget(ctx, flags, true);
   requireWritable(el);
-  requireActive(el, 'check');
+  requireActive(ctx, el, 'check');
 
   const prepared = prepareCheck(el, text, item, wantOn);
   if (prepared.newBody === null) {

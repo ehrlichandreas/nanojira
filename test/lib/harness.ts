@@ -55,6 +55,10 @@ export interface RunOpts {
    * used by the harness's own self-test instead of a wall-time ratio
    * (DECISIONS 210). */
   onSpawn?: () => void;
+  /** Async only: how long a child gets after the SIGTERM of a timeout or an
+   * overflow before SIGKILL; default KILL_GRACE_MS. Shortened by the
+   * harness's own self-test. */
+  killGraceMs?: number;
 }
 
 export interface RunResult {
@@ -686,13 +690,17 @@ function makeSemaphore(limit: number): { acquire(): Promise<void>; release(): vo
   };
 }
 const RUN_NJ_ASYNC_CONCURRENCY = 4;
+/* The grace between SIGTERM and SIGKILL when runPathAsync stops a child
+ * (TSK-030), the same 10 s run-all's pool gives a timed-out file. */
+const KILL_GRACE_MS = 10000;
 const runNjAsyncSemaphore = makeSemaphore(RUN_NJ_ASYNC_CONCURRENCY);
 
 /**
  * The async twin of `runPath`/`runNj` above -- same env handling (fixed
  * `NJ_NOW`, the `NJ_ON_CHANGE`/hook envs scrubbed before `opts.env`/
  * `unsetEnv` apply), same `njCommand` resolution, same `RunResult` shape,
- * same default 60 s timeout and 32 MiB output cap -- but via `spawn`
+ * same default 60 s timeout and 32 MiB output cap (past either the child
+ * gets SIGTERM, then SIGKILL after KILL_GRACE_MS) -- but via `spawn`
  * (non-blocking) instead of `spawnSync`, so independent legs' spawns can
  * actually overlap in wall time instead of each blocking the whole
  * process (the entire point of `runLegs`, DECISIONS 210). Capped by
@@ -710,6 +718,7 @@ async function runPathAsync(njPath: string | null, args: string[], opts?: RunOpt
   const inv = njCommand(njPath, args);
   const maxBuffer = o.maxBuffer || 32 * 1024 * 1024;
   const timeoutMs = o.timeout || 60000;
+  const graceMs = o.killGraceMs || KILL_GRACE_MS;
 
   await runNjAsyncSemaphore.acquire();
   const t0 = Date.now();
@@ -719,12 +728,21 @@ async function runPathAsync(njPath: string | null, args: string[], opts?: RunOpt
       if (o.onSpawn) child.on('spawn', o.onSpawn);
       let stdout = '', stderr = '', overflowed = false;
       let settled = false;
-      const kill = () => { try { child.kill('SIGTERM'); } catch { /* already gone */ } };
+      let grace: NodeJS.Timeout | undefined;
+      const signal = (sig: NodeJS.Signals) => { try { child.kill(sig); } catch { /* already gone */ } };
+      /* A child that ignores SIGTERM would otherwise run on, and its
+       * 'close' never come (TSK-030). */
+      const kill = () => {
+        if (grace) return;
+        signal('SIGTERM');
+        grace = setTimeout(() => signal('SIGKILL'), graceMs);
+      };
       const timer = setTimeout(kill, timeoutMs);
       const finish = (result: RunResult) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (grace) clearTimeout(grace);
         resolve(result);
       };
       child.on('error', (err) => {

@@ -6,7 +6,8 @@ import type { Flags, Element, Context } from '../core/types.ts';
 
 import * as path from 'path';
 import { checkCommandFlags } from '../core/cli-flags.ts';
-import { removeClaimDirWholesale } from '../core/claims.ts';
+import { removeClaimDirWholesale, requireRealClaimDirs } from '../core/claims.ts';
+import { requireIdShaped } from '../core/id-shape.ts';
 import { context, resolveTarget, requireWritable, requireNoStubs } from '../core/context.ts';
 import { elementProblems, entryJson } from '../core/derive.ts';
 import { ownFolder, placeOf, removeEmptiedIdFolders } from '../core/layout.ts';
@@ -91,6 +92,11 @@ function cmdUnarchive(flags: Flags) {
   const full = orderedSubtree(ctx, el);
   const stillArchived = full.filter((e: Element) => e.archived);
   for (const e of stillArchived) requireWritable(e);
+  // Each id names a claim directory removed below (§ 12a), and under
+  // `hierarchy` a folder: a malformed one must never become either path,
+  // nor may a claim directory behind a symlink be emptied (DECISIONS 215).
+  requireIdShaped(stillArchived.map((e: Element) => e.id), 'unarchive');
+  requireRealClaimDirs(ctx.backlog, stillArchived.map((e: Element) => e.id), 'unarchive');
 
   const layout = ctx.cfg.layout;
   const hierarchy = layout.group === 'hierarchy';
@@ -129,9 +135,13 @@ function cmdUnarchive(flags: Flags) {
   // `archive`/`rm`, now that unarchive has decided to proceed — after every
   // refusal above, while the element is still archived, before the first
   // write (§ 12a, DECISIONS 115 P-6).
+  const ts = nowIso();
+  // Every rewritten file must fit the element-file cap (DECISIONS 215):
+  // all of them checked before the first write.
+  for (const e of stillArchived) renderElement(e, new Map([['archived', undefined], ['updated', ts]]), undefined);
+
   for (const e of stillArchived) removeClaimDirWholesale(ctx.backlog, e.id);
 
-  const ts = nowIso();
   for (const e of stillArchived) {
     compareGuard(e, false, ctx.backlog, STABLE_HINT);
     atomicWrite(e.file, renderElement(e, new Map([['archived', undefined], ['updated', ts]]), undefined));

@@ -8,7 +8,7 @@ import { resolveActingName } from '../core/actor.ts';
 import { flagString } from '../core/args.ts';
 import { checkCommandFlags } from '../core/cli-flags.ts';
 import type { Entry } from '../core/claims.ts';
-import { rollback, transition, releaseUnconditional, undoRelease, highestEntry, claimsDir } from '../core/claims.ts';
+import { rollback, requireTransitionable, transition, releaseUnconditional, undoRelease, highestEntry, claimsDir } from '../core/claims.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireActive } from '../core/context.ts';
 import { entryJson, openAcceptanceExtra } from '../core/derive.ts';
@@ -20,8 +20,21 @@ import { refreshStatus } from '../core/status.ts';
 import { refreshTags } from '../core/tags.ts';
 import { compareGuard, mirrorWrite, nowIso, renderElement } from '../core/store.ts';
 import { valueHint } from '../core/suggest.ts';
+import { requireChildrenDone } from './cmd-set.ts';
 
 const STABLE_HINT = 'the element changed in parallel — nanojira claim takes no --force; retry once it is stable';
+
+/**
+ * The mirror write must fit the element-file cap (DECISIONS 215): checked
+ * before the claim entry is appended, so refused:too_large writes nothing —
+ * and, in a batch, in preflight (§ 9 "Batch writes"), so it writes nothing
+ * of the batch.
+ */
+function requireClaimFits(el: Element, name: string, status: string | undefined, ts: string): void {
+  const probe = new Map<string, string | string[] | undefined>([['assignee', name], ['updated', ts]]);
+  if (status !== undefined) probe.set('status', status);
+  renderElement(el, probe, undefined);
+}
 
 /** The claim CAS loop, mirror write and rollback for one element — already catchable (mirrorWrite), so the single and batch paths share it unchanged. */
 function claimOne(ctx: Context, el: Element, name: string, status: string | undefined, steal: string | undefined, ts: string) {
@@ -37,6 +50,8 @@ function claimOne(ctx: Context, el: Element, name: string, status: string | unde
     if (held !== null && held !== name) return { terminal: true as const, holder: held };
     return { append: { kind: 'claimed' as const, name } };
   };
+
+  requireClaimFits(el, name, status, ts);
 
   const t = transition(ctx.backlog, el.id, ts, decide);
   if (!t.ok) {
@@ -108,6 +123,7 @@ function cmdClaim(flags: Flags) {
     fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses));
   }
   const steal = flagString(flags, 'steal');
+  const allowOpen = flags.has('allow-open-children');
 
   // Batch writes (§ 9): --id=A,B,C, two or more. A single --id is
   // unaffected and falls through to the unchanged path below.
@@ -118,7 +134,10 @@ function cmdClaim(flags: Flags) {
       (id) => {
         const el = resolveById(ctx, id, true);
         requireWritable(el);
-        requireActive(el, 'claim');
+        requireActive(ctx, el, 'claim');
+        if (status === 'done') requireChildrenDone(ctx, el, allowOpen, 'claim');
+        requireTransitionable(ctx.backlog, el.id);
+        requireClaimFits(el, name, status, nowIso());
         return el;
       },
       (el) => claimOne(ctx, el, name, status, steal, nowIso()),
@@ -136,7 +155,10 @@ function cmdClaim(flags: Flags) {
 
   const el = resolveTarget(ctx, flags, true);
   requireWritable(el);
-  requireActive(el, 'claim');
+  requireActive(ctx, el, 'claim');
+  // The parent rule, checked before the claim transition as `set` checks
+  // it before its write: a refused call leaves no claim behind (§ 9).
+  if (status === 'done') requireChildrenDone(ctx, el, allowOpen, 'claim');
 
   const ts = nowIso();
   const single = claimOne(ctx, el, name, status, steal, ts);

@@ -151,12 +151,45 @@ function requireNoUnreadableDirs(ctx: Context, verb: string) {
     'make the directory readable, then run `nanojira doctor` and retry');
 }
 
-// Round one has no `nanojira unarchive`, so the archive is read-only (§ 9).
-function requireActive(el: Element, verb: string) {
+// The archive is read-only (§ 9); `nanojira unarchive` (§ 11a) is the way back.
+function requireActive(ctx: Context, el: Element, verb: string) {
   if (el.archived) {
-    fail('refused:archived', `${el.id} is archived — ${verb} is refused on archived elements`,
-      'archived elements are read-only in round one; `nanojira unarchive` is round two');
+    fail('refused:archived', `${el.id} is archived — ${verb} is refused on archived elements`, unarchiveHint(ctx, [el]));
   }
 }
 
-export { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireNoStubs, requireNoUnreadableDirs, requireActive };
+/** The element `unarchive` must be given to bring `el` back: its topmost
+ * archived ancestor, else `el` itself. `unarchive` refuses a child of an
+ * archived parent (`refused:parent_archived`) and restores the whole
+ * archived subtree of the one it is given (§ 11a). */
+function archivedRoot(ctx: Context, el: Element): Element {
+  const seen = new Set([el.id]);
+  let root = el;
+  for (;;) {
+    const parent = root.parent === null ? undefined : ctx.elements.find((e: Element) => e.id === root.parent);
+    if (!parent || !parent.archived || seen.has(parent.id)) return root;
+    seen.add(parent.id);
+    root = parent;
+  }
+}
+
+/** The `unarchive` call for each distinct archived root of `els`, joined
+ * for a sentence ("`…` and `…`"); for one element restored through an
+ * ancestor, that is said. */
+function unarchiveCalls(ctx: Context, els: Element[]): string {
+  const roots = Array.from(new Map(els.map((e) => archivedRoot(ctx, e)).map((r) => [r.id, r])).values()).sort(compareElements);
+  const calls = roots.map((r) => `\`nanojira unarchive --id=${r.id}\``);
+  const list = calls.length === 1 ? calls[0] : `${calls.slice(0, -1).join(', ')} and ${calls[calls.length - 1]}`;
+  return els.length === 1 && roots[0].id !== els[0].id ? `${list}, its topmost archived ancestor` : list;
+}
+
+/** `refused:archived`'s hint for the archived elements `els`: the
+ * `unarchive` call for each distinct archived root, in one grammatical
+ * number. */
+function unarchiveHint(ctx: Context, els: Element[]): string {
+  return els.length === 1
+    ? `an archived element is read-only; restore it first with ${unarchiveCalls(ctx, els)} (§ 11a)`
+    : `archived elements are read-only; restore them first with ${unarchiveCalls(ctx, els)} (§ 11a)`;
+}
+
+export { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireNoStubs, requireNoUnreadableDirs, requireActive, unarchiveHint, unarchiveCalls };

@@ -116,4 +116,66 @@ const epicPath = (d: string) => path.join(d, 'backlog', 'epics', 'EPIC-001.md');
     !ready.includes('TSK-003'), 'ready set: ' + JSON.stringify(ready));
 }
 
+/* ---- claim --status=done runs the same check (TSK-034 F2) -------------- */
+{
+  const d = fixture('edge-done-claim-refuse');
+  const before = fs.readFileSync(epicPath(d), 'utf8');
+  const r = H.runJson(['claim', '--id=EPIC-001', '--as=bob', '--status=done'], { cwd: d });
+  T.exit('claim --status=done on an epic with open children is refused', r, 1);
+  T.eq('claim: the code is refused:children_open', r.json && r.json.error, 'refused:children_open');
+  T.contains('claim: the refusal names an open child', r.stdout + r.stderr, 'TSK-002');
+  T.eq('claim: nothing was written (checksum)',
+    H.sha256(fs.readFileSync(epicPath(d), 'utf8')), H.sha256(before));
+  // The check runs before the claim transition: no claim is left behind,
+  // so someone else can claim it without --steal.
+  const other = H.runJson(['claim', '--id=EPIC-001', '--as=carol'], { cwd: d });
+  T.exit('claim: the refused call left no claim behind', other, 0);
+}
+{
+  const d = fixture('edge-done-claim-batch');
+  const r = H.runJson(['claim', '--id=EPIC-001,TSK-002', '--as=bob', '--status=done'], { cwd: d });
+  // A preflight refusal, as in `set`'s batch: the whole batch writes nothing.
+  const res = (r.json && r.json.results) || [];
+  T.exit('claim batch: refused', r, 1);
+  T.eq('claim batch: the epic is refused:children_open', res[0] && res[0].id + ' ' + res[0].error,
+    'EPIC-001 refused:children_open');
+  T.check('claim batch: the epic is unchanged', fs.readFileSync(epicPath(d), 'utf8').includes('status: todo'));
+  T.check('claim batch: the childless task is unchanged too',
+    fs.readFileSync(path.join(d, 'backlog', 'tasks', 'TSK-002.md'), 'utf8').includes('status: todo'));
+}
+{
+  const d = fixture('edge-done-claim-allow');
+  const r = H.runJson(['claim', '--id=EPIC-001', '--as=bob', '--status=done', '--allow-open-children'],
+    { cwd: d, env: { NJ_NOW: H.LATER_NOW } });
+  T.exit('claim --allow-open-children permits the write', r, 0);
+  T.contains('claim: the epic is now done', fs.readFileSync(epicPath(d), 'utf8'), 'status: done');
+  T.check('claim: the epic carries done:open_children',
+    ((r.json && r.json._problems) || []).includes('done:open_children'), JSON.stringify(r.json));
+  T.eq('claim: reaching done released the claim it made', r.json && r.json.released, 'bob');
+}
+
+/* ---- an unreadable directory may hide an open child: claim and next ---- */
+if (typeof process.getuid === 'function' && process.getuid() === 0) {
+  T.check('unreadable-dir legs skipped: running as root, where mode 000 does not restrict reads', true);
+} else {
+  const d = fixture('edge-done-unreadable');
+  const locked = path.join(d, 'backlog', 'tasks', 'locked');
+  fs.mkdirSync(locked);
+  fs.writeFileSync(path.join(locked, 'x.md'), 'x');
+  fs.chmodSync(locked, 0o000);
+  try {
+    const before = fs.readFileSync(path.join(d, 'backlog', 'tasks', 'TSK-002.md'), 'utf8');
+    const c = H.runJson(['claim', '--id=TSK-002', '--as=bob', '--status=done'], { cwd: d });
+    T.eq('claim --status=done: refused:unreadable_dir, as set', c.json && c.json.error, 'refused:unreadable_dir');
+    const n = H.runJson(['next', '--as=bob', '--status=done'], { cwd: d });
+    T.eq('next --status=done: refused:unreadable_dir, as set', n.json && n.json.error, 'refused:unreadable_dir');
+    T.eq('claim/next: nothing was written (checksum)',
+      H.sha256(fs.readFileSync(path.join(d, 'backlog', 'tasks', 'TSK-002.md'), 'utf8')), H.sha256(before));
+    const plain = H.runJson(['claim', '--id=TSK-002', '--as=carol'], { cwd: d });
+    T.exit('claim/next: no claim left behind, and a claim without done still works', plain, 0);
+  } finally {
+    fs.chmodSync(locked, 0o755);
+  }
+}
+
 T.finish();

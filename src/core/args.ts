@@ -5,6 +5,7 @@
 import type { Flags } from './types.ts';
 
 import * as fs from 'fs';
+import * as path from 'path';
 import { SECTION_ROLES } from './constants.ts';
 import { armDryRun } from './dry-run.ts';
 import { fail } from './output.ts';
@@ -23,22 +24,52 @@ function displayFlagName(name: string): string {
   return name;
 }
 
+/**
+ * `--` ends the options: every later token is a positional, even one that
+ * starts with `--` (TSK-034 F11). A flag given again with a different
+ * value (aliases counted as one) keeps its last value in `flags`, and
+ * `repeated` gets its name plus the spelling typed the second time
+ * (`depends_on` vs `depends-on`) — reported, not thrown, so each caller decides:
+ * `nanojira` refuses it, `nanojira-mcp`'s own startup flags are unchanged.
+ * An identical repeat (`--json` twice, the same `--backlog`) is not a
+ * conflict and is not reported.
+ */
+interface Repeat { name: string; typed: string }
+
+/** Two values of one flag that mean the same: equal, or for `--backlog` two
+ * paths that resolve alike (`B`, `B/`, `./B`). Every other flag compares
+ * exactly (TSK-034). */
+function sameValue(name: string, a: string | true, b: string | true): boolean {
+  if (a === b) return true;
+  return name === 'backlog' && typeof a === 'string' && typeof b === 'string' && a !== '' && b !== '' && path.resolve(a) === path.resolve(b);
+}
+
 function parseArgs(argv: string[]) {
   const flags: Flags = new Map();
   const positional = [];
+  const repeated: Repeat[] = [];
+  let options = true;
   for (const a of argv) {
-    if (a === '--') continue;
-    if (a.startsWith('--')) {
+    if (options && a === '--') { options = false; continue; }
+    if (options && a.startsWith('--')) {
       const eq = a.indexOf('=');
-      let name = eq === -1 ? a.slice(2) : a.slice(2, eq);
+      const typed = eq === -1 ? a.slice(2) : a.slice(2, eq);
       const value = eq === -1 ? true : a.slice(eq + 1);
-      name = FLAG_ALIASES.get(name) ?? name;
+      const name = FLAG_ALIASES.get(typed) ?? typed;
+      if (flags.has(name) && !sameValue(name, flags.get(name) as string | true, value) && !repeated.some((r) => r.name === name)) {
+        repeated.push({ name, typed });
+      }
       flags.set(name, value);
     } else {
       positional.push(a);
     }
   }
-  return { flags, positional };
+  return { flags, positional, repeated };
+}
+
+function refuseRepeated(repeated: Repeat[]): void {
+  if (repeated.length === 0) return;
+  fail('invalid_value', `--${repeated[0].typed} is given more than once with different values`, 'give each flag once');
 }
 
 // Controls every command takes, so no call site can forget one (§ 9).
@@ -132,4 +163,4 @@ function readSectionFlags(flags: Flags) {
   return wanted;
 }
 
-export { parseArgs, displayFlagName, allowedControlSet, checkFlags, flagString, parseListFlag, readSectionFlags, readStdin };
+export { parseArgs, refuseRepeated, displayFlagName, allowedControlSet, checkFlags, flagString, parseListFlag, readSectionFlags, readStdin };

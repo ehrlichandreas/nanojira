@@ -16,6 +16,8 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fail, output } from './output.ts';
+import { DEFAULT_CONFIG, FOLDER_ROLES, LEGACY_CONFIG_REL, V3_CONFIG_REL } from './constants.ts';
+import { readRegularFile, TEXT_FILE_CAP } from './regular-file.ts';
 
 type Kind = 'file' | 'dir' | 'symlink';
 
@@ -37,8 +39,22 @@ const state = {
   real: null as string | null,
   sandbox: null as string | null,
   scratch: null as string | null,
+  /** The scratch folder's device and inode: a `$TMPDIR` inside the backlog
+   * or inside a followed layout folder puts it among what is copied and
+   * compared, and it is left out of both (DECISIONS 218). */
+  scratchId: null as { dev: number; ino: number } | null,
   /** Backlog-relative path → the target a symlink was given in the copy. */
   links: new Map<string, string>(),
+  /** Top-level name → real path of a directory symlink in the real backlog
+   * that is a plain directory in the copy (DECISIONS 218). */
+  followed: new Map<string, string>(),
+  /** Directory symlinks nanojira never reads through (DECISIONS 91 B11),
+   * pointed at an empty stand-in in the scratch area (DECISIONS 218). */
+  standIns: new Set<string>(),
+  /** A FIFO, socket or device → the link to it that stands in for it in
+   * the copy, so a read there fails as the real call's does (DECISIONS
+   * 215); left out of the comparison, as the original is. */
+  nonRegular: new Map<string, string>(),
   stdout: [] as string[],
   writeOut: null as ((s: string) => void) | null,
 };
@@ -102,6 +118,13 @@ function intoSandbox(p: string): string {
   if (state.sandbox === null || state.real === null) return p;
   let rel = isInside(path.resolve(p), path.resolve(state.real));
   if (rel === null) rel = isInside(realpathLoose(p), realpathLoose(state.real));
+  // A path behind a followed layout folder's link: the real call finds the
+  // element through it, so the dry run finds the copy's (DECISIONS 218).
+  for (const [name, target] of state.followed) {
+    if (rel !== null) break;
+    const inner = isInside(realpathLoose(p), target);
+    if (inner !== null) rel = inner === '' ? name : path.join(name, inner);
+  }
   if (rel === null) return p;
   return rel === '' ? state.sandbox : path.join(state.sandbox, rel);
 }
@@ -112,10 +135,69 @@ function copyTimes(dst: string, st: fs.Stats) {
   fs.utimesSync(dst, st.atimeMs / 1000, st.mtimeMs / 1000);
 }
 
-function copyEntry(src: string, dst: string, rel: string, root: string) {
+/**
+ * The top-level names nanojira reads and writes through when they are
+ * directory symlinks: the four configured layout folders, matched
+ * case-insensitively as the scan does (DECISIONS 105). An unreadable or
+ * invalid config falls back to the default names; the call itself then
+ * fails on that config anyway.
+ */
+function followedNames(real: string): (name: string) => boolean {
+  let folders: Record<string, unknown> = { ...DEFAULT_CONFIG.layout.folders };
+  for (const rel of [V3_CONFIG_REL, LEGACY_CONFIG_REL]) {
+    let raw: string;
+    // The same reader and cap as loadConfig (DECISIONS 215): a FIFO or a
+    // device here must not block or grow the dry run before the real
+    // call's own refusal is reached.
+    try { raw = readRegularFile(path.join(real, rel), TEXT_FILE_CAP); } catch (e: any) { if (e && e.code === 'ENOENT') continue; break; }
+    try {
+      const lay = JSON.parse(raw).layout;
+      if (lay && lay.folders && typeof lay.folders === 'object') folders = { ...folders, ...lay.folders };
+    } catch { /* invalid: the defaults */ }
+    break;
+  }
+  const roles = FOLDER_ROLES.map((r) => folders[r]).filter((n): n is string => typeof n === 'string').map((n) => n.toLowerCase());
+  return (name: string) => roles.includes(name.toLowerCase());
+}
+
+function isDirTarget(p: string): boolean {
+  try { return fs.statSync(p).isDirectory(); } catch { return false; }
+}
+
+function isScratch(st: fs.Stats): boolean {
+  return state.scratchId !== null && st.dev === state.scratchId.dev && st.ino === state.scratchId.ino;
+}
+
+function copyEntry(src: string, dst: string, rel: string, root: string, follow?: (name: string) => boolean) {
   let st: fs.Stats;
   try { st = fs.lstatSync(src); } catch { return; } // vanished meanwhile
-  if (st.isDirectory()) return copyDir(src, dst, rel, root, st);
+  if (st.isDirectory()) return isScratch(st) ? undefined : copyDir(src, dst, rel, root, st);
+  if (st.isSymbolicLink() && follow !== undefined && follow(rel)) {
+    // A layout folder linked elsewhere: the real call reads and writes
+    // through it (DECISIONS 105), so the copy holds its contents as a plain
+    // directory — a link would carry the dry run's writes out to the real
+    // target (DECISIONS 218). Copied from its real path, so a relative link
+    // inside resolves the way the OS resolves it.
+    if (isDirTarget(src)) {
+      const target = fs.realpathSync.native(src);
+      state.followed.set(rel, target);
+      return copyDir(target, dst, rel, target, fs.statSync(target));
+    }
+  }
+  if (st.isSymbolicLink() && !rel.startsWith('.') && isDirTarget(src)) {
+    // Any other directory symlink: the scan never follows it (DECISIONS 91
+    // B11), but a write can still go through it — `hierarchy` placing an
+    // element in a linked ID folder. In the copy it points at an empty
+    // directory next to the copy, so such a write lands in the scratch area
+    // (DECISIONS 218). The dot-directories are nanojira's own state, which
+    // never writes through a link (DECISIONS 215).
+    const standIn = path.join(state.sandbox + '.links', String(state.standIns.size));
+    fs.mkdirSync(standIn, { recursive: true });
+    fs.symlinkSync(standIn, dst);
+    state.links.set(rel, standIn);
+    state.standIns.add(rel);
+    return;
+  }
   if (st.isSymbolicLink()) {
     const target = fs.readlinkSync(src);
     // A relative link that leaves the backlog would dangle in the copy;
@@ -127,7 +209,21 @@ function copyEntry(src: string, dst: string, rel: string, root: string) {
     state.links.set(rel, written);
     return;
   }
-  if (!st.isFile()) return; // a FIFO, socket or device is never a backlog file
+  if (!st.isFile()) {
+    // A FIFO, socket or device is never a backlog file, but reading one
+    // must fail in the copy exactly as in the real backlog ("not a regular
+    // file", DECISIONS 215): a link to the original does, since every such
+    // read opens it non-blocking and checks the type, and a write replaces
+    // the link, never the original. Not inside the dot-directories, whose
+    // own entries are read without following a link; their one followed
+    // file, the configuration, is linked too.
+    if (!rel.startsWith('.') || rel === V3_CONFIG_REL || rel === LEGACY_CONFIG_REL) {
+      const original = path.resolve(src);
+      fs.symlinkSync(original, dst);
+      state.nonRegular.set(rel, original);
+    }
+    return;
+  }
   try {
     fs.copyFileSync(src, dst, fs.constants.COPYFILE_FICLONE);
   } catch {
@@ -139,11 +235,11 @@ function copyEntry(src: string, dst: string, rel: string, root: string) {
   copyTimes(dst, st);
 }
 
-function copyDir(src: string, dst: string, rel: string, root: string, st: fs.Stats) {
+function copyDir(src: string, dst: string, rel: string, root: string, st: fs.Stats, follow?: (name: string) => boolean) {
   fs.mkdirSync(dst);
   let names: string[] | null;
   try { names = fs.readdirSync(src); } catch { names = null; } // unreadable: copied empty, same mode
-  for (const n of names || []) copyEntry(path.join(src, n), path.join(dst, n), rel === '' ? n : rel + '/' + n, root);
+  for (const n of names || []) copyEntry(path.join(src, n), path.join(dst, n), rel === '' ? n : rel + '/' + n, root, rel === '' ? follow : undefined);
   fs.chmodSync(dst, st.mode & 0o7777);
   copyTimes(dst, st);
 }
@@ -165,11 +261,13 @@ function sandboxFor(real: string): string {
   try {
     const scratch = fs.mkdtempSync(path.join(fs.realpathSync.native(tmp), 'nj-dry-run-'));
     state.scratch = scratch;
+    const sst = fs.statSync(scratch);
+    state.scratchId = { dev: sst.dev, ino: sst.ino };
     state.real = real;
     state.sandbox = path.join(scratch, path.basename(real) || 'backlog');
     let st: fs.Stats | null;
     try { st = fs.statSync(real); } catch { st = null; }
-    if (st !== null && st.isDirectory()) copyDir(real, state.sandbox, '', path.resolve(real), st);
+    if (st !== null && st.isDirectory()) copyDir(real, state.sandbox, '', path.resolve(real), st, followedNames(real));
   } catch (e: any) {
     removeScratch();
     state.real = null;
@@ -202,7 +300,9 @@ function removeScratch() {
 
 // ------------------------------------------------------------------- diff
 
-function snapshot(root: string | null): Map<string, Node> {
+/** `sandbox`: the copy's side, where a stand-in is walked into, so what a
+ * call wrote through the link shows as created. */
+function snapshot(root: string | null, sandbox: boolean): Map<string, Node> {
   const out: Map<string, Node> = new Map();
   if (root === null) return out;
   let st: fs.Stats;
@@ -217,8 +317,15 @@ function snapshot(root: string | null): Map<string, Node> {
       const r = rel === '' ? n : rel + '/' + n;
       let s: fs.Stats;
       try { s = fs.lstatSync(p); } catch { continue; }
-      if (s.isDirectory()) { out.set(r, { kind: 'dir', content: null }); walk(p, r); }
-      else if (s.isSymbolicLink()) out.set(r, { kind: 'symlink', content: fs.readlinkSync(p) });
+      // A followed layout folder is compared by its contents on both sides.
+      if (s.isSymbolicLink() && state.followed.has(r)) { try { s = fs.statSync(p); } catch { /* gone: the link */ } }
+      if (s.isDirectory()) { if (isScratch(s)) continue; out.set(r, { kind: 'dir', content: null }); walk(p, r); }
+      else if (s.isSymbolicLink()) {
+        const target = fs.readlinkSync(p);
+        if (sandbox && state.nonRegular.get(r) === target) continue;
+        out.set(r, { kind: 'symlink', content: target });
+        if (sandbox && state.standIns.has(r)) walk(p, r);
+      }
       else if (s.isFile()) {
         let c: string | null;
         try { c = fs.readFileSync(p, 'utf8'); } catch { c = null; }
@@ -234,8 +341,8 @@ function snapshot(root: string | null): Map<string, Node> {
  * backlog and its copy, sorted by path; a path that changed kind is a
  * `delete` followed by a `create`. */
 function diffTrees(): Change[] {
-  const before = snapshot(state.real);
-  const after = snapshot(state.sandbox);
+  const before = snapshot(state.real, false);
+  const after = snapshot(state.sandbox, true);
   const paths = Array.from(new Set([...before.keys(), ...after.keys()])).sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
   const changes: Change[] = [];
   const del = (p: string, n: Node) => changes.push({ path: p, kind: n.kind, op: 'delete', before: n.content, after: null });

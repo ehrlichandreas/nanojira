@@ -55,11 +55,11 @@ const PLAIN = [
   'legacy_layout', 'unknown_command', 'missing_argument',
   'missing_value', 'invalid_value', 'invalid_target', 'not_found',
   'duplicate_id', 'exists', 'changed_in_parallel', 'id_allocation_failed',
-  'internal_error', 'ambiguous_target', 'none_ready',
+  'internal_error', 'ambiguous_target', 'none_ready', 'unexpected_argument',
 ];
 const REFUSED = ['unreadable', 'unreadable_dir', 'archived', 'children_open',
   'has_children', 'not_done', 'parent_archived', 'misplaced', 'not_archived',
-  'claimed'];
+  'claimed', 'invalid_id', 'symlink', 'too_large'];
 const HOOKS = ['before-compare', 'after-tmp-write', 'before-rename'];
 const CLOSED = new Set(PLAIN
   .concat(REFUSED.map(r => 'refused:' + r))

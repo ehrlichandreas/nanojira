@@ -84,8 +84,12 @@ function spawnServer(njMcpPath: string, args?: string[], opts?: SpawnServerOpts)
   const pending = new Map<number | string, { resolve: (m: RpcMessage) => void; reject: (e: Error) => void }>();
   const unsolicited: RpcMessage[] = [];
 
-  child.stdout!.on('data', (chunk: Buffer) => {
-    buf += chunk.toString('utf8');
+  /* Decoded by the stream, not per chunk: a multibyte character split
+   * across two chunks would otherwise arrive as two U+FFFD (TSK-035). */
+  child.stdout!.setEncoding('utf8');
+  child.stderr!.setEncoding('utf8');
+  child.stdout!.on('data', (chunk: string) => {
+    buf += chunk;
     let nl: number;
     while ((nl = buf.indexOf('\n')) !== -1) {
       const line = buf.slice(0, nl);
@@ -102,7 +106,7 @@ function spawnServer(njMcpPath: string, args?: string[], opts?: SpawnServerOpts)
       }
     }
   });
-  child.stderr!.on('data', (chunk: Buffer) => { errBuf += chunk.toString('utf8'); });
+  child.stderr!.on('data', (chunk: string) => { errBuf += chunk; });
 
   /* A dead server must fail every STILL-PENDING request promptly, not
    * leave each one to its own fixed timeout -- a server that crashed (or

@@ -14,6 +14,7 @@ import { readInputText, parseInputJson } from '../core/input.ts';
 import { context, resolveTarget, resolveById, requireWritable, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
 import { entryJson, openAcceptanceExtra } from '../core/derive.ts';
 import { ownFolder, expectedPlace } from '../core/layout.ts';
+import { requireIdShaped } from '../core/id-shape.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
 import { buildWriteResult, fail, out, writeFeedback } from '../core/output.ts';
 import { parseOutputOpts, emitWriteResultOpts, trimResult } from '../core/result-opts.ts';
@@ -58,9 +59,33 @@ function buildSetInputFlags(inputValue: string): Flags {
       continue;
     }
     if (typeof value !== 'string') fail('invalid_value', `--input: '${key}' must be a string${key === 'acceptance' ? ' or an array of strings' : ''}`);
+    // `--input=-` already read stdin for the JSON itself; a second read gets
+    // nothing and would write an empty section — refused like `new` does.
+    if (inputValue === '-' && key.endsWith('-file') && value === '-') {
+      fail('invalid_value', `--input: '${key}'='-' cannot read stdin — already consumed`);
+    }
     synFlags.set(key, value);
   }
   return synFlags;
+}
+
+/**
+ * The parent rule (§ 9): `done` on an element whose children are not all
+ * done is refused unless `--allow-open-children`. Shared by `set`, `claim`
+ * and `next` (TSK-034 F2), each calling it before any write or claim.
+ */
+function requireChildrenDone(ctx: Context, el: Element, allowOpen: boolean, verb: string) {
+  // An unreadable directory anywhere hides whatever elements lie inside
+  // it — including, possibly, an open child of `el` — so the open-
+  // children check below cannot be trusted while one exists; a silent
+  // `done` would be worse than refusing (DECISIONS 106 F4).
+  requireNoUnreadableDirs(ctx, `${verb} --status=done`);
+  const open = (el.children as Element[]).filter((c) => !c.archived && c.status !== 'done');
+  if (open.length > 0 && !allowOpen) {
+    const names = open.map((c) => `  ${c.id}  ${c.status.padEnd(8)} ${c.title}`).join('\n');
+    fail('refused:children_open', `${el.id} has children that are not done — refusing to set done:\n${names}`,
+      'finish them first, or pass --allow-open-children');
+  }
 }
 
 type SectionRole = 'description' | 'acceptance';
@@ -84,7 +109,15 @@ interface SetItem {
  */
 function reparentMove(ctx: Context, el: Element, newParentId: string): { src: string; dst: string } | null {
   if (ctx.cfg.layout.group !== 'hierarchy') return null;
+  // The moved epic or task and every ancestor of its new parent become folder
+  // names: none may be a malformed id (DECISIONS 215).
   const byId = new Map(el.byId as Map<string, Element>);
+  const chain: string[] = el.type === 'subtask' ? [] : [el.id];
+  for (let a = byId.get(newParentId); a !== undefined && !chain.includes(a.id);) {
+    chain.push(a.id);
+    a = a.parent === null ? undefined : byId.get(a.parent);
+  }
+  requireIdShaped(chain, 'set --parent');
   const shadow: Element = { ...el, parent: newParentId as NonEmptyString };
   byId.set(el.id, shadow);
   const dir = expectedPlace(shadow, byId, ctx.cfg.layout) as string;
@@ -136,8 +169,11 @@ function cmdSet(flags: Flags) {
       (id) => {
         const el = resolveById(ctx, id, true);
         requireWritable(el);
-        requireActive(el, 'set');
+        requireActive(ctx, el, 'set');
         const { overrides, changed, newBody, movePlan, moveDst } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
+        // Rendered in preflight too, with an `updated` of the same length as
+        // the write's own: refused:too_large (DECISIONS 215) writes nothing of the batch.
+        if (changed.length > 0) renderElement(el, new Map(overrides).set('updated', nowIso()), newBody);
         return { el, overrides, changed, newBody, movePlan, moveDst };
       },
       (item) => {
@@ -150,9 +186,10 @@ function cmdSet(flags: Flags) {
         // Final status releases the claim (§ 12a, DECISIONS 171 B): attempted
         // before the guarded write, rolled back if that write fails.
         const isFinal = setsFinalStatus(ctx, item.overrides);
+        const content = renderElement(item.el, item.overrides, item.newBody); // before the release: refused:too_large writes nothing
         const released = isFinal ? releaseUnconditional(ctx.backlog, item.el.id, ts) : undefined;
         try {
-          guardedWriteCatchable(item.el, renderElement(item.el, item.overrides, item.newBody), force, ctx.backlog);
+          guardedWriteCatchable(item.el, content, force, ctx.backlog);
         } catch (e) {
           if (released !== undefined) undoRelease(ctx.backlog, item.el.id, released.holder, ts);
           throw e;
@@ -183,7 +220,7 @@ function cmdSet(flags: Flags) {
 
   const el = resolveTarget(ctx, flags, true);
   requireWritable(el);
-  requireActive(el, 'set');
+  requireActive(ctx, el, 'set');
 
   const { overrides, changed, newBody, movePlan, moveDst } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
 
@@ -202,16 +239,17 @@ function cmdSet(flags: Flags) {
   // final-status write needs the catchable (mirror) write -- an ordinary
   // write keeps guardedWrite's existing D135 behavior unchanged.
   const isFinal = setsFinalStatus(ctx, overrides);
+  const content = renderElement(el, overrides, newBody); // before the release: refused:too_large writes nothing
   const released = isFinal ? releaseUnconditional(ctx.backlog, el.id, ts) : undefined;
   if (isFinal) {
     try {
-      guardedWriteCatchable(el, renderElement(el, overrides, newBody), force, ctx.backlog);
+      guardedWriteCatchable(el, content, force, ctx.backlog);
     } catch (e) {
       if (released !== undefined) undoRelease(ctx.backlog, el.id, released.holder, ts);
       throw e;
     }
   } else {
-    guardedWrite(el, renderElement(el, overrides, newBody), force, ctx.backlog);
+    guardedWrite(el, content, force, ctx.backlog);
   }
 
   // The physical relocation (§ 4, DECISIONS 176 A) runs only once the
@@ -346,19 +384,7 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
     if (!ctx.cfg.statuses.includes(status)) {
       fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses));
     }
-    if (status === 'done') {
-      // An unreadable directory anywhere hides whatever elements lie inside
-      // it — including, possibly, an open child of `el` — so the open-
-      // children check below cannot be trusted while one exists; a silent
-      // `done` would be worse than refusing (DECISIONS 106 F4).
-      requireNoUnreadableDirs(ctx, 'set --status=done');
-      const open = (el.children as Element[]).filter((c) => !c.archived && c.status !== 'done');
-      if (open.length > 0 && !allowOpen) {
-        const names = open.map((c) => `  ${c.id}  ${c.status.padEnd(8)} ${c.title}`).join('\n');
-        fail('refused:children_open', `${el.id} has children that are not done — refusing to set done:\n${names}`,
-          'finish them first, or pass --allow-open-children');
-      }
-    }
+    if (status === 'done') requireChildrenDone(ctx, el, allowOpen, 'set');
     if (status !== el.status) { overrides.set('status', status); changed.push('status'); }
   }
 
@@ -429,4 +455,4 @@ function describeField(el: Element, field: SetField): string {
   return Array.isArray(v) ? (v.length ? v.join(',') : '(empty)') : (typeof v === 'string' && v === '' ? '(empty)' : String(v));
 }
 
-export { cmdSet };
+export { cmdSet, requireChildrenDone };

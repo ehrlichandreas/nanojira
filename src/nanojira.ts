@@ -10,7 +10,7 @@
 // their real exports, so a wrong name or a wrong call shape here is a
 // compile error like anywhere else -- no cast needed, unlike the JSDoc-era
 // module.exports boundary this replaced.
-import { parseArgs } from './core/args.ts';
+import { parseArgs, refuseRepeated } from './core/args.ts';
 import { cmdArchive } from './commands/cmd-archive.ts';
 import { cmdCheck } from './commands/cmd-check.ts';
 import { cmdClaim } from './commands/cmd-claim.ts';
@@ -30,6 +30,7 @@ import { cmdStatus } from './commands/cmd-status.ts';
 import { cmdTags } from './commands/cmd-tags.ts';
 import { cmdTree } from './commands/cmd-tree.ts';
 import { cmdUnarchive } from './commands/cmd-unarchive.ts';
+import { acceptedFlagNames, refuseStrayPositionals } from './core/cli-flags.ts';
 import { HELP, commandHelp } from './core/help.ts';
 import { finishDryRun } from './core/dry-run.ts';
 import { beginOnChange, fireRecordedChange } from './core/on-change.ts';
@@ -76,6 +77,10 @@ function main(argv: string[]) {
   if (pre.flags.has('version')) {
     const onlyVersionAndJson = Array.from(pre.flags.keys()).every((k) => k === 'version' || k === 'json');
     if (onlyVersionAndJson && pre.positional.length === 0) {
+      refuseRepeated(pre.repeated);
+      for (const k of ['version', 'json']) {
+        if (pre.flags.has(k) && pre.flags.get(k) !== true) fail('invalid_value', `--${k} takes no value`, `pass --${k} on its own`);
+      }
       process.stdout.write(output.json ? JSON.stringify({ version: VERSION }) + '\n' : `nanojira ${VERSION}\n`);
       return 0;
     }
@@ -83,7 +88,7 @@ function main(argv: string[]) {
   }
 
   const { cmd, rest } = splitCommand(argv);
-  const { flags, positional } = parseArgs(rest);
+  const { flags, positional, repeated } = parseArgs(rest);
 
   // `help`/`--help`'s own precedence is unchanged: checked before anything
   // else, regardless of other flags, never failing (§ 9). `--help` now
@@ -91,6 +96,17 @@ function main(argv: string[]) {
   // general one otherwise — `nanojira help`/bare `--help` are untouched.
   if (cmd === 'help') { process.stdout.write(HELP); return 0; }
   if (flags.has('help')) { process.stdout.write(cmd === null ? HELP : commandHelp(cmd, flags)); return 0; }
+
+  // A flag given twice with different values is refused rather than
+  // last-wins (TSK-034 F11), so a later token can never quietly override
+  // an earlier one. An identical repeat is harmless and accepted. A stray
+  // positional is refused too. Both wait for an unknown command or flag,
+  // which the dispatch and the command's own flag check report first.
+  const accepted = acceptedFlagNames(cmd ?? 'status');
+  if (accepted !== null && Array.from(flags.keys()).every((f) => accepted.includes(f))) {
+    refuseRepeated(repeated);
+    refuseStrayPositionals(cmd ?? 'status', positional);
+  }
 
   // NJ_NOW (§ 12, DECISIONS 207): an invalid value refuses every command
   // here, before anything is read or written -- not lazily at the first

@@ -21,6 +21,7 @@ import { nowIso } from '../core/store.ts';
 import { valueHint } from '../core/suggest.ts';
 import { applyFilters, availableToActor } from './cmd-list.ts';
 import { claimOne } from './cmd-claim.ts';
+import { requireChildrenDone } from './cmd-set.ts';
 
 function cmdNext(flags: Flags) {
   checkCommandFlags(flags, 'next');
@@ -51,14 +52,17 @@ function cmdNext(flags: Flags) {
   // with any other value they can never both hold, so the result is
   // `none_ready`, not a special case.
   const candidates = applyFilters(ctx.elements, filterFlags, ctx.cfg)
-    .filter((e) => isReady(e, ctx.cfg) && availableToActor(ctx.backlog, e.id, name) && !hasOpenChild(e)
+    .filter((e) => isReady(e, ctx.cfg, ctx.backlog) && availableToActor(ctx.backlog, e.id, name) && !hasOpenChild(e)
       && (e.assignee === '' || e.assignee === name));
 
   const skipped: string[] = [];
   for (const candidate of candidates) {
     const el = resolveById(ctx, candidate.id, true);
     requireWritable(el);
-    requireActive(el, 'claim');
+    requireActive(ctx, el, 'claim');
+    // Open children never reach here (D156 above), but an unreadable
+    // directory can hide one, so the parent rule runs as on `claim`.
+    if (status === 'done') requireChildrenDone(ctx, el, false, 'next');
 
     let single;
     try {

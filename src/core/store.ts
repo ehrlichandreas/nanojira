@@ -9,6 +9,9 @@ import * as path from 'path';
 import { TYPE_PREFIX, IDS_BUCKET_PAD } from './constants.ts';
 import { fail, hardExit } from './output.ts';
 import { serialize } from './parse.ts';
+import { readElementFile, ELEMENT_FILE_CAP } from './regular-file.ts';
+import { internalSymlink, requireNoInternalSymlink } from './internal-path.ts';
+import { idShaped } from './id-shape.ts';
 
 // -------------------------------------------------------------------- clock
 
@@ -68,8 +71,37 @@ function sleepMs(ms: number) {
 // element set): the one caller that must NOT do an O(total-ever-allocated)
 // scan is `allocateId`'s own start-value computation below, which never
 // calls this — it only ever looks at the single highest bucket.
+/**
+ * The symlinks tombstones are never read or written through (DECISIONS 215):
+ * `ids/` itself (or `.nanojira/`), else each linked type directory or bucket
+ * of a sharded layout. One of them means part of the never-reuse record is
+ * out of reach, which `doctor` reports as `backlog:ids_missing`. Exactly
+ * `readTombstones`' own blind spots: in a flat `ids/` a linked entry is a
+ * tombstone, counted by its name, so only `ids/` itself can hide any.
+ */
+function idsSymlinks(dir: string, shardSize?: number): string[] {
+  const root = internalSymlink(dir);
+  if (root !== null) return [root];
+  const links: string[] = [];
+  if (!shardSize) return links;
+  let types: fs.Dirent[];
+  try { types = fs.readdirSync(dir, { withFileTypes: true }); } catch { return links; }
+  for (const te of types) {
+    if (te.name.startsWith('.') || !(te.isDirectory() || te.isSymbolicLink())) continue;
+    const typeDir = path.join(dir, te.name);
+    if (te.isSymbolicLink()) { links.push(typeDir); continue; }
+    let buckets: fs.Dirent[];
+    try { buckets = fs.readdirSync(typeDir, { withFileTypes: true }); } catch { continue; }
+    for (const be of buckets) if (!be.name.startsWith('.') && be.isSymbolicLink()) links.push(path.join(typeDir, be.name));
+  }
+  return links.sort();
+}
+
 function readTombstones(dir: string, shardSize?: number): Set<string> {
   const out: Set<string> = new Set();
+  // Never listed through a symlink (DECISIONS 215): a linked `ids/` reads as
+  // empty, which `doctor` reports as `backlog:ids_missing`.
+  if (internalSymlink(dir) !== null) return out;
   if (!shardSize) {
     let names;
     try { names = fs.readdirSync(dir); } catch { return out; }
@@ -80,14 +112,16 @@ function readTombstones(dir: string, shardSize?: number): Set<string> {
     return out;
   }
   let types;
-  try { types = fs.readdirSync(dir); } catch { return out; }
-  for (const t of types) {
-    if (t.startsWith('.')) continue;
+  try { types = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const te of types) {
+    const t = te.name;
+    if (t.startsWith('.') || te.isSymbolicLink()) continue;
     const typeDir = path.join(dir, t);
     let buckets;
-    try { buckets = fs.readdirSync(typeDir); } catch { continue; }
-    for (const b of buckets) {
-      if (b.startsWith('.')) continue;
+    try { buckets = fs.readdirSync(typeDir, { withFileTypes: true }); } catch { continue; }
+    for (const be of buckets) {
+      const b = be.name;
+      if (b.startsWith('.') || be.isSymbolicLink()) continue;
       let names;
       try { names = fs.readdirSync(path.join(typeDir, b)); } catch { continue; }
       for (const n of names) if (!n.startsWith('.')) out.add(n);
@@ -163,10 +197,15 @@ function highestShardedMax(idsDir: string, prefix: string): number {
 // and the start-value scan change.
 function allocateId(idsDir: string, type: string, elements: Element[], shardSize: number): string {
   const prefix = TYPE_PREFIX[type];
+  // A tombstone is the first write of `new`: none may land behind a symlink
+  // (DECISIONS 215). The type directory is checked here too, since the
+  // start value is read from it under sharding.
+  requireNoInternalSymlink(shardSize ? path.join(idsDir, prefix) : idsDir, 'allocating a new id');
   fs.mkdirSync(idsDir, { recursive: true });
 
   let max = 0;
   const consider = (id: string) => {
+    if (!idShaped(id)) return; // a 300-digit id must not become the start value (DECISIONS 215)
     const m = new RegExp('^' + prefix + '-(\\d+)$').exec(id);
     if (m) {
       const n = parseInt(m[1], 10);
@@ -180,8 +219,16 @@ function allocateId(idsDir: string, type: string, elements: Element[], shardSize
   let n = max + 1;
   for (let i = 0; i < 100; i++) {
     const id = prefix + '-' + String(n).padStart(3, '0');
+    // § 6 bounds the number at 15 digits; a longer id would be malformed
+    // the moment it exists (DECISIONS 215) — refused before its tombstone.
+    if (!idShaped(id)) {
+      return hardExit('id_allocation_failed', `nanojira: the next ${prefix} id would be ${id}, more than 15 digits — this is a hard limit (§ 6)`);
+    }
     const { dir, file } = tombstoneLocation(idsDir, id, shardSize);
-    if (dir !== idsDir) fs.mkdirSync(dir, { recursive: true });
+    if (dir !== idsDir) {
+      requireNoInternalSymlink(dir, 'allocating a new id');
+      fs.mkdirSync(dir, { recursive: true });
+    }
     try {
       fs.closeSync(fs.openSync(file, 'wx'));
       return id;
@@ -305,7 +352,7 @@ function compareGuard(el: Element, force: boolean, backlog?: string, hint?: stri
   }
   if (force) return;
   let current;
-  try { current = fs.readFileSync(el.file, 'utf8'); } catch { current = null; }
+  try { current = readElementFile(el.file); } catch { current = null; }
   if (current !== el.raw) {
     fail('changed_in_parallel', `${el.id} changed in parallel, please run again`,
       hint === undefined ? 'use --force to overwrite deliberately' : hint);
@@ -398,7 +445,66 @@ function renderElement(el: Element, fieldOverrides: Map<string, string | string[
   }
   const order = el.order.slice();
   for (const k of fields.keys()) if (!order.includes(k)) order.push(k);
-  return serialize(fields, order, bodyOverride === undefined ? el.body : bodyOverride);
+  return requireWithinCap(el.id, serialize(fields, order, bodyOverride === undefined ? el.body : bodyOverride));
 }
 
-export { checkClockEnv, nowIso, nowMs, mtimeIso, readTombstones, allocateId, tombstoneLocation, atomicWrite, mirrorWrite, atomicReplace, compareGuard, guardedWrite, guardedWriteCatchable, planMove, runMove, renderElement, sleepMs };
+/**
+ * `mkdir -p` for the folder an element is written into. Something that is
+ * not a directory in the way — a file, or a layout folder linked to a file
+ * or to nothing (DECISIONS 105 F1, 218) — is a one-line `io_error` naming
+ * the path; any other OS error is left to the caller, as before. The hint
+ * follows what is in the way: a symlink gets the symlink text, anything
+ * else is named as the file to move (Reviewer N1).
+ */
+function makeFolder(dir: string): void {
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+  } catch (e: any) {
+    if (!e || (e.code !== 'EEXIST' && e.code !== 'ENOENT' && e.code !== 'ENOTDIR')) throw e;
+    const block = inTheWay(dir);
+    fail('io_error', `cannot create the folder ${e.path || dir} (${e.code}): something that is not a directory is in the way`,
+      block !== null && !block.link
+        ? `a file or other non-directory is in the way at ${block.at}; move it`
+        : 'a layout folder that is a symlink must point at an existing directory; `nanojira doctor` reports one that does not as backlog:unreadable_dir');
+  }
+}
+
+/** The first component of `dir`, from the top, that `mkdir -p` cannot pass:
+ * a symlink not leading to a directory, or anything else that is not one.
+ * Null when every existing component is a directory (a race). Only on the
+ * error path, so the extra `lstat` calls cost nothing otherwise. */
+function inTheWay(dir: string): { at: string; link: boolean } | null {
+  const chain: string[] = [];
+  for (let p = path.resolve(dir); ; p = path.dirname(p)) {
+    chain.unshift(p);
+    if (path.dirname(p) === p) break;
+  }
+  for (const p of chain) {
+    let st: fs.Stats;
+    try { st = fs.lstatSync(p); } catch { return null; }
+    if (st.isDirectory()) continue;
+    if (!st.isSymbolicLink()) return { at: p, link: false };
+    let toDir = false;
+    try { toDir = fs.statSync(p).isDirectory(); } catch { /* dangling or a loop */ }
+    if (!toDir) return { at: p, link: true };
+  }
+  return null;
+}
+
+const TOO_LARGE_HINT = 'an element file is capped at 1 MiB so it can always be read back; shorten the text, or keep large content in a separate file and link to it';
+
+/**
+ * The write side of the element-file cap (DECISIONS 215): nanojira never
+ * writes an element it would then refuse to read (`file:unreadable` above
+ * 1 MiB, § 7). Every element write renders its content first, so this runs
+ * before anything is written; `refused:too_large` (§ 9) otherwise.
+ */
+function requireWithinCap(id: string, content: string): string {
+  const size = Buffer.byteLength(content, 'utf8');
+  if (size > ELEMENT_FILE_CAP) {
+    fail('refused:too_large', `${id}: the element file would be ${size} bytes, above the 1 MiB cap on element files (§ 7) — nothing was written`, TOO_LARGE_HINT);
+  }
+  return content;
+}
+
+export { makeFolder, checkClockEnv, nowIso, nowMs, mtimeIso, idsSymlinks, readTombstones, allocateId, tombstoneLocation, atomicWrite, mirrorWrite, atomicReplace, compareGuard, guardedWrite, guardedWriteCatchable, planMove, runMove, renderElement, requireWithinCap, sleepMs };

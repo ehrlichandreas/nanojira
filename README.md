@@ -27,7 +27,7 @@ v3 — see `docs/SPECIFICATION.md` for the full spec, and `package.json` /
 $ bin/nanojira init
 Created backlog at …/proj/backlog
   epics/ tasks/ subtasks/ archive/ .nanojira/
-  .nanojira/config.json .nanojira/ids/ .gitignore README.md STATUS.md
+  .nanojira/config.json .nanojira/ids/ .gitignore README.md STATUS.md TAGS.md
 ```
 
 (Or set up an alias so plain `nanojira` works — see `docs/GUIDE.md` § 1.)

@@ -82,13 +82,21 @@ NJ_TEST_JOBS=4 $NODE run-all.ts "$NJ"
   the pool has drained**, in collected order. Their blocks therefore come
   last. The summary lists `failed`/`cannot run` in collected order whatever
   order files finished in, so it reads the same as a serial run's.
-- `--jobs=1` ignores the marker and is byte-for-byte the old serial loop:
-  same order, same output, same exit code.
+- `--jobs=1` ignores the marker and runs the files one at a time, in
+  collected order, through the same runner as the pool: the same order,
+  output and exit code as the old serial loop, except for a file that
+  times out or passes the output cap (DECISIONS 193).
 - Passed / failed / cannot-run are classified exactly as before. A file
   still running at the 600 s per-file timeout counts as failed in either
-  mode, whatever it exits with later: the pool sends SIGTERM, then SIGKILL
-  after 10 s; the serial path kills with SIGKILL at once. A file passing the
-  64 MiB output cap counts as failed too.
+  mode, whatever it exits with later. Every file runs as its own process
+  group, and the kill reaches the whole group: SIGTERM, then SIGKILL after
+  10 s, and SIGKILL at once to anything left once the file is gone
+  (DECISIONS 193). A file passing the 64 MiB output cap counts as failed
+  too, and is stopped the same way. A descendant that starts its own
+  session (`setsid`, a daemon) escapes the group kill; that is inherent
+  to process-group kills. Stop a run with Ctrl-C or SIGTERM, never
+  SIGKILL: run-all passes those on to every file's group, while a
+  SIGKILL leaves the files running.
 
 **The marker.** A file is `@serial` when a comment line in its header —
 before the first `import` — starts with `@serial`, followed by a one-line

@@ -112,18 +112,19 @@ function cmdNote(flags: Flags, positional: string[]) {
   const batchIds = parseBatchIds(flags);
   if (batchIds !== null) {
     const ts = nowIso();
-    const result = runBatch<Element, object>(
+    const result = runBatch<{ el: Element; content: string }, object>(
       batchIds,
       (id) => {
         const el = resolveById(ctx, id, true);
         requireWritable(el);
-        requireActive(el, 'note');
-        return el;
-      },
-      (el) => {
+        requireActive(ctx, el, 'note');
+        // Rendered in preflight: refused:too_large (DECISIONS 215) writes nothing of the batch.
         const signer = author !== null ? author : el.assignee !== '' ? el.assignee : '?';
         const newBody = withNote(el, text, signer, ts);
-        guardedWriteCatchable(el, renderElement(el, new Map([['updated', ts]]), newBody), flags.has('force'), ctx.backlog);
+        return { el, content: renderElement(el, new Map([['updated', ts]]), newBody) };
+      },
+      ({ el, content }) => {
+        guardedWriteCatchable(el, content, flags.has('force'), ctx.backlog);
         const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
         deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
         const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
@@ -143,7 +144,7 @@ function cmdNote(flags: Flags, positional: string[]) {
 
   const el = resolveTarget(ctx, flags, true);
   requireWritable(el);
-  requireActive(el, 'note');
+  requireActive(ctx, el, 'note');
 
   const ts = nowIso();
   const signer = author !== null ? author : el.assignee !== '' ? el.assignee : '?';

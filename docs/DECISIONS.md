@@ -3066,6 +3066,56 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        status, and kills: the pool with SIGTERM, then SIGKILL after 10 s;
        the serial path, whose spawnSync cannot escalate, with SIGKILL.
        Test: test/tools/run-all-timeout.ts (24 checks; red before this change).
+     - Revised (2026-10-18, TSK-029): the kill reaches the file's whole
+       process group, not only the file. Each file runs detached, as its
+       own group leader; a timeout (or the 64 MiB cap) sends SIGTERM to
+       the group, SIGKILL after 10 s, and SIGKILL at once to whatever of
+       the group outlives the file. Before, a grandchild that ignored
+       SIGTERM ran on after the run, and one that held the file's pipes
+       hung the pool for good, since the file's 'close' never came. The
+       serial phase (`--jobs=1`, `@serial`) had the same gap: spawnSync
+       kills only its direct child, and its child shares run-all's own
+       group, which run-all cannot signal without killing itself. It now
+       runs its files one at a time through the pool's runner, so both
+       phases kill the same way; output and verdicts are unchanged except
+       for the wording of the "timed out" line. A group of its own also
+       means a SIGTERM to the gate's process group or a Ctrl-C no longer
+       reaches a file directly: run-all passes SIGINT/SIGTERM/SIGHUP on
+       as SIGKILL to every live group and then dies of the signal itself.
+       A SIGKILL to run-all cannot be passed on: stop a run with TERM or
+       INT, never KILL, since a SIGKILL to run-all leaves the files running
+       in their own groups. On Windows there are no process groups to
+       signal, so there the kill still reaches the file only. A
+       descendant that starts its own session (`setsid`, a daemon)
+       escapes the group kill too; that is inherent to process-group
+       kills, and TSK-031's /proc sweep could cover it later.
+       Two effects are new for serial runs only (`--jobs=1`, `@serial`):
+       a file with its own SIGTERM handler now gets SIGTERM before
+       SIGKILL, as in the pool, where spawnSync sent SIGKILL at once; and
+       an overflow is now cut at the same MAX_BUFFER as in the pool
+       (before, spawnSync's own maxBuffer handling applied).
+       Test: run-all-timeout.ts, 35 checks: a grandchild with its
+       stdio detached, one holding the pipes, both pooled and serial, and
+       a SIGTERM to run-all itself (13 of them red before this change).
+       Known Node limitation, not a TSK-029 effect: after a file that
+       passed the output cap (~64 MiB held), run-all can hang inside
+       process.exit once its summary is printed (main thread and V8Worker
+       both in a futex wait; node v24.21.0, Linux 7.0). Measured
+       2026-10-18 with an 80 MiB flood file plus a passing file, --jobs=2,
+       a 60 s watchdog: the old run-all (d6a0022) 1 of 10, the new one 1
+       of 11; a bare node process with the same 64 MiB and listeners 0 of
+       10, a one-child copy of the overflow path 0 of 16. No hard-exit
+       fallback: a timer cannot fire once process.exit is tearing the loop
+       down, and an outside watchdog risks pid reuse and turns the exit
+       code into 137. Real suites stay far below the cap.
+     - Revised (2026-10-18, TSK-030): the harness's runPathAsync (D210)
+       stopped a child past its timeout or its output cap with SIGTERM
+       only, so a child that ignored it ran on and the call never
+       returned. Both now send SIGTERM, then SIGKILL after the same 10 s
+       grace (RunOpts.killGraceMs, which the self-test shortens). An
+       overflow still reports "maxBuffer exceeded". The child itself is
+       signalled, not a group: these are single nanojira calls. Test:
+       harness-self-test.ts section 8 (9 of its 36 checks red before).
      - The export also copies LICENSE, because consumers vendor the
        exported folder and need the licence text with it.
      - Tooling patch: no change to nj behaviour. Version 3.12.2.
@@ -4454,6 +4504,686 @@ Written for adversarial review: if a line reads like a guess, challenge it.
          is larger than the spread within each pair, the narrowest
          separation (slowest A vs fastest B, 10 s) is not. 165 s / 6,938 calls ≈
          24 ms per call, which matches the spawn timing under load.
+
+214. **nanojira-mcp: no flag injection through text, no local-file reads,
+     no hangs** (2026-10-18, TSK-035; improvement survey #3).
+     - The gaps, each reproduced by the Scout or by the new test:
+       - note/find `text` went to the child as a bare positional. The CLI
+         reads any `--…` argument as a flag, so a note text
+         `--text-file=<path>` copied that local file into the note, an
+         ordinary note `--force-push was needed` failed with
+         `unknown_field`, and `--text-file=-` hung on stdin;
+       - `description-file`/`acceptance-file` were schema fields, so a
+         `set` or `new` call read any local path into the backlog;
+       - the child's stdin was a pipe never closed, and there was no
+         timeout: one stuck child held its call for good;
+       - a JSON line that is not an object (`"hello"`, `42`, `true`)
+         crashed the server (`'id' in` a primitive throws);
+       - stdin EOF SIGKILLed in-flight children, so a write could be cut
+         off mid-flight and its answer was lost;
+       - `out += chunk` decoded each 64 KB chunk on its own, so a
+         multibyte character across a boundary became two U+FFFD;
+       - an error result carried only `{ok:false,error,hint}`; the
+         message itself went to stderr and was dropped.
+     - The choices:
+       - every input goes as `--name=value`, the text included
+         (`--text=`): a value is never parsed as a flag that way. `note`
+         already took `--text=` (TSK-006); `find` gains it (§ 9a), the
+         positional's twin, both together `invalid_value`. Ending option
+         parsing with `--` would also work, but `--` is skipped by the
+         parser today (its meaning is TSK-034's), and `--text=` needs no
+         new rule;
+       - the `*-file` fields leave the MCP schemas (`toolFields` drops
+         any name ending in `-file`; `file`, which addresses a scanned
+         element, stays). Confining them to the backlog was the other
+         option; it keeps a path-reading surface for no gain, since an
+         MCP client has the text and passes `description`/`acceptance`.
+         A call that still names one is `-32602`, no child spawned;
+       - children get `stdin: 'ignore'` and a per-call timeout of 60 s,
+         plus `NJ_ON_CHANGE_TIMEOUT` (default 10) when `NJ_ON_CHANGE` is
+         set, because the hook runs inside the child. Past it the call
+         answers `-32603` and the child gets SIGTERM (nanojira passes it
+         on to a running hook's group), then SIGKILL after 5 s;
+       - a non-object line is `-32600` with `id: null`;
+       - stdin EOF waits for in-flight calls to answer, then exits 0: the
+         same reason `notifications/cancelled` does not kill a call
+         (§ 12's half-done state), now bounded by the timeout;
+       - the child's stdout and stderr are decoded by the stream
+         (`setEncoding('utf8')`);
+       - an error result gets a second text block with nanojira's stderr
+         (trimmed, at most 4,000 characters); `structuredContent` and the
+         first text block stay exactly the CLI's body.
+     - Compatibility: dropping the `*-file` fields is a schema break for a
+       client that used them; the survey judged that unlikely. Everything
+       else is a fix or additive. No CLI behaviour changes except the new
+       `find --text=`.
+     - Not done here (survey #3 point 8): `required`/`enum`/descriptions
+       in the schemas and exposing `quiet`/`fields`/`dry-run`.
+     - The test driver (`test/lib/mcp-stdio.ts`) had the same per-chunk
+       decoding bug and is fixed the same way.
+     - Revised (2026-10-18, TSK-035 review): a call is finished when the
+       child has exited and its stdout has ended, no longer on 'close',
+       which also waits for stderr. A hook job that left the hook's group
+       (`setsid`, so D217's group kill does not reach it) and kept
+       nanojira's stderr held the call until it ended, past the timeout a
+       write that had succeeded came back as -32603 (the Reviewer's probe:
+       margin 3 s, `sleep 8 &`, -32603 at +4137 ms with EPIC-001 written;
+       a client retrying that duplicates a `new`), and at EOF the server
+       lived as long as the job. stderr now gets at most 200 ms
+       (STDERR_DRAIN_MS) after that and is still read, never closed, after
+       the answer. Test: hardening-mcp X11, red before: 2 of 40 (15286 ms
+       to answer, 15591 ms to exit at EOF).
+     - Test: test/edge/hardening-mcp.ts, 32 checks (X1–X9: flag-like
+       note/find text, no `*-file` fields, stdin, the timeout in a
+       patched copy with a fake `nanojira.mjs`, non-object lines, EOF in
+       flight, UTF-8 across chunks, the error message); 28 of 34 red on
+       the code before this change.
+
+215. **An element id becomes a path only in the § 6 shape; element files
+     are read non-blocking, regular files only, at most 1 MiB**
+     (2026-10-18, TSK-033; ImprovementScout's survey § 1).
+     - The gap: a frontmatter `id` is read as written; a bad one only
+       draws `id:mismatch`. That id was then joined into paths. Verified
+       by the Scout (`scout-survey-verify-sec.sh`): with
+       `id: ../../outside/PWNED`, `doctor --fix` renamed the element
+       file out of the backlog (S1); a done child with
+       `id: ../../../outside/victim` made `archive` delete every
+       number-named file in `outside/victim/` while removing "its" claim
+       directory (S2); `claim` on such an element created a directory
+       outside. The same id reached `rm`'s and `unarchive`'s claim
+       cleanup, `log`'s and `_claim`'s claim reads, `hierarchyDir`
+       (`doctor --fix` step 3, `set --parent`, `new --parent` under
+       `hierarchy`). Separately, a file symlink is read like a file
+       (DECISIONS 91 B11), so an element file could be a FIFO (`list`
+       hung) or `/dev/zero` (RSS grew to about 42 GB before it was
+       killed).
+     - The choice: one check, `src/core/id-shape.ts` (`EPIC|TSK|SUB-<n>`,
+       the pattern the tombstone code and `hierarchy`'s ID folders
+       already used — `layout.ts`'s `ID_FOLDER` is now this one), applied
+       where an id becomes a path:
+       - claims (`claims.ts`): `claimsDir` refuses a malformed id, so
+         `transition`/`rollback`, the first write of `claim`/`release`,
+         fail before anything is created; `readClaim` and
+         `allEntriesAscending` answer "unclaimed" without touching the
+         disk; `removeClaimDirWholesale`, `releaseUnconditional` and
+         `undoRelease` are no-ops. A malformed id can never hold a
+         claim, so nothing is lost. `allClaimDirs` keeps joining its
+         `readdir` names (one component each), and `doctor --fix` step
+         7a removes what it lists by directory (`removeClaimDirAt`), so
+         an orphaned directory is still cleaned whatever its name;
+       - `archive`, `rm` and `unarchive` check every id of the subtree
+         they act on, after their existing refusals and before the first
+         write;
+       - `new --parent`/`set --parent` check the named parent
+         (`checkExplicitParent`), and `set --parent` under `hierarchy`
+         also the moved epic or task itself and every ancestor of the new
+         parent, all of which become folder names;
+       - `doctor --fix` step 2 never renames to a malformed id; a note
+         names the file;
+       - `hierarchyDir` returns null when an epic or task on the chain
+         has a malformed id: no place is derived from it, the same
+         treatment as a broken `parent` chain (no `layout:misplaced`,
+         never moved by step 3).
+     - The code: a new `refused:invalid_id`, not a reused one.
+       `invalid_target` is a bad call ("the flag names an element of the
+       wrong kind"); here the call is fine and the element's state is
+       the obstacle, which is what `refused:*` means. `refused:misplaced`
+       and `refused:unreadable` each already point at a specific repair
+       (`doctor --fix`, the file's permissions) that would not help.
+       Additive to § 9's closed set; no override flag exists.
+     - No new § 7 problem code: a stray document (DECISIONS 86, a file
+       name id like `notes`) is equally malformed and harmless until
+       something would make a path of it; a new code would put a new
+       finding on every such backlog. A crafted id with a `/` already
+       draws `id:mismatch`, which `doctor` reports and which blocks
+       `--ready`.
+     - The reader (`src/core/element-file.ts`, since generalised as
+       `src/core/regular-file.ts`, below; used by `loadElement` and
+       `compareGuard`): `open(O_RDONLY|O_NONBLOCK)`, `fstat` on that fd,
+       `isFile()` required, size at most 1 MiB, read from the same fd,
+       never more than 1 MiB + 1 byte — the `.njrc` pattern (config.ts,
+       TSK-029 T1). A refusal becomes the existing `file:unreadable` stub
+       ("cannot be read — not a regular file" / "larger than 1 MiB");
+       § 7's row now says so. 1 MiB: the largest element file in
+       nanojira's own backlog and in the portable-ai backlog is under
+       7 KB (6,580 and 6,782 bytes, 2026-10-18); the cap only has to
+       bound memory, not fit real use tightly.
+     - Rejected:
+       - a `refused` for every command touching a malformed id: `list`,
+         `show`, `set` of a field, `note` and `check` write only the
+         element's own file, by its real path; refusing them would lock
+         the user out of the element they need to fix;
+       - rewriting a malformed id (or the file name) automatically in
+         `doctor --fix`: which real id it should get is not derivable;
+       - resolving each target with `realpath` and checking it lies
+         inside the backlog: a correct id never needs it, and a symlinked
+         layout folder pointing outside is allowed (DECISIONS 105);
+       - option (3) of the survey, refusing a layout-folder symlink that
+         points outside: breaks DECISIONS 105 layouts; left out.
+     - Tests: `test/edge/id-path-escape.ts` — S1 (three ids), S2, `rm`
+       (cascade and leaf), `unarchive`, `claim`/`--steal`/`release`, no
+       read of a planted outside claim (`show`, `log`, `list`), `new
+       --parent`, `set --parent` (onto a malformed parent, and onto a task
+       below a malformed epic) and `new --parent` under `hierarchy`, a
+       FIFO element, a `/dev/null` symlink as the device case (the
+       `/dev/zero` repro is never re-run), and 1 MiB + 1 byte (sparse)
+       against exactly 1 MiB. Red on d6a0022: 62 of 83 checks failed,
+       the FIFO case by the 20 s spawn timeout.
+     - Follow-up, after ImprovementScout's adversarial check of 050d12c
+       (`scout-t033-attack.sh`). Everything below already happened on
+       d6a0022.
+     - Symlinked bookkeeping (C1–C4). `.nanojira/claims/<id>` pointing
+       outside, with no element behind it, made `doctor --fix` step 7a
+       delete the number-named files there (C1). A live element's claim
+       directory as a link made `archive` delete outside (C2).
+       `.nanojira/claims` as a link made `claim` write outside (C3), and
+       `.nanojira/ids` as a link made `new` write tombstones outside (C4).
+       The choice: none of nanojira's own directories is ever followed when
+       it is a symlink. That covers `.nanojira/`, `ids/` and its sharded
+       type and bucket directories, `claims/` and each claim directory.
+       `src/core/internal-path.ts` finds the first symlink from the
+       internal root (`.nanojira`, or a legacy `.ids`) down to a path,
+       caching directories already seen to be real.
+       - Writes refuse with a new `refused:symlink` before anything is
+         written: `transition` (claim/release), `allocateId` (new), and
+         `requireRealClaimDirs` in `archive`/`rm`/`unarchive`, next to
+         the id-shape check.
+       - Reads find nothing behind the link. `readClaim`,
+         `allEntriesAscending`, `allClaimDirs` and `readTombstones` skip
+         it, so a linked `ids/` reads as empty: `backlog:ids_missing`,
+         whose message now says why. `releaseUnconditional` (`set
+         --status=<last>`) has nothing to release, so it no longer blocks
+         such a write.
+       - `doctor --fix` leaves every such link alone and adds a note:
+         steps 0, 4 and 7a, the ids layout move, and the stray-temp sweep.
+       Why a new code: `refused:unreadable_dir` means "a directory hides
+       element files", with a permissions repair; `io_error` is a failed
+       call; neither says what is wrong here or how to repair it. Why
+       DECISIONS 105 does not apply: it allows a layout folder, which is
+       user content, to be a link; these directories are nanojira's own
+       state, and nothing legitimate needs them to be links. The
+       configuration is still read through a linked `.nanojira/`; that is
+       a read only, and refusing it would make every command fail. Tests:
+       `test/edge/internal-symlinks.ts` (C1, C2 including `unarchive`,
+       C3, C4, `.nanojira/` itself). Red on 050d12c: 41 of 53 checks
+       failed.
+     - Six more unguarded reads (N1). A FIFO at `STATUS.md`, `TAGS.md`,
+       `.nanojira/config.json`, a claim entry, `README.md` or `.gitignore`
+       hung the command that read it. The element reader became
+       `readRegularFile(path, cap, {noFollow})` in
+       `src/core/regular-file.ts`, and every one of those reads goes
+       through it. Caps:
+       - 1 MiB (`TEXT_FILE_CAP`) for the configuration, `.gitignore`,
+         `README.md` and claim entries;
+       - `STATUS.md`/`TAGS.md`: the fresh rendering's byte length, since
+         a larger file cannot equal it and so counts as stale.
+       `README.md` first had the v2 init text's length as its cap. That
+       silenced `fixReadme`'s "not the v2 init text — left alone" note for
+       a longer README (ac-24 L3 caught it in the full suite), so it reads
+       up to 1 MiB like the others.
+       A claim entry is also opened `O_NOFOLLOW`: internals are never
+       links, as above. The configuration error now says "cannot be
+       read — <reason>" for anything but a plain absence, which keeps "is
+       missing". Tests: `test/edge/non-regular-reads.ts`. Red on 49593c8:
+       14 of 17 checks failed, every hang cut at 20 s.
+     - Very long ids (L1). `TSK-` with 300 digits passed the shape check.
+       `claim` and `doctor --fix` then died at `mkdir`/`rename` with a raw
+       "Error: Error: ENAMETOOLONG" and no JSON, and `new` beside such an
+       element took 1.1e299 as its start value. The choice: bound the
+       shape at 15 digits (`\d{1,15}`), rather than catch ENAMETOOLONG at
+       each call site. One rule then covers every place an id becomes a
+       path, and 15 digits keep every number a safe integer (2^53 has
+       16), which the allocator's `parseInt` needs. The limit leaves
+       room: a backlog would need 10^15 elements of one type to reach it.
+       `allocateId` ignores an id outside the shape when it computes the
+       start value. Tests: the L1 cases in `id-path-escape.ts` (300
+       digits; 15 claimable, 16 refused). Red on 816dd97: 6 of 94 checks
+       failed.
+     - Cap symmetry. This one was a regression of 050d12c itself: reads
+       stopped at 1 MiB, but writes had no limit. A 1.1 MB note returned
+       ok:true and wrote a 1,100,180-byte element, and the next `set` was
+       `refused:unreadable`. The user locked themselves out of their own
+       element with a normal command. The choice: `renderElement`, which
+       every write of an existing element goes through, refuses a result
+       above the cap (`requireWithinCap`, store.ts) with the new
+       `refused:too_large`.
+       - Commands that write more than the element, or before it, render
+         first so the refusal still writes nothing: `set` before the
+         final-status release, `claim` before the claim entry is
+         appended, `archive`/`unarchive` for every file of the subtree
+         before the first move.
+       - `new` renders with the longest possible id standing in before it
+         allocates, since the tombstone is a write. `new --input` does
+         the same for every node during validation, so no node of the
+         plan is written.
+       - `doctor --fix` steps 1, 5 and 6 leave such an element alone with
+         a note, instead of failing the run halfway.
+       The cap stays 1 MiB: the largest real element anywhere is 39,709
+       bytes (Lead, 2026-10-18). Why a new code rather than
+       `invalid_value`: the same refusal comes from `archive`, `claim` or
+       `doctor` on an element that is already near the cap, where no
+       value in the call is wrong. Tests: `test/edge/element-size-cap.ts`
+       (note, set, new and a plan over the cap; a note just below it,
+       followed by a `set`; archive and claim at the cap; doctor --fix at
+       the cap). Red on c591cd7: 24 of 31 checks failed.
+     - Batch writes (Reviewer, R1). The three new refusals first fired
+       in the write phase of a batch (`--id=A,B,C`, § 9 "Batch writes"),
+       so a batch wrote A and then refused B:
+       - `set`, `note`, `check` or `claim` with B near the cap drew
+         `refused:too_large` for B;
+       - `claim` or `release` with B's claim directory linked drew
+         `refused:symlink`, and with a malformed B, `refused:invalid_id`.
+       All three are per-ID preflight failures now, next to
+       `refused:archived` and `refused:unreadable`, so the batch writes
+       nothing. `set`, `note` and `check` render each element in preflight.
+       For `set`, the render uses an `updated` timestamp of the same length
+       as the write's own. `claim` checks the mirror write's size
+       (`requireClaimFits`). `claim` and `release` check the claim
+       directory (`requireTransitionable`, which `transition` now calls
+       too). Tests: the batch cases in `element-size-cap.ts`,
+       `internal-symlinks.ts` and `id-path-escape.ts`. Red on cfd674b:
+       8 of 44, 4 of 60 and 4 of 98 checks failed.
+     - Plain `doctor` and linked claims (Reviewer, N1–N3). Plain `doctor`
+       said ok:true with no problems for a linked claim directory, which
+       `claim`, `release` and `rm` all refuse. Such a link is now the new
+       § 7 code `claim:symlink`. It is reported on the element the claim
+       directory names, or at backlog level for a linked
+       `.nanojira/claims/`, a linked `.nanojira/`, or a link named after no
+       element. It is collected next to `claim:orphaned`. Why error
+       severity: the link blocks every claim write until a human replaces
+       it, and an error cannot be silenced through `problems.ignore`. A
+       linked `ids/` alone stays `backlog:ids_missing`, which already says
+       why, so it is not reported twice.
+       `doctor --fix` gave the note for a linked `.nanojira/` twice: once
+       from step 4 (tombstones) and once from step 7a (claims). Every
+       symlink note now goes through `noteSymlink`, which adds a note only
+       once.
+       `set --status=<last>` on an element whose claim directory is a link
+       releases nothing, and its result does not say so
+       (`releaseUnconditional` finds no claim behind the link). `doctor`
+       reports that state as `claim:symlink`. Tests: the `claim:symlink`
+       and duplicate-note cases in `internal-symlinks.ts`. Red on c41a74d:
+       12 of 77 checks failed.
+     - Scout's second attack (round 2, on cfd674b).
+       - Links made mid-call (N1, N2). `archive` held at
+         `NJ_FAULT=before-compare` while the claim directory was swapped for
+         a link. Its removal then deleted the entries outside, because the
+         re-check in `removeClaimDirAt` was answered from the cache of
+         directories already seen to be real. `claim`'s rollback after a
+         failed mirror write appended its entry through a claim directory or
+         claims root swapped the same way. `internalSymlink` now takes
+         `fresh`, which skips the cache. `removeClaimDirAt` re-checks with it
+         before each unlink and before the `rmdir`. `appendEntry` re-checks
+         before its first write and again before the `link()` that
+         publishes the entry. On a link, `transition` refuses with
+         `refused:symlink` and the rollback stops. Node has no openat(2),
+         so a window between the check and the operation remains. The
+         check narrows it to a single syscall pair; dirfd-based removal is
+         out of reach in Node.
+       - A legacy migration into a link (N3). `doctor --fix` step 0 moved
+         the configuration and every tombstone into a linked `.nanojira/`.
+         It now moves nothing when `.nanojira/` or `.ids/` is a link, and
+         notes the link. A linked `.ids/` would otherwise have moved as a
+         link and left `ids/` a link.
+       - A 16-digit id from the allocator (N4). With `TSK-999999999999999`
+         present, `new` created `TSK-1000000000000000`, which `claim` then
+         refused. `allocateId` now refuses with `id_allocation_failed`
+         before the tombstone, as the sharded path's bucket limit already
+         did.
+       - A claim entry that is a symlink (N6). It is never read, so every
+         round's next generation collided with it, and `claim` reported
+         `changed_in_parallel` "too many concurrent claim attempts". It is
+         now `refused:symlink` naming the entry, and `claim:symlink` in
+         `doctor`. `set --status=<last>` releases nothing behind it, as
+         for a linked claim directory.
+       Tests: `test/edge/internal-symlink-races.ts` (new: N1, and N2 for
+       a claim directory and for the claims root), plus the N6 and legacy
+       cases in `internal-symlinks.ts` and the allocation case in
+       `id-path-escape.ts`. Red on e4fe0d9: 3 of 14, 12 of 95 and 3 of 101
+       checks failed.
+     - `next` and a linked claim directory (Reviewer, S1). `next` stopped
+       at the highest-priority candidate whose claim directory (or a claim
+       entry in it) was a link and failed with `refused:symlink`, so one
+       link blocked `next` for everyone. Element-level `claim:symlink` now
+       blocks `--ready`, as the § 7 consistency invariant asks of an
+       element-level error ("Doctor = `error` implies Blocks = `yes`").
+       It depends on the claims, not the element file, so it is computed
+       fresh where it is read: `entryJson` adds it to `_problems`, like
+       `claim:stale`, and `isReady` takes the backlog to check it
+       (`elementClaimLink`). `list --ready`, bare `nanojira` and `next`
+       pass such an element by. A linked claims root or `.nanojira/` stays
+       backlog-level, and `next` is still refused. The error counts of
+       `list` and bare `nanojira` do not count `claim:symlink` in 4.2.0:
+       they come from the element file's own problems, and `doctor`
+       already reports the link while `next` skips the element (Lead,
+       2026-10-18). Tests: the S1 cases in
+       `internal-symlinks.ts` (a linked claim directory, a linked entry, a
+       linked root). Red on be61fbe: 8 of 109 checks failed.
+     - Scout's third attack (round 3, on be61fbe), a racer flipping a
+       claim directory between a real directory and a link in a tight
+       loop.
+       - Removal (R1). `doctor --fix` orphan sweeps still deleted outside
+         decoys, 30 times in 400 sweeps, the same rate as before the fresh
+         re-check: the window between `lstat` and `unlink` stayed open.
+         `removeClaimDirAt` now renames the directory aside to a random
+         `.nj-rm-<pid>-<rand>` name in the same parent first. `rename`
+         moves a link itself, never its target, and the racer cannot
+         reach the aside name. Only the aside name is then checked and
+         emptied. An aside that turns out to be a link is renamed back
+         untouched, and `doctor --fix` notes it. An aside that cannot be
+         emptied, because it holds an entry that is not a generation or a
+         straggler's append, goes back under its own name for `doctor`
+         to report, when that name is still free. A crash between the
+         rename and the `rmdir` leaves the hidden `.nj-rm-*` directory.
+         The entries in it are dead, since nothing reads a dot-name.
+         Accepted residual (Reviewer, round 5): if the parent is swapped
+         for a link between the rename aside and the rename back, the
+         rename back runs inside the link's target: a rename within that
+         outside directory, never a deletion there. In the same case
+         `doctor --fix`'s cleanup of a leftover aside does nothing more,
+         and its note names the aside's current name and the link as the
+         reason.
+       - Append (R1, residual). The temp file `appendEntry` writes before
+         its `link()` can still land behind a link swapped in between the
+         fresh check and the `open`. At be61fbe, 800 claim/release calls
+         under the racer left 70 distinct `.nj-tmp-*` names outside, 64
+         still there at the end, and deleted no decoy. That is the whole
+         residual: temp files only, under `O_EXCL` names, never an
+         overwrite and never a deletion outside. No cheap fix exists
+         without openat(2). The check narrows the window to a single
+         syscall pair; dirfd-based I/O is out of reach in Node.
+       - ENOENT from the temp file's `open` (R2). Under the same race,
+         195 of 800 calls failed with `internal_error` and a stack trace:
+         the directory vanished between the `mkdir` and the `open`. That
+         is now `'enoent'`, the same retry the `link()` step already
+         takes.
+       - A linked bucket (R3). With `ids/TSK/000000` linked outside,
+         `doctor` said nothing, and `doctor --fix` exited 0 having
+         backfilled tombstones around the bucket. A linked type directory
+         or bucket now counts like a linked `ids/` (`idsSymlinks`):
+         `backlog:ids_missing` "is behind a symlink" names it, exit 2, and
+         step 4 writes no tombstone at all, since backfilling around the
+         link would treat its hidden tombstones as missing. `new` already
+         refused it.
+       Two pure-pause hooks make the races testable: `NJ_FAULT=claim-append`
+       (after the `mkdir`) and `claim-aside` (after the rename aside), like
+       `njrc-swap` (§ 4, § 12). Tests: the R1 and R2 cases in
+       `internal-symlink-races.ts` and the R3 case in `internal-symlinks.ts`.
+       Red on 2cf3bd5: 4 of 22 and 4 of 116 checks failed. Mutation: with
+       the ENOENT mapping removed, R2 fails 2 checks (`internal_error`).
+       Scout r4 (re-run on 5fd3ddc) confirmed R1, R3 and the batch, and
+       found two more. R2': 41 of 800 claim calls still failed with
+       `internal_error`, now ENOENT from `appendEntry`'s recursive
+       `mkdir` (a parent gone meanwhile); that is `'enoent'` too, the same
+       retry. R4: a removal killed after its rename aside (C1, C1b), or
+       whose rename back failed (C3), left a `.nj-rm-*` directory or link
+       that nothing reported or removed. `doctor` now reports each as
+       `backlog:stray_tmp`, the code for every other leftover of an
+       interrupted write, and `doctor --fix` step 7 removes it: a link is
+       unlinked itself, never followed, with a note; a directory is
+       renamed aside again to a fresh name, and only that name is checked
+       and emptied, as in the removal itself, and only when it holds
+       nothing but generations and `.nj-tmp-*` files (anything else
+       leaves it in place, with a note). A third pure pause,
+       `NJ_FAULT=claim-mkdir` (before the `mkdir`), makes R2' testable,
+       with a dangling link in the claims root's place; `claim-aside`
+       also holds after the leftover's fresh rename. Tests: R2' and R4 in
+       `internal-symlink-races.ts`, red on 3a46410 with 11 of 41 checks
+       failed. Mutation: without the `mkdir` mapping R2' fails 2 checks;
+       without the second `lstat` the swapped link is left behind.
+       Reviewer r4 (R1): R3's `idsSymlinks` ignored `shardSize`, so in
+       the default flat layout a tombstone that is a link counted as a
+       linked type directory: a false `backlog:ids_missing`, exit 2, and
+       no backfill. It now mirrors `readTombstones` exactly: flat, only
+       `ids/` itself (or `.nanojira/`) counts, since a linked tombstone
+       is still counted by its name; sharded, linked type directories and
+       buckets, as before. The message for a linked part reads "part of
+       .nanojira/ids/ (<path>) is behind a symlink" (N1). When the rename
+       back of a linked aside fails, `doctor --fix`'s note names the
+       `.nj-rm-*` path where the link stays, not the claim directory (N2).
+       Reviewer r5: the leftover cleanup re-checked only the fresh name,
+       so a claims root swapped for a link after its rename let it empty
+       a directory outside. It now checks the claims root and `.nanojira/`
+       fresh before its first write and again after the rename, and leaves
+       the leftover as it is when either is a link, without renaming
+       anything back through it.
+
+216. **Four CLI parsing and guard fixes** (2026-10-18, TSK-034; Lead,
+     from the improvement survey § 4).
+     - **F1, `set --input=-` reads stdin once.** A `<role>-file` of `-`
+       inside JSON that `--input=-` read from stdin is `invalid_value`,
+       with `new`'s own message. § 9 already said so; `set` read stdin a
+       second time, got nothing and wrote an empty section.
+     - **F2, the parent rule on `claim`/`next`.** § 12a applied it to
+       `claim --status=` ("the parent rule of § 9 applies unchanged"), but
+       only `set` ran it. `set`'s whole guard (`refused:unreadable_dir`,
+       then `refused:children_open`) is now one function, called by `set`,
+       `claim` (in a batch, in the preflight, so the whole batch writes
+       nothing, as in `set`) and `next`. It runs before the claim
+       transition, so a refused call leaves no claim behind. `claim` takes
+       `--allow-open-children`. `next` does not: D156 already keeps every
+       element with an open child out of its candidates, so the flag
+       could never do anything there. The unreadable-dir half does reach
+       `next`.
+     - **F3, a valueless flag refuses a value.** Commands test only
+       `flags.has(...)`, so `--cascade=false` cascaded. Every flag that
+       takes no value (the control flags `--json`, `--quiet`, `--force`,
+       `--allow-open-children`, `--ready`, `--all`, plus the flag table's
+       boolean fields, plus `--version`) now answers `--name=<v>` with
+       `invalid_value`, as `--dry-run` already did. The value is never
+       read as yes/no: accepting `false` would make the flags mean
+       different things depending on a spelling nobody documented.
+       `--help` stays exempt, because it never fails.
+     - **F11, `--` and repeated flags.** `--` was skipped, so a token
+       after it could still be a flag (a note signed by whoever came
+       last). It now ends the options. A repeated flag was last-wins
+       (D93 F6: "kept, not pinned"). A flag given twice with different
+       values is now `invalid_value`; an identical repeat is accepted
+       (Lead). A conflicting value is the security case
+       (`--as=scout … --as=mallory`). An identical repeat is harmless,
+       and agents and wrappers often add `--json` or the same `--backlog`
+       a second time. A flag that takes no value can only repeat
+       identically, so it is always accepted. `nanojira-mcp` builds each
+       flag once from the flag table and never sends `--`, and that still
+       holds after TSK-035's `--text=`. `parseArgs` reports conflicts
+       instead of throwing, so `nanojira-mcp`'s own startup flags keep
+       their behaviour. `--help` is again exempt.
+     - **Stray positionals: `unexpected_argument` (Reviewer).** Once `--`
+       ends the options, `set --id=X -- --status=doing` passed
+       `--status=doing` as a positional, which `set` ignored, so it
+       reported success and changed nothing. Every command except `note`
+       and `find` (the two whose flag table has a positional field) now
+       refuses a positional, naming it. No existing code fits:
+       `unknown_field` is about a flag name, and `invalid_value` about a
+       flag's value. So the closed set gains `unexpected_argument`, which
+       is additive under § 7's rule. `nanojira-mcp` cannot trip it: since
+       b871f51 (TSK-035, DECISIONS 214) it sends no positional at all,
+       note/find's text included, which goes as `--text=`.
+     - **Precedence (Reviewer).** An unknown command or flag is reported
+       before a conflicting repeat or a stray positional. `main` runs the
+       two checks only when every flag is one the command accepts;
+       otherwise the dispatch (`unknown_command`) or the command's own
+       flag check (`unknown_field`) fails first. The repeat message names
+       the spelling typed (`--depends_on` stays `--depends_on`).
+     - **`--backlog` repeats compare resolved (Reviewer).** `B`, `B/`,
+       `./B` and the absolute path name one backlog, so `path.resolve()`
+       of both values decides. This applies only to `--backlog`, the one
+       path-valued flag that wrappers add. Every other flag compares
+       exactly, so `--as=scout --as=./scout` stays refused.
+
+217. **A hook's in-group background work ends when the hook's shell
+     exits** (2026-10-18, TSK-036; improvement survey, "also noted").
+     - The gap: with `NJ_ON_CHANGE='sleep 6 &'`, an MCP call answered
+       only after ~6.5 s. sh exits at once, and nanojira cleared the hook's
+       timer on that exit and never touched its process group again. The
+       backgrounded `sleep` ran on in the group with nanojira's stderr as
+       its fd 2, so every caller reading that pipe (nanojira-mcp waiting
+       for the child's `close`, spawnSync, `$(… 2>&1)`) waited for it.
+       One with its output redirected held nothing, but still ran on past
+       nanojira, unbounded by the timeout.
+     - The choice: when the hook's shell exits, nanojira sends SIGKILL to
+       the hook's process group, the same kill the timeout sends. This is
+       what § 9 already said ("Work a hook backgrounds outlives that wait
+       only if it leaves the hook's process group"), and it is D200's own
+       reason for the group kill ("otherwise it would hold the caller's
+       stderr pipe open long after nanojira returned"); only the code
+       lagged. A hook's in-group background work now ends when the hook's
+       shell exits, as SPEC § 9 always said; use setsid to outlive it.
+       Lead: no contract change. Nothing in the manifest/scans tree uses
+       `NJ_ON_CHANGE` apart from copies of nanojira.
+     - Rejected:
+       - piping the hook's stderr through nanojira and closing the pipe
+         when sh exits: the in-group job still runs on, and its next write
+         gets SIGPIPE, a death by a signal nobody chose;
+       - `stdio: 'ignore'` plus a log file: it breaks § 9's "stdout and
+         stderr of the hook both go to nanojira's stderr" and writes state.
+     - Not changed: the stdio routing, the wait, the timeout and its
+       message, every warning, exit codes, and work that left the group
+       (it still outlives the wait; a detached child that keeps
+       nanojira's stderr still holds a reader, which § 9 already tells a
+       hook to avoid by redirecting its output).
+     - Test: AC-63 F2 (574 checks): `sleep 20 &` on the inherited stderr
+       returns at once and the job is gone; `sleep 30 >/dev/null 2>&1 &`
+       does not outlive the hook; the control, a detached `sleep` that
+       left the group, outlives the wait. hardening-mcp X10: the MCP call
+       with `sleep 20 &` answers at once. Red before: AC-63 2 of 574
+       (20215 ms; the redirected job alive), hardening-mcp 1 of 34
+       (20445 ms).
+     - Revised (2026-10-18, TSK-036 review): the kill now says so. When
+       something is still in the group as the hook's shell exits
+       (`kill(-pid, 0)` succeeds just before the SIGKILL), nanojira writes
+       one more warning, in the same style as the others: `Warning:
+       NJ_ON_CHANGE hook left background work in its process group, which
+       was killed (use setsid to keep it); the write itself succeeded and
+       is unchanged`. A hook author who wrote `nohup cmd &` or
+       `( cmd & )` believing it detaches sees why the work stopped; both
+       stay in the group. Not after a timeout, whose kill has its own
+       warning. A background child that has already exited but is not yet
+       reaped can, in a sub-millisecond window, trigger the line too; the
+       kill itself is harmless then. GUIDE § 30 gives macOS, which has no
+       setsid(1), a perl one-liner. Corrected after the Reviewer's
+       measurement: a backgrounded `perl -MPOSIX -e 'setsid(); exec @ARGV'
+       cmd &` lost the race every time (job alive 0 of 20, warning 20 of
+       20), since perl needs about 0.05 s to reach setsid() and the group
+       kill comes first. The guide now gives a handshake run in the
+       foreground: the parent forks, the child calls setsid() and then
+       closes a pipe, and the parent exits only on that EOF (job alive 20
+       of 20, no warning). `setsid cmd &` works because setsid(1) leaves
+       the group within microseconds. AC-63 F2 pins the line in both
+       in-group legs and none in the setsid control (red before: 2 of
+       576).
+
+218. **`--dry-run` writes nothing through a directory symlink either**
+     (2026-10-18, TSK-042; ImprovementScout's TSK-033 check, item D1).
+     - The gap: the scratch copy kept every symlink as a symlink (a
+       relative one leaving the backlog made absolute, so it stays
+       readable). A layout folder linked elsewhere, which DECISIONS 105
+       allows, was therefore a link in the copy too, and the dry run's
+       writes went through it to the real target: with `tasks ->
+       <outside>`, `new --dry-run` created `<outside>/TSK-002.md`.
+       `set` and `claim` rewrote the element file there. The same held
+       below the top level: under `hierarchy`, an ID folder that is a
+       link (`EPIC-001 -> <outside>`, the epic's file elsewhere) took
+       `new --parent=EPIC-001 --dry-run`'s new child. Present on d6a0022.
+     - The choice, by what the real call does with the link:
+       - A layout folder (the four configured names, matched
+         case-insensitively like the scan; the defaults if the config
+         cannot be read, when the call fails anyway): the real call reads
+         and writes through it, so the copy holds it as a plain directory
+         with the target's contents, copied from the target's real path
+         so a relative link inside resolves as the OS resolves it.
+         `changes` compares it by contents on both sides, so the paths
+         in it read as in any folder and the link itself is no change.
+         `--file=` naming an element by its path behind the link, which
+         the real call matches through `realpath`, maps to the copy's
+         file like any other path in the backlog.
+       - Any other directory symlink outside the dot-folders: the scan
+         never follows it (DECISIONS 91 B11), so nothing the call reads
+         is behind it, but placement can still write through it. In the
+         copy it points at an empty directory next to the copy, inside
+         the same `nj-dry-run-*` folder. A write through it lands there;
+         `changes` walks into it on the copy's side only, so the write is
+         listed as `create` under the link's path, the same path the real
+         call writes to.
+       - The dot-folders (`.nanojira`, `.ids`, anything below them) are
+         left as they were: they are nanojira's own state, and DECISIONS
+         215 (TSK-033) refuses every write through a link there with
+         `refused:symlink`, in a dry run exactly as in the real call.
+         Making them plain directories in the copy would make the dry run
+         succeed where the real call is refused. Until TSK-033 is merged,
+         a linked `.nanojira` or `.nanojira/ids` is still written
+         through, dry run or not.
+     - Alternatives considered:
+       - refusing `--dry-run` on a backlog with a linked folder: DECISIONS
+         105 layouts are legitimate, and the dry run is exactly the tool to
+         try a write on one;
+       - copying the target of every directory symlink: a link below a
+         layout folder may point anywhere (`/`, a home directory, a
+         loop), and nothing the call reads is behind it;
+       - an empty stand-in for a layout folder as well: the call reads its
+         element files through it, so the dry run would not see them.
+     - Disclosed: a write the real call would make onto a file that
+       already exists behind a stand-in link is made onto nothing in the
+       copy, and reported as a `create`; nanojira never addresses such a
+       file by itself, since the scan never sees it. For the same
+       reason the dry run can predict a different id than the real call:
+       an element file behind a stand-in link is not seen when the next id
+       is allocated, while the real call's collision check (`new` never
+       overwrites a file, DECISIONS 106 F10) meets it through the link
+       (the Scout's N1: the dry run said TSK-003, the real call wrote
+       TSK-004).
+       A followed layout folder's target is copied in full, files that
+       are not elements included, so a large target makes every dry run
+       slower by the time it takes to copy it. Two layout folders linked
+       to the same directory are two separate copies.
+     - Tests: AC-61 section H. `tasks` linked relatively and absolutely
+       (`new`, `set`, `claim`, `claim --file=<path behind the link>`),
+       a configured folder `work` linked as
+       `work` (`new`) and as `Work` (`set`), and a `hierarchy` ID
+       folder linked out (`new`). Each checks that the linked target and
+       the backlog stay byte-identical, that `changes` equals what the
+       real call changed, and that the real call still writes through the
+       link. Red before: 16 of 408.
+     - Follow-up, after ImprovementScout's check of 5fab8b9
+       (`scout-t042-attack.mjs`, 0 of 27 dry runs wrote outside):
+       - `$TMPDIR` inside a followed layout folder's target put the
+         scratch folder inside what was being copied, so the copy copied
+         itself until `ENAMETOOLONG` (`io_error` after about 2 s, while
+         the real call succeeded). The same held for a `$TMPDIR` inside
+         the backlog itself, since DECISIONS 197. The copy and the
+         comparison now leave out the scratch folder, recognised by
+         device and inode, so no extra system call per entry. AC-61
+         section I: red before 6 of 418.
+       - A layout folder linked to a file or to nothing made `new`'s
+         `mkdir` fail with EEXIST or ENOENT, reported as
+         `internal_error` with a stack, in the real call as in a dry run
+         (cases 5a–5c; present on d6a0022). `makeFolder` (`store.ts`)
+         turns that class (EEXIST, ENOENT, ENOTDIR) into a one-line
+         `io_error` naming the path, with a hint pointing at
+         `backlog:unreadable_dir`, for a single `new` and for a node of a
+         plan. After the Reviewer's N1, that hint is only for a symlink in
+         the way (found by `lstat` from the top of the path); a plain file
+         or other non-directory gets "a file or other non-directory is in
+         the way at <path>; move it", and `doctor` reports nothing there,
+         as before. Any other OS error from that `mkdir` keeps DECISIONS
+         174's `internal_error`. Test: `test/edge/layout-link-broken.ts`,
+         red before 32 of 57.
+     - Follow-up, after the TSK-033 pick (Lead): the configured folder
+       names are read with `readRegularFile` and the configuration's cap,
+       as `loadConfig` reads them. A FIFO as `config.json` blocked the
+       dry run on that read, before the real call's `invalid_config` was
+       reached (AC-61 section J: red before 4 of 424, the 20 s timeout).
+       A FIFO, socket or device was also left out of the copy, so there it
+       read as missing (the configuration: "is missing" instead of "not a
+       regular file") or not at all (an element file: no
+       `file:unreadable` stub, so `rm` passed in the dry run and was
+       refused for real). The copy now holds a link to the original:
+       every such read opens it non-blocking and refuses it by type, a
+       write replaces the link and never the original, and the comparison
+       leaves the link out, as it leaves out the original. Not inside the
+       dot-folders, whose own entries are read without following a link
+       (DECISIONS 215), except the configuration. With the link removed
+       again, section J is red 3 of 429.
 
 ## Known gaps, stated plainly
 

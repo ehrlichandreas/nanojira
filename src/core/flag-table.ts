@@ -15,9 +15,11 @@
 // `core/cli-flags.ts` adds the control flags back for the CLI's own
 // validation and `--help` (DECISIONS 205).
 //
-// `positional: true` marks a field that is a bare CLI argument (`nanojira note
-// --id=X "text"`), not a `--name=value` flag; nanojira-mcp appends it to argv
-// after every other flag, in table order.
+// `positional: true` marks a field whose usual CLI form is a bare argument
+// (`nanojira note --id=X "text"`); the CLI takes it as `--text=` too, and
+// nanojira-mcp always passes it that way, so a value starting with `--` is
+// never parsed as a flag (TSK-035). It stays out of cliFieldNames() below:
+// each command lists `text` among its own controls instead.
 
 import { NEW_FIELDS, SETTABLE_FIELDS } from './constants.ts';
 
@@ -75,10 +77,10 @@ function spec(command: string): CommandSpec {
 
 /** Every field `command` takes as a `--name=value` flag — what each CLI
  * command's own `checkFlags` call builds its allowed-field set from. A
- * `positional` field (note/find's `text`) is never a `--flag` on the CLI,
- * so it is excluded here: including it would let `--text=…` through
- * `checkFlags` where it was previously `unknown_field`, a CLI behaviour
- * change the shared table must not cause. */
+ * `positional` field (note/find's `text`) is excluded: `--text=` is
+ * granted by each command's own controls in core/cli-flags.ts (note since
+ * TSK-006, find since TSK-035), not as a schema field, so "Known fields:"
+ * hints stay as they were. */
 function cliFieldNames(command: string): string[] {
   return spec(command).fields.filter((f) => !f.positional).map((f) => f.name);
 }
@@ -87,7 +89,7 @@ function cliFieldNames(command: string): string[] {
  * `positional` marker intact — what `nanojira-mcp`'s schema generator and its
  * `tools/call` argument builder both read (§ 17: the MCP tool call has no
  * "positional" concept; a positional CLI field is still one ordinary
- * input field, just appended to argv differently when spawning `nanojira`). */
+ * input field, passed as `--text=` like any other). */
 function commandFields(command: string): FieldSpec[] {
   return spec(command).fields;
 }

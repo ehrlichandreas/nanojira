@@ -2,9 +2,8 @@
 
 `nanojira` keeps a backlog of epics, tasks and subtasks as one Markdown file per
 element, next to your code. This guide shows how to use it; the rules behind
-every answer are in `docs/SPECIFICATION.md` (spec v3, current through
-v3.9 — §§ 21–23 below), and where this guide and the spec differ, the
-spec wins.
+every answer are in `docs/SPECIFICATION.md`, and where this guide and the
+spec differ, the spec wins.
 
 **Upgrading an existing backlog?** `nanojira` refuses to touch a v2 backlog
 (`.nanojira.json`/`.ids/` at the top level) until you run the one
@@ -12,7 +11,7 @@ spec wins.
 from an earlier v3 release (this guide already describes the latest):
 `docs/CHANGES.md`.
 
-This describes spec v3.9's end state. Most examples below were run directly
+This describes the release it ships with (`nanojira --version`). Most examples below were run directly
 against `dist/nanojira.mjs`; output is shown as it is printed, with the
 machine-specific path shortened to `…`.
 
@@ -33,13 +32,15 @@ team vendors its own copy, exported from a signed tag:
 $ node tools/export-skill.mts <signed-tag> <dest>
 ```
 
-This reads `SKILL.md`, `bin/` and `dist/` from `<signed-tag>`'s own tree —
+This reads `SKILL.md`, `LICENSE`, `references/`, `bin/` and `dist/` from `<signed-tag>`'s own tree —
 never the working tree, and nothing else (no `src/`, `test/`, `tools/` or
 `package.json`) — and writes `<dest>/` as one atomic unit:
 
 ```
 <dest>/
   SKILL.md
+  LICENSE
+  references/*.md                               (on-demand reading SKILL.md points at)
   bin/nanojira         bin/nanojira-mcp         (sh launchers)
   bin/nanojira.cmd     bin/nanojira-mcp.cmd     (Windows launchers)
   dist/nanojira.mjs    dist/nanojira-mcp.mjs    (the bundles)
@@ -78,11 +79,11 @@ checked equal to it directly.
 $ nanojira init
 Created backlog at …/proj/backlog
   epics/ tasks/ subtasks/ archive/ .nanojira/
-  .nanojira/config.json .nanojira/ids/ .gitignore README.md STATUS.md
+  .nanojira/config.json .nanojira/ids/ .gitignore README.md STATUS.md TAGS.md
 ```
 
 `init` creates `./backlog/` with the default configuration, a `README.md`, a
-`.gitignore`, a `STATUS.md` and the empty type folders `epics/`, `tasks/`,
+`.gitignore`, a `STATUS.md`, a `TAGS.md` and the empty type folders `epics/`, `tasks/`,
 `subtasks/`, `archive/`; everything only `nanojira` needs — the configuration and
 the tombstones — lives in one hidden folder, `.nanojira/`. Commit all of
 the **files**: tombstones (`.nanojira/ids/`) are what guarantee that an ID
@@ -122,7 +123,8 @@ whenever that ambiguity matters, rather than relying on "no backlog
 nearby" being true of a path you don't control.
 
 **`--backlog`/`--json` also work before the command word**, not just after
-— either order, either place, repeated or mixed:
+— either order, either place. Giving one twice with the same value is
+fine; two different values are `invalid_value`:
 
 ```sh
 $ nanojira --backlog=../shared/backlog list --json | head -2
@@ -262,7 +264,8 @@ TSK-001 → status=done
   - 2026-10-06T21:16:23Z alice: First line
     Second line
   ```
-- `nanojira set --status=done` on a parent with open children is refused
+- `nanojira set --status=done` (and `nanojira claim --status=done`) on a parent
+  with open children is refused
   (`refused:children_open`); `--allow-open-children` forces it and leaves a
   `done:open_children` warning. `--force` means only one thing: overwrite a
   parallel change.
@@ -837,7 +840,8 @@ lowercase mapping, not full Unicode case folding, so e.g. `ß`/`SS` don't
 match each other; `--case-sensitive` for an exact match. Combines with
 `list`'s other filters (`--status`, `--type`, `--tag`, `--parent`,
 `--assignee`) as an AND; `--all` includes the archive. The literal empty
-string is `invalid_value`.
+string is `invalid_value`. A text that starts with `--` goes as
+`--text=…` (`nanojira find --text=--force`), never as the bare argument.
 
 ## 18. Batch writes: `--id=A,B,C`
 
@@ -880,7 +884,7 @@ $ <dest>/bin/nanojira-mcp --backlog=./backlog [--allow-destructive]
   return for the equivalent CLI call — nothing to learn beyond the contract
   above.
 - Tools: `list`, `show`, `find`, `tree`, `new`, `set`, `note`, `check`,
-  `claim`, `release`, `archive`, `unarchive`, `doctor`. **`rm` is never
+  `claim`, `release`, `next`, `log`, `archive`, `unarchive`, `doctor`. **`rm` is never
   offered.** `archive`/`unarchive` are offered ungated (both reversible);
   `doctor --fix` only exists as a tool when the server was started with
   `--allow-destructive`.
@@ -903,7 +907,7 @@ With `--json`, `error` is one of a closed set. The ones an agent meets:
 | `invalid_config` | the configuration violates § 5 | `nanojira doctor` names the defect |
 | `legacy_layout` | a v2 backlog | `nanojira doctor --fix` migrates it (`docs/MIGRATION-v3.md`) |
 | `unknown_field`, `unknown_command` | a typo | the hint lists the known flags |
-| `missing_argument`, `missing_value`, `invalid_value`, `invalid_target` | the call itself is wrong | fix the call |
+| `missing_argument`, `missing_value`, `invalid_value`, `invalid_target`, `unexpected_argument` | the call itself is wrong | fix the call |
 | `ambiguous_target` | `check --text` matches two or more checkboxes | narrow the text, or use `--item=<n>` |
 | `invalid_env` | `NJ_AUTHOR`, `NJ_NOW` or `NJ_ON_CHANGE_TIMEOUT` holds an invalid value; the hint names which | fix or unset it; for `NJ_AUTHOR`, `--as` works too |
 | `not_found` | the `--id`, `--parent`, `--depends-on` or `--file` names nothing | check the ID |
@@ -918,9 +922,12 @@ With `--json`, `error` is one of a closed set. The ones an agent meets:
 | `refused:unreadable` | an unreadable file exists (`rm`, `archive`, as `--parent`) | fix or remove the file `nanojira doctor` names |
 | `refused:misplaced` | a hierarchy archive of a subtree outside its folder | `nanojira doctor --fix` |
 | `refused:unreadable_dir` | an unreadable directory hides part of the backlog | fix its permissions, then `nanojira doctor` |
+| `refused:too_large` | the write would make an element file larger than 1 MiB | shorten the text, or keep large content in a separate file and link to it |
+| `refused:symlink` | `.nanojira/`, its `ids/` or `claims/`, a claim directory or a claim entry is a symlink (`new`, `claim`, `release`, `archive`, `rm`, `unarchive`) | replace the link with a real directory holding the same contents; `doctor` names every such link (`claim:symlink`, or `backlog:ids_missing` for `ids/`) |
+| `refused:invalid_id` | an element involved has an `id` that is not `EPIC-`/`TSK-`/`SUB-<n>` (`claim`, `release`, `archive`, `rm`, `unarchive`, as `--parent`) | give it a real id by hand (and rename the file to match) |
 | `exists` | `init` target occupied, or an archive target occupied | choose another target, or clear it |
 | `io_error` | a filesystem call on a named path failed | read the message; nothing was half-written |
-| `id_allocation_failed` | 100 ID retries exhausted under contention | retry |
+| `id_allocation_failed` | 100 ID retries exhausted under contention, or the next ID would need more than 15 digits | retry; the 15-digit limit is final |
 
 Element problems arrive in `_problems` on every entry — branch on the codes
 (`incomplete:acceptance`, `depends_on:dangling`, `layout:misplaced`,
@@ -1474,7 +1481,19 @@ What to rely on:
 - **It is bounded.** nanojira waits for it, at most
   `NJ_ON_CHANGE_TIMEOUT` seconds (default `10`, whole seconds 1–86400),
   then kills it and everything it started. An invalid value is refused
-  (`invalid_env`) before anything is written.
+  (`invalid_env`) before anything is written. Work the hook backgrounds
+  (`cmd &`) ends when the hook's shell exits, with one
+  `Warning: … left background work in its process group …` line;
+  `nohup cmd &` and `( cmd & )` end the same way. To outlive the hook,
+  leave the process group: `setsid cmd >/dev/null 2>&1 &`, which works
+  because setsid(1) leaves the group within microseconds, long before the
+  hook's shell exits. macOS has no `setsid` command; there, run this in
+  the foreground (no `&`): it returns as soon as `cmd` has left the
+  group, and `cmd` keeps running:
+  `perl -MPOSIX -e 'pipe(R,W); if (fork) { close W; <R>; exit 0 } close R; setsid(); close W; exec @ARGV' cmd >/dev/null 2>&1`.
+  A backgrounded `perl -MPOSIX -e 'setsid(); exec @ARGV' cmd &` does not
+  work: perl needs about 0.05 s to reach `setsid()`, and the group kill
+  comes first.
 - **Order across processes is not guaranteed.** Two agents writing at
   the same time each run their own hook, possibly concurrently. If order
   matters, re-read the element in the hook (as above) instead of trusting

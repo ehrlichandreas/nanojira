@@ -11,7 +11,7 @@ import { checkCommandFlags } from '../core/cli-flags.ts';
 import { TYPE_FOLDER_ROLE, TYPES, PARENT_TYPE, PRIORITIES, FIELD_ORDER, SECTION_ROLES, NEW_FIELDS, TYPE_PREFIX } from '../core/constants.ts';
 import { cliFieldNames } from '../core/flag-table.ts';
 import { readInputText, parseInputJson } from '../core/input.ts';
-import { context } from '../core/context.ts';
+import { context, unarchiveCalls } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
 import { folderOf, expectedPlace } from '../core/layout.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
@@ -22,7 +22,8 @@ import { valueHint } from '../core/suggest.ts';
 import { parseOutputOpts, emitWriteResultOpts } from '../core/result-opts.ts';
 import { refreshStatus } from '../core/status.ts';
 import { refreshTags, warnTagNearMatches } from '../core/tags.ts';
-import { nowIso, allocateId, atomicWrite } from '../core/store.ts';
+import { nowIso, allocateId, atomicWrite, makeFolder, requireWithinCap } from '../core/store.ts';
+import { requireIdShaped } from '../core/id-shape.ts';
 
 /** Whether `dir` already holds a file named `name`, comparing case-insensitively. */
 function collidesCaseInsensitively(dir: string, name: string): boolean {
@@ -63,8 +64,9 @@ function article(word: string): string {
 /**
  * `verb` (DECISIONS 178): the archived-parent refusal's own wording —
  * `new` is about to CREATE a child under the given parent, `set --parent`
- * is about to MOVE an existing one there; same code, same every other
- * word, just the one verb that actually differs between the two callers.
+ * is about to MOVE an existing one there; same code and the same way out
+ * (the `unarchive` call that restores the parent), only what the call
+ * would do differs between the two callers.
  */
 function checkExplicitParent(ctx: Context, type: string, parent: string | undefined, verb: 'create' | 'move' = 'create'): string | undefined {
   if (type === 'epic') {
@@ -87,8 +89,11 @@ function checkExplicitParent(ctx: Context, type: string, parent: string | undefi
   }
   if (p.archived) {
     fail('refused:parent_archived', `parent '${parent}' is archived — refusing to ${verb} a child under it`,
-      'a fresh child of an archived parent would immediately carry archive:split');
+      `${verb === 'create' ? 'a new child of' : 'an element moved under'} an archived parent would at once carry archive:split; restore the parent first with ${unarchiveCalls(ctx, [p])} (§ 11a)`);
   }
+  // Under `hierarchy` the parent's id is a folder the child goes into; under
+  // every layout a malformed id can never hold a child (DECISIONS 215).
+  requireIdShaped([p.id], `${verb === 'create' ? 'new' : 'set'} --parent`);
   return p.id;
 }
 
@@ -158,6 +163,47 @@ function newPlace(ctx: Context, type: string, id: string, parent: string | undef
   return [at === null ? folderOf(ctx.backlog, p.file) : at].concat(own).filter((s) => s !== '').join('/');
 }
 
+interface NewFieldSpec {
+  type: string;
+  cleanTitle: string;
+  status?: string;
+  priority?: string;
+  assignee?: string;
+  tags?: string[];
+  deps?: string[];
+}
+
+/** The frontmatter of a new element, in the order `new` writes it (shared by the flag and `--input` paths). */
+function buildNewFields(ctx: Context, s: NewFieldSpec, id: string, parent: string | undefined, deps: string[] | undefined, ts: string): Map<string, string | string[]> {
+  const fields: Map<string, string | string[]> = new Map();
+  fields.set('id', id);
+  fields.set('type', s.type);
+  if (parent !== undefined) fields.set('parent', parent);
+  fields.set('title', s.cleanTitle);
+  fields.set('status', s.status === undefined ? ctx.cfg.statuses[0] : s.status);
+  if (s.priority !== undefined) fields.set('priority', s.priority);
+  if (s.assignee !== undefined && s.assignee !== '') fields.set('assignee', s.assignee);
+  if (s.tags !== undefined && s.tags.length > 0) fields.set('tags', s.tags);
+  if (deps !== undefined && deps.length > 0) fields.set('depends_on', deps);
+  fields.set('created', ts);
+  fields.set('updated', ts);
+  return fields;
+}
+
+// The longest id § 6 allows: it stands in for one not allocated yet.
+const LONGEST_ID = 'EPIC-' + '9'.repeat(15);
+
+/**
+ * The new element must fit the element-file cap (DECISIONS 215) — checked
+ * before its id is allocated, since the tombstone is already a write (§ 8).
+ * The real id is not known yet; the longest possible one stands in, so the
+ * check can only err on the safe side, by at most a dozen bytes.
+ */
+function requireNewFits(ctx: Context, s: NewFieldSpec, parent: string | undefined, body: string): void {
+  const fields = buildNewFields(ctx, s, LONGEST_ID, parent, s.deps, nowIso());
+  requireWithinCap(`the new ${s.type}`, serialize(fields, Array.from(fields.keys()), body));
+}
+
 function buildBody(ctx: Context, type: string, cleanTitle: string, sections: Map<string, string>): string {
   let body = `\n# ${cleanTitle}\n\n## ${ctx.cfg.sections.description[0]}\n`;
   if (type !== 'epic') body += `\n## ${ctx.cfg.sections.acceptance[0]}\n`;
@@ -185,6 +231,9 @@ function cmdNew(flags: Flags) {
 
   const { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections } =
     validateNewFlags(ctx, flags);
+  const body = buildBody(ctx, type, cleanTitle, sections);
+  const spec: NewFieldSpec = { type, cleanTitle, status, priority, assignee, tags, deps };
+  requireNewFits(ctx, spec, parent, body);
 
   // A case-insensitively taken name is never overwritten (DECISIONS 106
   // F10): the allocator sees only tracked IDs (tombstones and loaded
@@ -202,25 +251,11 @@ function cmdNew(flags: Flags) {
     if (attempt >= 100) return hardExit('id_allocation_failed', `nanojira: id allocation failed after 100 retries (${id} collides with an existing file)`);
   }
   const ts = nowIso();
-
-  const fields: Map<string, string | string[]> = new Map();
-  fields.set('id', id);
-  fields.set('type', type);
-  if (parent !== undefined) fields.set('parent', parent);
-  fields.set('title', cleanTitle);
-  fields.set('status', status === undefined ? ctx.cfg.statuses[0] : status);
-  if (priority !== undefined) fields.set('priority', priority);
-  if (assignee !== undefined && assignee !== '') fields.set('assignee', assignee);
-  if (tags !== undefined && tags.length > 0) fields.set('tags', tags);
-  if (deps !== undefined && deps.length > 0) fields.set('depends_on', deps);
-  fields.set('created', ts);
-  fields.set('updated', ts);
-
-  const body = buildBody(ctx, type, cleanTitle, sections);
+  const fields = buildNewFields(ctx, spec, id, parent, deps, ts);
 
   // Under `hierarchy` the element's own folder (epic, task) is created first;
   // one that already exists is reused (§ 12).
-  fs.mkdirSync(dir, { recursive: true });
+  makeFolder(dir);
   atomicWrite(file, serialize(fields, Array.from(fields.keys()), body));
 
   if (tags !== undefined && tags.length > 0) warnTagNearMatches(tags, ctx.elements.flatMap((e) => e.tags));
@@ -520,6 +555,11 @@ function cmdNewInput(ctx: Context, inputValue: string) {
   for (let i = 0; i < flat.length; i++) {
     try {
       const v = validatePlanNode(ctx, flat[i], flat, seenRefs, anyRefIndex, declaredSoFar, stdinState);
+      // Before anything of the plan is written: an implied parent, a `@ref`
+      // and the node's own id are not known yet, so the longest id stands in.
+      requireNewFits(ctx, Object.assign({}, v, { deps: (v.deps || []).map((d) => (d.startsWith('@') ? LONGEST_ID : d)) }),
+        v.parentMode === 'explicit' ? v.explicitParentId : v.parentMode === 'implied' ? LONGEST_ID : undefined,
+        buildBody(ctx, v.type, v.cleanTitle, v.sections));
       validated.push(v);
       if (v.ownRef !== undefined) declaredSoFar.add(v.ownRef);
     } catch (e) {
@@ -570,24 +610,13 @@ function cmdNewInput(ctx: Context, inputValue: string) {
       });
 
       const ts = nowIso();
-      const fields: Map<string, string | string[]> = new Map();
-      fields.set('id', id);
-      fields.set('type', v.type);
-      if (parentId !== undefined) fields.set('parent', parentId);
-      fields.set('title', v.cleanTitle);
-      fields.set('status', v.status === undefined ? ctx.cfg.statuses[0] : v.status);
-      if (v.priority !== undefined) fields.set('priority', v.priority);
-      if (v.assignee !== undefined && v.assignee !== '') fields.set('assignee', v.assignee);
-      if (v.tags !== undefined && v.tags.length > 0) fields.set('tags', v.tags);
-      if (resolvedDeps.length > 0) fields.set('depends_on', resolvedDeps);
-      fields.set('created', ts);
-      fields.set('updated', ts);
+      const fields = buildNewFields(ctx, v, id, parentId, resolvedDeps, ts);
       lastFields = fields;
       lastSections = v.sections;
 
       const body = buildBody(ctx, v.type, v.cleanTitle, v.sections);
 
-      fs.mkdirSync(dir, { recursive: true });
+      makeFolder(dir);
       atomicWrite(file, serialize(fields, Array.from(fields.keys()), body));
       created.push(id);
       // `refs` lists only elements actually written (DECISIONS 174): a ref

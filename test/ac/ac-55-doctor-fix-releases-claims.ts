@@ -64,7 +64,7 @@ function claimAt(dir: string, id: string, name: string, since: string): void {
   ok(run(['set', '--id=' + id, '--assignee=' + name], dir, { NJ_NOW: since }), 'mirror assignee=' + name);
 }
 /** Same, but for an element already archived: `nj set` refuses to write to
- * an archived element at all (read-only, round one), so there is no way
+ * an archived element at all (read-only, § 9), so there is no way
  * to mirror `assignee` through a real command -- only the claim directory
  * itself can be reconstructed, exactly the residue a straight backlog
  * move/copy could leave behind independent of `nj archive`'s own

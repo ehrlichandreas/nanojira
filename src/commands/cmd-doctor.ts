@@ -7,7 +7,10 @@ import type { Flags, Element, Context, Finding } from '../core/types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { checkCommandFlags } from '../core/cli-flags.ts';
-import { allClaimDirs, claimsRootDir, highestEntry, isClaimStale, releaseUnconditional, removeClaimDirWholesale } from '../core/claims.ts';
+import { idShaped as idShapedId } from '../core/id-shape.ts';
+import { allClaimDirs, claimAsides, claimSymlinks, claimsRootDir, highestEntry, isClaimStale, releaseUnconditional, removeClaimDirAt, removeLeftoverAside } from '../core/claims.ts';
+import { internalSymlink, shownName, symlinkNote } from '../core/internal-path.ts';
+import { readRegularFile, TEXT_FILE_CAP } from '../core/regular-file.ts';
 import {
   PREFIX_TYPE, PARENT_TYPE, SEVERITY,
   V3_DIR_REL, V3_CONFIG_REL, V3_IDS_REL, V3_INDEX_REL, LEGACY_CONFIG_REL, LEGACY_IDS_REL, LEGACY_INDEX_REL,
@@ -16,15 +19,15 @@ import { workingDir } from '../core/config.ts';
 import { context } from '../core/context.ts';
 import { elementProblems, compareElements } from '../core/derive.ts';
 import { toReal } from '../core/dry-run.ts';
-import { ID_FOLDER, moveTarget, misplacedCode, ownFolder, removeEmptiedIdFolders } from '../core/layout.ts';
-import { fail, out } from '../core/output.ts';
+import { moveTarget, misplacedCode, ownFolder, removeEmptiedIdFolders } from '../core/layout.ts';
+import { Fail, fail, out } from '../core/output.ts';
 import { recordChange } from '../core/on-change.ts';
 import { syncH1, sectionCheckboxCounts } from '../core/parse.ts';
 import { article } from './cmd-new.ts';
 import { V2_README, V3_README } from '../core/readme-texts.ts';
 import { statusIsFresh, refreshStatus } from '../core/status.ts';
 import { tagsIsFresh, refreshTags } from '../core/tags.ts';
-import { nowIso, nowMs, mtimeIso, readTombstones, tombstoneLocation, atomicWrite, planMove, runMove, renderElement } from '../core/store.ts';
+import { nowIso, nowMs, mtimeIso, idsSymlinks, readTombstones, tombstoneLocation, atomicWrite, planMove, runMove, renderElement } from '../core/store.ts';
 
 // ------------------------------------------------------------------- doctor
 
@@ -78,6 +81,14 @@ function collectFindings(ctx: Context): Finding[] {
   for (const file of strayTmpFiles(scan.dirs.concat(claimsScanDirs(ctx.backlog)))) {
     findings.push({ code: 'backlog:stray_tmp', severity: 'warning', file, message: 'stray temp file from an interrupted write' });
   }
+  // A claim directory's removal killed after its rename aside, or whose
+  // rename back failed, leaves the aside behind (DECISIONS 215).
+  for (const file of claimAsides(ctx.backlog)) {
+    let link = false;
+    try { link = fs.lstatSync(file).isSymbolicLink(); } catch { continue; }
+    findings.push({ code: 'backlog:stray_tmp', severity: 'warning', file,
+      message: link ? 'stray symlink from an interrupted claim-directory removal (never followed)' : 'stray claim directory from an interrupted removal' });
+  }
   findings.push(...collectClaimFindings(ctx));
   if (claimsNeedGitignoreLine(ctx.backlog)) {
     findings.push({ code: 'backlog:claims_unignored', severity: 'warning', file: path.join(ctx.backlog, '.gitignore'),
@@ -88,9 +99,16 @@ function collectFindings(ctx: Context): Finding[] {
     findings.push({ code: 'backlog:unreadable_dir', severity: 'error', file: dir, message: `folder cannot be listed (${reason}) — element files in it are not seen` });
   }
 
+  // A linked `ids/`, type directory or bucket hides tombstones as surely as a
+  // missing `ids/` (DECISIONS 215), whether or not other tombstones remain.
   const tombs = readTombstones(ctx.idsDir, ctx.cfg.ids.shardSize);
-  if (ctx.elements.length > 0 && tombs.size === 0) {
-    findings.push({ code: 'backlog:ids_missing', severity: 'error', file: ctx.idsDir, message: `${path.relative(ctx.backlog, ctx.idsDir)}/ is missing or empty while element files exist — the never-reuse guarantee is not in force` });
+  const idsLink = idsSymlinks(ctx.idsDir, ctx.cfg.ids.shardSize)[0] ?? null;
+  if (ctx.elements.length > 0 && (tombs.size === 0 || idsLink !== null)) {
+    const rel = path.relative(ctx.backlog, ctx.idsDir) + '/';
+    const what = idsLink === null ? `${rel} is missing or empty`
+      : idsLink.startsWith(ctx.idsDir + path.sep) ? `part of ${rel} (${shownName(idsLink)}) is behind a symlink, which nanojira does not follow,`
+        : `${rel} is behind a symlink (${shownName(idsLink)}), which nanojira does not follow,`;
+    findings.push({ code: 'backlog:ids_missing', severity: 'error', file: ctx.idsDir, message: `${what} while element files exist — the never-reuse guarantee is not in force` });
   }
   // backlog:ids_layout_mismatch (§ 5 `ids.shardSize`, § 8): the on-disk
   // tombstone layout disagrees with what the current configuration asks
@@ -150,6 +168,7 @@ function strayTmpFiles(dirs: string[]): string[] {
 // is out of bounds, § 4 DECISIONS 91 B11), so a stray temp file inside one
 // needs its own list of directories to check (§ 12 "Claims").
 function claimsScanDirs(backlog: string): string[] {
+  if (internalSymlink(claimsRootDir(backlog)) !== null) return []; // never swept through a link (DECISIONS 215)
   return [claimsRootDir(backlog), ...allClaimDirs(backlog).map((c) => c.dir)];
 }
 
@@ -158,6 +177,19 @@ function claimsScanDirs(backlog: string): string[] {
 // not exist — backlog-level in the latter case) — § 7, § 12a.
 function collectClaimFindings(ctx: Context): Finding[] {
   const findings: Finding[] = [];
+  // claim:symlink (§ 7, DECISIONS 215): a linked claims root, `.nanojira/`,
+  // claim directory or claim entry, which every claim write refuses
+  // (refused:symlink) and every read skips — on the element it names, else
+  // backlog-level.
+  const root = claimsRootDir(ctx.backlog);
+  for (const link of claimSymlinks(ctx.backlog)) {
+    const below = path.relative(root, link).split(path.sep);
+    const el = below[0] === '..' || below[0] === '' ? undefined : ctx.elements.find((e) => e.id === below[0]);
+    findings.push(Object.assign({ code: 'claim:symlink', severity: 'error' as const }, el ? { element: el.id } : {}, {
+      file: link,
+      message: `${shownName(link)}: a symlink — not followed; claim, release, archive, rm and unarchive refuse (refused:symlink)`,
+    }));
+  }
   for (const { id, dir } of allClaimDirs(ctx.backlog)) {
     const el = ctx.elements.find((e) => e.id === id);
     const h = highestEntry(dir);
@@ -187,7 +219,7 @@ const CLAIMS_GITIGNORE_LINE = '.nanojira/claims/';
 
 function gitignoreHasClaimsLine(backlog: string): boolean {
   let content: string;
-  try { content = fs.readFileSync(path.join(backlog, '.gitignore'), 'utf8'); } catch { return false; }
+  try { content = readRegularFile(path.join(backlog, '.gitignore'), TEXT_FILE_CAP); } catch { return false; }
   return content.split('\n').some((l) => l.replace(/\r$/, '') === CLAIMS_GITIGNORE_LINE);
 }
 
@@ -290,6 +322,14 @@ function fixSkip(el: Element, notes: string[]) {
   return false;
 }
 
+// A link inside the bookkeeping is named once, however many steps meet it:
+// a linked `.nanojira/` stands behind both the tombstones (step 4) and the
+// claims (step 7a) (DECISIONS 215).
+function noteSymlink(fc: { notes: string[] }, link: string): void {
+  const note = symlinkNote(link);
+  if (!fc.notes.includes(note)) fc.notes.push(note);
+}
+
 // What every step shares: the accumulated report, the two guards, and the
 // mtime bookkeeping `rename` keeps current across steps 2/3's moves.
 interface FixShared {
@@ -378,6 +418,13 @@ function fixStep0(ctx: Context, fc: FixShared) {
     fc.notes.push(`both the v2 and the v3 place exist (${LEGACY_CONFIG_REL} / ${LEGACY_IDS_REL} and ${V3_CONFIG_REL} / ${V3_IDS_REL}) — ambiguous, nothing moved; remove one copy by hand and run \`nanojira doctor --fix\` again`);
     return;
   }
+  // Never migrated into, or out of, a link (DECISIONS 215): a linked
+  // `.nanojira/` would receive the configuration and every tombstone, a
+  // linked `.ids/` would move as a link and leave `ids/` one.
+  for (const dir of [V3_DIR_REL, LEGACY_IDS_REL]) {
+    const link = internalSymlink(path.join(backlog, dir));
+    if (link !== null) { noteSymlink(fc, link); return; }
+  }
   fs.mkdirSync(path.join(backlog, V3_DIR_REL), { recursive: true });
   fc.rename(path.join(backlog, LEGACY_CONFIG_REL), v3Config);
   fc.rename(path.join(backlog, LEGACY_IDS_REL), v3Ids);
@@ -399,6 +446,8 @@ function fixStrayIds(ctx: Context, fc: FixShared) {
   const backlog = ctx.backlog;
   const strayDir = path.join(backlog, LEGACY_IDS_REL);
   if (!fs.existsSync(strayDir)) return;
+  const strayLink = internalSymlink(strayDir);
+  if (strayLink !== null) { noteSymlink(fc, strayLink); return; }
   // The stray `.ids/` is always flat (a v2 leftover; v2 never sharded), but
   // the "real" `.nanojira/ids/` it is compared against may now be sharded —
   // `readTombstones` needs the current configuration's layout to see it.
@@ -419,6 +468,7 @@ function fixStrayIds(ctx: Context, fc: FixShared) {
 const TOMBSTONE_RE = /^(EPIC|TSK|SUB)-(\d+)$/;
 
 function detectIdsLayout(idsDir: string): 'empty' | 'flat' | 'sharded' | 'mixed' {
+  if (internalSymlink(idsDir) !== null) return 'empty'; // not followed (DECISIONS 215)
   let entries;
   try { entries = fs.readdirSync(idsDir, { withFileTypes: true }); } catch { return 'empty'; }
   let flat = false, sharded = false;
@@ -453,11 +503,15 @@ function fixIdsLayout(ctx: Context, fc: FixShared) {
   if (!wantSharded) {
     for (const prefix of Object.keys(PREFIX_TYPE)) {
       const typeDir = path.join(idsDir, prefix);
+      const typeLink = internalSymlink(typeDir);
+      if (typeLink !== null) { noteSymlink(fc, typeLink); continue; }
       let buckets;
       try { buckets = fs.readdirSync(typeDir); } catch { continue; }
       for (const b of buckets) {
         if (b.startsWith('.')) continue;
         const bucketDir = path.join(typeDir, b);
+        const bucketLink = internalSymlink(bucketDir);
+        if (bucketLink !== null) { noteSymlink(fc, bucketLink); continue; }
         let names;
         try { names = fs.readdirSync(bucketDir); } catch { continue; }
         for (const n of names) {
@@ -481,6 +535,8 @@ function fixIdsLayout(ctx: Context, fc: FixShared) {
       if (n.startsWith('.')) continue;
       if (!TOMBSTONE_RE.test(n)) continue;
       const { dir, file } = tombstoneLocation(idsDir, n, ctx.cfg.ids.shardSize);
+      const dirLink = internalSymlink(dir);
+      if (dirLink !== null) { noteSymlink(fc, dirLink); continue; }
       if (fs.existsSync(file)) { fc.notes.push(`${n}: cannot move to the sharded layout — already exists at ${path.relative(idsDir, file)}`); continue; }
       fs.mkdirSync(dir, { recursive: true });
       fs.renameSync(path.join(idsDir, n), file);
@@ -506,9 +562,10 @@ function fixGitignore(backlog: string, fc: FixShared, verbose: boolean) {
   const p = path.join(backlog, '.gitignore');
   let content: string;
   try {
-    content = fs.readFileSync(p, 'utf8');
-  } catch {
-    if (verbose) fc.notes.push('.gitignore does not exist — not created');
+    content = readRegularFile(p, TEXT_FILE_CAP);
+  } catch (e: any) {
+    if (e && e.code === 'ENOENT') { if (verbose) fc.notes.push('.gitignore does not exist — not created'); }
+    else fc.notes.push(`.gitignore cannot be read (${e && e.message}) — left alone`);
     return;
   }
   let changed = false;
@@ -532,7 +589,9 @@ function fixGitignore(backlog: string, fc: FixShared, verbose: boolean) {
 function fixReadme(backlog: string, fc: FixShared, verbose: boolean) {
   const p = path.join(backlog, 'README.md');
   let content: string;
-  try { content = fs.readFileSync(p, 'utf8'); } catch { return; }
+  // Read in full up to the text-file cap, not just the v2 text's size: a
+  // longer README.md is not the v2 text either, and says so in the note below.
+  try { content = readRegularFile(p, TEXT_FILE_CAP); } catch { return; }
   if (content !== V2_README) {
     if (verbose) fc.notes.push('README.md is not the v2 init text — left alone');
     return;
@@ -565,7 +624,20 @@ function fixSnapshotMtimes(fc: FixCtx<0>): FixCtx<1> {
 // element (DECISIONS 86), but writing an `id` into a colleague's meeting
 // notes, or burning it a tombstone, is not a repair (DECISIONS 106 F5).
 function idShaped(el: Element): boolean {
-  return ID_FOLDER.test(el.id);
+  return idShapedId(el.id);
+}
+
+// A repair never writes an element past the 1 MiB cap it could not read back
+// (DECISIONS 215): such an element is left as it is, with a note, instead of
+// failing the whole --fix run halfway.
+function renderOrNote(fc: FixShared, el: Element, ov: Map<string, string | string[]>, body: string | undefined): string | null {
+  try {
+    return renderElement(el, ov, body);
+  } catch (e) {
+    if (!(e instanceof Fail) || e.code !== 'refused:too_large') throw e;
+    fc.notes.push(`${el.id}: not rewritten — it would grow past the 1 MiB cap on element files (§ 7); make room in it by hand`);
+    return null;
+  }
 }
 
 // 1. write missing id / type — only when the key is genuinely absent; an
@@ -579,7 +651,9 @@ function fixStep1(fc: FixCtx<1>): FixCtx<2> {
     if (el.problems.has('type:derived') && el.type && fc.absent(el, 'type')) ov.set('type', el.type);
     if (ov.size === 0) continue;
     ov.set('updated', nowIso());
-    atomicWrite(el.file, renderElement(el, ov, undefined));
+    const content = renderOrNote(fc, el, ov, undefined);
+    if (content === null) continue;
+    atomicWrite(el.file, content);
     fc.actions.push(`${el.id}: wrote ${Array.from(ov.keys()).filter((k) => k !== 'updated').join(', ')} into the frontmatter`);
   }
   return { ...fc, stage: 2 };
@@ -591,6 +665,13 @@ function fixStep2(fc: FixCtx<2>): FixCtx<3> {
   for (const el of ctx.elements) {
     if (fc.guard(el)) continue;
     if (!el.problems.has('id:mismatch')) continue;
+    // The id becomes the file name, so only a § 6-shaped one may: `../x`
+    // would rename the file out of its folder, or out of the backlog
+    // (DECISIONS 215, TSK-033).
+    if (!idShaped(el)) {
+      fc.notes.push(`${el.file}: not renamed — its id ${JSON.stringify(el.id)} is not of the form EPIC-<n>, TSK-<n> or SUB-<n> (§ 6); fix the id by hand`);
+      continue;
+    }
     const target = path.join(path.dirname(el.file), el.id + '.md');
     if (fs.existsSync(target)) { fc.notes.push(`${el.file}: cannot rename to ${path.basename(target)} — target exists`); continue; }
     fc.rename(el.file, target);
@@ -706,12 +787,19 @@ function fixStep4(fc: FixCtx<4>): FixCtx<5> {
   const ctx = fc.reload();
   const dir = ctx.idsDir;
   const shardSize = ctx.cfg.ids.shardSize;
+  // No tombstone is ever written behind a symlink (DECISIONS 215), and none
+  // at all while one hides part of the record: backfilling around a linked
+  // bucket would treat its hidden tombstones as missing.
+  const links = idsSymlinks(dir, shardSize);
+  if (links.length > 0) { for (const link of links) noteSymlink(fc, link); return { ...fc, stage: 5 }; }
   fs.mkdirSync(dir, { recursive: true });
   const tombs = readTombstones(dir, shardSize);
   let created = 0;
   for (const el of ctx.elements) {
     if (!idShaped(el) || tombs.has(el.id)) continue;
     const { dir: tdir, file } = tombstoneLocation(dir, el.id, shardSize);
+    const tlink = tdir === dir ? null : internalSymlink(tdir);
+    if (tlink !== null) { noteSymlink(fc, tlink); continue; }
     if (tdir !== dir) fs.mkdirSync(tdir, { recursive: true });
     try { fs.closeSync(fs.openSync(file, 'wx')); created++; } catch { /* raced */ }
   }
@@ -736,7 +824,9 @@ function fixStep5(fc: FixCtx<5>): FixCtx<6> {
     if (ov.size === 0 && !el.problems.has('missing:updated')) continue;
     const wrote = Array.from(ov.keys());
     ov.set('updated', nowIso());
-    atomicWrite(el.file, renderElement(el, ov, undefined));
+    const content = renderOrNote(fc, el, ov, undefined);
+    if (content === null) continue;
+    atomicWrite(el.file, content);
     fc.actions.push(`${el.id}: wrote ${wrote.concat(['updated']).join(', ')}`);
   }
   return { ...fc, stage: 6 };
@@ -747,18 +837,35 @@ function fixStep6(fc: FixCtx<6>): FixCtx<7> {
   const ctx = fc.reload();
   for (const el of ctx.elements) {
     if (fc.guard(el) || !el.parsed || !el.problems.has('title:h1_mismatch')) continue;
-    atomicWrite(el.file, renderElement(el, new Map([['updated', nowIso()]]), syncH1(el.body, el.title)));
+    const content = renderOrNote(fc, el, new Map([['updated', nowIso()]]), syncH1(el.body, el.title));
+    if (content === null) continue;
+    atomicWrite(el.file, content);
     fc.actions.push(`${el.id}: synchronised the H1 with title`);
   }
   return { ...fc, stage: 7 };
 }
 
-// 7. remove stray temp files (now covers .nanojira/claims/ too, § 12 "Claims")
+// 7. remove stray temp files (now covers .nanojira/claims/ too, § 12 "Claims"),
+// and the `.nj-rm-*` asides an interrupted claim-directory removal left
 function fixStep7(fc: FixCtx<7>): FixCtx<8> {
   const ctx = fc.reload();
   for (const file of strayTmpFiles(ctx.scan.dirs.concat(claimsScanDirs(ctx.backlog)))) {
     fs.unlinkSync(file);
     fc.actions.push(`removed stray temp file ${path.relative(ctx.backlog, file)}`);
+  }
+  for (const aside of claimAsides(ctx.backlog)) {
+    const rel = path.relative(ctx.backlog, aside);
+    const { done, at } = removeLeftoverAside(aside);
+    if (done === 'removed') {
+      fc.actions.push(`removed the stray claim directory ${rel} an interrupted removal left`);
+    } else if (done === 'unlinked') {
+      fc.actions.push(`removed the stray symlink ${rel} an interrupted removal left`);
+      fc.notes.push(`${rel} was a symlink: only the link itself was removed, nothing behind it was followed or deleted`);
+    } else if (done === 'linked_root') {
+      fc.notes.push(`${path.relative(ctx.backlog, at)} not removed — the claims folder (or .nanojira/) is a symlink, so nothing was followed or deleted through it; replace the link with a real directory, then run doctor --fix again`);
+    } else {
+      fc.notes.push(`${path.relative(ctx.backlog, at)} not removed — it holds something other than claim entries; check it and remove it by hand`);
+    }
   }
   return { ...fc, stage: 8 };
 }
@@ -769,6 +876,9 @@ function fixStep7(fc: FixCtx<7>): FixCtx<8> {
 // line to .gitignore if the directory exists and the line is missing.
 function fixStep7a(fc: FixCtx<8>): FixCtx<8> {
   const ctx = fc.reload();
+  // A linked claims root or claim directory is never followed, emptied or
+  // removed (DECISIONS 215): named, and left for a human.
+  for (const link of claimSymlinks(ctx.backlog)) noteSymlink(fc, link);
   for (const { id, dir } of allClaimDirs(ctx.backlog)) {
     const el = ctx.elements.find((e) => e.id === id);
     if (el && !el.archived) continue; // live: never touched
@@ -779,7 +889,8 @@ function fixStep7a(fc: FixCtx<8>): FixCtx<8> {
     // discarding who held it.
     const entry = highestEntry(dir);
     const holder = entry && entry.kind === 'claimed' ? entry.name : null;
-    removeClaimDirWholesale(ctx.backlog, id);
+    const left = removeClaimDirAt(dir);
+    if (left !== null) { noteSymlink(fc, left); continue; } // swapped for a link meanwhile
     if (fs.existsSync(dir)) continue;
     fc.actions.push(holder !== null ? `${id}: released ${holder}` : `removed the orphaned claim directory for ${id}`);
   }
@@ -787,9 +898,11 @@ function fixStep7a(fc: FixCtx<8>): FixCtx<8> {
     const p = path.join(ctx.backlog, '.gitignore');
     let content: string;
     try {
-      content = fs.readFileSync(p, 'utf8');
-    } catch {
-      fc.notes.push('.gitignore does not exist — not created (the claims/ line was not added)');
+      content = readRegularFile(p, TEXT_FILE_CAP);
+    } catch (e: any) {
+      fc.notes.push(e && e.code === 'ENOENT'
+        ? '.gitignore does not exist — not created (the claims/ line was not added)'
+        : `.gitignore cannot be read (${e && e.message}) — the claims/ line was not added`);
       return { ...fc, stage: 8 };
     }
     atomicWrite(p, appendGitignoreLine(content, CLAIMS_GITIGNORE_LINE));

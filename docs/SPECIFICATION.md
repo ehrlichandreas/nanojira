@@ -68,7 +68,8 @@ execs `node` against the real artefact beside it, `dist/nanojira.mjs` or
 `dist/nanojira-mcp.mjs`, a single-file ESM bundle. Both the wrappers and
 the bundles are built by `npm run build` from the sources — the entries
 `src/nanojira.ts`/`src/nanojira-mcp.ts` and the modules in `src/commands/`
-and `src/core/` — and all four generated files are committed: a fresh
+and `src/core/` — and all six generated files (the two bundles, the two
+wrappers and their two `.cmd` siblings, § 18) are committed: a fresh
 build must be byte-identical to what is committed (`npm run build:check`),
 so a stale bundle or a hand-edited wrapper fails at once. Whoever changes
 anything under `src/` rebuilds and commits `bin/` and `dist/*.mjs` in the
@@ -557,6 +558,30 @@ epic, subtask under task. `nanojira new` rejects deeper nesting and wrong parent
 types; `nanojira doctor` reports violations. `id` and `type` are **immutable** after
 creation.
 
+**An id becomes a path only in this shape** (DECISIONS 215). A frontmatter
+`id` is read as written, so a hand-edited or foreign file can carry any
+string; `doctor` names a disagreement with the file name (`id:mismatch`,
+§ 7). Wherever nanojira would join an id into a path — the claim directory
+`.nanojira/claims/<id>/` (§ 12 "Claims"), the file name `doctor --fix` renames to
+(§ 14 step 2), the folder group `hierarchy` gives an epic or task (§ 4) —
+it first checks the id against `EPIC-<n>`, `TSK-<n>` or `SUB-<n>`, with
+`<n>` at most 15 digits. A malformed id (`../../x`, `..`, `notes`,
+`TSK-` followed by 300 digits) never names a path:
+
+- a write that would need such a path is refused with
+  `refused:invalid_id`, before anything is written: `claim`/`release` of
+  the element, `archive`, `rm` or `unarchive` of a subtree holding it,
+  `new --parent`/`set --parent` naming it, and under `hierarchy`
+  `set --parent` moving it as an epic or task, or onto a parent below it;
+- a read that would need one finds nothing: the element is unclaimed
+  (`_claim`, `log`), and under `hierarchy` it, and everything below it,
+  has no derivable place (as for a broken `parent` chain, § 4);
+- `doctor --fix` leaves the file where it is and says so in a note.
+
+Every other command reads and writes such an element as usual — it is
+still listed, shown and editable in place; the repair is to give it a
+real id by hand.
+
 ### Optional fields
 
 | Field | Type | Default | Purpose |
@@ -687,7 +712,7 @@ condition that produces it:
 | Code | Produced by | Doctor | Blocks `--ready` |
 |---|---|---|---|
 | `frontmatter:unreadable` | frontmatter block cannot be parsed | error | yes |
-| `file:unreadable` | element file cannot be read at all (dangling symlink, permissions) | error | yes |
+| `file:unreadable` | element file cannot be read at all (dangling symlink, permissions), is not a regular file (a FIFO, a device — through a file symlink too), or is larger than 1 MiB (DECISIONS 215) | error | yes |
 | `duplicate_id` | two files carry the same `id` | error | yes |
 | `missing:title` | `title` absent or empty | error | yes |
 | `missing:status` | `status` absent — defaulted to `statuses[0]` | warning | no |
@@ -711,6 +736,7 @@ condition that produces it:
 | `claim:mismatch` | the element is `claimed N` but its `assignee` is not N — a crash between the append and the mirror write, a hand edit, or a claim's own rollback losing a race to a concurrent `archive`/`unarchive` (§ 12 "Claims") | warning | no |
 | `claim:orphaned` | a claim directory for an element that is archived or does not exist (backlog-level when it does not exist) — not merely `done`: a done-but-still-live element can still legitimately be claimed | warning | — |
 | `claim:stale` | the element is claimed and `now − _claim.since` exceeds `claims.staleAfterHours` (§ 5, § 12 "Claims") | warning | no |
+| `claim:symlink` | a claim directory, a claim entry, `.nanojira/claims/` or `.nanojira/` itself is a symlink — never followed, and `claim`, `release`, `archive`, `rm` and `unarchive` refuse it (`refused:symlink`, § 8, § 12 "Claims"); on the element the claim directory names — then also in its `_problems`, keeping it out of `--ready` so `next` passes it by — backlog-level otherwise, where `next` itself is refused (DECISIONS 215) | error | yes |
 | `title:h1_mismatch` | H1 ≠ `title` | warning | no |
 | `incomplete:description` | description section absent/empty | — | yes |
 | `incomplete:acceptance` | acceptance section absent/empty (task/subtask) | — | yes |
@@ -719,7 +745,7 @@ condition that produces it:
 | `done:open_acceptance` | `status` is `done` and the acceptance section has at least one unticked countable checkbox (task/subtask) | warning | no |
 | `active_refs_archived` | `depends_on` points into the archive (satisfied) | — | no |
 | `id:no_tombstone` | element file has no tombstone (hand-created, or partial tombstone loss) | warning | no |
-| `backlog:stray_tmp` | stray `.nj-tmp-*` file (crashed write), backlog-level | warning | — |
+| `backlog:stray_tmp` | stray `.nj-tmp-*` file (crashed write), or a `.nj-rm-*` directory or link in `.nanojira/claims/` (a claim directory's removal interrupted after its rename aside, § 8), backlog-level | warning | — |
 | `backlog:ids_missing` | `.nanojira/ids/` absent or empty while element files exist, backlog-level | error | — |
 | `backlog:ids_layout_mismatch` | `.nanojira/ids/` is laid out flat/sharded on disk but `ids.shardSize` (§ 5, § 8) asks for the other, or both are mixed together, backlog-level | error | — |
 | `config:invalid` | `.nanojira/config.json` violates § 5 (backlog-level) | error | — |
@@ -730,6 +756,29 @@ condition that produces it:
 | `backlog:claims_unignored` | `.nanojira/claims/` exists and `.gitignore` has no line that is exactly `.nanojira/claims/`, backlog-level | warning | — |
 | `config:unknown_key` | an unrecognised top-level config key, or an unrecognised key inside `layout`/`layout.folders`/`claims`/`problems`, backlog-level (DECISIONS 166) | warning | — |
 | `config:unknown_code` | a code in `problems.ignore` outside § 7's closed vocabulary, backlog-level (DECISIONS 166) | warning | — |
+
+**No read can block or grow without bound** (DECISIONS 215). Every file
+nanojira reads from a backlog is opened non-blocking, must be a regular
+file, and is read only up to a cap. That covers element files,
+`.nanojira/config.json`, `STATUS.md`, `TAGS.md`, `README.md`, `.gitignore`
+and claim entries. The cap is 1 MiB, except for `STATUS.md` and `TAGS.md`:
+they are only compared with a fresh rendering, so they are read only up to
+that rendering's size. A file that fails this check is treated like a file that
+cannot be read:
+- an element file is a `file:unreadable` stub;
+- the configuration is `invalid_config` ("cannot be read — not a regular
+  file");
+- `STATUS.md` and `TAGS.md` count as stale and are rewritten;
+- a claim entry is skipped, and so is one that is a symlink;
+- `README.md` and `.gitignore` are left alone by `doctor --fix`; a
+  `.gitignore` it cannot read gets a note.
+
+**Nothing writes an element file it would not read back** (DECISIONS 215).
+Every write renders the element first. If the result is larger than the
+1 MiB read cap, the write is refused with `refused:too_large` before
+anything is written: no element, no tombstone, no claim entry, no move. For
+`new --input` that means no node of the plan. `doctor --fix` leaves such an
+element as it is and adds a note.
 
 The two axes are independent: **Doctor** says whether a code is a doctor
 finding, **Blocks `--ready`** says whether it keeps an element out of the
@@ -967,7 +1016,11 @@ their original order. Empty optional fields are omitted. The serializer is
 ## 8. Identifiers
 
 Per type, sequential, zero-padded to three digits: `EPIC-001`, `TSK-001`,
-`SUB-001`. Past 999 the number naturally grows.
+`SUB-001`. Past 999 the number naturally grows, up to 15 digits (§ 6); an
+id with a longer number is malformed, and the allocator ignores it when it
+computes the start value. The allocator never hands one out: when the next
+number would have 16 digits, `new` exits 1 with `id_allocation_failed`
+before any tombstone is written (DECISIONS 215).
 
 **IDs are never reused — provided `.nanojira/ids/` is preserved** (`ids/`
 below, for short; `.ids/` always means the legacy top-level folder). Allocation is
@@ -996,6 +1049,34 @@ risk, disclosed: a lost `ids/` can still recycle the numbers of elements
 deleted with `nanojira rm`, if their tombstones were lost with it — live and
 archived elements are always protected by the file-scan start value. A
 tombstone without an element is normal (deleted or archived).
+
+**nanojira's bookkeeping is never a symlink** (DECISIONS 215).
+`.nanojira/` itself, `ids/`, a sharded type or bucket directory below it,
+`.nanojira/claims/`, each claim directory and each claim entry (§ 12
+"Claims") are internal; unlike a layout folder (§ 4, DECISIONS 105) none of
+them is followed when it is a symlink. A write that would pass through such a link — a tombstone for
+`new`, a claim entry, a claim directory `archive`/`rm`/`unarchive` empties —
+is refused with `refused:symlink` before anything is written. A read finds
+nothing behind it: a linked `ids/`, or a linked type directory or bucket
+of a sharded `ids/`, hides its tombstones (`backlog:ids_missing`, which
+names the link; `doctor --fix` then writes no tombstone at all), a linked
+claim directory holds no claim. `doctor` reports a linked claim directory or claim entry,
+`.nanojira/claims/` or `.nanojira/` as `claim:symlink` (§ 7); a linked
+`ids/` alone is `backlog:ids_missing` only. `doctor --fix` neither follows
+nor changes such a link, and adds a note naming it, once; its migration of
+a legacy layout (§ 14 step 0) moves nothing when `.nanojira/` or `.ids/` is
+a link. A claim write checks again, past any cached answer, right before
+it acts, and a claim directory is removed by first renaming it aside and
+emptying only the aside name, so a directory swapped for a link during the
+call is not deleted through; the one residual is a claim entry's temp file
+(§ 12a), which a swap timed between the check and its `open` can place
+behind the link (DECISIONS 215). A removal killed after its rename, or
+whose rename back fails, leaves the `.nj-rm-*` aside in `.nanojira/claims/`:
+`doctor` reports it as `backlog:stray_tmp`, and `doctor --fix` renames a
+directory aside once more and removes it when it holds only claim entries
+and temp files (anything else: left, with a note), and unlinks a link
+itself, never following it, with a note. The configuration, `.nanojira/config.json`, is
+still read through a linked `.nanojira/`.
 
 ### Sharding `ids/` for large backlogs (`ids.shardSize`)
 
@@ -1064,13 +1145,14 @@ nanojira check --id=TSK-009 --item=<n>         [--on | --off] [--force] (§ 10a)
 nanojira show  --id=TSK-009 [--notes=none|all|last:N] [--json]
 nanojira list  [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
          [--ready] [--all] [--json]
-nanojira find  "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
-         [--all] [--case-sensitive] [--json] (§ 9a)
+nanojira find  ["<text>" | --text=<t>] [--status=…] [--type=…] [--tag=…] [--parent=…]
+         [--assignee=…] [--all] [--case-sensitive] [--json] (§ 9a)
 nanojira tree  [--id=EPIC-001] [--all] [--json]
+nanojira tags  [--json]                      every tag in use, with its carrier count (§ 4)
 nanojira rm    --id=TSK-009 [--cascade]
 nanojira archive --id=EPIC-001 (§ 11)
 nanojira unarchive --id=EPIC-001 (§ 11a)
-nanojira claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] (§ 12 "Claims")
+nanojira claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] [--allow-open-children] (§ 12 "Claims")
 nanojira release --id=TSK-007 [--as=<name>] (§ 12 "Claims")
 nanojira next    [--as=<name>] [--status=<s>] [--type=…] [--tag=…] [--parent=…]
            [--assignee=…] [--json] (§ 12b)
@@ -1110,8 +1192,8 @@ only, checked before a command is even dispatched — ahead of the backlog
 resolution every other command (including bare `nanojira`) performs.
 
 **There is exactly one version source**: the `"version"` field in
-`package.json` (`3.4.0` as of this round), embedded at build time into
-`dist/nanojira` and `dist/nanojira-mcp` alike, so the two binaries can never report
+`package.json`, embedded at build time into
+`dist/nanojira.mjs` and `dist/nanojira-mcp.mjs` alike, so the two binaries can never report
 different versions of themselves from drifting independently.
 
 `--version` combined with anything beyond `--json` — another flag (`--
@@ -1275,9 +1357,13 @@ model `assignee` has (§ 6).
 - **Verb as a subcommand**, not as a flag: `nanojira set`, not `nanojira --set`.
 - **`--backlog` and `--json` may precede the command word** (DECISIONS
   158, EV-6) — `nanojira --backlog=<path> list`, `nanojira --json list
-  --backlog=<path>`, or any mix of the two in either order, any number of
-  times (the last occurrence of a repeated one wins, the same as anywhere
-  else a flag repeats). These are the **only** two flags this applies to:
+  --backlog=<path>`, or any mix of the two in either order. As with every
+  other flag, a flag given twice with different values is refused; an
+  identical repeat is accepted (`--json` twice, or the same `--backlog`
+  before and after the command word). Two `--backlog` values count as the
+  same when they resolve to the same path (`B`, `B/`, `./B`, or the
+  absolute path); every other flag compares its values exactly. These are the **only** two flags
+  this applies to:
   the search for the command word skips past a leading run of exactly
   `--backlog[=…]`/`--json` and stops at the first token that either does
   not start with `--` (that token is the command) or does (anything
@@ -1325,6 +1411,38 @@ model `assignee` has (§ 6).
   and the known fields are listed. A control flag that the addressed command
   does not take is rejected the same way, as `unknown_field` (e.g. `nanojira archive
   --force`, § 12).
+- **`--` ends the options.** Every token after it is a positional, even
+  one that starts with `--`: `nanojira note --id=X --as=scout -- --as=y`
+  writes the note text `--as=y`, signed `scout`; `nanojira find -- --x`
+  searches for `--x`. A flag meant for the command goes before `--`.
+  `--help` and `--version` after `--` are text too.
+- **Only `nanojira note` and `nanojira find` take a positional** (the note
+  text, the search text). Any other command given one, before or after
+  `--`, refuses it with `unexpected_argument`, naming the token, and
+  writes nothing: `set --id=X -- --status=doing`, `set --id=X
+  status=done`, `list --json stray`, and `nanojira -- list`. A stray
+  word in front of every flag is still the command word, so `nanojira
+  stray` stays `unknown_command`.
+- **A flag given twice with different values is refused; an identical
+  repeat is accepted.** `--as=scout … --as=mallory` is `invalid_value`
+  ("`--name` is given more than once with different values") and nothing
+  is written. `--title=a --title=a` is the same as `--title=a`. A flag
+  that takes no value can only repeat identically, so `--json … --json`
+  is accepted. `--depends-on` and `--depends_on` are one flag, and the
+  message names the spelling typed the second time. This holds for
+  `--backlog`/`--json` before the command word too. `--help` never fails,
+  whatever else is repeated. An unknown command (`unknown_command`) or an
+  unknown flag (`unknown_field`) is reported first: `list --bogus=1
+  --bogus=2` is `unknown_field`. The same order applies to a stray
+  positional (below).
+- **A flag that takes no value is given on its own:** `--json`, `--quiet`,
+  `--force`, `--fix`, `--cascade`, `--ready`, `--all`,
+  `--allow-open-children`, `--dry-run`, `--case-sensitive`, `--on`,
+  `--off` and `--version` (each command's `--help` shows them without
+  `=<value>`). `--name=<anything>` on one of them is `invalid_value`
+  ("`--name` takes no value") and nothing is written. The value is never
+  read as a yes or no, so `--cascade=false` does not mean "no cascade"; it
+  is refused. `--help` is the one exception, because it never fails.
 - List fields are set, not appended: `--tags=a,b` replaces the list.
   `--tags=` empties it. `--tags=` / `--depends-on=` reject items containing
   `,` or `]` with a clear error.
@@ -1468,6 +1586,9 @@ model `assignee` has (§ 6).
   from a section boundary on the next read, so callers must not embed one.
 - `nanojira set --status=done` on an element with children not `done` is **refused**
   unless `--allow-open-children`; forcing it produces `done:open_children`.
+  The same check, flag and refusal apply to `nanojira claim --status=done`
+  and `nanojira next --status=done` (§ 12a, § 12b), checked before the claim
+  is taken, so a refused call leaves no claim behind.
   `--force` has exactly one meaning: overwrite a parallel change (§ 12). It
   never weakens the parent rule.
 - `nanojira rm` refuses while child elements exist and names them. `--cascade`
@@ -1487,9 +1608,13 @@ model `assignee` has (§ 6).
   while a stub exists, even a `--id` that names nothing yields
   `refused:unreadable`, not `not_found`. Reads (`list`, `tree`, `show`,
   `doctor`) stay open so the stub remains findable.
-- Archived elements are **read-only**: `set`, `note`, `rm` and `archive`
-  refuse them; `nanojira unarchive` (§ 11a) is the one write that accepts an
-  archived element. Reads and `--all` keep working.
+- Archived elements are **read-only**: `set`, `note`, `check`, `claim`,
+  `rm` and `archive` refuse them; `nanojira unarchive` (§ 11a) is the one write that accepts an
+  archived element. Reads and `--all` keep working. The refusal's hint
+  names the `nanojira unarchive --id=<id>` call that makes the target
+  writable again: for the element's topmost archived ancestor, since
+  `unarchive` refuses a child of an archived parent; for `rm --cascade`,
+  one per archived root in the subtree.
 - **A claim is exclusive only against another claim** (§ 12 "Claims"): it
   never blocks a read or any other write — `set`, `note`, `rm`, `archive`,
   `doctor --fix` work on a claimed element exactly as on an unclaimed one.
@@ -1536,7 +1661,10 @@ conditions fall into two kinds, reported differently (Output, below):
   resolving to exactly one countable checkbox, § 10a's
   `not_found`/`ambiguous_target`) and each command's own
   refusal-before-anything-is-written conditions (`refused:archived`,
-  `refused:unreadable`).
+  `refused:unreadable`; `refused:too_large` when the element file this ID's
+  write would produce is above the 1 MiB cap, § 7; for `claim`/`release`,
+  `refused:invalid_id` and `refused:symlink` when this ID's claim directory
+  may not be written, § 12 "Claims" — DECISIONS 215).
 
 **Any preflight failure, of either kind, aborts the whole batch: nothing is
 written for any ID**, and `STATUS.md` (§ 4) is not regenerated. The two
@@ -1849,6 +1977,22 @@ mtime changes. Files the call only reads are read as usual: `--input=`,
 the backlog addresses the same file in the copy, whether the path is
 absolute or relative.
 
+**Symlinked folders** (DECISIONS 218). Nothing is written through a link
+either. A layout folder that is a symlink to a directory, which the real
+call reads and writes through (§ 4, DECISIONS 105), is copied as a plain
+folder with its contents; `changes` lists the paths in it as in any
+folder, and `--file=` may name a file by its path behind the link. Any other directory symlink outside the dot-folders, which the
+scan never follows (DECISIONS 91 B11), points in the copy at an empty
+folder in the scratch area: what the real call would write through it
+(`hierarchy` placing a child in a linked ID folder) lands there and is
+listed under the link's path, as a `create`. `nanojira`'s own
+dot-folders never write through a link at all (DECISIONS 215). A
+`$TMPDIR` inside the backlog or inside a followed folder's target is
+allowed: the scratch folder lives there while the call runs, and is left
+out of the copy and of `changes`. An element file behind such a stand-in
+link is not seen when the dry run allocates an id, so the dry run may
+predict a different id than the real call there.
+
 **Exit code and stderr** are exactly the real call's, with every path
 inside the copy written as the real backlog path.
 
@@ -1959,8 +2103,12 @@ copy lives elsewhere. If the copy itself cannot be made (`$TMPDIR`
 unwritable or full), the call fails with `io_error`, naming the temporary
 directory, before any of the command's own checks run. A file or folder `nanojira` cannot read is copied as
 an equally unreadable stand-in, so refusals such as
-`refused:unreadable_dir` still match. FIFOs, sockets and devices inside
-the backlog are not copied. Each dry run costs one copy of the backlog,
+`refused:unreadable_dir` still match. A FIFO, socket or device inside
+the backlog is not copied either; the copy holds a link to it instead,
+which every read refuses as "not a regular file" exactly as the real
+call does (a `file:unreadable` stub, an `invalid_config`), and which is
+never listed in `changes` (DECISIONS 218). Inside the dot-folders only
+the configuration gets such a link. Each dry run costs one copy of the backlog,
 time and space linear in its size. A dry run killed by a signal may leave
 its `nj-dry-run-*` folder in `$TMPDIR`, never anything in the backlog.
 Mapping the copy's path back to the real one is a plain text replacement
@@ -2511,10 +2659,11 @@ unknown_command       missing_argument         missing_value
 invalid_value         invalid_target           not_found
 duplicate_id          exists                   changed_in_parallel
 id_allocation_failed  internal_error           ambiguous_target
-none_ready
+none_ready            unexpected_argument
 refused:<reason>      reason ∈ unreadable | unreadable_dir | archived | children_open |
                                has_children | not_done | parent_archived |
-                               misplaced | not_archived | claimed
+                               misplaced | not_archived | claimed | invalid_id |
+                               symlink | too_large
 fault:<hook>          hook ∈ before-compare | after-tmp-write | before-rename
 ```
 
@@ -2566,7 +2715,7 @@ just makes it a lookup instead of a re-read of the hint every time:
 | a `--description-file` / `--acceptance-file` path cannot be read | `not_found` | § 9 | — |
 | two files carry the same `id` | `duplicate_id` | § 9 | — (address one file directly with `--file=<path>` instead) |
 | `init` target already exists (even an empty directory) | `exists` | § 4 | — |
-| a filesystem call on a named target fails (`init` into a read-only or non-directory parent; a deleted working directory; a `--dry-run` whose scratch copy cannot be made in `$TMPDIR`) | `io_error` | § 9, § 9 "`--dry-run`" | — |
+| a filesystem call on a named target fails (`init` into a read-only or non-directory parent; a deleted working directory; a `--dry-run` whose scratch copy cannot be made in `$TMPDIR`; `new` placing an element in a layout folder that is a symlink to a file or to nothing, or where a file is in the folder's place) | `io_error` | § 9, § 9 "`--dry-run`" | — |
 | the upward search cannot examine a directory (a probe fails with anything but `ENOENT`/`ENOTDIR`, e.g. `EACCES` from an unsearchable ancestor) | `io_error` | § 4 "Backlog location", DECISIONS 204 | — (fix the permissions, or name the backlog with `--backlog`/`NJ_BACKLOG`) |
 | an `archive` target path is occupied | `exists` | § 11 | — |
 | `set`/`note`/`check`: the file changed between read and write | `changed_in_parallel` | § 12 | `--force` |
@@ -2583,6 +2732,12 @@ just makes it a lookup instead of a re-read of the hint every time:
 | `unarchive` while an unreadable stub exists | `refused:unreadable` | § 11a, § 9 | — |
 | `unarchive` of a subtree not lying in its own folder, or with an unresolvable `parent` chain (`hierarchy`) | `refused:misplaced` | § 11a | — (`nanojira doctor --fix`, a separate call) |
 | an `unarchive` target path is occupied | `exists` | § 11a | — |
+| `archive`, `rm` or `unarchive` of a subtree holding an element whose `id` is not of the § 6 shape | `refused:invalid_id` | § 6, DECISIONS 215 | — (give it a real id by hand) |
+| `claim` or `release` of an element whose `id` is not of the § 6 shape | `refused:invalid_id` | § 6, DECISIONS 215 | — (give it a real id by hand) |
+| `new --parent`/`set --parent` naming an element whose `id` is not of the § 6 shape; under `hierarchy`, `set --parent` moving an epic or task with such an `id`, or onto a parent below one | `refused:invalid_id` | § 6, DECISIONS 215 | — (give it a real id by hand) |
+| `claim`/`release`, or `archive`/`rm`/`unarchive` of a subtree, where a claim directory, `.nanojira/claims/` or `.nanojira/` is a symlink — or, for `claim`/`release`, a claim entry is | `refused:symlink` | § 8, § 12 Claims, DECISIONS 215 | — (replace the link with a real directory) |
+| `new` where `.nanojira/ids/` (or a sharded directory below it, or `.nanojira/`) is a symlink | `refused:symlink` | § 8, DECISIONS 215 | — (replace the link with a real directory) |
+| any write (`new`, `set`, `note`, `check`, `claim`, `archive`, `unarchive`) that would make an element file larger than 1 MiB | `refused:too_large` | § 7, DECISIONS 215 | — (shorten the text, or keep large content in a separate file) |
 | an `NJ_FAULT` hook fires | `fault:<hook>` | § 12 | — (test-only, not a real refusal) |
 | `NJ_AUTHOR` is not a valid name, on a command that uses it | `invalid_env` | § 9 | — (use `--as` instead) |
 | `--as` is not a valid name | `invalid_value` | § 9 | — |
@@ -2613,6 +2768,9 @@ just makes it a lookup instead of a re-read of the hint every time:
 | `--dry-run` on a command that never writes (`list`, `show`, `find`, `tree`, `tags`, `log`, bare `nanojira`) | `unknown_field` | § 9 "`--dry-run`" | — |
 | `doctor --dry-run` without `--fix` | `invalid_value` | § 9 "`--dry-run`" | — |
 | `--dry-run=<value>` (the flag takes no value) | `invalid_value` | § 9 "`--dry-run`" | — |
+| a value on any other flag that takes none (`--cascade=false`, `--json=1`, …) | `invalid_value` | § 9 Rules | — |
+| a flag given twice with different values (`--title=a --title=b`) | `invalid_value` | § 9 Rules | — |
+| a positional on a command other than `note`/`find` (`set --id=X status=done`, a flag after `--`) | `unexpected_argument` | § 9 Rules | — |
 | `nanojira note`'s text given more than one way (positional, `--text`, `--text-file`) | `invalid_value` | § 10 | — |
 | `nanojira note --text-file` names a path that cannot be read | `not_found` | § 10 | — |
 | `NJ_ON_CHANGE_TIMEOUT` is not a whole number of seconds from 1 to 86400, while the hook is armed | `invalid_env` | § 9 "`NJ_ON_CHANGE`" | — (fix or unset the variable) |
@@ -2760,7 +2918,12 @@ rather than trusting the order in which its calls arrive.
 - nanojira **waits** for the hook (bounded by the timeout), so when
   nanojira returns, the hook has finished or been killed. Work a hook
   backgrounds (`cmd &`) outlives that wait only if it leaves the hook's
-  process group; it should redirect its own output.
+  process group (`setsid`, a detached spawn); it should redirect its own
+  output. What is still in the group when the hook's shell exits is
+  killed with `SIGKILL` at that moment (DECISIONS 217), so it can neither
+  run on nor hold nanojira's stderr open for whoever reads it; that kill
+  is one warning line (below). `nohup cmd &` and `( cmd & )` do not leave
+  the group.
 
 **Recursion guard.** Inside the hook `NJ_ON_CHANGE` is unset, and
 `NJ_HOOK_COMMAND` is set — a nanojira that finds `NJ_HOOK_COMMAND` in its
@@ -2793,7 +2956,14 @@ Warning: NJ_ON_CHANGE hook exited with status 127 (command not found); the write
 Warning: NJ_ON_CHANGE hook timed out after 10s and was killed; the write itself succeeded and is unchanged
 Warning: NJ_ON_CHANGE hook was killed by SIGKILL; the write itself succeeded and is unchanged
 Warning: NJ_ON_CHANGE hook could not be started (<reason>); the write itself succeeded and is unchanged
+Warning: NJ_ON_CHANGE hook left background work in its process group, which was killed (use setsid to keep it); the write itself succeeded and is unchanged
 ```
+
+The last one is not a failure of the hook: it comes after an exit-status
+or killed-by line, or on its own for a hook that exited 0, whenever
+something was still running in the hook's group when its shell exited
+(DECISIONS 217). It never follows the timeout line, whose kill already
+ends the group, nor "could not be started", which has no group.
 
 A hook that succeeds prints nothing of nanojira's own. Without
 `NJ_ON_CHANGE` (unset or empty), every command's stdout, stderr, exit code
@@ -2817,8 +2987,8 @@ $ nanojira set --id=TSK-009 --status=done --json
 ## 9a. `nanojira find`
 
 ```
-nanojira find "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
-                  [--all] [--case-sensitive] [--json]
+nanojira find ["<text>" | --text=<t>] [--status=…] [--type=…] [--tag=…] [--parent=…]
+                  [--assignee=…] [--all] [--case-sensitive] [--json]
 ```
 
 A read, like `list`, over the same already-loaded element data, with one more
@@ -2855,6 +3025,13 @@ read anywhere, for any other command. `<text>` given as the literal empty
 string is `invalid_value`, nothing searched — the same "an explicit flag or
 argument given empty is a caller's mistake" reading `--as=` (DECISIONS 119)
 and `check --text=` (DECISIONS 129) already get.
+
+**`--text=<t>`** gives the same search text as the positional form, and is
+the only way to search for a text that starts with `--` (as a bare
+argument it would be read as a flag). One or the other: both together is
+`invalid_value`, the rule `note`'s text sources follow (§ 10); neither is
+`missing_argument`, as before. `nanojira-mcp` always passes the text this
+way (§ 17, DECISIONS 214).
 
 **Output:** the same read shape as `list` (§ 9 JSON interface): `{backlog,
 counts, entries: [{…, _problems, _claim}]}`, filtered to matching entries, in
@@ -3310,6 +3487,16 @@ file untouched:
 
 It exists so that criterion AC-9 is testable. The abandoned temp file is
 reported by `nanojira doctor` (`backlog:stray_tmp`) and removed by `doctor --fix`.
+
+Two more values are **pure pauses** for the claim directory's own races
+(DECISIONS 215), like `njrc-swap` (§ 4): `claim-mkdir` holds right before
+a claim entry's `mkdir`, after its symlink check; `claim-append` right after
+that `mkdir`, before its temp file is opened; and `claim-aside` right after
+the removal of a claim directory (`archive`, `rm`, `unarchive`,
+`doctor --fix`) has renamed it aside, or `doctor --fix` has renamed a
+leftover `.nj-rm-*` aside to a fresh name (§ 8). Each writes
+`NJ_FAULT_READY` when set, polls for `<backlog>/.nj-fault-go` (timeout
+10 s), and then always proceeds; there is no `fault:` code for either.
 A single command is unchanged by batch writes existing. **Within a batch
 (`--id=A,B,C`, § 9 "Batch writes"), `NJ_FAULT` fires once**: at the first
 write, in execution order, that reaches the injection point. That ID fails
@@ -3363,7 +3550,16 @@ claimed\n<name>\n<ISO-8601 UTC>\n          (or)          released\n<name>\n<ISO-
 — the transition, the acting name that made it (§ 9), and its time
 (`NJ_NOW` applies, above). **The claim state is the entry with the highest
 generation**: `claimed <N>` means N holds the claim; `released`, no entry, or
-no directory means the element is unclaimed.
+no directory means the element is unclaimed. `<ID>` is the element's `id` only when it
+has the § 6 shape: an element with any other `id` has no claim directory,
+is always unclaimed, and `claim`/`release` of it is `refused:invalid_id`
+(§ 6 "An id becomes a path only in this shape", DECISIONS 215). A claim
+directory, or `.nanojira/claims/` itself, that is a symlink is never
+followed (§ 8 "nanojira's bookkeeping is never a symlink"): the element is
+unclaimed, and `claim`/`release` of it, or `archive`/`rm`/`unarchive` of a
+subtree holding it, is `refused:symlink`; it carries `claim:symlink` (§ 7),
+which `doctor` reports and which keeps the element out of `--ready`, so
+`next` hands out the next candidate instead of stopping at it.
 
 **Every change of claim state is one compare-and-swap:** a process that has
 read the state at generation *g* writes the new entry completely into a temp
@@ -3480,7 +3676,8 @@ itself.
 ## 12a. `nanojira claim` / `nanojira release`
 
 ```
-nanojira claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] [--json]
+nanojira claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>]
+                 [--allow-open-children] [--json]
 nanojira release --id=TSK-007 [--as=<name>] [--json]
 ```
 
@@ -3536,6 +3733,12 @@ mechanism is § 12 "Claims"; this section is the interface built on it.
 `--status=<s>` lets an agent claim and start in one write
 (`nanojira claim --id=TSK-007 --status=doing`), validated as for `nanojira set`
 (`invalid_value`; the parent rule of § 9 applies unchanged).
+`--status=done` on an element with open children is `refused:children_open`
+unless `--allow-open-children`, and `refused:unreadable_dir` while the
+backlog has an unreadable directory, exactly as on `set`. Both are checked
+before the claim transition: a refused call takes no claim and writes
+nothing. In a batch (`--id=A,B`) they are preflight refusals, so nothing
+in the batch is written, as with `set`.
 
 **Stealing.** `--steal=H` takes over a claim held by H — the only way to
 recover from a crashed claimant, and deliberately explicit: the stealer must
@@ -3767,7 +3970,11 @@ therefore applies here too, since `next` claims via the same path `claim`
 does: the claim this call just made is released again, in the same call
 — unusual (nothing was ever worked on between claiming and finishing),
 but the consistent reading of "the last status releases the claim,"
-exactly as `claim --status=<last>` already is, above.
+exactly as `claim --status=<last>` already is, above. The parent rule
+runs as on `claim`: a candidate never has an open child (the leaf-work
+rule above), but `--status=done` is still `refused:unreadable_dir` while
+the backlog has an unreadable directory, because one could hide an open
+child. `next` has no `--allow-open-children`: no candidate could use it.
 
 **Mechanism.** `next` reads the candidate list exactly once, then
 attempts `claim --id=<candidate> --as=<name> [--status=<s>]` against each
@@ -4058,10 +4265,10 @@ a missing or empty `ids/` while elements exist (`backlog:ids_missing`); the
 on-disk `ids/` layout disagreeing with `ids.shardSize`
 (`backlog:ids_layout_mismatch`, § 8 "Sharding `ids/`");
 element files without tombstones (`id:no_tombstone`); stray `.nj-tmp-*`
-files, including inside `.nanojira/claims/` (`backlog:stray_tmp`, § 12
-"Claims"); archive rules (§ 11); claim directories that are mismatched,
+files, including inside `.nanojira/claims/`, and `.nj-rm-*` asides there
+(`backlog:stray_tmp`, § 8, § 12 "Claims"); archive rules (§ 11); claim directories that are mismatched,
 orphaned or stale (`claim:mismatch`, `claim:orphaned`, `claim:stale`, § 12
-"Claims") and a `.gitignore` missing the claims line
+"Claims"), or behind a symlink (`claim:symlink`, § 8) and a `.gitignore` missing the claims line
 (`backlog:claims_unignored`); `STATUS.md` against a
 fresh rendering (`backlog:status_stale`, only with `statusFile: true`). The
 summary line splits the
@@ -4090,7 +4297,8 @@ unprotected:
    is byte-identical to the text a v2 `nanojira init` wrote; otherwise it is left
    alone and a note says so. If both the v2 and the v3 location of the
    configuration or of the tombstones exist, nothing is moved — ambiguous,
-   reported, never merged.
+   reported, never merged. If `.nanojira/` or `.ids/` is a symlink, nothing
+   is moved either, and a note names the link (§ 8, DECISIONS 215).
 
    **A backlog that is already v3** (not `backlog:legacy_layout`) can still
    carry a stray top-level `.ids/` — the half of a crash between step 0's
@@ -4116,7 +4324,9 @@ unprotected:
 1. write the `id` from the file name, and the `type` from the ID prefix, when
    missing
 2. rename the file to match the `id` when frontmatter and file name disagree
-   and the target is free
+   and the target is free — only for an `id` of the § 6 shape; any other
+   `id` is never made a file name, the file stays and a note says why
+   (DECISIONS 215)
 3. move a file to its layout place (`type:folder`, `layout:misplaced`) —
    under `type` only when `id` prefix and `type` agree (frontmatter > prefix >
    folder precedence; the folder loses); under `hierarchy` only when the
@@ -4131,7 +4341,10 @@ unprotected:
    `created` from the file mtime, `updated` = now (this step is a write)
 6. pull the H1 up from `title`
 7. remove stray `.nj-tmp-*` files (now covers `.nanojira/claims/` too, § 12
-   "Claims")
+   "Claims"), and the `.nj-rm-*` asides an interrupted claim-directory
+   removal left in `.nanojira/claims/` (§ 8: a link is unlinked itself, a
+   directory holding anything but claim entries and temp files is left,
+   with a note)
 7a. remove the claim directories of orphaned claims — archived or gone,
     never merely `done` (§ 7 `claim:orphaned`) — and append the
     `.nanojira/claims/` line to `.gitignore` if missing (§ 12a). Never
@@ -4958,7 +5171,9 @@ lifetime.
 - **An unknown method, in either era** (anything outside the four named
   above), or a malformed JSON-RPC envelope, gets the standard JSON-RPC
   error: `-32601` ("Method not found") for an unknown method,
-  `-32700`/`-32600` for a parse/invalid-request failure.
+  `-32700`/`-32600` for a parse/invalid-request failure. A line that is
+  valid JSON but not an object (a string, a number, `true`, `null`, an
+  array) is `-32600` with `id: null`; the server keeps running.
 - **`-32602` (Invalid params) vs. a tool result with `isError`.** A
   `tools/call` whose `arguments` fail the tool's own declared JSON
   Schema (a required field missing, the wrong type) is rejected
@@ -4995,7 +5210,11 @@ lifetime.
 table only, never the separate table of global controls (`--backlog`,
 `--json`, and the rest of § 9's control-flag list) a command's own flags
 are checked against. **No generated tool schema names a `backlog`
-field.** `--file`, where a command already has one, remains in that
+field**, and none names a `*-file` field (`description-file`,
+`acceptance-file`): those read whatever local path the caller names,
+which would let a tool call copy any readable file into the backlog. An
+MCP client has the text in hand and passes it as `description`/
+`acceptance` (DECISIONS 214). `--file`, where a command already has one, remains in that
 tool's schema unchanged — it is already confined to the backlog by the
 same addressing rule that confines it on the CLI (§ 9: `--file` resolves
 only against already-scanned elements, never an arbitrary path).
@@ -5023,14 +5242,33 @@ re-shaped.
 A command failure (`refused:claimed`, `invalid_value`, …) is an MCP tool
 error, `isError: true`, carrying the **same** `{ok: false, error,
 hint?}` body as content — the code is never lost, never folded into a
-generic protocol-level message.
+generic protocol-level message. The message the CLI prints for it on
+stderr (`Error: …` and the hint line) follows as a second text block,
+since the `--json` body has no message field; `structuredContent` stays
+exactly the body (DECISIONS 214).
 
 ### Architecture
 
 **One `dist/nanojira` process per tool call.** A tool call becomes exactly the
 argument list the equivalent CLI invocation would have, plus the
 explicit `--backlog` above, run as a child process with `--json`; its
-parsed stdout becomes the tool result. This buys zero duplicated logic
+parsed stdout becomes the tool result. Every input goes as
+`--name=value`, `note`'s and `find`'s `text` included (`--text=`), so
+no value is ever read as a flag (DECISIONS 214).
+
+**The child's limits** (DECISIONS 214). Its stdin is not connected: no
+tool reads stdin, and an open pipe nobody writes to would hang a child
+that tried. A call still running 60 s after it started — plus
+`NJ_ON_CHANGE_TIMEOUT` (default 10) when `NJ_ON_CHANGE` is set, since the
+hook runs inside the child — answers `-32603` naming the timeout; the
+child gets SIGTERM, then SIGKILL 5 s later. A call is finished once the
+child has exited and its stdout has ended; its stderr gets at most
+200 ms more to end, so a process the child left holding stderr (a hook
+job that left the hook's group) can neither hold the call nor turn a
+write that succeeded into the timeout's error. When the server's stdin
+closes, calls still running finish and answer, then `nanojira-mcp` exits
+0: a write is never killed mid-flight for a disconnect, for the same
+reason `notifications/cancelled` does not kill one. This buys zero duplicated logic
 (the result *is* `dist/nanojira --json`'s own output, because it is the same
 binary), zero new concurrency model (every call goes through § 12's
 compare-before-write and § 12a's claim CAS exactly as any other
@@ -5125,7 +5363,7 @@ not edit."** — the same discipline `export-skill.mts`'s DECISIONS 185
 wrapper strings could not offer, since a string embedded in a `.mts` file
 cannot itself be diffed or hand-edited by mistake the way a committed
 `bin/nanojira` now can be (and now is checked for, below). `tools/bundle.ts
---check` fails if any of the four generated files differs from a fresh
+--check` fails if any of the six generated files differs from a fresh
 render of its template, or is not executable where it must be (`bin/nanojira`,
 `bin/nanojira-mcp`) — catching a hand-edit to a generated file the same way it
 already catches a stale `dist/*.mjs`.
@@ -5260,7 +5498,7 @@ not guaranteed of `bin/<name>` (D187 addendum, 81cd90a).
 earlier extensionless CommonJS `dist/nanojira`/`dist/nanojira-mcp` entirely, old
 tags' own `dist/nanojira` included (a frozen oracle replay against an old tag
 keeps working by naming that tag's own `dist/nanojira` explicitly via
-`--nanojira=<path>`; nothing about replaying an old tag changes). This
+`--nj=<path>`; nothing about replaying an old tag changes). This
 matches the convention the other `agent-skills` Node skills
 already use (`dist/<name>.mjs`, esbuild, `node:*` imports only) and is
 feasible because nothing under `src/` uses `__dirname`, `__filename`,

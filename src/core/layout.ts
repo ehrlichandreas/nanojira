@@ -9,6 +9,7 @@ import type { Element, Layout, Scan } from './types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { FOLDER_ROLES, TYPE_FOLDER_ROLE } from './constants.ts';
+import { ID_SHAPE, idShaped } from './id-shape.ts';
 
 // ---------------------------------------------------------------------- scan
 
@@ -20,7 +21,7 @@ const INTERNAL_DIRS = ['.ids', '.nanojira'];
 const TOP_LEVEL_DOCS = new Set(['README.md', 'STATUS.md', 'TAGS.md']);
 
 /** A folder named like an element ID — the folders group `hierarchy` creates. */
-const ID_FOLDER = /^(EPIC|TSK|SUB)-\d+$/;
+const ID_FOLDER = ID_SHAPE;
 
 // A configured folder name is matched case-insensitively wherever it is
 // compared against what actually lies on disk — for placement and for
@@ -155,7 +156,8 @@ function samePlace(want: string, have: string, layout: Layout): boolean {
  * after its ID below its parent's, a subtask lies in its parent's. Without a
  * `parent` the element starts at the top (DECISIONS 91 B15). null when the
  * chain cannot be followed: a `parent` that points at nothing, or a cycle —
- * anywhere up the chain.
+ * anywhere up the chain — and when an epic or task on it has an id that is
+ * not § 6-shaped, which never becomes a folder name (DECISIONS 215).
  */
 function hierarchyDir(el: Element, byId: Map<string, Element>): string | null {
   const chain: Element[] = [];
@@ -168,7 +170,9 @@ function hierarchyDir(el: Element, byId: Map<string, Element>): string | null {
     cur = byId.get(cur.parent);
     if (cur === undefined) return null;
   }
-  return chain.filter((c) => c.type === 'epic' || c.type === 'task').map((c) => c.id).join('/');
+  const folders = chain.filter((c) => c.type === 'epic' || c.type === 'task');
+  if (!folders.every((c) => idShaped(c.id))) return null;
+  return folders.map((c) => c.id).join('/');
 }
 
 /**

@@ -44,7 +44,18 @@ is the reason they exist.
 | § 4 `.njrc` ownership: a foreign-owned symlink (needs root; otherwise CANNOT RUN) | `hardening-njrc-foreign-link.ts` |
 | the v3 coverage gaps, one section per clause ID of `../COVERAGE-v3.md` | `coverage-v3-gaps.ts` |
 | § 5 `problems.ignore`: every example in the shipped docs (SKILL.md, references/, README, GUIDE, AGENT-INSTRUCTIONS) is a code nanojira accepts (4.1.0's SKILL.md named `incomplete:acceptance`) | `docs-ignore-examples.ts` |
+| docs drift guard: every MCP tool list in GUIDE/SPEC equals the real `tools/list`, documented `init` transcripts equal a real `init`, versions named in SPEC `--version`/GUIDE intro equal `package.json`, the ARCHITECTURE module map covers `src/core/`, SPEC § 9 closed set equals the codes `src/` emits, the archived hint names `nanojira unarchive` (TSK-039) | `docs-drift.ts` |
 | § 7 closed severity vocabulary — every table row through `problems.ignore`, the stale warnings really suppressed, every code literal in `src/` has a row, the closed warning list matches the table (DECISIONS 211) | `severity-vocabulary.ts` |
+| § 17 `nanojira-mcp` hardening — flag-like note/find text stays text, no `*-file` schema fields, child stdin not connected, per-call timeout, non-object JSON lines, stdin EOF with a call in flight, UTF-8 across chunks, the error message in error results (DECISIONS 214) | `hardening-mcp.ts` |
+| § 9 `set --input=-` reads stdin once: a `<role>-file` of `-` inside the JSON is `invalid_value`, as in `new` (TSK-034 F1) | `set-input-stdin-once.ts` |
+| § 9 failure table: `new` into a layout folder linked to a file or to nothing is a one-line `io_error` naming the folder, not `internal_error` with a stack; real call, dry run and plan form (DECISIONS 218) | `layout-link-broken.ts` |
+| § 9 a flag that takes no value refuses one (`--cascade=false`, `--json=1`), on every command, cross-checked against `--help` (TSK-034 F3) | `boolean-flag-values.ts` |
+| § 9 `--` ends option parsing; a flag repeated with a different value is `invalid_value`, an identical repeat is accepted; `--help` twice still prints help; a positional on a command other than note/find is `unexpected_argument` (TSK-034 F11) | `args-end-of-options-and-repeats.ts` |
+| § 6 an element id never becomes a path unchecked: a frontmatter `id` outside the § 6 shape is `refused:invalid_id` wherever it would be joined into a path (claims, `doctor --fix` renames, `hierarchy` folders), and a FIFO or device element file is a stub (DECISIONS 215) | `id-path-escape.ts` |
+| § 9 `refused:too_large`: no write, single or batch, makes an element file larger than the 1 MiB read cap; one at the cap goes through (DECISIONS 215) | `element-size-cap.ts` |
+| § 8 / § 12 Claims: nothing is written, deleted or listed through a symlinked `.nanojira/`, `ids/`, `claims/`, claim directory or claim entry (`refused:symlink`, `claim:symlink`) (DECISIONS 215) | `internal-symlinks.ts` |
+| § 8 / § 12 Claims: a link made inside the bookkeeping while a write holds at `NJ_FAULT=before-compare`, `claim-append` or `claim-aside` is still never written or deleted through (DECISIONS 215) | `internal-symlink-races.ts` |
+| § 7 `file:unreadable`: a FIFO at STATUS.md, TAGS.md, `config.json`, a claim entry, README.md or `.gitignore` never hangs a command; each caller keeps its answer for an unreadable file (DECISIONS 215) | `non-regular-reads.ts` |
 
 ## Why these are separate from the AC files
 

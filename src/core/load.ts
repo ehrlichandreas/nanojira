@@ -4,12 +4,12 @@
 
 import type { Element, ParsedFile, Config, Context, Layout, Scan, Skeleton, WithId, WithType, WithTitle, WithStatus, WithParent, WithOptionals, WithTimestamps, WithArchiveState, NonEmptyString } from './types.ts';
 
-import * as fs from 'fs';
 import * as path from 'path';
 import { PREFIX_TYPE, TYPE_FOLDER_ROLE, TYPES, PARENT_TYPE, PRIORITIES } from './constants.ts';
 import { scanBacklog, folderOf, inArchive, samePlace, foldEq, expectedPlace, misplacedCode } from './layout.ts';
 import { parseFile, h1Of, sectionPresent, sectionHasCheckbox, sectionCheckboxCounts, normalizeTitle } from './parse.ts';
 import { mtimeIso, readTombstones } from './store.ts';
+import { readElementFile } from './regular-file.ts';
 
 // ------------------------------------------------------------- element load
 
@@ -259,7 +259,7 @@ function deriveBody(el: WithArchiveState, p: ParsedFile, cfg: Config): WithArchi
 function loadElement(file: string, backlog: string, cfg: Config, folder: string = folderOf(backlog, file)): Element {
   let raw;
   try {
-    raw = fs.readFileSync(file, 'utf8');
+    raw = readElementFile(file);
   } catch (err: any) {
     return unreadableElement(file, folder, cfg, err);
   }
@@ -319,15 +319,11 @@ function indexById(elements: Element[]) {
  *   - cmdTree's `scope`, a FILTERED array (archived hidden without --all)
  *   - descendants(), over the whole context
  * None of them may be quietly turned into another. In particular this is not
- * memoised across deriveGraph's calls -- not because a memo breaks anything
- * today, but because it is harmless ONLY while round one has no verb that moves
- * parentage: `set` takes no `--parent` (SETTABLE_FIELDS), `doctor --fix` never
- * touches `parent`, `rm` does not re-derive after writing, and `archive`
- * presupposes a done subtree. Those are properties of this round, not
- * guarantees of the spec -- § 4 provides for re-parenting. The moment a verb
- * can move an element, an index built before the write is a real bug that no
- * net reports (DECISIONS 81); the step that brings such a verb brings the
- * fixture with it.
+ * memoised across deriveGraph's calls: `set --parent` (v3.9) moves an element
+ * under another parent, and an index built before that write is a real bug
+ * that no net reports (DECISIONS 81). (`doctor --fix` never touches `parent`,
+ * `rm` does not re-derive after writing, and `archive` presupposes a done
+ * subtree, so `set --parent` is the one verb that moves parentage today.)
  *
  * Depends on the `parent` normalisation in deriveParent: empty or whitespace
  * becomes `null`, never `''`. That is what makes `=== null` here equivalent to

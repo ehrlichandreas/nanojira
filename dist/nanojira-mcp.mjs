@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 
 // src/nanojira-mcp.ts
-import * as path5 from "node:path";
+import * as path7 from "node:path";
 import { spawn } from "node:child_process";
 
 // src/core/args.ts
-import * as fs4 from "node:fs";
+import * as fs6 from "node:fs";
+import * as path5 from "node:path";
 
 // src/core/constants.ts
 var SECTION_FLAGS = ["description", "description-file", "acceptance", "acceptance-file"];
@@ -16,17 +17,25 @@ var V3_CONFIG_REL = ".nanojira/config.json";
 var LEGACY_CONFIG_REL = ".nanojira.json";
 
 // src/core/dry-run.ts
-import * as fs3 from "node:fs";
+import * as fs5 from "node:fs";
 import * as os from "node:os";
-import * as path3 from "node:path";
+import * as path4 from "node:path";
 
 // src/core/claims.ts
+import * as fs3 from "node:fs";
+import * as path2 from "node:path";
+
+// src/core/internal-path.ts
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-// src/core/store.ts
+// src/core/regular-file.ts
 import * as fs2 from "node:fs";
-import * as path2 from "node:path";
+var MiB = 1024 * 1024;
+
+// src/core/store.ts
+import * as fs4 from "node:fs";
+import * as path3 from "node:path";
 function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -51,22 +60,34 @@ process.stdout.on("error", (err) => {
 
 // src/core/args.ts
 var FLAG_ALIASES = /* @__PURE__ */ new Map([["depends-on", "depends_on"]]);
+function sameValue(name, a, b) {
+  if (a === b) return true;
+  return name === "backlog" && typeof a === "string" && typeof b === "string" && a !== "" && b !== "" && path5.resolve(a) === path5.resolve(b);
+}
 function parseArgs(argv) {
   const flags = /* @__PURE__ */ new Map();
   const positional = [];
+  const repeated = [];
+  let options = true;
   for (const a of argv) {
-    if (a === "--") continue;
-    if (a.startsWith("--")) {
+    if (options && a === "--") {
+      options = false;
+      continue;
+    }
+    if (options && a.startsWith("--")) {
       const eq = a.indexOf("=");
-      let name = eq === -1 ? a.slice(2) : a.slice(2, eq);
+      const typed = eq === -1 ? a.slice(2) : a.slice(2, eq);
       const value = eq === -1 ? true : a.slice(eq + 1);
-      name = FLAG_ALIASES.get(name) ?? name;
+      const name = FLAG_ALIASES.get(typed) ?? typed;
+      if (flags.has(name) && !sameValue(name, flags.get(name), value) && !repeated.some((r) => r.name === name)) {
+        repeated.push({ name, typed });
+      }
       flags.set(name, value);
     } else {
       positional.push(a);
     }
   }
-  return { flags, positional };
+  return { flags, positional, repeated };
 }
 function flagString(flags, name) {
   const v = flags.get(name);
@@ -76,12 +97,12 @@ function flagString(flags, name) {
 }
 
 // src/core/config.ts
-import * as fs5 from "node:fs";
+import * as fs7 from "node:fs";
 import * as os2 from "node:os";
-import * as path4 from "node:path";
+import * as path6 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.1.2";
+var VERSION = "4.2.0";
 
 // src/core/config.ts
 var SOURCE_CODE = { flag: "invalid_backlog_flag", env: "invalid_backlog_env", njrc: "invalid_backlog_njrc" };
@@ -89,13 +110,13 @@ function sourceName(src) {
   return src.kind === "flag" ? "--backlog" : src.kind === "env" ? "NJ_BACKLOG" : src.file;
 }
 function holdsBacklog(dir) {
-  return fs5.existsSync(path4.join(dir, V3_CONFIG_REL)) || fs5.existsSync(path4.join(dir, LEGACY_CONFIG_REL));
+  return fs7.existsSync(path6.join(dir, V3_CONFIG_REL)) || fs7.existsSync(path6.join(dir, LEGACY_CONFIG_REL));
 }
 function claim(dir, src, lenient) {
   const shown = src.kind === "njrc" ? escapeInvisible(dir) : dir;
   if (!isDir(dir)) fail(SOURCE_CODE[src.kind], `no backlog at ${shown} (from ${sourceName(src)})`);
   if (lenient || holdsBacklog(dir)) return dir;
-  if (fs5.existsSync(path4.join(dir, V3_DIR_REL))) {
+  if (fs7.existsSync(path6.join(dir, V3_DIR_REL))) {
     fail(
       "backlog_without_config",
       `${shown} exists but has no ${V3_CONFIG_REL}`,
@@ -122,33 +143,33 @@ function explicitLocation(flags) {
   return null;
 }
 function njrcLocation(dir) {
-  const file = path4.join(dir, ".njrc");
+  const file = path6.join(dir, ".njrc");
   const raw = readNjrc(file);
   if (raw === null) return null;
   const value = parseNjrc(file, raw).get("backlog");
   if (value === void 0) return null;
-  const expanded = value.startsWith("~/") ? path4.join(os2.homedir(), value.slice(2)) : value;
-  return { dir: path4.resolve(dir, expanded), src: { kind: "njrc", file } };
+  const expanded = value.startsWith("~/") ? path6.join(os2.homedir(), value.slice(2)) : value;
+  return { dir: path6.resolve(dir, expanded), src: { kind: "njrc", file } };
 }
 function readNjrc(file) {
   let link;
   try {
-    link = fs5.lstatSync(file);
+    link = fs7.lstatSync(file);
   } catch (e) {
-    return searchMiss(e, path4.dirname(file));
+    return searchMiss(e, path6.dirname(file));
   }
   const bad = (reason, hint) => fail("invalid_njrc", `invalid .njrc at ${file}: ${reason}`, hint);
   checkOwner(link.uid, bad);
-  njrcSwapFaultHook(path4.dirname(file));
+  njrcSwapFaultHook(path6.dirname(file));
   let fd;
   try {
-    fd = fs5.openSync(file, fs5.constants.O_RDONLY | fs5.constants.O_NONBLOCK);
+    fd = fs7.openSync(file, fs7.constants.O_RDONLY | fs7.constants.O_NONBLOCK);
   } catch (e) {
     if (e.code === "ELOOP") return bad("it is a symlink loop (ELOOP)");
     if (e.code === "ENOENT") {
       let fresh;
       try {
-        fresh = fs5.lstatSync(file);
+        fresh = fs7.lstatSync(file);
       } catch {
         return null;
       }
@@ -159,7 +180,7 @@ function readNjrc(file) {
   try {
     let st;
     try {
-      st = fs5.fstatSync(fd);
+      st = fs7.fstatSync(fd);
     } catch (e) {
       return bad(`cannot stat it -- ${e.code || e.message}`);
     }
@@ -167,20 +188,20 @@ function readNjrc(file) {
     if (!st.isFile()) return bad(st.isDirectory() ? "it is a directory, not a file" : "it is not a regular file");
     let raw;
     try {
-      raw = fs5.readFileSync(fd, "utf8");
+      raw = fs7.readFileSync(fd, "utf8");
     } catch (e) {
       return bad(`cannot read it -- ${e.code || e.message}`);
     }
     return raw.startsWith("\uFEFF") ? raw.slice(1) : raw;
   } finally {
-    fs5.closeSync(fd);
+    fs7.closeSync(fd);
   }
 }
 function njrcSwapFaultHook(dir) {
   if (process.env.NJ_FAULT !== "njrc-swap") return;
-  const marker = path4.join(dir, ".nj-fault-go");
+  const marker = path6.join(dir, ".nj-fault-go");
   const deadline = Date.now() + 1e4;
-  while (!fs5.existsSync(marker)) {
+  while (!fs7.existsSync(marker)) {
     if (Date.now() >= deadline) return;
     sleepMs(50);
   }
@@ -227,7 +248,7 @@ function workingDir() {
   }
 }
 function fromCwd(p) {
-  return path4.isAbsolute(p) ? path4.resolve(p) : path4.resolve(workingDir(), p);
+  return path6.isAbsolute(p) ? path6.resolve(p) : path6.resolve(workingDir(), p);
 }
 function oneLine(e) {
   const msg = e && e.message ? String(e.message) : String(e);
@@ -236,10 +257,10 @@ function oneLine(e) {
 function findBacklog(flags, lenient) {
   const explicit = explicitLocation(flags);
   if (explicit !== null) return claim(explicit.dir, explicit.src, lenient);
-  for (let dir = workingDir(); ; dir = path4.dirname(dir)) {
+  for (let dir = workingDir(); ; dir = path6.dirname(dir)) {
     const rc = njrcLocation(dir);
     if (rc !== null) return claim(rc.dir, rc.src, lenient);
-    const candidate = path4.join(dir, "backlog");
+    const candidate = path6.join(dir, "backlog");
     if (searchIsDir(candidate)) {
       if (lenient || holdsBacklog(candidate)) return candidate;
       fail(
@@ -248,7 +269,7 @@ function findBacklog(flags, lenient) {
         "run `nanojira doctor` \u2014 it tolerates the missing file and reports config:invalid"
       );
     }
-    if (path4.dirname(dir) === dir) break;
+    if (path6.dirname(dir) === dir) break;
   }
   return fail(
     "no_backlog",
@@ -258,7 +279,7 @@ function findBacklog(flags, lenient) {
 }
 function isDir(p) {
   try {
-    return fs5.statSync(p).isDirectory();
+    return fs7.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -269,9 +290,9 @@ function searchMiss(e, dir) {
 }
 function searchIsDir(p) {
   try {
-    return fs5.statSync(p).isDirectory();
+    return fs7.statSync(p).isDirectory();
   } catch (e) {
-    return searchMiss(e, path4.dirname(p)) ?? false;
+    return searchMiss(e, path6.dirname(p)) ?? false;
   }
 }
 
@@ -348,8 +369,16 @@ var TOOL_NAMES = [
   "doctor"
 ];
 function toolFields(name, allowDestructive) {
-  if (name !== "doctor") return commandFields(name);
-  return allowDestructive ? commandFields("doctor") : [];
+  if (name === "doctor" && !allowDestructive) return [];
+  return commandFields(name).filter((f) => !f.name.endsWith("-file"));
+}
+var CALL_MARGIN_S = 60;
+var KILL_GRACE_MS = 5e3;
+var STDERR_DRAIN_MS = 200;
+function callTimeoutMs() {
+  const raw = process.env.NJ_ON_CHANGE_TIMEOUT;
+  const hookS = !process.env.NJ_ON_CHANGE ? 0 : raw !== void 0 && /^[1-9][0-9]*$/.test(raw) ? Math.min(Number(raw), 86400) : 10;
+  return (CALL_MARGIN_S + hookS) * 1e3;
 }
 function inputSchema(fields) {
   const properties = {};
@@ -391,8 +420,9 @@ function main() {
 `);
     process.exit(1);
   }
-  const njPath = path5.join(path5.dirname(path5.resolve(process.argv[1])), "nanojira.mjs");
+  const njPath = path7.join(path7.dirname(path7.resolve(process.argv[1])), "nanojira.mjs");
   const liveChildren = /* @__PURE__ */ new Set();
+  const timeoutMs = callTimeoutMs();
   function send(obj) {
     process.stdout.write(JSON.stringify(obj) + "\n");
   }
@@ -431,53 +461,114 @@ function main() {
       }
     }
     const flagArgs = [];
-    const positionals = [];
     for (const f of fields) {
       if (!(f.name in args)) continue;
       const v = args[f.name];
-      if (f.positional) {
-        positionals.push(String(v));
-        continue;
-      }
       if (f.kind === "boolean") {
         if (v) flagArgs.push(`--${f.name}`);
         continue;
       }
       flagArgs.push(`--${f.name}=${v}`);
     }
-    const childArgv = [njPath, name, ...flagArgs, `--backlog=${backlog}`, "--json", ...positionals];
-    const child = spawn(process.execPath, childArgv, { env: process.env });
+    const childArgv = [njPath, name, ...flagArgs, `--backlog=${backlog}`, "--json"];
+    const child = spawn(process.execPath, childArgv, { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     liveChildren.add(child);
     let out = "";
     let err = "";
+    let answered = false;
+    let finished = false;
+    let grace;
+    let drain;
+    const answer = (fn) => {
+      if (answered) return;
+      answered = true;
+      clearTimeout(timer);
+      fn();
+    };
+    const done = () => {
+      if (finished) return;
+      finished = true;
+      liveChildren.delete(child);
+      if (grace) clearTimeout(grace);
+      if (drain) clearTimeout(drain);
+      exitWhenIdle();
+    };
+    const timer = setTimeout(() => {
+      answer(() => respondError(id, -32603, `Internal error: nanojira did not finish within ${timeoutMs / 1e3} s; killed`));
+      try {
+        child.kill("SIGTERM");
+      } catch {
+      }
+      grace = setTimeout(() => {
+        try {
+          child.kill("SIGKILL");
+        } catch {
+        }
+      }, KILL_GRACE_MS);
+    }, timeoutMs);
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
     child.stdout.on("data", (c) => {
       out += c;
     });
     child.stderr.on("data", (c) => {
-      err += c;
+      if (!answered) err += c;
     });
     child.on("error", (e) => {
-      liveChildren.delete(child);
-      respondError(id, -32603, `Internal error: failed to spawn nanojira: ${e.message}`);
+      answer(() => respondError(id, -32603, `Internal error: failed to spawn nanojira: ${e.message}`));
+      done();
     });
-    child.on("close", (code) => {
-      liveChildren.delete(child);
-      let parsed = null;
-      try {
-        parsed = JSON.parse(out);
-      } catch {
-      }
-      if (parsed === null) {
-        respondError(id, -32603, `Internal error: nanojira exited ${code} without parsable --json output: ${err.slice(0, 500)}`);
+    let exitCode;
+    let stdoutEnded = false;
+    let stderrEnded = false;
+    const settle = () => {
+      if (exitCode === void 0 || !stdoutEnded || finished) return;
+      if (!stderrEnded && !drain) {
+        drain = setTimeout(() => {
+          stderrEnded = true;
+          settle();
+        }, STDERR_DRAIN_MS);
         return;
       }
-      const isError = code !== 0;
-      respond(id, {
-        content: [{ type: "text", text: JSON.stringify(parsed) }],
-        structuredContent: parsed,
-        isError
-      });
+      if (!stderrEnded) return;
+      complete(exitCode);
+    };
+    child.on("exit", (code) => {
+      exitCode = code;
+      settle();
     });
+    child.stdout.on("end", () => {
+      stdoutEnded = true;
+      settle();
+    });
+    child.stderr.on("end", () => {
+      stderrEnded = true;
+      settle();
+    });
+    child.on("close", (code) => {
+      exitCode = exitCode === void 0 ? code : exitCode;
+      stdoutEnded = true;
+      stderrEnded = true;
+      settle();
+    });
+    const complete = (code) => {
+      answer(() => {
+        let parsed = null;
+        try {
+          parsed = JSON.parse(out);
+        } catch {
+        }
+        if (parsed === null) {
+          respondError(id, -32603, `Internal error: nanojira exited ${code} without parsable --json output: ${err.slice(0, 500)}`);
+          return;
+        }
+        const isError = code !== 0;
+        const content = [{ type: "text", text: JSON.stringify(parsed) }];
+        if (isError && err.trim() !== "") content.push({ type: "text", text: err.trim().slice(0, 4e3) });
+        respond(id, { content, structuredContent: parsed, isError });
+      });
+      done();
+    };
   }
   function handleLine(line) {
     let msg;
@@ -487,8 +578,9 @@ function main() {
       respondError(null, -32700, "Parse error");
       return;
     }
-    if (msg === null || typeof msg !== "object" || Array.isArray(msg) || msg.jsonrpc !== "2.0" || typeof msg.method !== "string") {
-      respondError("id" in (msg || {}) ? msg.id : null, -32600, "Invalid Request");
+    const isObject = msg !== null && typeof msg === "object" && !Array.isArray(msg);
+    if (!isObject || msg.jsonrpc !== "2.0" || typeof msg.method !== "string") {
+      respondError(isObject && "id" in msg ? msg.id : null, -32600, "Invalid Request");
       return;
     }
     const hasId = "id" in msg;
@@ -545,14 +637,13 @@ function main() {
       if (line.trim() !== "") handleLine(line);
     }
   });
+  let stdinEnded = false;
+  function exitWhenIdle() {
+    if (stdinEnded && liveChildren.size === 0) process.stdout.write("", () => process.exit(0));
+  }
   process.stdin.on("end", () => {
-    for (const child of liveChildren) {
-      try {
-        child.kill("SIGKILL");
-      } catch {
-      }
-    }
-    process.exit(0);
+    stdinEnded = true;
+    exitWhenIdle();
   });
 }
 main();

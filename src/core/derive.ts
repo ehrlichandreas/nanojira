@@ -4,7 +4,7 @@
 
 import type { Element, Config, EntryJson } from './types.ts';
 
-import { readClaim, isClaimStale } from './claims.ts';
+import { readClaim, isClaimStale, elementClaimLink } from './claims.ts';
 import { PRIORITY_WEIGHT, SEVERITY, BLOCKS_READY, BACKLOG_LEVEL } from './constants.ts';
 import { sectionCheckboxCounts } from './parse.ts';
 import { nowMs } from './store.ts';
@@ -30,10 +30,13 @@ function isIncomplete(el: Element) {
   return elementProblems(el).some((c) => c.startsWith('incomplete:'));
 }
 
-function isReady(el: Element, cfg: Config) {
+// `backlog` adds the one blocking code that lives outside the element file:
+// element-level `claim:symlink` (§ 7, DECISIONS 215), read from its claims.
+function isReady(el: Element, cfg: Config, backlog?: string) {
   if (el.archived) return false;
   if (el.status !== cfg.statuses[0]) return false;
   for (const c of el.problems) if (BLOCKS_READY.has(c)) return false;
+  if (backlog !== undefined && elementClaimLink(backlog, el.id) !== null) return false;
   for (const dep of el.depends_on) {
     const t = (el.byId as Map<string, Element>).get(dep);
     if (!t) return false;
@@ -103,6 +106,8 @@ function entryJson(el: Element, backlog: string, cfg: Config): EntryJson {
   const claim = readClaim(backlog, el.id);
   const probs = elementProblems(el, cfg.problems.ignore);
   if (claim && isClaimStale(claim.since, cfg.claims.staleAfterHours, nowMs())) probs.push('claim:stale');
+  // claim:symlink (§ 7, DECISIONS 215), element-level: computed fresh the same way.
+  if (elementClaimLink(backlog, el.id) !== null) probs.push('claim:symlink');
   e._problems = probs.sort();
   e._claim = claim;
   return e as EntryJson;

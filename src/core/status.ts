@@ -12,6 +12,7 @@ import { compareElements } from './derive.ts';
 import { scanBacklog } from './layout.ts';
 import { loadElement } from './load.ts';
 import { atomicReplace } from './store.ts';
+import { readRegularFile } from './regular-file.ts';
 
 // --------------------------------------------------------------------- render
 
@@ -47,9 +48,12 @@ function renderStatus(elements: Element[], cfg: Config): string {
 
 /** What `doctor` compares against, from elements it has already loaded. */
 function statusIsFresh(backlog: string, elements: Element[], cfg: Config): boolean {
+  const fresh = renderStatus(elements, cfg);
   let current;
-  try { current = fs.readFileSync(statusPath(backlog), 'utf8'); } catch { return false; }
-  return current === renderStatus(elements, cfg);
+  // Never more than the fresh rendering's own size: a larger file cannot be
+  // equal to it, and a FIFO or device never blocks the read (DECISIONS 215).
+  try { current = readRegularFile(statusPath(backlog), Buffer.byteLength(fresh)); } catch { return false; }
+  return current === fresh;
 }
 
 // ---------------------------------------------------------------------- write
@@ -86,7 +90,7 @@ function refreshStatus(backlog: string, cfg: Config, ctx?: Context): boolean {
     });
     const fresh = renderStatus(elements, cfg);
     let current = null;
-    try { current = fs.readFileSync(statusPath(backlog), 'utf8'); } catch { /* missing or not a file: rewrite */ }
+    try { current = readRegularFile(statusPath(backlog), Buffer.byteLength(fresh)); } catch { /* missing, not a regular file, or larger: rewrite */ }
     if (current === fresh) return false;
     atomicReplace(statusPath(backlog), fresh);
     return true;

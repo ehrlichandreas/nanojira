@@ -5,6 +5,187 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nanojira --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 4.2.0
+
+Mostly fixes, several of them security fixes: a hand-edited or cloned
+backlog can no longer make nanojira read, write or delete outside it.
+Six changes are breaking for a caller that relied on the old behaviour:
+`claim --status=done` on a parent with open children, a value on a flag
+that takes none, `--` and repeated flags, a stray positional
+(`unexpected_argument`), the `*-file` fields over MCP, and an
+`NJ_ON_CHANGE` hook's background work. Each says so in its first line.
+
+- **Fixed: `set --input=-` with `"description-file": "-"` (or
+  `"acceptance-file": "-"`) in the JSON no longer empties that section.**
+  stdin was already read for the JSON itself, so the second read got
+  nothing and wrote an empty section over the old one. It is now refused
+  with `invalid_value` and nothing is written, the same as `new` has
+  always done and as § 9 already specified. With `--input=<path>`, a `-`
+  inside the JSON still reads stdin. (DECISIONS 216, TSK-034)
+- **Changed (breaking for scripts that relied on it): `claim
+  --status=done` on a parent with open children is now refused with
+  `refused:children_open`, as `set --status=done` is.**
+  `claim` and `next` used to skip the parent rule that § 12a already
+  applied to them. The refusal comes before the claim is taken, so
+  nothing is written and no claim is left behind. Pass the new
+  `claim --allow-open-children` to force it, as on `set`. A batch
+  `claim --id=A,B --status=done` with one open parent writes nothing,
+  again as `set` does. `claim` and `next` with `--status=done` are also
+  `refused:unreadable_dir` while the backlog has an unreadable
+  directory. `next` itself never hands out a parent with open children
+  (DECISIONS 156), so it gets no new flag. `docs/SPECIFICATION.md`
+  § 9, § 12a, § 12b. (DECISIONS 216, TSK-034)
+- **Changed (breaking only for an undocumented form): a flag that takes no
+  value refuses one.** `--cascade=false`, `--off=false` and `--fix=no`
+  used to act as if the bare flag were given: `rm --cascade=false`
+  deleted the subtree, `check --off=false` unticked and `doctor --fix=no`
+  fixed. Every flag that takes no value now answers `--name=<anything>`
+  with `invalid_value` ("--name takes no value") and writes nothing, as
+  `--dry-run` already did. The flags are `--json`, `--quiet`, `--force`,
+  `--fix`, `--cascade`, `--ready`, `--all`, `--allow-open-children`,
+  `--case-sensitive`, `--on`, `--off` and `--version`. `--json=true` stops
+  working too. `--help` is unchanged and never fails.
+  `docs/SPECIFICATION.md` § 9 Rules and the failure table. (DECISIONS
+  216, TSK-034)
+- **Changed (breaking for a script that relied on last-wins): `--` ends
+  the options, and a flag repeated with a different value is refused.**
+  `--` used to be skipped, so a token after it that started with `--`
+  was still read as a flag:
+  `note --id=X --as=scout -- "--as=mallory" hello` wrote a note signed
+  `mallory`. Now every token after `--` is a positional, so that note
+  says `--as=mallory hello` and is signed `scout`. To pass note or find
+  text that starts with `--`, put `--` before it. A flag given twice with
+  different values used to keep its last value. It is now `invalid_value`
+  ("--name is given more than once with different values") and nothing is
+  written. This includes `--backlog` given both before and after the
+  command word, and `--depends-on` with `--depends_on`. An identical
+  repeat is still accepted, so a wrapper that adds `--json` or the same
+  `--backlog` a second time keeps working. `--help` still never fails. An
+  unknown flag is reported first: `list --bogus=1 --bogus=2` is
+  `unknown_field`. Two `--backlog` values that resolve to the same path
+  (`B`, `B/`, `./B`) count as identical.
+  `nanojira-mcp` never repeats a flag or sends `--`, so it is unaffected.
+  `docs/SPECIFICATION.md` § 9 Rules and the failure table. (DECISIONS
+  216, TSK-034)
+- **Changed (breaking for a call that relied on the word being ignored): a
+  positional on a command that takes none is refused with the new code
+  `unexpected_argument`.** Only `note` and `find` take one. Every other
+  command used to ignore a stray word, so `set --id=X status=done` (a
+  missing `--`) said "unchanged" and exited 0, and `set --id=X --
+  --status=doing` reported success while writing nothing. Now the call
+  fails, names the token, and writes nothing. `nanojira stray` is still
+  `unknown_command`. `unexpected_argument` is a new code in § 9's closed
+  set. (DECISIONS 216, TSK-034)
+- **Changed (breaking for an MCP client that used them): `nanojira-mcp`
+  no longer offers `description-file` or `acceptance-file`.** Through
+  them a `new` or `set` call read any local path into the backlog. An MCP
+  client has the text itself and passes `description`/`acceptance`. A
+  call that still names a `*-file` field is refused with `-32602` and
+  runs nothing. `file`, which addresses an element in the backlog, stays.
+  `docs/SPECIFICATION.md` § 17. (DECISIONS 214, TSK-035)
+- **Fixed: `nanojira-mcp` passes note and find text as text, and a call
+  can no longer hang.** The text went to nanojira as a bare argument, so
+  a note starting with `--` was read as a flag: `--text-file=<path>`
+  copied that local file into the note, `--force-push was needed` failed
+  with `unknown_field`, and `--text-file=-` hung. Every input now goes
+  as `--name=value`, the text as `--text=`. Each call has a time limit:
+  60 s, plus `NJ_ON_CHANGE_TIMEOUT` when a hook is set. Past it the call
+  answers `-32603` and nanojira is stopped. The answer comes when
+  nanojira has exited and its output has ended, even if a hook's
+  detached job still holds stderr. A JSON line that is not an object
+  gets `-32600` instead of crashing the server. At the end of stdin the
+  server lets running calls answer, then exits 0; before, it killed them
+  mid-write. Text split across read chunks keeps its multibyte
+  characters. An error result carries nanojira's stderr message as a
+  second text block. (DECISIONS 214, TSK-035)
+- **Added: `find --text=<t>`, the twin of `find "<text>"`.** Given
+  together, they are `invalid_value`. `docs/SPECIFICATION.md` § 9a.
+  (DECISIONS 214, TSK-035)
+- **Changed (breaking for a hook whose background work relied on
+  outliving it): `NJ_ON_CHANGE`: a hook's in-group background work now
+  ends when the hook's shell exits, as SPEC § 9 always said; use
+  `setsid` to outlive it.** Before, a hook such as `sleep 6 &` kept
+  running after nanojira returned, holding nanojira's stderr, so an MCP
+  call (or any caller reading stderr) waited until it ended. `nohup cmd
+  &` and `( cmd & )` do not detach either: both stay in the hook's
+  process group and end with it. When nanojira kills such work it prints
+  one line, `Warning: NJ_ON_CHANGE hook left background work in its
+  process group, which was killed (use setsid to keep it); the write
+  itself succeeded and is unchanged`. Work that leaves the group
+  (`setsid cmd >/dev/null 2>&1 &`; on macOS, which has no setsid
+  command, `perl -MPOSIX -e 'pipe(R,W); if (fork) { close W; <R>; exit 0 }
+  close R; setsid(); close W; exec @ARGV' cmd >/dev/null 2>&1`, run in
+  the foreground; see `docs/GUIDE.md` § 30) is unaffected. (DECISIONS
+  217, TSK-036)
+- **Fixed: `--dry-run` writes nothing through a symlinked folder.** With
+  a layout folder linked elsewhere (`tasks -> ../shared/tasks`, allowed
+  since DECISIONS 105), a dry run wrote into the link's target:
+  `new --dry-run` created the new task file there. The same happened
+  under `hierarchy` through a linked ID folder. A dry run now writes
+  nothing at all. `changes` still lists what the real call would write
+  there, and `--file=` may name a file by its path behind the link. The
+  real call still writes through such links. `docs/SPECIFICATION.md`
+  § 9 "`--dry-run`". A `$TMPDIR` inside the backlog or inside a linked
+  folder no longer makes the dry run copy itself until it fails. (DECISIONS
+  218, TSK-042)
+- **Fixed: `new` into a layout folder linked to a file or to nothing,
+  or with a plain file in the folder's place, fails with `io_error`
+  naming the folder.** It was `internal_error` with a stack trace. For
+  a link, the hint says that `nanojira doctor` reports such a folder as
+  `backlog:unreadable_dir`; for a file, it names the file to move.
+  (DECISIONS 218)
+- **Fixed (security): a hand-edited or cloned backlog can no longer
+  make nanojira read, write or delete outside it.**
+  - An element whose frontmatter `id` is not `EPIC-<n>`, `TSK-<n>` or
+    `SUB-<n>` (at most 15 digits) is never joined into a path. `claim`,
+    `release`, `archive`, `rm`, `unarchive` and `new`/`set --parent`
+    refuse it with the new code `refused:invalid_id`, and `doctor --fix`
+    never renames a file to such an id. Before, an `id` such as
+    `../../outside/x` let `doctor --fix` move a file out of the backlog,
+    and let `archive` delete files elsewhere.
+  - nanojira's own bookkeeping (`.nanojira/`, `ids/`, `claims/`, a claim
+    directory or entry) is never written or deleted through a symlink,
+    not even one made while a call runs (except a claim entry's temp file
+    in a narrow race, DECISIONS 215): `claim`, `release`, `archive`,
+    `rm`, `unarchive` and `new` refuse with the new code
+    `refused:symlink`. `doctor` reports a linked claim directory or
+    entry as the new error `claim:symlink`, and `next`/`--ready` pass
+    such an element by. A claim directory is removed by renaming it
+    aside first; a removal killed after that rename leaves a hidden
+    `.nj-rm-*` entry in `.nanojira/claims/`, which `doctor` reports as
+    `backlog:stray_tmp` and `doctor --fix` removes.
+  - No backlog file nanojira reads can hang it or exhaust memory:
+    element files, the configuration, STATUS.md, TAGS.md, README.md,
+    `.gitignore` and claim entries are read only if they are regular
+    files, up to 1 MiB. (`--input=` and `--<role>-file=` still read a
+    FIFO, so `<(…)` keeps working.)
+    A FIFO or device element file is a `file:unreadable` stub, as an
+    oversized one is.
+  - No write makes an element file larger than that 1 MiB read cap: it
+    is refused with the new code `refused:too_large` and nothing is
+    written, batches included, instead of producing a file nanojira then
+    refuses to read.
+  `docs/SPECIFICATION.md` § 6, § 7, § 8, § 9. (DECISIONS 215, TSK-033)
+- **Fixed: `refused:archived`'s hint names the way out.** It said
+  "`nanojira unarchive` is round two" (`rm --cascade` over a subtree
+  holding archived elements: "read-only in round one"), though
+  `unarchive` exists (§ 11a). It now names the `nanojira unarchive
+  --id=<id>` call that works: the topmost archived ancestor's for an
+  element below an archived parent, and one per archived root for
+  `rm --cascade`. `refused:parent_archived` (`new` under, or
+  `set --parent` to, an archived parent) names the call that restores
+  the parent the same way.
+  The docs' own drift is fixed with it: GUIDE's MCP tool list (`next`,
+  `log`), its export contents (`LICENSE`, `references/`), both `init`
+  transcripts (`TAGS.md`), the spec's `--version` passage and command
+  synopsis (`tags`). A new test keeps these facts equal to the tool.
+  (TSK-039)
+- The dev-time dependency git-history-tools is pinned to its signed
+  release tag `v0.4.4`. Its `git-release-squash`, which `tools/release.ts`
+  runs, now moves every branch and tag in one transaction, so a cut that
+  fails partway leaves no ref moved, and a refusal no longer leaves a
+  backup bundle behind. (TSK-032)
+
 ## 4.1.2
 
 Two changes to nanojira itself: `invalid_env` now names the offending

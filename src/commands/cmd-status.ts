@@ -18,7 +18,7 @@ function cmdStatus(flags: Flags) {
   // (reused, not reimplemented) — an element with an open child is left
   // out here, in favor of that child if it is itself ready. `list --ready`
   // (cmd-list.ts) does not call this: it stays a pure readiness filter.
-  const ready = scope.filter((e) => isReady(e, ctx.cfg) && !hasOpenChild(e)).sort(compareElements).slice(0, 5);
+  const ready = scope.filter((e) => isReady(e, ctx.cfg, ctx.backlog) && !hasOpenChild(e)).sort(compareElements).slice(0, 5);
   const incomplete = scope.filter(isIncomplete).sort(compareElements).slice(0, 5);
 
   if (flags.has('json')) {

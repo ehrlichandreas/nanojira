@@ -75,6 +75,8 @@ const TABLE = [
   'backlog:claims_unignored',
   /* spec v3.2 § B, promoted 8822e95: stale claims */
   'claim:stale',
+  /* DECISIONS 215: a linked claim directory, claims root or .nanojira/ */
+  'claim:symlink',
   /* spec v3.7, DECISIONS 163 E/F: acceptance quality warnings */
   'acceptance:no_checkbox',
   'done:no_acceptance',
