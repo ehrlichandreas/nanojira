@@ -213,4 +213,16 @@ function ownFolder(el: Element): string | null {
   return path.basename(dir) === el.id ? dir : null;
 }
 
-export { ID_FOLDER, scanBacklog, folderOf, inArchive, samePlace, placeOf, expectedPlace, moveTarget, misplacedCode, ownFolder, foldEq };
+// The folders a move left behind: removed once empty, walking up, but only
+// the ID-shaped ones `hierarchy` creates — never a type folder, never with
+// anything still in it, never recursively (DECISIONS 92). Shared by
+// `doctor --fix` step 3 and `nj unarchive` (§ 11a).
+function removeEmptiedIdFolders(backlog: string, dirs: Set<string>) {
+  for (const start of dirs) {
+    for (let d = start; d !== backlog && d.startsWith(backlog + path.sep) && ID_FOLDER.test(path.basename(d)); d = path.dirname(d)) {
+      try { fs.rmdirSync(d); } catch { break; }
+    }
+  }
+}
+
+export { ID_FOLDER, scanBacklog, folderOf, inArchive, samePlace, placeOf, expectedPlace, moveTarget, misplacedCode, ownFolder, removeEmptiedIdFolders, foldEq };

@@ -1,9 +1,10 @@
 'use strict';
-/* AC-26 — `nj unarchive`, proposal v3.1 § B ("§ 11a").
+/* AC-26 — `nj unarchive`, docs/SPECIFICATION.md § 11a (v3.1 proposal § B,
+ * promoted: DECISIONS 110/112).
  *
  * Source: docs/proposals/v3.1.md (5d1c83d) with the lead's rulings on it:
  * B-1 unarchive takes the archived subtree; B-2 no --status; B-3 the
- * `archived` key is dropped. Not yet folded into docs/SPECIFICATION.md.
+ * `archived` key is dropped.
  *
  * AC-26: "For each group (`type`, `hierarchy`, `flat`) and for renamed
  * folders: `archive` followed by `unarchive` of the same element returns
@@ -420,14 +421,35 @@ for (const [name, layout] of [['type', null], ['hierarchy', { group: 'hierarchy'
   refused('U4 [hierarchy] inside the merge, a folder at a target file path: exists', x, ['--id=TSK-001'], 'exists');
 }
 {
-  /* refused:misplaced — hierarchy only (§ 11a) */
-  /* DECISIONS 104 (75): a member of the subtree lying outside the archive */
-  const x = model('ac26-mis-out', { group: 'hierarchy' });
+  /* DECISIONS 104 (75), amended (82): a subtree member already lying outside
+   * the archive (a manual move produced archive:split) is NOT a refusal in
+   * any group — § 11a leaves it untouched, and unarchiving the parent heals
+   * the split; under hierarchy the parent's folder merges into the existing
+   * active one (D90/94). */
+  const tag = 'U2 [hierarchy, a subtree member already moved outside the archive heals the split (D104 82)]';
+  const x = model('ac26-split-heal', { group: 'hierarchy' });
+  const REST = ['EPIC-001', 'TSK-001', 'SUB-001'];
+  const before = state(x.bl, REST);
   archive(x, 'EPIC-001');
   try { mkdir(path.join(x.bl, 'EPIC-001')); fs.renameSync(path.join(x.bl, 'archive', 'EPIC-001', 'TSK-002'), path.join(x.bl, 'EPIC-001', 'TSK-002')); }
   catch (e) { T.check('fixture: move archive/EPIC-001/TSK-002 back out of the archive', false, e.code + ' ' + J(places(x.bl))); }
-  refused('U4 [hierarchy] a subtree member lying outside the archive: refused:misplaced', x, ['--id=EPIC-001'], 'refused:misplaced',
-    pointsAtFix('U4 [hierarchy] member outside'));
+  const t2Before = snapshot(path.join(x.bl, 'EPIC-001', 'TSK-002'));
+  const split = runJ(['doctor'], { cwd: x.dir });
+  T.check(tag + ' fixture: doctor sees the split before unarchive', (H.doctorSet(split) || []).includes('archive:split:error'), J(split.json && split.json.problems));
+  const r = unarchive(x, 'EPIC-001');
+  T.exit(tag + ': exit 0', r, 0);
+  const after = state(x.bl, REST);
+  for (const id of REST) {
+    T.eq(tag + ' ' + id + ' is back at ' + before[id].path, after[id].path, before[id].path);
+    T.eq(tag + ' ' + id + ' is byte-identical to before the archive, except updated', stripUpdated(after[id].bytes), stripUpdated(before[id].bytes));
+    T.check(tag + ' ' + id + ': the archived key is gone', !/^archived:/m.test(after[id].bytes || ''), J(after[id].bytes));
+  }
+  T.eq(tag + ' TSK-002 is untouched (bytes and mtime) — only archived members move', snapshot(path.join(x.bl, 'EPIC-001', 'TSK-002')), t2Before);
+  const j = r.json || {};
+  T.check(tag + ' --json: changed is ["unarchived"]', J(j.changed) === J(['unarchived']), J(j).slice(0, 300));
+  T.eq(tag + ' --json: ids are exactly the three members that were still archived', (j.ids || []).slice().sort(), REST.slice().sort());
+  T.check(tag + ' --json: TSK-002 is not among the moved ids', !(j.ids || []).includes('TSK-002'), J(j.ids));
+  doctorClean(tag, x);
 }
 {
   const x = model('ac26-mis-in', { group: 'hierarchy' });

@@ -14,7 +14,7 @@ import {
 import { workingDir } from '../core/config.ts';
 import { context } from '../core/context.ts';
 import { elementProblems, compareElements } from '../core/derive.ts';
-import { ID_FOLDER, moveTarget, misplacedCode, ownFolder } from '../core/layout.ts';
+import { ID_FOLDER, moveTarget, misplacedCode, ownFolder, removeEmptiedIdFolders } from '../core/layout.ts';
 import { out } from '../core/output.ts';
 import { syncH1 } from '../core/parse.ts';
 import { V2_README, V3_README } from '../core/readme-texts.ts';
@@ -478,17 +478,6 @@ function chainProblem(el: Element): boolean {
     if (['parent:dangling', 'parent:cycle', 'parent:hierarchy'].some((c) => (cur as Element).problems.has(c))) return true;
   }
   return false;
-}
-
-// The folders a move left behind: removed once empty, walking up, but only
-// the ID-shaped ones `hierarchy` creates — never a type folder, never with
-// anything still in it, never recursively (DECISIONS 92).
-function removeEmptiedIdFolders(backlog: string, dirs: Set<string>) {
-  for (const start of dirs) {
-    for (let d = start; d !== backlog && d.startsWith(backlog + path.sep) && ID_FOLDER.test(path.basename(d)); d = path.dirname(d)) {
-      try { fs.rmdirSync(d); } catch { break; }
-    }
-  }
 }
 
 // 4. backfill tombstones

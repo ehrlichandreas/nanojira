@@ -1,10 +1,10 @@
 {
-  "njSha256": "86a0cb9640b4836edebfcabc32a86c43e3d3b617ae14071263327abcd4fe9c1d",
-  "njPath": "dist/nj",
+  "njSha256": "45da9e4afbf6dd733a24d41cb55e8a9f924d9caf803c736128a9f2b49a71111c",
+  "njPath": "../../../../../../../../../var/folders/xg/9sw6yt791zsf3rsmffcg8w2m0000gp/T/tmp.xuMbDWUH7E/projects/nanojira/dist/nj",
   "node": "v24.21.0",
   "platform": "darwin-arm64",
-  "recordedAt": "2026-10-03T00:41:45.017Z",
-  "calls": 4829,
+  "recordedAt": "2026-10-03T11:00:12.358Z",
+  "calls": 5849,
   "parts": [
     {
       "name": "fixtures",
@@ -13,8 +13,8 @@
     },
     {
       "name": "oracle",
-      "calls": 2716,
-      "detail": "passed 70/72, failed 0, cannot run 2"
+      "calls": 3736,
+      "detail": "passed 73/74, failed 0, cannot run 1"
     },
     {
       "name": "scratch",
@@ -47,6 +47,8 @@
     "ac/ac-22-layout.js",
     "ac/ac-23-status-overview.js",
     "ac/ac-24-legacy-migration.js",
+    "ac/ac-25-note-author.js",
+    "ac/ac-26-unarchive.js",
     "fault/det-fence-heading.js",
     "fault/det-id-retry.js",
     "fault/fault-hook-json.js",
@@ -96,7 +98,7 @@
     "edge/v3-2-regressions.js",
     "edge/write-encoding.js"
   ],
-  "testDigest": "88bf0b8104751968591516fcdc8ce15e47d4df31dbdd597fae46442cdb90b3a4",
+  "testDigest": "1acd6e4912c3ad10028d81647097a7784b6a90a4e78f9e8c86c9e1604edcd1f9",
   "testDigestScope": [
     "test/ac/",
     "test/edge/",
@@ -108,6 +110,7 @@
   ],
   "cannotRun": [],
   "notRecorded": [
+    "ac/ac-15-no-dependencies.js (environment-conditional (expected-gaps.js): searches a fixed set of paths relative to its own location for the runtime Node (§ 3: workspace/portable/runtime/<platform>/bin/node), honouring NJ_NODE only as an explicit override; this recording machine's runtime lives somewhere else entirely, none of the fixed paths exist, and NJ_NODE is deliberately left unset here so every suite is driven the same way the suite itself is designed to be run: verdict taken directly, calls not in the corpus)",
     "fault/det-id-retry.js (preload-instrumented: verdict taken directly, calls not in the corpus)",
     "edge/hardening-v3-1.js (the shim's own process.cwd() call throws in its deleted/unsearchable-CWD legs, before the real nj runs: verdict taken directly, calls not in the corpus)",
     "edge/stdout-epipe.js (timing-dependent: verdict taken directly, calls not in the corpus)",
@@ -120,9 +123,8 @@
     "edge/stdout-epipe.js"
   ],
   "expectedGaps": [
-    "ac/ac-15-no-dependencies.js: searches a fixed set of paths relative to its own location for the runtime Node (§ 3: workspace/portable/runtime/<platform>/bin/node), honouring NJ_NODE only as an explicit override; this recording machine's runtime lives somewhere else entirely, none of the fixed paths exist, and NJ_NODE is deliberately left unset here so every suite is driven the same way the suite itself is designed to be run",
     "edge/hardening-njrc-foreign-link.js: needs root, or a symlink owned by another non-root uid on the scratch filesystem, to prove a foreign-owned .njrc link is refused (DECISIONS 98); a normal user account on this machine has neither (718c230)"
   ],
   "note": "Comparison key excludes per-file raw sha; nsha (normalised content) is normative.",
-  "corpusSha256": "2bca3e7859c03278ae5913636397cd986b4183e98a2f8ebce6fe988c3c46bcbc"
+  "corpusSha256": "34dbb16dc9a7f888149dd3133686218fc3056dca3b1953655c865dda52539566"
 }

@@ -1331,6 +1331,132 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      `.njrc` swap race; the suite's timing-based leg rarely lands a hit
      when `nj` runs under a Node parent.
 
+109. **v3 closed.** EPIC-006 and TSK-025..029 are done; each step was
+     tested first, implemented, and verified independently
+     (docs/verification/). `c4-baseline` = `oracle-frozen-9` = `b9ed8c6`:
+     4829 recorded calls, self-replay unchanged. The suites for the v3.1
+     proposal (`NJ_AUTHOR`, `unarchive`) live in `test/proposed/` and are
+     not gated until v3.1 is promoted. `hardening-v3-1` is verdict-only
+     under the recording shim (the shim cannot run in an unreachable cwd);
+     `baseline.js` passes `NJ_NODE`, so AC-15 is a real check again. Gate
+     at HEAD: replay unchanged, oracle 71/72, one expected gap (a
+     foreign-owned symlink needs root), exit 0.
+     *Open, stated plainly:* the absolute § 13 perf bars were never
+     re-measured on a quiet machine (A/B against each previous step showed
+     no regression); a deterministic hook for the `.njrc` swap race; the
+     stray `.ids/` after a crash between step 0's renames (G1); v3.1 itself.
+
+110. **v3.1 released by the user** (2026-10-03: "gut, mache das. arbeite
+     aber diesmal vorsichtiger"), scope as proposed in docs/proposals/v3.1.md:
+     A `NJ_AUTHOR` (with § 0 acting name), B `nj unarchive`, C `nj claim` /
+     `nj release`, plus a quiet-machine § 13 perf measurement. *How, more
+     carefully than v3:* one feature at a time, in the order A → B → C;
+     each is promoted into SPECIFICATION.md before any code, tested,
+     implemented, verified, and accepted before the next starts; only one
+     agent writes `src/` at a time; C is promoted only after an independent
+     review of its concurrency protocol passes. No new teammates. Every
+     ruling is recorded here before it is acted on.
+     *Promotion scope:* the spec names only what exists. § 0 enters with
+     `NJ_AUTHOR` as the sole source of the acting name; the `--as` flag is
+     added when C (`claim`/`release`) is promoted. Until then `nj note
+     --as` is `unknown_field`, as AC-25 already asserts.
+
+111. **V3.1-A verified: accept with one follow-up** (docs/verification/
+     v3-1-a-nj-author.md, 6391d26). Finding: `--id` together with `--file`
+     (`invalid_target`) is checked inside target resolution, after
+     `NJ_AUTHOR`, while its sibling "neither given" (`missing_argument`) is
+     checked before it. *Ruling:* "both given" is argument parsing, like
+     "neither given". § 10's precedence names it in the first bucket, so
+     an invalid `NJ_AUTHOR` loses to it. Order: the Oracle amends § 10 and
+     adds an AC-25 case; then the Implementer makes the early target-flag
+     check catch both cases; then the Verifier checks the delta. A is
+     accepted (TSK-030 done) once that delta passes.
+
+112. **V3.1-A accepted.** `NJ_AUTHOR` (§ 0, § 9, § 10, AC-25) passes
+     independent verification (docs/verification/v3-1-a-nj-author.md:
+     6391d26 accept with notes; D111 delta b6fc1d9 accept). Gate at f7e91ad:
+     exit 0, replay unchanged, oracle 72/73 (the one gap is D98's root
+     requirement). TSK-030 done. B (`nj unarchive`, TSK-031) starts:
+     the Oracle promotes proposal § B into the spec first, with D104's
+     rulings 75–83 as amended.
+
+113. **V3.1-B replay diffs: one named class.** At cd33d3a the replay
+     against c4-baseline differs in `nj help`, `nj --help` and `nj help
+     --json` only (6 calls): the added `nj unarchive` line from § 9's
+     command list. As in D88, consistency with the spec wins over "0 diffs";
+     the replay is accepted only if the diffs are exactly that class, which
+     the Verifier confirms independently. Gate otherwise green (oracle 73/74,
+     the gap is D98), perf `--ab` vs f7e91ad within bounds. A stale AC-26
+     case (ac26-mis-out, pre-amendment 82) was flipped by the Oracle in
+     d8507d2 by applying 82; that was not a new ruling. *After B is
+     accepted:* the replay baseline is re-recorded at the accepted commit
+     and tagged `c5-baseline`, so C is gated against v3.1-B behaviour and
+     not against the old help text.
+
+114. **Claim-protocol review adopted** (docs/review/claim-protocol.md,
+     e10be45: "sound with fixes"). All seven changes of its § 5 are taken
+     into proposal § C before promotion: (1) no live pruning in `doctor
+     --fix` step 7a, so the post-check goes too; (2) roll back only after an
+     own successful `link()`, and restore the entry read; (3) `ENOENT` on
+     `link()` is a retry round, under the same 100-round bound as `EEXIST`;
+     (4) the "already held" `claim` path re-asserts with one real CAS
+     append, with or without `--status` (variant P3); (5) a landed steal's
+     own mirror failure is reported, not undone; (6) claim directories are
+     removed only for archived or gone elements, never merely `done`;
+     (7) mixed line endings in `.gitignore`: append with the last line's
+     ending, else `LF`. *On (4):* this drops the promise "idempotent,
+     nothing appended". Put to the user 2026-10-03 with a stated default;
+     no objection; the user said to continue autonomously. The residual
+     audit-trail oddity (I3x, review § 1.5) is disclosed as a limit, not
+     fixed. *Order unchanged (D110):* the Oracle revises the proposal now
+     (a document only, no spec, no src); promotion into SPECIFICATION.md
+     waits until B is accepted, and the Verifier re-checks the revised § C
+     against the model (P3) before promotion.
+
+115. **Proposal § C (59a3a9a): two rulings.**
+     - *Rollback restores what was read (D114 point 2, as the review
+       states).* A plain claim read `unclaimed`/`released`, so its rollback
+       appends `released N`. A re-assertion read its own `claimed N`, so
+       its rollback restores `claimed N`: a failed mirror write must not
+       give up a claim N held before the command ran. In effect a
+       re-assertion has nothing to roll back. A steal is never rolled back
+       (point 5). 59a3a9a's "re-assertion is rolled back with `released N`"
+       is corrected.
+     - *P-6: `nj unarchive` removes a leftover claim directory*, through
+       the same wholesale removal that `archive`/`rm` use, so an unarchived
+       element always starts unclaimed. Removal happens while the element is
+       still archived, before the first move; no legitimate claimant can be
+       active then because `claim` refuses archived elements. A straggler's
+       `link()` meeting `ENOENT` retries, re-reads, and is refused (point 3).
+       It never inherits a pre-archive claim.
+     The Verifier re-checks the revised § C against the model (P3, plus
+     these two points) before promotion.
+
+116. **V3.1-B accepted.** `nj unarchive` (§ 11a, AC-26 711/711) passes
+     independent verification (docs/verification/v3-1-b-unarchive.md,
+     49b8670: accept). The replay diffs were confirmed byte for byte to be
+     exactly D113's class: 6 calls, the one inserted help line, 4829 calls
+     on both sides. The helper move into core/layout.ts is a pure
+     relocation. TSK-031 done. *Next, in parallel because they share no
+     files:* the Implementer re-records the replay baseline at the accepted
+     behaviour and tags it `c5-baseline` (D113); the Verifier re-checks the
+     revised proposal § C (2689db8) against the model before C is promoted
+     (D114/D115).
+
+117. **Proposal § C cleared for promotion** (docs/review/claim-protocol.md,
+     "Re-check of revised § C", f4179d1: ready to promote). All seven
+     D114 fixes are in place as intended. D115's rollback rule is already
+     covered by model variant P3. P-6 was modelled as scenario S13 (652,451
+     states): I1 never fires; the I3x/I4 hits trace to the already-disclosed
+     `claim:mismatch`, reached by a non-crash path. *Promotion now* (D110:
+     B accepted, review passed): the Oracle promotes § C into
+     SPECIFICATION.md, with `--as` added to § 0 as D110 foresaw, and folds
+     in the re-check's four wording fixes: the straggler-retry sentence;
+     "starts unclaimed" stated as best-effort, like archive's limit;
+     `claim:mismatch` causes including the non-crash path; and where the
+     claim-dir removal sits in § 11a's order. Tests (AC-27) follow from
+     the promoted text.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now
@@ -1343,5 +1469,5 @@ Written for adversarial review: if a line reads like a guess, challenge it.
   `note` *and* `archive`. The compare and the marker wait moved into a shared
   `compareGuard`, which `guardedWrite` and `archive` both call; `archive` still writes
   to the new path and unlinks the old one, it just no longer duplicates the guard.
-- **The `nj note` author is the element's `assignee`, else `?`** — § 10 as written;
-  `NJ_AUTHOR` is listed under § 16 as round two.
+- ~~**The `nj note` author is the element's `assignee`, else `?`**~~ **Closed.**
+  § 10 now has `NJ_AUTHOR` (v3.1-A, D110/D111).

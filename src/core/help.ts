@@ -25,6 +25,7 @@ Section writes replace the section; --<role>-file=- reads stdin.
   nj tree  [--id=EPIC-001] [--all]
   nj rm    --id=TSK-009 [--cascade]
   nj archive --id=EPIC-001
+  nj unarchive --id=EPIC-001
   nj doctor [--fix]
 
 Every command accepts --json. Write commands accept --file=<path> instead of
