@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 // src/core/args.ts
-import * as fs7 from "node:fs";
+import * as fs8 from "node:fs";
 import * as path6 from "node:path";
 
 // src/core/constants.ts
@@ -143,7 +143,7 @@ var BLOCKS_READY = /* @__PURE__ */ new Set([
 var BACKLOG_LEVEL = /* @__PURE__ */ new Set(["backlog:stray_tmp", "backlog:ids_missing", "backlog:unreadable_dir", "config:invalid", "config:unknown_key", "config:unknown_code"]);
 
 // src/core/dry-run.ts
-import * as fs6 from "node:fs";
+import * as fs7 from "node:fs";
 import * as os from "node:os";
 import * as path5 from "node:path";
 
@@ -1081,11 +1081,189 @@ function notesSectionBounds(lines) {
 }
 
 // src/core/store.ts
-import * as fs5 from "node:fs";
+import * as fs6 from "node:fs";
 import * as path4 from "node:path";
 
-// src/core/touched.ts
+// src/core/kernel.ts
 import * as fs4 from "node:fs";
+var Fail = class extends Error {
+  hint;
+  code;
+  constructor(message, hint, code) {
+    super(message);
+    this.hint = hint;
+    this.code = code || "failed";
+  }
+};
+function fail(code, message, hint) {
+  throw new Fail(message, hint, code);
+}
+var output = { json: false };
+var decorateFailure = (res) => res;
+function setFailureDecorator(fn) {
+  decorateFailure = fn;
+}
+function hardExit(code, message) {
+  process.stderr.write(message + "\n");
+  if (output.json) process.stdout.write(JSON.stringify(decorateFailure({ ok: false, error: code }), null, 2) + "\n");
+  process.exit(1);
+}
+process.stdout.on("error", (err) => {
+  if (err.code === "EPIPE") process.exit(0);
+  throw err;
+});
+function out(s) {
+  process.stdout.write(s + "\n");
+}
+function emitFailure(code, message, hint) {
+  process.stderr.write(`Error: ${message}
+`);
+  if (hint) process.stderr.write(`${hint}
+`);
+  if (output.json) {
+    const res = { ok: false, error: code };
+    if (hint) res.hint = hint;
+    out(JSON.stringify(decorateFailure(res), null, 2));
+  }
+  process.exitCode = 1;
+}
+function parseArgs(argv, kinds, opts) {
+  const aliases = opts?.aliases;
+  const sameValue2 = opts?.sameValue ?? ((_name, a, b) => a === b);
+  const flags = /* @__PURE__ */ new Map();
+  const positional = [];
+  const repeated = [];
+  let options = true;
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (options && a === "--") {
+      options = false;
+      continue;
+    }
+    if (options && a.startsWith("--")) {
+      const eq = a.indexOf("=");
+      const typed = eq === -1 ? a.slice(2) : a.slice(2, eq);
+      const name = aliases?.get(typed) ?? typed;
+      let value = eq === -1 ? true : a.slice(eq + 1);
+      if (value === true && kinds !== void 0 && Object.hasOwn(kinds, name) && kinds[name] === "string" && i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
+        value = argv[++i];
+      }
+      if (flags.has(name) && !sameValue2(name, flags.get(name), value) && !repeated.some((r) => r.name === name)) {
+        repeated.push({ name, typed });
+      }
+      flags.set(name, value);
+    } else {
+      positional.push(a);
+    }
+  }
+  return { flags, positional, repeated };
+}
+function allowedControlSet(commandControls, globalControls = []) {
+  return /* @__PURE__ */ new Set([...commandControls, ...globalControls]);
+}
+function checkFlags(flags, allowedFields, allowedControls, isWrite, displayName = (name) => name) {
+  for (const name of flags.keys()) {
+    if (allowedControls.has(name)) continue;
+    if (allowedFields.includes(name)) continue;
+    const suffix = isWrite ? " Nothing written." : "";
+    const known = Array.from(/* @__PURE__ */ new Set([...allowedFields, ...allowedControls])).map(displayName).sort();
+    fail("unknown_field", `unknown field '${name}'.${suffix}`, `Known flags: ${known.map((f) => "--" + f).join(", ")}`);
+  }
+}
+function flagString(flags, name) {
+  const v = flags.get(name);
+  if (v === void 0) return void 0;
+  if (v === true) return fail("missing_value", `--${name} needs a value (use --${name}=\u2026 or --${name} <value>)`);
+  return v;
+}
+function readStdin(hint = "pipe the text in") {
+  try {
+    return fs4.readFileSync(0, "utf8");
+  } catch (e) {
+    return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, hint);
+  }
+}
+function osaDistance(a, b) {
+  const m = a.length, n = b.length;
+  const d = [];
+  for (let i = 0; i <= m; i++) d.push([i]);
+  for (let j = 1; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        v = Math.min(v, d[i - 2][j - 2] + 1);
+      }
+      d[i][j] = v;
+    }
+  }
+  return d[m][n];
+}
+function nearestMatch(value, allowed) {
+  const threshold = value.length <= 4 ? 1 : 2;
+  let best = [];
+  let bestDist = Infinity;
+  for (const v of allowed) {
+    const d = osaDistance(value, v);
+    if (d < bestDist) {
+      bestDist = d;
+      best = [v];
+    } else if (d === bestDist) best.push(v);
+  }
+  return bestDist <= threshold && best.length === 1 ? best[0] : null;
+}
+function listHint(label, value, allowed) {
+  const known = `Known ${label}: ${allowed.join(", ")}`;
+  const suggestion = nearestMatch(value, allowed);
+  return suggestion === null ? known : `did you mean '${suggestion}'? ${known}`;
+}
+function pinnedNow() {
+  const pinned = process.env.NJ_NOW;
+  if (pinned === void 0 || pinned === "") return null;
+  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(pinned) || Number.isNaN(Date.parse(pinned))) {
+    fail(
+      "invalid_env",
+      `invalid NJ_NOW '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`,
+      "fix NJ_NOW, or unset it for the system clock"
+    );
+  }
+  return pinned;
+}
+function checkClockEnv() {
+  pinnedNow();
+}
+function nowIso() {
+  return pinnedNow() ?? (/* @__PURE__ */ new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+function nowMs() {
+  return Date.parse(nowIso());
+}
+function parseOutputOpts(flags, json, allowedFields, label = "fields") {
+  const quiet = flags.has("quiet");
+  const fieldsRaw = flagString(flags, "fields");
+  if (quiet && fieldsRaw !== void 0) {
+    fail(
+      "invalid_value",
+      "--quiet cannot be combined with --fields",
+      "use --fields=<list> to choose fields, or --quiet for {ok, id}"
+    );
+  }
+  if (quiet && !json) fail("invalid_value", "--quiet requires --json");
+  if (fieldsRaw !== void 0 && !json) fail("invalid_value", "--fields requires --json");
+  if (fieldsRaw === void 0) return { quiet };
+  const names = fieldsRaw.split(",").map((s) => s.trim()).filter((s) => s !== "");
+  if (names.length === 0) fail("invalid_value", "--fields must not be empty");
+  for (const n of names) {
+    if (!allowedFields.includes(n)) {
+      fail("invalid_value", `unknown field '${n}' in --fields`, listHint(label, n, allowedFields));
+    }
+  }
+  return { quiet, fields: names };
+}
+
+// src/core/touched.ts
+import * as fs5 from "node:fs";
 import * as path3 from "node:path";
 var journal = /* @__PURE__ */ new Map();
 var root = null;
@@ -1094,7 +1272,7 @@ function setJournalRoot(backlog) {
 }
 function existedBefore(abs) {
   try {
-    fs4.lstatSync(abs);
+    fs5.lstatSync(abs);
     return true;
   } catch {
     return false;
@@ -1135,7 +1313,7 @@ function touchMove(from, to) {
 function touchDeleteTree(abs) {
   let st;
   try {
-    st = fs4.lstatSync(abs);
+    st = fs5.lstatSync(abs);
   } catch {
     return;
   }
@@ -1143,12 +1321,12 @@ function touchDeleteTree(abs) {
     touchDelete(abs);
     return;
   }
-  for (const n of fs4.readdirSync(abs).sort()) touchDeleteTree(path3.join(abs, n));
+  for (const n of fs5.readdirSync(abs).sort()) touchDeleteTree(path3.join(abs, n));
 }
 function touchRename(from, to) {
   let st;
   try {
-    st = fs4.lstatSync(to);
+    st = fs5.lstatSync(to);
   } catch {
     return;
   }
@@ -1156,7 +1334,7 @@ function touchRename(from, to) {
     touchMove(from, to);
     return;
   }
-  for (const n of fs4.readdirSync(to).sort()) touchRename(path3.join(from, n), path3.join(to, n));
+  for (const n of fs5.readdirSync(to).sort()) touchRename(path3.join(from, n), path3.join(to, n));
 }
 function listed(rel) {
   if (rel === "" || rel.startsWith("..") || path3.isAbsolute(rel)) return false;
@@ -1189,30 +1367,9 @@ function withFiles(result, backlog) {
 }
 
 // src/core/store.ts
-function pinnedNow() {
-  const pinned = process.env.NJ_NOW;
-  if (pinned === void 0 || pinned === "") return null;
-  if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(pinned) || Number.isNaN(Date.parse(pinned))) {
-    fail(
-      "invalid_env",
-      `invalid NJ_NOW '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`,
-      "fix NJ_NOW, or unset it for the system clock"
-    );
-  }
-  return pinned;
-}
-function checkClockEnv() {
-  pinnedNow();
-}
-function nowIso() {
-  return pinnedNow() ?? (/* @__PURE__ */ new Date()).toISOString().replace(/\.\d{3}Z$/, "Z");
-}
-function nowMs() {
-  return Date.parse(nowIso());
-}
 function mtimeIso(file) {
   try {
-    return new Date(fs5.statSync(file).mtime).toISOString().replace(/\.\d{3}Z$/, "Z");
+    return new Date(fs6.statSync(file).mtime).toISOString().replace(/\.\d{3}Z$/, "Z");
   } catch {
     return "1970-01-01T00:00:00Z";
   }
@@ -1227,7 +1384,7 @@ function idsSymlinks(dir, shardSize) {
   if (!shardSize) return links;
   let types;
   try {
-    types = fs5.readdirSync(dir, { withFileTypes: true });
+    types = fs6.readdirSync(dir, { withFileTypes: true });
   } catch {
     return links;
   }
@@ -1240,7 +1397,7 @@ function idsSymlinks(dir, shardSize) {
     }
     let buckets;
     try {
-      buckets = fs5.readdirSync(typeDir, { withFileTypes: true });
+      buckets = fs6.readdirSync(typeDir, { withFileTypes: true });
     } catch {
       continue;
     }
@@ -1254,7 +1411,7 @@ function readTombstones(dir, shardSize) {
   if (!shardSize) {
     let names;
     try {
-      names = fs5.readdirSync(dir);
+      names = fs6.readdirSync(dir);
     } catch {
       return out2;
     }
@@ -1266,7 +1423,7 @@ function readTombstones(dir, shardSize) {
   }
   let types;
   try {
-    types = fs5.readdirSync(dir, { withFileTypes: true });
+    types = fs6.readdirSync(dir, { withFileTypes: true });
   } catch {
     return out2;
   }
@@ -1276,7 +1433,7 @@ function readTombstones(dir, shardSize) {
     const typeDir = path4.join(dir, t);
     let buckets;
     try {
-      buckets = fs5.readdirSync(typeDir, { withFileTypes: true });
+      buckets = fs6.readdirSync(typeDir, { withFileTypes: true });
     } catch {
       continue;
     }
@@ -1285,7 +1442,7 @@ function readTombstones(dir, shardSize) {
       if (b.startsWith(".") || be.isSymbolicLink()) continue;
       let names;
       try {
-        names = fs5.readdirSync(path4.join(typeDir, b));
+        names = fs6.readdirSync(path4.join(typeDir, b));
       } catch {
         continue;
       }
@@ -1318,7 +1475,7 @@ function highestShardedMax(idsDir, prefix) {
   const typeDir = path4.join(idsDir, prefix);
   let buckets;
   try {
-    buckets = fs5.readdirSync(typeDir).filter((b) => !b.startsWith("."));
+    buckets = fs6.readdirSync(typeDir).filter((b) => !b.startsWith("."));
   } catch {
     return 0;
   }
@@ -1327,7 +1484,7 @@ function highestShardedMax(idsDir, prefix) {
   const hi = buckets[buckets.length - 1];
   let names;
   try {
-    names = fs5.readdirSync(path4.join(typeDir, hi));
+    names = fs6.readdirSync(path4.join(typeDir, hi));
   } catch {
     return 0;
   }
@@ -1345,7 +1502,7 @@ function highestShardedMax(idsDir, prefix) {
 function allocateId(idsDir, type, elements, shardSize) {
   const prefix = TYPE_PREFIX[type];
   requireNoInternalSymlink(shardSize ? path4.join(idsDir, prefix) : idsDir, "allocating a new id");
-  fs5.mkdirSync(idsDir, { recursive: true });
+  fs6.mkdirSync(idsDir, { recursive: true });
   let max = 0;
   const consider = (id) => {
     if (!idShaped(id)) return;
@@ -1367,10 +1524,10 @@ function allocateId(idsDir, type, elements, shardSize) {
     const { dir, file } = tombstoneLocation(idsDir, id, shardSize);
     if (dir !== idsDir) {
       requireNoInternalSymlink(dir, "allocating a new id");
-      fs5.mkdirSync(dir, { recursive: true });
+      fs6.mkdirSync(dir, { recursive: true });
     }
     try {
-      fs5.closeSync(fs5.openSync(file, "wx"));
+      fs6.closeSync(fs6.openSync(file, "wx"));
       touchWrite(file, false);
       return id;
     } catch (e) {
@@ -1384,17 +1541,17 @@ function atomicWrite(target, content) {
   const dir = path4.dirname(target);
   const tmp = path4.join(dir, `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
   const fault = process.env.NJ_FAULT;
-  const fd = fs5.openSync(tmp, "wx");
+  const fd = fs6.openSync(tmp, "wx");
   try {
-    fs5.writeFileSync(fd, content, "utf8");
+    fs6.writeFileSync(fd, content, "utf8");
     if (fault === "after-tmp-write") {
-      fs5.closeSync(fd);
+      fs6.closeSync(fd);
       hardExit("fault:after-tmp-write", "nanojira: aborted at fault injection point after-tmp-write");
     }
-    fs5.fsyncSync(fd);
+    fs6.fsyncSync(fd);
   } finally {
     try {
-      fs5.closeSync(fd);
+      fs6.closeSync(fd);
     } catch {
     }
   }
@@ -1402,24 +1559,24 @@ function atomicWrite(target, content) {
     hardExit("fault:before-rename", "nanojira: aborted at fault injection point before-rename");
   }
   const existed = existedBefore(target);
-  fs5.renameSync(tmp, target);
+  fs6.renameSync(tmp, target);
   touchWrite(target, existed);
 }
 function mirrorWrite(target, content) {
   const dir = path4.dirname(target);
   const tmp = path4.join(dir, `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
   const fault = process.env.NJ_FAULT;
-  const fd = fs5.openSync(tmp, "wx");
+  const fd = fs6.openSync(tmp, "wx");
   try {
-    fs5.writeFileSync(fd, content, "utf8");
+    fs6.writeFileSync(fd, content, "utf8");
     if (fault === "after-tmp-write") {
-      fs5.closeSync(fd);
+      fs6.closeSync(fd);
       fail("fault:after-tmp-write", "nanojira: aborted at fault injection point after-tmp-write");
     }
-    fs5.fsyncSync(fd);
+    fs6.fsyncSync(fd);
   } finally {
     try {
-      fs5.closeSync(fd);
+      fs6.closeSync(fd);
     } catch {
     }
   }
@@ -1427,25 +1584,25 @@ function mirrorWrite(target, content) {
     fail("fault:before-rename", "nanojira: aborted at fault injection point before-rename");
   }
   const existed = existedBefore(target);
-  fs5.renameSync(tmp, target);
+  fs6.renameSync(tmp, target);
   touchWrite(target, existed);
 }
 function atomicReplace(target, content) {
   const tmp = path4.join(path4.dirname(target), `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
   try {
-    const fd = fs5.openSync(tmp, "wx");
+    const fd = fs6.openSync(tmp, "wx");
     try {
-      fs5.writeFileSync(fd, content, "utf8");
-      fs5.fsyncSync(fd);
+      fs6.writeFileSync(fd, content, "utf8");
+      fs6.fsyncSync(fd);
     } finally {
-      fs5.closeSync(fd);
+      fs6.closeSync(fd);
     }
     const existed = existedBefore(target);
-    fs5.renameSync(tmp, target);
+    fs6.renameSync(tmp, target);
     touchWrite(target, existed);
   } catch (e) {
     try {
-      fs5.unlinkSync(tmp);
+      fs6.unlinkSync(tmp);
     } catch {
     }
     throw e;
@@ -1457,7 +1614,7 @@ function compareGuard(el, force, backlog, hint, catchable) {
     const ready = process.env.NJ_FAULT_READY;
     if (ready) {
       try {
-        fs5.writeFileSync(ready, el.id + "\n");
+        fs6.writeFileSync(ready, el.id + "\n");
       } catch (e) {
         const msg = `nanojira: before-compare could not write NJ_FAULT_READY ${ready}: ${e.message}`;
         if (catchable) fail("fault:before-compare", msg);
@@ -1465,7 +1622,7 @@ function compareGuard(el, force, backlog, hint, catchable) {
       }
     }
     const deadline = Date.now() + 1e4;
-    while (!fs5.existsSync(marker)) {
+    while (!fs6.existsSync(marker)) {
       if (Date.now() >= deadline) {
         const msg = "nanojira: before-compare timed out after 10s waiting for .nj-fault-go";
         if (catchable) fail("fault:before-compare", msg);
@@ -1502,7 +1659,7 @@ function planMove(src, dst) {
   const visit = (from, to) => {
     let target;
     try {
-      target = fs5.lstatSync(to);
+      target = fs6.lstatSync(to);
     } catch (e) {
       if (e.code === "ENOENT") {
         plan.renames.push([from, to]);
@@ -1513,7 +1670,7 @@ function planMove(src, dst) {
     }
     let source;
     try {
-      source = fs5.lstatSync(from);
+      source = fs6.lstatSync(from);
     } catch {
       plan.conflicts.push(to);
       return;
@@ -1523,7 +1680,7 @@ function planMove(src, dst) {
       plan.conflicts.push(to);
       return;
     }
-    for (const n of fs5.readdirSync(from).sort()) visit(path4.join(from, n), path4.join(to, n));
+    for (const n of fs6.readdirSync(from).sort()) visit(path4.join(from, n), path4.join(to, n));
     plan.emptied.push(from);
   };
   visit(src, dst);
@@ -1531,13 +1688,13 @@ function planMove(src, dst) {
 }
 function runMove(plan) {
   for (const [from, to] of plan.renames) {
-    fs5.mkdirSync(path4.dirname(to), { recursive: true });
-    fs5.renameSync(from, to);
+    fs6.mkdirSync(path4.dirname(to), { recursive: true });
+    fs6.renameSync(from, to);
     touchRename(from, to);
   }
   for (const dir of plan.emptied) {
     try {
-      fs5.rmdirSync(dir);
+      fs6.rmdirSync(dir);
     } catch {
     }
   }
@@ -1554,7 +1711,7 @@ function renderElement(el, fieldOverrides, bodyOverride) {
 }
 function makeFolder(dir) {
   try {
-    fs5.mkdirSync(dir, { recursive: true });
+    fs6.mkdirSync(dir, { recursive: true });
   } catch (e) {
     if (!e || e.code !== "EEXIST" && e.code !== "ENOENT" && e.code !== "ENOTDIR") throw e;
     const block = inTheWay(dir);
@@ -1574,7 +1731,7 @@ function inTheWay(dir) {
   for (const p of chain) {
     let st;
     try {
-      st = fs5.lstatSync(p);
+      st = fs6.lstatSync(p);
     } catch {
       return null;
     }
@@ -1582,7 +1739,7 @@ function inTheWay(dir) {
     if (!st.isSymbolicLink()) return { at: p, link: false };
     let toDir = false;
     try {
-      toDir = fs5.statSync(p).isDirectory();
+      toDir = fs6.statSync(p).isDirectory();
     } catch {
     }
     if (!toDir) return { at: p, link: true };
@@ -1682,35 +1839,11 @@ function openAcceptanceExtra(el, cfg, isFinal) {
 }
 
 // src/core/output.ts
-var Fail = class extends Error {
-  hint;
-  code;
-  constructor(message, hint, code) {
-    super(message);
-    this.hint = hint;
-    this.code = code || "failed";
-  }
-};
-function fail(code, message, hint) {
-  throw new Fail(message, hint, code);
-}
-var output = { json: false };
 function withFailureFiles(res) {
   const files = failureFiles();
   return files === void 0 ? res : Object.assign({}, res, { files });
 }
-function hardExit(code, message) {
-  process.stderr.write(message + "\n");
-  if (output.json) process.stdout.write(JSON.stringify(withFailureFiles({ ok: false, error: code }), null, 2) + "\n");
-  process.exit(1);
-}
-process.stdout.on("error", (err) => {
-  if (err.code === "EPIPE") process.exit(0);
-  throw err;
-});
-function out(s) {
-  process.stdout.write(s + "\n");
-}
+setFailureDecorator(withFailureFiles);
 function problemSuffix(el, cfg) {
   const codes = elementProblems(el, cfg.problems.ignore);
   return codes.length > 0 ? "  " + codes.join(" ") : "";
@@ -1739,18 +1872,6 @@ function buildWriteResult(el, changed, backlog, cfg, extra) {
 function emitWriteResult(json, el, changed, backlog, cfg, extra) {
   if (!json) return;
   out(JSON.stringify(buildWriteResult(el, changed, backlog, cfg, extra), null, 2));
-}
-function emitFailure(code, message, hint) {
-  process.stderr.write(`Error: ${message}
-`);
-  if (hint) process.stderr.write(`${hint}
-`);
-  if (output.json) {
-    const res = { ok: false, error: code };
-    if (hint) res.hint = hint;
-    out(JSON.stringify(withFailureFiles(res), null, 2));
-  }
-  process.exitCode = 1;
 }
 
 // src/core/dry-run.ts
@@ -1821,11 +1942,11 @@ function isInside(p, root2) {
 }
 function realpathLoose(p) {
   try {
-    return fs6.realpathSync.native(p);
+    return fs7.realpathSync.native(p);
   } catch {
   }
   try {
-    return path5.join(fs6.realpathSync.native(path5.dirname(p)), path5.basename(p));
+    return path5.join(fs7.realpathSync.native(path5.dirname(p)), path5.basename(p));
   } catch {
     return path5.resolve(p);
   }
@@ -1843,7 +1964,7 @@ function intoSandbox(p) {
   return rel === "" ? state.sandbox : path5.join(state.sandbox, rel);
 }
 function copyTimes(dst, st) {
-  fs6.utimesSync(dst, st.atimeMs / 1e3, st.mtimeMs / 1e3);
+  fs7.utimesSync(dst, st.atimeMs / 1e3, st.mtimeMs / 1e3);
 }
 function followedNames(real) {
   let folders = { ...DEFAULT_CONFIG.layout.folders };
@@ -1867,7 +1988,7 @@ function followedNames(real) {
 }
 function isDirTarget(p) {
   try {
-    return fs6.statSync(p).isDirectory();
+    return fs7.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -1878,60 +1999,60 @@ function isScratch(st) {
 function copyEntry(src, dst, rel, root2, follow) {
   let st;
   try {
-    st = fs6.lstatSync(src);
+    st = fs7.lstatSync(src);
   } catch {
     return;
   }
   if (st.isDirectory()) return isScratch(st) ? void 0 : copyDir(src, dst, rel, root2, st);
   if (st.isSymbolicLink() && follow !== void 0 && follow(rel)) {
     if (isDirTarget(src)) {
-      const target = fs6.realpathSync.native(src);
+      const target = fs7.realpathSync.native(src);
       state.followed.set(rel, target);
-      return copyDir(target, dst, rel, target, fs6.statSync(target));
+      return copyDir(target, dst, rel, target, fs7.statSync(target));
     }
   }
   if (st.isSymbolicLink() && !rel.startsWith(".") && isDirTarget(src)) {
     const standIn = path5.join(state.sandbox + ".links", String(state.standIns.size));
-    fs6.mkdirSync(standIn, { recursive: true });
-    fs6.symlinkSync(standIn, dst);
+    fs7.mkdirSync(standIn, { recursive: true });
+    fs7.symlinkSync(standIn, dst);
     state.links.set(rel, standIn);
     state.standIns.add(rel);
     return;
   }
   if (st.isSymbolicLink()) {
-    const target = fs6.readlinkSync(src);
+    const target = fs7.readlinkSync(src);
     const outside = !path5.isAbsolute(target) && isInside(path5.resolve(path5.dirname(src), target), root2) === null;
     const written = outside ? path5.resolve(path5.dirname(src), target) : target;
-    fs6.symlinkSync(written, dst);
+    fs7.symlinkSync(written, dst);
     state.links.set(rel, written);
     return;
   }
   if (!st.isFile()) {
     if (!rel.startsWith(".") || rel === V3_CONFIG_REL || rel === LEGACY_CONFIG_REL) {
       const original = path5.resolve(src);
-      fs6.symlinkSync(original, dst);
+      fs7.symlinkSync(original, dst);
       state.nonRegular.set(rel, original);
     }
     return;
   }
   try {
-    fs6.copyFileSync(src, dst, fs6.constants.COPYFILE_FICLONE);
+    fs7.copyFileSync(src, dst, fs7.constants.COPYFILE_FICLONE);
   } catch {
-    fs6.writeFileSync(dst, "");
+    fs7.writeFileSync(dst, "");
   }
-  fs6.chmodSync(dst, st.mode & 4095);
+  fs7.chmodSync(dst, st.mode & 4095);
   copyTimes(dst, st);
 }
 function copyDir(src, dst, rel, root2, st, follow) {
-  fs6.mkdirSync(dst);
+  fs7.mkdirSync(dst);
   let names;
   try {
-    names = fs6.readdirSync(src);
+    names = fs7.readdirSync(src);
   } catch {
     names = null;
   }
   for (const n of names || []) copyEntry(path5.join(src, n), path5.join(dst, n), rel === "" ? n : rel + "/" + n, root2, rel === "" ? follow : void 0);
-  fs6.chmodSync(dst, st.mode & 4095);
+  fs7.chmodSync(dst, st.mode & 4095);
   copyTimes(dst, st);
 }
 function sandboxFor(real) {
@@ -1942,15 +2063,15 @@ function sandboxFor(real) {
   }
   const tmp = os.tmpdir();
   try {
-    const scratch = fs6.mkdtempSync(path5.join(fs6.realpathSync.native(tmp), "nj-dry-run-"));
+    const scratch = fs7.mkdtempSync(path5.join(fs7.realpathSync.native(tmp), "nj-dry-run-"));
     state.scratch = scratch;
-    const sst = fs6.statSync(scratch);
+    const sst = fs7.statSync(scratch);
     state.scratchId = { dev: sst.dev, ino: sst.ino };
     state.real = real;
     state.sandbox = path5.join(scratch, path5.basename(real) || "backlog");
     let st;
     try {
-      st = fs6.statSync(real);
+      st = fs7.statSync(real);
     } catch {
       st = null;
     }
@@ -1969,33 +2090,33 @@ function removeScratch() {
   const scratch = state.scratch;
   state.scratch = null;
   try {
-    fs6.rmSync(scratch, { recursive: true, force: true });
+    fs7.rmSync(scratch, { recursive: true, force: true });
     return;
   } catch {
   }
   const open = (d) => {
     try {
-      fs6.chmodSync(d, 448);
+      fs7.chmodSync(d, 448);
     } catch {
       return;
     }
     let names;
     try {
-      names = fs6.readdirSync(d);
+      names = fs7.readdirSync(d);
     } catch {
       return;
     }
     for (const n of names) {
       const p = path5.join(d, n);
       try {
-        if (fs6.lstatSync(p).isDirectory()) open(p);
+        if (fs7.lstatSync(p).isDirectory()) open(p);
       } catch {
       }
     }
   };
   open(scratch);
   try {
-    fs6.rmSync(scratch, { recursive: true, force: true });
+    fs7.rmSync(scratch, { recursive: true, force: true });
   } catch (e) {
     process.stderr.write(`Warning: dry run scratch copy not removed: ${scratch} (${e && e.message ? e.message : e})
 `);
@@ -2006,7 +2127,7 @@ function snapshot2(root2, sandbox) {
   if (root2 === null) return out2;
   let st;
   try {
-    st = fs6.statSync(root2);
+    st = fs7.statSync(root2);
   } catch {
     return out2;
   }
@@ -2015,7 +2136,7 @@ function snapshot2(root2, sandbox) {
   const walk = (dir, rel) => {
     let names;
     try {
-      names = fs6.readdirSync(dir);
+      names = fs7.readdirSync(dir);
     } catch {
       return;
     }
@@ -2024,13 +2145,13 @@ function snapshot2(root2, sandbox) {
       const r = rel === "" ? n : rel + "/" + n;
       let s;
       try {
-        s = fs6.lstatSync(p);
+        s = fs7.lstatSync(p);
       } catch {
         continue;
       }
       if (s.isSymbolicLink() && state.followed.has(r)) {
         try {
-          s = fs6.statSync(p);
+          s = fs7.statSync(p);
         } catch {
         }
       }
@@ -2039,14 +2160,14 @@ function snapshot2(root2, sandbox) {
         out2.set(r, { kind: "dir", content: null });
         walk(p, r);
       } else if (s.isSymbolicLink()) {
-        const target = fs6.readlinkSync(p);
+        const target = fs7.readlinkSync(p);
         if (sandbox && state.nonRegular.get(r) === target) continue;
         out2.set(r, { kind: "symlink", content: target });
         if (sandbox && state.standIns.has(r)) walk(p, r);
       } else if (s.isFile()) {
         let c;
         try {
-          c = fs6.readFileSync(p, "utf8");
+          c = fs7.readFileSync(p, "utf8");
         } catch {
           c = null;
         }
@@ -2139,62 +2260,23 @@ function sameValue(name, a, b) {
   if (a === b) return true;
   return name === "backlog" && typeof a === "string" && typeof b === "string" && a !== "" && b !== "" && path6.resolve(a) === path6.resolve(b);
 }
-function parseArgs(argv, kinds) {
-  const flags = /* @__PURE__ */ new Map();
-  const positional = [];
-  const repeated = [];
-  let options = true;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (options && a === "--") {
-      options = false;
-      continue;
-    }
-    if (options && a.startsWith("--")) {
-      const eq = a.indexOf("=");
-      const typed = eq === -1 ? a.slice(2) : a.slice(2, eq);
-      const name = FLAG_ALIASES.get(typed) ?? typed;
-      let value = eq === -1 ? true : a.slice(eq + 1);
-      if (value === true && kinds !== void 0 && Object.hasOwn(kinds, name) && kinds[name] === "string" && i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
-        value = argv[++i];
-      }
-      if (flags.has(name) && !sameValue(name, flags.get(name), value) && !repeated.some((r) => r.name === name)) {
-        repeated.push({ name, typed });
-      }
-      flags.set(name, value);
-    } else {
-      positional.push(a);
-    }
-  }
-  return { flags, positional, repeated };
+function parseArgs2(argv, kinds) {
+  return parseArgs(argv, kinds, { aliases: FLAG_ALIASES, sameValue });
 }
 function refuseRepeated(repeated) {
   if (repeated.length === 0) return;
   fail("invalid_value", `--${repeated[0].typed} is given more than once with different values`, "give each flag once");
 }
 var GLOBAL_CONTROLS = ["backlog"];
-function allowedControlSet(commandControls, isWrite) {
-  return /* @__PURE__ */ new Set([...commandControls, ...GLOBAL_CONTROLS, ...isWrite ? ["dry-run"] : []]);
+function allowedControlSet2(commandControls, isWrite) {
+  return allowedControlSet(commandControls, [...GLOBAL_CONTROLS, ...isWrite ? ["dry-run"] : []]);
 }
-function checkFlags(flags, allowedFields, commandControls, isWrite) {
-  const allowedControls = allowedControlSet(commandControls, isWrite);
-  for (const name of flags.keys()) {
-    if (allowedControls.has(name)) continue;
-    if (allowedFields.includes(name)) continue;
-    const suffix = isWrite ? " Nothing written." : "";
-    const known = Array.from(/* @__PURE__ */ new Set([...allowedFields, ...allowedControls])).map(displayFlagName).sort();
-    fail("unknown_field", `unknown field '${name}'.${suffix}`, `Known flags: ${known.map((f) => "--" + f).join(", ")}`);
-  }
+function checkFlags2(flags, allowedFields, commandControls, isWrite) {
+  checkFlags(flags, allowedFields, allowedControlSet2(commandControls, isWrite), isWrite, displayFlagName);
   if (flags.has("dry-run")) {
     armDryRun();
     if (flags.get("dry-run") !== true) fail("invalid_value", "--dry-run takes no value", "pass --dry-run on its own");
   }
-}
-function flagString(flags, name) {
-  const v = flags.get(name);
-  if (v === void 0) return void 0;
-  if (v === true) return fail("missing_value", `--${name} needs a value (use --${name}=\u2026)`);
-  return v;
 }
 function parseListFlag(flags, name) {
   const v = flagString(flags, name);
@@ -2206,12 +2288,8 @@ function parseListFlag(flags, name) {
   }
   return items;
 }
-function readStdin() {
-  try {
-    return fs7.readFileSync(0, "utf8");
-  } catch (e) {
-    return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, "pipe the text in, or pass a path with --<role>-file=<path>");
-  }
+function readStdin2() {
+  return readStdin("pipe the text in, or pass a path with --<role>-file=<path>");
 }
 function readSectionFlags(flags) {
   const src = /* @__PURE__ */ new Map();
@@ -2245,12 +2323,12 @@ function readSectionFlags(flags) {
       continue;
     }
     if (s.file === "-") {
-      wanted.set(role, normalizeSectionContent(readStdin()));
+      wanted.set(role, normalizeSectionContent(readStdin2()));
       continue;
     }
     let raw;
     try {
-      raw = fs7.readFileSync(s.file, "utf8");
+      raw = fs8.readFileSync(s.file, "utf8");
     } catch (e) {
       fail(
         "not_found",
@@ -2264,7 +2342,7 @@ function readSectionFlags(flags) {
 }
 
 // src/commands/cmd-archive.ts
-import * as fs13 from "node:fs";
+import * as fs14 from "node:fs";
 import * as path13 from "node:path";
 
 // src/core/flag-table.ts
@@ -2363,7 +2441,7 @@ function cliSpec(command) {
 }
 function checkCommandFlags(flags, command) {
   const s = cliSpec(command);
-  checkFlags(flags, s.fields, new Set(s.controls), s.write);
+  checkFlags2(flags, s.fields, new Set(s.controls), s.write);
   for (const [name, value] of flags) {
     if (value !== true && isBooleanFlag(command, name)) {
       fail("invalid_value", `--${name} takes no value`, `pass --${name} on its own`);
@@ -2399,7 +2477,7 @@ function isBooleanFlag(command, name) {
 function acceptedFlagNames(command) {
   if (!Object.hasOwn(CLI_SPEC, command)) return null;
   const s = CLI_SPEC[command];
-  const accepted = /* @__PURE__ */ new Set([...s.fields, ...s.controls, ...allowedControlSet(s.controls, s.write)]);
+  const accepted = /* @__PURE__ */ new Set([...s.fields, ...s.controls, ...allowedControlSet2(s.controls, s.write)]);
   const tableOrder = Object.hasOwn(FLAG_TABLE, command) ? cliFieldNames(command).filter((f) => accepted.has(f)) : [];
   return Array.from(/* @__PURE__ */ new Set([...tableOrder, ...accepted]));
 }
@@ -2505,16 +2583,16 @@ function flagDoc(command, name) {
 }
 
 // src/core/context.ts
-import * as fs10 from "node:fs";
+import * as fs11 from "node:fs";
 import * as path10 from "node:path";
 
 // src/core/config.ts
-import * as fs8 from "node:fs";
+import * as fs9 from "node:fs";
 import * as os2 from "node:os";
 import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.4.0";
+var VERSION = "4.5.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -2730,13 +2808,13 @@ function sourceName(src) {
   return src.kind === "flag" ? "--backlog" : src.kind === "env" ? "NJ_BACKLOG" : src.file;
 }
 function holdsBacklog(dir) {
-  return fs8.existsSync(path7.join(dir, V3_CONFIG_REL)) || fs8.existsSync(path7.join(dir, LEGACY_CONFIG_REL));
+  return fs9.existsSync(path7.join(dir, V3_CONFIG_REL)) || fs9.existsSync(path7.join(dir, LEGACY_CONFIG_REL));
 }
 function claim(dir, src, lenient) {
   const shown = src.kind === "njrc" ? escapeInvisible(dir) : dir;
   if (!isDir(dir)) fail(SOURCE_CODE[src.kind], `no backlog at ${shown} (from ${sourceName(src)})`);
   if (lenient || holdsBacklog(dir)) return dir;
-  if (fs8.existsSync(path7.join(dir, V3_DIR_REL))) {
+  if (fs9.existsSync(path7.join(dir, V3_DIR_REL))) {
     fail(
       "backlog_without_config",
       `${shown} exists but has no ${V3_CONFIG_REL}`,
@@ -2774,7 +2852,7 @@ function njrcLocation(dir) {
 function readNjrc(file) {
   let link;
   try {
-    link = fs8.lstatSync(file);
+    link = fs9.lstatSync(file);
   } catch (e) {
     return searchMiss(e, path7.dirname(file));
   }
@@ -2783,13 +2861,13 @@ function readNjrc(file) {
   njrcSwapFaultHook(path7.dirname(file));
   let fd;
   try {
-    fd = fs8.openSync(file, fs8.constants.O_RDONLY | fs8.constants.O_NONBLOCK);
+    fd = fs9.openSync(file, fs9.constants.O_RDONLY | fs9.constants.O_NONBLOCK);
   } catch (e) {
     if (e.code === "ELOOP") return bad("it is a symlink loop (ELOOP)");
     if (e.code === "ENOENT") {
       let fresh;
       try {
-        fresh = fs8.lstatSync(file);
+        fresh = fs9.lstatSync(file);
       } catch {
         return null;
       }
@@ -2800,7 +2878,7 @@ function readNjrc(file) {
   try {
     let st;
     try {
-      st = fs8.fstatSync(fd);
+      st = fs9.fstatSync(fd);
     } catch (e) {
       return bad(`cannot stat it -- ${e.code || e.message}`);
     }
@@ -2808,20 +2886,20 @@ function readNjrc(file) {
     if (!st.isFile()) return bad(st.isDirectory() ? "it is a directory, not a file" : "it is not a regular file");
     let raw;
     try {
-      raw = fs8.readFileSync(fd, "utf8");
+      raw = fs9.readFileSync(fd, "utf8");
     } catch (e) {
       return bad(`cannot read it -- ${e.code || e.message}`);
     }
     return raw.startsWith("\uFEFF") ? raw.slice(1) : raw;
   } finally {
-    fs8.closeSync(fd);
+    fs9.closeSync(fd);
   }
 }
 function njrcSwapFaultHook(dir) {
   if (process.env.NJ_FAULT !== "njrc-swap") return;
   const marker = path7.join(dir, ".nj-fault-go");
   const deadline = Date.now() + 1e4;
-  while (!fs8.existsSync(marker)) {
+  while (!fs9.existsSync(marker)) {
     if (Date.now() >= deadline) return;
     sleepMs(50);
   }
@@ -2909,7 +2987,7 @@ function findBacklog(flags, lenient) {
 }
 function isDir(p) {
   try {
-    return fs8.statSync(p).isDirectory();
+    return fs9.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -2920,20 +2998,20 @@ function searchMiss(e, dir) {
 }
 function searchIsDir(p) {
   try {
-    return fs8.statSync(p).isDirectory();
+    return fs9.statSync(p).isDirectory();
   } catch (e) {
     return searchMiss(e, path7.dirname(p)) ?? false;
   }
 }
 function isLegacyBacklog(backlog) {
-  return fs8.existsSync(path7.join(backlog, LEGACY_CONFIG_REL));
+  return fs9.existsSync(path7.join(backlog, LEGACY_CONFIG_REL));
 }
 
 // src/core/load.ts
 import * as path9 from "node:path";
 
 // src/core/layout.ts
-import * as fs9 from "node:fs";
+import * as fs10 from "node:fs";
 import * as path8 from "node:path";
 var INTERNAL_DIRS = [".ids", ".nanojira"];
 var TOP_LEVEL_DOCS = /* @__PURE__ */ new Set(["README.md", "STATUS.md", "TAGS.md"]);
@@ -2948,7 +3026,7 @@ function scanBacklog(backlog, layout) {
   const readEntries = (dir) => {
     let entries;
     try {
-      entries = fs9.readdirSync(dir, { withFileTypes: true });
+      entries = fs10.readdirSync(dir, { withFileTypes: true });
     } catch (e) {
       if (e.code !== "ENOENT") unreadable.push({ dir, reason: e.code || e.message });
       return [];
@@ -2977,7 +3055,7 @@ function scanBacklog(backlog, layout) {
     if (e.isSymbolicLink()) {
       let st;
       try {
-        st = fs9.statSync(abs);
+        st = fs10.statSync(abs);
       } catch (err) {
         unreadable.push({ dir: abs, reason: err.code === "ENOENT" ? "dangling symlink" : err.code || err.message });
         continue;
@@ -3001,7 +3079,7 @@ function scanBacklog(backlog, layout) {
 }
 function isDirectory(p) {
   try {
-    return fs9.statSync(p).isDirectory();
+    return fs10.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -3066,7 +3144,7 @@ function removeEmptiedIdFolders(backlog, dirs) {
   for (const start of dirs) {
     for (let d = start; d !== backlog && d.startsWith(backlog + path8.sep) && ID_FOLDER.test(path8.basename(d)); d = path8.dirname(d)) {
       try {
-        fs9.rmdirSync(d);
+        fs10.rmdirSync(d);
       } catch {
         break;
       }
@@ -3453,13 +3531,13 @@ function resolveTarget(ctx, flags, forWrite) {
     const abs = intoSandbox(path10.isAbsolute(file) ? file : path10.resolve(ctx.backlog, file));
     const real = (p) => {
       try {
-        return fs10.realpathSync.native(p);
+        return fs11.realpathSync.native(p);
       } catch {
       }
       const dir = path10.dirname(p);
       let rdir;
       try {
-        rdir = fs10.realpathSync.native(dir);
+        rdir = fs11.realpathSync.native(dir);
       } catch {
         rdir = path10.resolve(dir);
       }
@@ -3678,7 +3756,7 @@ function fireRecordedChange() {
 }
 
 // src/core/status.ts
-import * as fs11 from "node:fs";
+import * as fs12 from "node:fs";
 import * as path11 from "node:path";
 function statusPath(backlog) {
   return path11.join(backlog, "STATUS.md");
@@ -3721,7 +3799,7 @@ function refreshStatus(backlog, cfg, ctx) {
       if (had !== void 0) {
         let ctime = Infinity;
         try {
-          ctime = fs11.statSync(file).ctimeMs;
+          ctime = fs12.statSync(file).ctimeMs;
         } catch {
         }
         if (ctime < cutoff) return had;
@@ -3746,7 +3824,7 @@ function refreshStatus(backlog, cfg, ctx) {
 }
 
 // src/core/tags.ts
-import * as fs12 from "node:fs";
+import * as fs13 from "node:fs";
 import * as path12 from "node:path";
 
 // src/core/suggest.ts
@@ -3756,36 +3834,6 @@ var SYNONYMS = {
   priority: { medium: "normal" }
 };
 var FIELD_LABEL = { type: "types", status: "statuses", priority: "priorities" };
-function osaDistance(a, b) {
-  const m = a.length, n = b.length;
-  const d = [];
-  for (let i = 0; i <= m; i++) d.push([i]);
-  for (let j = 1; j <= n; j++) d[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      let v = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
-        v = Math.min(v, d[i - 2][j - 2] + 1);
-      }
-      d[i][j] = v;
-    }
-  }
-  return d[m][n];
-}
-function nearestMatch(value, allowed) {
-  const threshold = value.length <= 4 ? 1 : 2;
-  let best = [];
-  let bestDist = Infinity;
-  for (const v of allowed) {
-    const d = osaDistance(value, v);
-    if (d < bestDist) {
-      bestDist = d;
-      best = [v];
-    } else if (d === bestDist) best.push(v);
-  }
-  return bestDist <= threshold && best.length === 1 ? best[0] : null;
-}
 function suggestValue(field, value, allowed) {
   const synonym = SYNONYMS[field][value];
   if (synonym !== void 0 && allowed.includes(synonym)) return synonym;
@@ -3794,11 +3842,6 @@ function suggestValue(field, value, allowed) {
 function valueHint(field, value, allowed) {
   const known = `Known ${FIELD_LABEL[field]}: ${allowed.join(", ")}`;
   const suggestion = suggestValue(field, value, allowed);
-  return suggestion === null ? known : `did you mean '${suggestion}'? ${known}`;
-}
-function listHint(label, value, allowed) {
-  const known = `Known ${label}: ${allowed.join(", ")}`;
-  const suggestion = nearestMatch(value, allowed);
   return suggestion === null ? known : `did you mean '${suggestion}'? ${known}`;
 }
 
@@ -3845,7 +3888,7 @@ function refreshTags(backlog, cfg, ctx) {
       if (had !== void 0) {
         let ctime = Infinity;
         try {
-          ctime = fs12.statSync(file).ctimeMs;
+          ctime = fs13.statSync(file).ctimeMs;
         } catch {
         }
         if (ctime < cutoff) return had;
@@ -3909,10 +3952,10 @@ function warnTagNearMatches(newTags, priorTags) {
 var STABLE_HINT = "retry once the backlog is stable \u2014 archive takes no --force";
 function archiveFlat(ctx, subtree, ts) {
   const archiveDir = path13.join(ctx.backlog, ctx.cfg.layout.folders.archive);
-  fs13.mkdirSync(archiveDir, { recursive: true });
+  fs14.mkdirSync(archiveDir, { recursive: true });
   const plan = subtree.map((e) => ({ el: e, target: path13.join(archiveDir, path13.basename(e.file)) }));
   for (const { target } of plan) {
-    if (fs13.existsSync(target)) {
+    if (fs14.existsSync(target)) {
       fail(
         "exists",
         `${target} already exists \u2014 refusing to overwrite; nothing was moved`,
@@ -3924,7 +3967,7 @@ function archiveFlat(ctx, subtree, ts) {
   const moved = [];
   for (const { el: e, target } of plan) {
     atomicWrite(target, renderElement(e, /* @__PURE__ */ new Map([["archived", ts], ["updated", ts]]), void 0));
-    fs13.unlinkSync(e.file);
+    fs14.unlinkSync(e.file);
     touchMove(e.file, target);
     moved.push(loadElement(target, ctx.backlog, ctx.cfg));
   }
@@ -4054,27 +4097,8 @@ function runBatch(ids, preflight, write) {
 }
 
 // src/core/result-opts.ts
-function parseOutputOpts(flags, json, allowedFields) {
-  const quiet = flags.has("quiet");
-  const fieldsRaw = flagString(flags, "fields");
-  if (quiet && fieldsRaw !== void 0) {
-    fail(
-      "invalid_value",
-      "--quiet cannot be combined with --fields",
-      "use --fields=<list> to choose fields, or --quiet for {ok, id}"
-    );
-  }
-  if (quiet && !json) fail("invalid_value", "--quiet requires --json");
-  if (fieldsRaw !== void 0 && !json) fail("invalid_value", "--fields requires --json");
-  if (fieldsRaw === void 0) return { quiet };
-  const names = fieldsRaw.split(",").map((s) => s.trim()).filter((s) => s !== "");
-  if (names.length === 0) fail("invalid_value", "--fields must not be empty");
-  for (const n of names) {
-    if (!allowedFields.includes(n)) {
-      fail("invalid_value", `unknown field '${n}' in --fields`, listHint("entry fields", n, allowedFields));
-    }
-  }
-  return { quiet, fields: names };
+function parseOutputOpts2(flags, json, allowedFields) {
+  return parseOutputOpts(flags, json, allowedFields, "entry fields");
 }
 function trimResult(result, opts) {
   if (opts.quiet) {
@@ -4159,7 +4183,7 @@ function prepareCheck(el, text, item, wantOn) {
 function cmdCheck(flags) {
   checkCommandFlags(flags, "check");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
+  const opts = parseOutputOpts2(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
   const text = flagString(flags, "text");
@@ -4266,17 +4290,17 @@ function actingNameForRead() {
 import * as path15 from "node:path";
 
 // src/core/input.ts
-import * as fs14 from "node:fs";
+import * as fs15 from "node:fs";
 function readInputText(value) {
   if (value === "-") {
     try {
-      return fs14.readFileSync(0, "utf8");
+      return fs15.readFileSync(0, "utf8");
     } catch (e) {
       return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, "pipe the JSON in, or pass a path with --input=<path>");
     }
   }
   try {
-    return fs14.readFileSync(value, "utf8");
+    return fs15.readFileSync(value, "utf8");
   } catch (e) {
     return fail("not_found", `--input: cannot read '${value}' \u2014 ${e.message}`);
   }
@@ -4290,12 +4314,12 @@ function parseInputJson(raw) {
 }
 
 // src/commands/cmd-new.ts
-import * as fs15 from "node:fs";
+import * as fs16 from "node:fs";
 import * as path14 from "node:path";
 function collidesCaseInsensitively(dir, name) {
   let names;
   try {
-    names = fs15.readdirSync(dir);
+    names = fs16.readdirSync(dir);
   } catch {
     return false;
   }
@@ -4407,7 +4431,7 @@ function buildBody(ctx, type, cleanTitle, sections) {
 function cmdNew(flags) {
   checkCommandFlags(flags, "new");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
+  const opts = parseOutputOpts2(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
   const inputValue = flagString(flags, "input");
   if (inputValue !== void 0) {
@@ -4494,7 +4518,7 @@ function collectNodeSections(raw, nodePath, stdinState) {
         stdinState.consumed = true;
         let stdinText;
         try {
-          stdinText = fs15.readFileSync(0, "utf8");
+          stdinText = fs16.readFileSync(0, "utf8");
         } catch (e) {
           return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`);
         }
@@ -4503,7 +4527,7 @@ function collectNodeSections(raw, nodePath, stdinState) {
       }
       let text;
       try {
-        text = fs15.readFileSync(filePath, "utf8");
+        text = fs16.readFileSync(filePath, "utf8");
       } catch (e) {
         return fail("not_found", `'${role}-file': cannot read '${filePath}' \u2014 ${e.message}`);
       }
@@ -4816,7 +4840,7 @@ function setsFinalStatus(ctx, overrides) {
 function cmdSet(flags) {
   checkCommandFlags(flags, "set");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
+  const opts = parseOutputOpts2(flags, json, ENTRY_FIELDS);
   const force = flags.has("force");
   const allowOpen = flags.has("allow-open-children");
   const checkAll = flags.has("check-all");
@@ -5183,7 +5207,7 @@ function claimOne(ctx, el, name, status, steal, ts, checkAll = false) {
 function cmdClaim(flags) {
   checkCommandFlags(flags, "claim");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
+  const opts = parseOutputOpts2(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
   const name = resolveActingName(flags, true);
@@ -5289,7 +5313,7 @@ function applyFilters(elements, flags, cfg) {
 }
 function cmdList(flags) {
   checkCommandFlags(flags, "list");
-  const { fields } = parseOutputOpts(flags, flags.has("json"), ENTRY_FIELDS);
+  const { fields } = parseOutputOpts2(flags, flags.has("json"), ENTRY_FIELDS);
   const ctx = context(flags);
   const scope = ctx.elements.filter((e) => flags.has("all") || !e.archived);
   const filtered = applyFilters(ctx.elements, flags, ctx.cfg);
@@ -5339,7 +5363,7 @@ function matchContext(el, needle, fold) {
 }
 function cmdFind(flags, positional) {
   checkCommandFlags(flags, "find");
-  const { fields } = parseOutputOpts(flags, flags.has("json"), ENTRY_FIELDS);
+  const { fields } = parseOutputOpts2(flags, flags.has("json"), ENTRY_FIELDS);
   const textFlag = flagString(flags, "text");
   if (textFlag !== void 0 && positional.length > 0) {
     fail("invalid_value", "the search text was given both as an argument and with --text", 'pass it one way: nanojira find "<text>" or nanojira find --text=<text>');
@@ -5371,7 +5395,7 @@ function cmdFind(flags, positional) {
 }
 
 // src/commands/cmd-doctor.ts
-import * as fs16 from "node:fs";
+import * as fs17 from "node:fs";
 import * as path16 from "node:path";
 
 // src/core/readme-texts.ts
@@ -5477,7 +5501,7 @@ function collectFindings(ctx) {
   for (const file of claimAsides(ctx.backlog)) {
     let link = false;
     try {
-      link = fs16.lstatSync(file).isSymbolicLink();
+      link = fs17.lstatSync(file).isSymbolicLink();
     } catch {
       continue;
     }
@@ -5535,7 +5559,7 @@ function strayTmpFiles(dirs) {
   for (const dir of dirs) {
     let names;
     try {
-      names = fs16.readdirSync(dir);
+      names = fs17.readdirSync(dir);
     } catch {
       continue;
     }
@@ -5600,7 +5624,7 @@ function gitignoreHasClaimsLine(backlog) {
   return content.split("\n").some((l) => l.replace(/\r$/, "") === CLAIMS_GITIGNORE_LINE);
 }
 function claimsNeedGitignoreLine(backlog) {
-  return fs16.existsSync(claimsRootDir(backlog)) && !gitignoreHasClaimsLine(backlog);
+  return fs17.existsSync(claimsRootDir(backlog)) && !gitignoreHasClaimsLine(backlog);
 }
 function appendGitignoreLine(content, line) {
   if (content === "") return line + "\n";
@@ -5742,7 +5766,7 @@ function makeFixCtx(flags) {
     }
   };
   const rename = (from, to) => {
-    fs16.renameSync(from, to);
+    fs17.renameSync(from, to);
     touchRename(from, to);
     rekey(from, to);
   };
@@ -5756,7 +5780,7 @@ function fixStep0(ctx, fc) {
   const backlog = ctx.backlog;
   const v3Config = path16.join(backlog, V3_CONFIG_REL);
   const v3Ids = path16.join(backlog, V3_IDS_REL);
-  if (fs16.existsSync(v3Config) || fs16.existsSync(v3Ids)) {
+  if (fs17.existsSync(v3Config) || fs17.existsSync(v3Ids)) {
     fc.notes.push(`both the v2 and the v3 place exist (${LEGACY_CONFIG_REL} / ${LEGACY_IDS_REL} and ${V3_CONFIG_REL} / ${V3_IDS_REL}) \u2014 ambiguous, nothing moved; remove one copy by hand and run \`nanojira doctor --fix\` again`);
     return;
   }
@@ -5767,17 +5791,17 @@ function fixStep0(ctx, fc) {
       return;
     }
   }
-  fs16.mkdirSync(path16.join(backlog, V3_DIR_REL), { recursive: true });
+  fs17.mkdirSync(path16.join(backlog, V3_DIR_REL), { recursive: true });
   fc.rename(path16.join(backlog, LEGACY_CONFIG_REL), v3Config);
   fc.rename(path16.join(backlog, LEGACY_IDS_REL), v3Ids);
   const legacyIndex = path16.join(backlog, LEGACY_INDEX_REL);
-  if (fs16.existsSync(legacyIndex)) fs16.unlinkSync(legacyIndex);
+  if (fs17.existsSync(legacyIndex)) fs17.unlinkSync(legacyIndex);
   fc.actions.push(`migrated the legacy layout: ${LEGACY_CONFIG_REL} \u2192 ${V3_CONFIG_REL}, ${LEGACY_IDS_REL}/ \u2192 ${V3_IDS_REL}/`);
 }
 function fixStrayIds(ctx, fc) {
   const backlog = ctx.backlog;
   const strayDir = path16.join(backlog, LEGACY_IDS_REL);
-  if (!fs16.existsSync(strayDir)) return;
+  if (!fs17.existsSync(strayDir)) return;
   const strayLink = internalSymlink(strayDir);
   if (strayLink !== null) {
     noteSymlink(fc, strayLink);
@@ -5787,7 +5811,7 @@ function fixStrayIds(ctx, fc) {
   const real = readTombstones(path16.join(backlog, V3_IDS_REL), ctx.cfg.ids.shardSize);
   for (const id of stray) if (!real.has(id)) return;
   touchDeleteTree(strayDir);
-  fs16.rmSync(strayDir, { recursive: true, force: true });
+  fs17.rmSync(strayDir, { recursive: true, force: true });
   fc.notes.push(`removed the stray top-level ${LEGACY_IDS_REL}/ (every tombstone in it was already in ${V3_IDS_REL}/, \xA7 14 step 0)`);
 }
 var TOMBSTONE_RE = /^(EPIC|TSK|SUB)-(\d+)$/;
@@ -5795,7 +5819,7 @@ function detectIdsLayout(idsDir) {
   if (internalSymlink(idsDir) !== null) return "empty";
   let entries;
   try {
-    entries = fs16.readdirSync(idsDir, { withFileTypes: true });
+    entries = fs17.readdirSync(idsDir, { withFileTypes: true });
   } catch {
     return "empty";
   }
@@ -5828,7 +5852,7 @@ function fixIdsLayout(ctx, fc) {
       }
       let buckets;
       try {
-        buckets = fs16.readdirSync(typeDir);
+        buckets = fs17.readdirSync(typeDir);
       } catch {
         continue;
       }
@@ -5842,35 +5866,35 @@ function fixIdsLayout(ctx, fc) {
         }
         let names;
         try {
-          names = fs16.readdirSync(bucketDir);
+          names = fs17.readdirSync(bucketDir);
         } catch {
           continue;
         }
         for (const n of names) {
           if (n.startsWith(".")) continue;
           const target = path16.join(idsDir, n);
-          if (fs16.existsSync(target)) {
+          if (fs17.existsSync(target)) {
             fc.notes.push(`${path16.join(prefix, b, n)}: cannot move to the flat layout \u2014 ${n} already exists there`);
             continue;
           }
-          fs16.renameSync(path16.join(bucketDir, n), target);
+          fs17.renameSync(path16.join(bucketDir, n), target);
           touchRename(path16.join(bucketDir, n), target);
           moved++;
         }
         try {
-          fs16.rmdirSync(bucketDir);
+          fs17.rmdirSync(bucketDir);
         } catch {
         }
       }
       try {
-        fs16.rmdirSync(typeDir);
+        fs17.rmdirSync(typeDir);
       } catch {
       }
     }
   } else {
     let entries;
     try {
-      entries = fs16.readdirSync(idsDir);
+      entries = fs17.readdirSync(idsDir);
     } catch {
       entries = [];
     }
@@ -5883,12 +5907,12 @@ function fixIdsLayout(ctx, fc) {
         noteSymlink(fc, dirLink);
         continue;
       }
-      if (fs16.existsSync(file)) {
+      if (fs17.existsSync(file)) {
         fc.notes.push(`${n}: cannot move to the sharded layout \u2014 already exists at ${path16.relative(idsDir, file)}`);
         continue;
       }
-      fs16.mkdirSync(dir, { recursive: true });
-      fs16.renameSync(path16.join(idsDir, n), file);
+      fs17.mkdirSync(dir, { recursive: true });
+      fs17.renameSync(path16.join(idsDir, n), file);
       touchRename(path16.join(idsDir, n), file);
       moved++;
     }
@@ -5979,7 +6003,7 @@ function fixStep2(fc) {
       continue;
     }
     const target = path16.join(path16.dirname(el.file), el.id + ".md");
-    if (fs16.existsSync(target)) {
+    if (fs17.existsSync(target)) {
       fc.notes.push(`${el.file}: cannot rename to ${path16.basename(target)} \u2014 target exists`);
       continue;
     }
@@ -6024,7 +6048,7 @@ function fixStep3(fc) {
         const src = own === null ? el.file : own;
         const dst = own === null ? path16.join(ctx.backlog, dir, path16.basename(el.file)) : path16.join(ctx.backlog, dir);
         const shown = (dir === "" ? "." : dir) + "/";
-        if (layout.group === "type") fs16.mkdirSync(path16.dirname(dst), { recursive: true });
+        if (layout.group === "type") fs17.mkdirSync(path16.dirname(dst), { recursive: true });
         const plan = planMove(src, dst);
         if (plan.conflicts.length > 0) {
           fc.notes.push(`${el.id}: cannot move into ${shown} \u2014 target exists`);
@@ -6064,7 +6088,7 @@ function fixStep4(fc) {
     for (const link of links) noteSymlink(fc, link);
     return { ...fc, stage: 5 };
   }
-  fs16.mkdirSync(dir, { recursive: true });
+  fs17.mkdirSync(dir, { recursive: true });
   const tombs = readTombstones(dir, shardSize);
   let created = 0;
   for (const el of ctx.elements) {
@@ -6075,9 +6099,9 @@ function fixStep4(fc) {
       noteSymlink(fc, tlink);
       continue;
     }
-    if (tdir !== dir) fs16.mkdirSync(tdir, { recursive: true });
+    if (tdir !== dir) fs17.mkdirSync(tdir, { recursive: true });
     try {
-      fs16.closeSync(fs16.openSync(file, "wx"));
+      fs17.closeSync(fs17.openSync(file, "wx"));
       touchWrite(file, false);
       created++;
     } catch {
@@ -6122,7 +6146,7 @@ function fixStep6(fc) {
 function fixStep7(fc) {
   const ctx = fc.reload();
   for (const file of strayTmpFiles(ctx.scan.dirs.concat(claimsScanDirs(ctx.backlog)))) {
-    fs16.unlinkSync(file);
+    fs17.unlinkSync(file);
     fc.actions.push(`removed stray temp file ${path16.relative(ctx.backlog, file)}`);
   }
   for (const aside of claimAsides(ctx.backlog)) {
@@ -6154,7 +6178,7 @@ function fixStep7a(fc) {
       noteSymlink(fc, left);
       continue;
     }
-    if (fs16.existsSync(dir)) continue;
+    if (fs17.existsSync(dir)) continue;
     fc.actions.push(holder !== null ? `${id}: released ${holder}` : `removed the orphaned claim directory for ${id}`);
   }
   if (claimsNeedGitignoreLine(ctx.backlog)) {
@@ -6245,21 +6269,21 @@ function fixReport(json, actions, notes, ctx, findings) {
 }
 
 // src/commands/cmd-init.ts
-import * as fs17 from "node:fs";
+import * as fs18 from "node:fs";
 import * as path17 from "node:path";
 function probeCreatable(target) {
   let dir = path17.dirname(target);
   for (; ; ) {
     let st;
     try {
-      st = fs17.statSync(dir);
+      st = fs18.statSync(dir);
     } catch {
       st = null;
     }
     if (st !== null) {
       if (!st.isDirectory()) fail("io_error", `cannot create the backlog at ${target}: ENOTDIR: not a directory, mkdir '${target}'`);
       try {
-        fs17.accessSync(dir, fs17.constants.W_OK | fs17.constants.X_OK);
+        fs18.accessSync(dir, fs18.constants.W_OK | fs18.constants.X_OK);
       } catch (e) {
         fail("io_error", `cannot create the backlog at ${target}: ${oneLine(e)}`);
       }
@@ -6274,22 +6298,22 @@ function cmdInit(flags) {
   checkCommandFlags(flags, "init");
   const json = flags.has("json");
   const target = initLocation(flags);
-  if (fs17.existsSync(target)) fail("exists", `${target} already exists`);
+  if (fs18.existsSync(target)) fail("exists", `${target} already exists`);
   if (isDryRun()) probeCreatable(target);
   const backlog = sandboxFor(target);
   setJournalRoot(backlog);
   try {
-    fs17.mkdirSync(backlog, { recursive: true });
+    fs18.mkdirSync(backlog, { recursive: true });
     for (const d of ["epics", "tasks", "subtasks", "archive", V3_IDS_REL]) {
-      fs17.mkdirSync(path17.join(backlog, d), { recursive: true });
+      fs18.mkdirSync(path17.join(backlog, d), { recursive: true });
     }
     const { claims, problems, ids, ...written } = DEFAULT_CONFIG;
     void claims;
     void problems;
     void ids;
-    fs17.writeFileSync(path17.join(backlog, ".nanojira", "config.json"), JSON.stringify(written, null, 2) + "\n", "utf8");
-    fs17.writeFileSync(path17.join(backlog, ".gitignore"), ".nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n", "utf8");
-    fs17.writeFileSync(path17.join(backlog, "README.md"), V3_README, "utf8");
+    fs18.writeFileSync(path17.join(backlog, ".nanojira", "config.json"), JSON.stringify(written, null, 2) + "\n", "utf8");
+    fs18.writeFileSync(path17.join(backlog, ".gitignore"), ".nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n", "utf8");
+    fs18.writeFileSync(path17.join(backlog, "README.md"), V3_README, "utf8");
     for (const f of [path17.join(".nanojira", "config.json"), ".gitignore", "README.md"]) touchWrite(path17.join(backlog, f), false);
   } catch (e) {
     fail("io_error", `cannot create the backlog at ${backlog}: ${oneLine(e)}`);
@@ -6380,7 +6404,7 @@ function cmdLog(flags) {
 function cmdNext(flags) {
   checkCommandFlags(flags, "next");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
+  const opts = parseOutputOpts2(flags, json, ENTRY_FIELDS);
   const name = resolveActingName(flags, true);
   const ctx = context(flags);
   const status = flagString(flags, "status");
@@ -6426,7 +6450,7 @@ function cmdNext(flags) {
 }
 
 // src/commands/cmd-note.ts
-import * as fs18 from "node:fs";
+import * as fs19 from "node:fs";
 function withNote(el, text, signer, ts) {
   const line = renderNoteLine(ts, signer, text);
   let body = el.body;
@@ -6470,7 +6494,7 @@ function resolveNoteText(flags, positional) {
   }
   let raw;
   if (textFile !== void 0) {
-    raw = textFile === "-" ? readStdin() : readTextFile(textFile);
+    raw = textFile === "-" ? readStdin2() : readTextFile(textFile);
   } else if (textFlag !== void 0) {
     raw = textFlag;
   } else {
@@ -6489,7 +6513,7 @@ function resolveNoteText(flags, positional) {
 }
 function readTextFile(filePath) {
   try {
-    return fs18.readFileSync(filePath, "utf8");
+    return fs19.readFileSync(filePath, "utf8");
   } catch (e) {
     return fail(
       "not_found",
@@ -6501,7 +6525,7 @@ function readTextFile(filePath) {
 function cmdNote(flags, positional) {
   checkCommandFlags(flags, "note");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
+  const opts = parseOutputOpts2(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
   const text = resolveNoteText(flags, positional);
@@ -6624,7 +6648,7 @@ function releaseOne(ctx, el, name, status, ts) {
 function cmdRelease(flags) {
   checkCommandFlags(flags, "release");
   const json = flags.has("json");
-  const opts = parseOutputOpts(flags, json, ENTRY_FIELDS);
+  const opts = parseOutputOpts2(flags, json, ENTRY_FIELDS);
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
   const name = resolveActingName(flags, true);
@@ -6686,10 +6710,10 @@ function releasedLine(id, changed, name, status) {
 }
 
 // src/commands/cmd-rm.ts
-import * as fs19 from "node:fs";
+import * as fs20 from "node:fs";
 function removeIfEmpty(dir) {
   try {
-    fs19.rmdirSync(dir);
+    fs20.rmdirSync(dir);
   } catch {
   }
 }
@@ -6727,7 +6751,7 @@ ${archivedVictims.map((v) => "  " + v.id).join("\n")}`,
   const dependents = ctx.elements.filter((e) => !victimIds.has(e.id) && e.depends_on.some((d) => victimIds.has(d))).sort(compareElements);
   const entries = victims.map((v) => entryJson(v, ctx.backlog, ctx.cfg));
   for (const v of victims.slice().reverse()) {
-    fs19.unlinkSync(v.file);
+    fs20.unlinkSync(v.file);
     touchDelete(v.file);
     const own = ctx.cfg.layout.group === "hierarchy" ? ownFolder(v) : null;
     if (own !== null) removeIfEmpty(own);
@@ -6791,7 +6815,7 @@ function renderBodyForNotes(body, mode) {
 }
 function cmdShow(flags) {
   checkCommandFlags(flags, "show");
-  const { fields } = parseOutputOpts(flags, flags.has("json"), SHOW_FIELDS);
+  const { fields } = parseOutputOpts2(flags, flags.has("json"), SHOW_FIELDS);
   const ctx = context(flags);
   const mode = parseNotesFlag(flags);
   const el = resolveTarget(ctx, flags, false);
@@ -7203,7 +7227,7 @@ function splitCommand(argv) {
   return { cmd: null, rest: argv };
 }
 function main(argv) {
-  const pre = parseArgs(argv);
+  const pre = parseArgs2(argv);
   output.json = pre.flags.has("json");
   if (pre.flags.has("version")) {
     const onlyVersionAndJson = Array.from(pre.flags.keys()).every((k) => k === "version" || k === "json");
@@ -7219,7 +7243,7 @@ function main(argv) {
     fail("unknown_field", `unknown field 'version'.`, "--version takes no other flag and names no command");
   }
   const { cmd, rest } = splitCommand(argv);
-  const { flags, positional, repeated } = parseArgs(rest, flagKinds(cmd ?? "status"));
+  const { flags, positional, repeated } = parseArgs2(rest, flagKinds(cmd ?? "status"));
   if (cmd === "help") {
     process.stdout.write(HELP);
     return 0;

@@ -12,6 +12,12 @@
  *
  * Every probe below is one task in one backlog; the body differs only in the
  * section shape.
+ *
+ * SHAPES (merged from edge/acceptance-section-shapes, TSK-049) probe the
+ * boundary from the other side: shapes that are unusual but that the
+ * spec's literal rule ("at least one non-empty line") does count as
+ * present. They sit in the same backlog (TSK-010 on); a German config
+ * needs its own backlog, listed alongside. The three lists run at once.
  */
 import * as H from '../lib/harness.ts';
 import type { JsonRunResult } from '../lib/harness.ts';
@@ -54,6 +60,18 @@ const PROBES: [string, string, string, string][] = [
     '## description:\nDo the thing.\n\n' + ACCEPT, ''],
 ];
 
+/* name, whether it counts as present, the section (after a description) */
+const SHAPES: [string, boolean, string][] = [
+  ['heading followed directly by a sub-heading', true, '## Acceptance Criteria\n### Detail\n'],
+  ['heading followed by a list item', true, '## Acceptance Criteria\n- [ ] something\n'],
+  ['heading followed by a bare prose line', true, '## Acceptance Criteria\nIt must work.\n'],
+  ['heading followed by only blank lines', false, '## Acceptance Criteria\n\n\n   \n'],
+  ['heading at EOF with no newline', false, '## Acceptance Criteria'],
+  ['heading present with a trailing colon', true, '## Acceptance Criteria:\n- [ ] x\n'],
+  ['heading in a different case', true, '## acceptance criteria\n- [ ] x\n'],
+];
+const shapeId = (i: number) => 'TSK-' + String(10 + i).padStart(3, '0');
+
 const files: Record<string, string> = {
   'epics/EPIC-001.md': H.element({
     id: 'EPIC-001', type: 'epic', title: 'Platform', status: 'todo',
@@ -71,13 +89,45 @@ PROBES.forEach(([id, , tail], i) => {
   tombstones.push(id);
 });
 
+SHAPES.forEach(([, , body], i) => {
+  files['tasks/' + shapeId(i) + '.md'] = H.element({
+    id: shapeId(i), type: 'task', parent: 'EPIC-001', title: 'Shape',
+    status: 'todo', created: C, updated: C,
+  }, '# Shape\n\n## Description\nD\n\n' + body);
+  tombstones.push(shapeId(i));
+});
+
 const d = H.mkBacklog({ label: 'ac05', files, tombstones });
 
-const list = H.runJson(['list'], { cwd: d });
+/* The configured heading names are configurable (§ 5): a German backlog
+ * renames the heading and the completeness check keeps working. */
+const dg = H.mkBacklog({
+  label: 'ac05-config',
+  config: JSON.stringify({
+    schema: 1,
+    statuses: ['todo', 'doing', 'done'],
+    sections: {
+      description: ['Beschreibung'],
+      acceptance: ['Akzeptanzkriterien', 'Acceptance Criteria'],
+    },
+  }, null, 2) + '\n',
+  files: {
+    'tasks/TSK-001.md': H.element({
+      id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'Deutsch',
+      status: 'todo', created: C, updated: C,
+    }, '# Deutsch\n\n## Beschreibung\nD\n\n## Akzeptanzkriterien\n- [ ] x\n'),
+  },
+  tombstones: ['TSK-001'],
+});
+
+const [list, ready, german] = await Promise.all([
+  H.runJsonAsync(['list'], { cwd: d }),
+  H.runJsonAsync(['list', '--ready'], { cwd: d }),
+  H.runJsonAsync(['list'], { cwd: dg }),
+]);
 T.exit('list --json', list, 0);
 const byId = new Map(entriesOf(list).map((e: any) => [e.id, e]));
 
-const ready = H.runJson(['list', '--ready'], { cwd: d });
 T.exit('list --ready --json', ready, 0);
 const readyIds = new Set(entriesOf(ready).map((e: any) => e.id));
 
@@ -99,6 +149,23 @@ for (const [id, what, , expected] of PROBES) {
   const e = entriesOf(after).find((x: any) => x.id === 'TSK-001');
   T.check('an empty acceptance section survives a write as incomplete',
     sortedCodes(e) === 'incomplete:acceptance', JSON.stringify(e && e._problems));
+}
+
+/* ---- SHAPES ------------------------------------------------------------ */
+SHAPES.forEach(([name, keep], i) => {
+  const e = byId.get(shapeId(i));
+  const probs = (e && e._problems) || [];
+  const flagged = probs.includes('incomplete:acceptance');
+  T.check(name + ' → ' + (keep ? 'counts as present' : 'counts as incomplete'),
+    flagged === !keep,
+    'incomplete:acceptance present: ' + flagged + ', _problems: ' + JSON.stringify(probs));
+});
+{
+  const e = entriesOf(german).find((x: any) => x.id === 'TSK-001');
+  const probs = (e && e._problems) || [];
+  T.check('renamed headings satisfy the completeness check',
+    !probs.includes('incomplete:acceptance') && !probs.includes('incomplete:description'),
+    JSON.stringify(probs));
 }
 
 T.finish();

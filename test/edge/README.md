@@ -14,12 +14,12 @@ mistaken for uncovered.
 | Tombstone integrity — total loss of `.ids/` | `../ac/ac-18-tombstone-integrity.ts` |
 | Tombstone integrity — **partial** loss (the warning, not the error) | `tombstone-partial-loss.ts` |
 | Empty / whitespace-only acceptance section | `../ac/ac-05-empty-sections.ts` |
-| Acceptance section boundary shapes (sub-heading, EOF, colon, case) | `acceptance-section-shapes.ts` |
+| Acceptance section boundary shapes (sub-heading, EOF, colon, case) | `../ac/ac-05-empty-sections.ts` (SHAPES) |
 | Non-ASCII values survive byte-exact | `../ac/ac-16-language.ts` |
 | Frontmatter grammar — colon split, quoting, lists, BOM, CRLF, comments, bad lines | `frontmatter-grammar.ts` |
 | Unknown-field rejection verified by checksum | `../ac/ac-06-rejection.ts`, `../ac/ac-02-golden-files.ts` |
-| Discovery from a nested subdir and from an unrelated dir (exit 1) | `../ac/ac-12-discovery.ts` |
-| `NJ_BACKLOG` override | `../ac/ac-12-discovery.ts` |
+| Discovery from a nested subdir and from an unrelated dir (exit 1) | `../ac/ac-21-backlog-location.ts` (block AC-12) |
+| `NJ_BACKLOG` override | `../ac/ac-21-backlog-location.ts` (block AC-12) |
 
 ## Contracts added after the first repair
 
@@ -52,6 +52,7 @@ is the reason they exist.
 | § 9 failure table: `new` into a layout folder linked to a file or to nothing is a one-line `io_error` naming the folder, not `internal_error` with a stack; real call, dry run and plan form (DECISIONS 218) | `layout-link-broken.ts` |
 | § 9 a flag that takes no value refuses one (`--cascade=false`, `--json=1`), on every command, cross-checked against `--help` (TSK-034 F3) | `boolean-flag-values.ts` |
 | § 9 `--` ends option parsing; a flag repeated with a different value is `invalid_value`, an identical repeat is accepted; `--help` twice still prints help; a positional on a command other than note/find is `unexpected_argument` (TSK-034 F11) | `args-end-of-options-and-repeats.ts` |
+| DECISIONS 231: `src/core/kernel.ts` imports only `node:*` built-ins (side-effect imports and either quote included) and names no project; no file under `src/` or `dist/` names agent-skills; `parseArgs`'s flag-table spec, aliases and caller sameness, unit-pinned (TSK-050) | `kernel-neutral.ts` |
 | § 6 an element id never becomes a path unchecked: a frontmatter `id` outside the § 6 shape is `refused:invalid_id` wherever it would be joined into a path (claims, `doctor --fix` renames, `hierarchy` folders), and a FIFO or device element file is a stub (DECISIONS 215) | `id-path-escape.ts` |
 | § 9 `refused:too_large`: no write, single or batch, makes an element file larger than the 1 MiB read cap; one at the cap goes through (DECISIONS 215) | `element-size-cap.ts` |
 | § 8 / § 12 Claims: nothing is written, deleted or listed through a symlinked `.nanojira/`, `ids/`, `claims/`, claim directory or claim entry (`refused:symlink`, `claim:symlink`) (DECISIONS 215) | `internal-symlinks.ts` |

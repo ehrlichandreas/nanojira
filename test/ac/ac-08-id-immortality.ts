@@ -12,6 +12,22 @@
  * Layout note: the 40 survivors are archived as a whole subtree (the epic with
  * them) so that the run does not trip archive:split, which is a different
  * criterion and would make this test fail for the wrong reason.
+ *
+ * Why S1-S3 below (TSK-049): in the scenario above every id ever allocated
+ * left its tombstone, so the tombstones are dense 1..50 and the O_EXCL
+ * claim walks up past every one of them. A start value that ignores the
+ * tombstones, the element files or only the archived ones lands on 51 all
+ * the same: the scenario cannot see which of the three sources the
+ * allocator reads. It only fails when both halves break (a tombstone lost,
+ * or no O_EXCL). S1-S3 each give one source a number above the other two
+ * with a gap below it, so dropping that source from the start value hands
+ * out a lower, free id. Their fixtures are written by hand (§ 6 makes the
+ * folder the user's), as an untombstoned element file or a lone tombstone
+ * arrives with a copied file or a merge.
+ *
+ * Speed (TSK-049): the 50 tasks come from one `new --input=-` plan (the
+ * same allocator, one id per node) and the 40 `set --status=done` are one
+ * batch write (AC-31); rm takes one id per call and stays one call per id.
  */
 import fs from 'fs';
 import path from 'path';
@@ -19,15 +35,20 @@ import * as H from '../lib/harness.ts';
 const T = H.T;
 
 const d = H.freshDir('ac08');
+const pad = (i: number) => String(i).padStart(3, '0');
 
 T.exit('nj init', H.runNj(['init'], { cwd: d }), 0);
 T.exit('epic E1', H.runNj(['new', '--type=epic', '--title=E1'], { cwd: d }), 0);
 T.exit('epic E2 (parent for the new task)',
   H.runNj(['new', '--type=epic', '--title=E2'], { cwd: d }), 0);
 
-for (let i = 1; i <= 50; i++) {
-  const r = H.runNj(['new', '--type=task', '--parent=EPIC-001', '--title=T' + i], { cwd: d });
-  if (r.status !== 0) { T.check('created TSK-' + String(i).padStart(3, '0'), false, r.stderr); break; }
+{
+  const plan = Array.from({ length: 50 }, (_, i) => ({ type: 'task', parent: 'EPIC-001', title: 'T' + (i + 1) }));
+  const r = H.runJson(['new', '--input=-'], { cwd: d, input: JSON.stringify(plan) });
+  const got = (r.json && r.json.ids) || [];
+  for (let i = 1; i <= 50; i++) {
+    if (got[i - 1] !== 'TSK-' + pad(i)) { T.check('created TSK-' + pad(i), false, r.stderr + JSON.stringify(got)); break; }
+  }
 }
 
 const tasksDir = path.join(d, 'backlog', 'tasks');
@@ -40,7 +61,7 @@ T.eq('IDs run TSK-001 … TSK-050',
 
 /* ---- delete 10 -------------------------------------------------------- */
 for (let i = 41; i <= 50; i++) {
-  const id = 'TSK-' + String(i).padStart(3, '0');
+  const id = 'TSK-' + pad(i);
   const r = H.runNj(['rm', '--id=' + id], { cwd: d });
   if (r.status !== 0) T.check('rm ' + id, false, r.stderr);
 }
@@ -51,15 +72,19 @@ T.eq('40 task files remain',
 const idsDir = path.join(d, 'backlog', H.IDS_REL);
 const tombstones = H.lsOrEmpty(idsDir);
 for (let i = 41; i <= 50; i++) {
-  const id = 'TSK-' + String(i).padStart(3, '0');
+  const id = 'TSK-' + pad(i);
   T.check('tombstone survives rm for ' + id, tombstones.includes(id));
 }
 
 /* ---- archive the surviving 40 as a subtree ----------------------------- */
-for (let i = 1; i <= 40; i++) {
-  const id = 'TSK-' + String(i).padStart(3, '0');
-  const r = H.runNj(['set', '--id=' + id, '--status=done'], { cwd: d });
-  if (r.status !== 0) T.check('set ' + id + ' done', false, r.stderr);
+{
+  const ids = Array.from({ length: 40 }, (_, i) => 'TSK-' + pad(i + 1));
+  const r = H.runJson(['set', '--id=' + ids.join(','), '--status=done'], { cwd: d });
+  const results: any[] = (r.json && r.json.results) || [];
+  for (const id of ids) {
+    const one = results.find((x) => x.id === id);
+    if (!one || one.ok !== true) T.check('set ' + id + ' done', false, r.stderr + JSON.stringify(one));
+  }
 }
 T.exit('set EPIC-001 done', H.runNj(['set', '--id=EPIC-001', '--status=done'], { cwd: d }), 0);
 
@@ -94,5 +119,28 @@ T.check('the new ID is above every tombstone that predated it', newNum > priorTo
   'new ' + newId + ' vs highest prior tombstone TSK-' + priorTombstones);
 T.check('and it is exactly the next number after them', newNum === priorTombstones + 1,
   'new ' + newId + ', highest prior tombstone TSK-' + priorTombstones);
+
+/* ---- S1-S3: each source of the start value on its own (see the header) - */
+const NOW = H.FIXED_NOW;
+const epic = H.element({ id: 'EPIC-001', type: 'epic', title: 'E', status: 'todo', created: NOW, updated: NOW },
+  '# E\n\n## Description\nD.\n');
+const task = (id: string, extra?: Record<string, string>) => H.element(
+  Object.assign({ id, type: 'task', parent: 'EPIC-001', title: id, status: 'todo', created: NOW, updated: NOW }, extra || {}),
+  H.completeBody(id));
+const SOURCES: [string, string, Record<string, string>, string[], string][] = [
+  ['S1 a lone tombstone (TSK-200) above every element file', 's1',
+    { 'tasks/TSK-001.md': task('TSK-001') }, ['TSK-001', 'TSK-200'], 'TSK-201'],
+  ['S2 an active element file without a tombstone (TSK-300) above every tombstone', 's2',
+    { 'tasks/TSK-001.md': task('TSK-001'), 'tasks/TSK-300.md': task('TSK-300') }, ['TSK-001'], 'TSK-301'],
+  ['S3 an archived element file without a tombstone (TSK-400) above every tombstone', 's3',
+    { 'tasks/TSK-001.md': task('TSK-001'), 'archive/TSK-400.md': task('TSK-400', { status: 'done', archived: NOW }) }, ['TSK-001'], 'TSK-401'],
+];
+await H.runLegs(SOURCES.map(([desc, label, files, tombs, want]) => async (t: H.BufferedContext) => {
+  const x = H.mkBacklog({ label: 'ac08-' + label, files: Object.assign({ 'epics/EPIC-001.md': epic }, files), tombstones: ['EPIC-001'].concat(tombs) });
+  const r = await H.runJsonAsync(['new', '--type=task', '--parent=EPIC-001', '--title=Next'], { cwd: x });
+  t.exit(desc + ': nj new exits 0', r, 0);
+  t.eq(desc + ': the new ID is the next number above it', r.json && r.json.id, want);
+  t.check(desc + ': and its tombstone was claimed', fs.existsSync(path.join(x, 'backlog', H.IDS_REL, want)), want);
+}));
 
 T.finish();

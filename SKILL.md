@@ -3,7 +3,7 @@ name: nanojira
 description: "A local, file-based task tool for agents: read, claim, update, close and note backlog elements (epics/tasks/subtasks) under a plain-Markdown backlog/ folder, no server or database. Use whenever an agent needs to track its own work, pick up the next ready item, or report on backlog state. Not for a team's existing issue tracker (Jira, GitHub Issues, Linear, ...) - nanojira is its own, separate backlog; do not point it at one of those."
 license: MIT
 metadata:
-  version: "4.4.0"
+  version: "4.5.0"
 ---
 
 # nanojira (NanoJira)

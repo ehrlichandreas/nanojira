@@ -25,6 +25,14 @@
  * shape."
  *
  * Written before batch writes exist: red everywhere until implemented.
+ *
+ * Speed (TSK-049): the three-task model is built through the real binary
+ * once and copied per case (the backlog stores no absolute path and NJ_NOW
+ * is pinned, so a copy is byte-identical to a fresh build; mtimes kept, as
+ * in ac-25, DECISIONS 209), and the cases run as runLegs legs (DECISIONS
+ * 210): each owns its copy, checks flush in the order below. H18's ~10 s
+ * before-compare timeout is started before the other legs and overlaps
+ * them.
  */
 import fs from 'fs';
 import path from 'path';
@@ -32,6 +40,7 @@ import { spawn } from 'child_process';
 import * as H from '../lib/harness.ts';
 import type { RunResult, JsonRunResult } from '../lib/harness.ts';
 const T = H.T;
+type Ctx = H.BufferedContext;
 
 H.requireNj();
 
@@ -51,29 +60,38 @@ function envFor(o: RunOptsLite) {
   for (const k of ['NJ_AUTHOR', 'NJ_BACKLOG', 'NJ_FAULT']) if (env[k] === undefined) unset.push(k);
   return { cwd: o.cwd, env, unsetEnv: unset };
 }
-function run(args: string[], o: RunOptsLite): RunResult { return H.runNj(args, envFor(o)); }
-function runJ(args: string[], o: RunOptsLite): JsonRunResult { return H.runJson(args, envFor(o)); }
+function run(args: string[], o: RunOptsLite): Promise<RunResult> { return H.runNjAsync(args, envFor(o)); }
+function runJ(args: string[], o: RunOptsLite): Promise<JsonRunResult> { return H.runJsonAsync(args, envFor(o)); }
 const at = (t: string) => ({ NJ_NOW: t });
 const later = (env?: Record<string, string>) => Object.assign({ NJ_NOW: LATER }, env || {});
 
-function ok(r: RunResult, what: string): RunResult {
-  if (r.missing || r.status !== 0) T.check('fixture: ' + what, false, r.status + ' ' + J(r.stderr));
+function ok(t: Ctx, r: RunResult, what: string): RunResult {
+  if (r.missing || r.status !== 0) t.check('fixture: ' + what, false, r.status + ' ' + J(r.stderr));
   return r;
 }
 
 interface Model { dir: string; bl: string; }
 
-/* EPIC-001 with TSK-001/002/003, all todo and complete. */
+/* EPIC-001 with TSK-001/002/003, all todo and complete. Built through the
+ * real binary once, then copied per case. */
+const TEMPLATE = H.freshDir('ac31-template');
+{
+  const body = ['--description=Something.', '--acceptance=- [ ] It works'];
+  for (const [what, args] of [
+    ['nj init', ['init']],
+    ['new epic', ['new', '--type=epic', '--title=Epic', '--description=The epic.']],
+    ['new TSK-001', ['new', '--type=task', '--parent=EPIC-001', '--title=Task one'].concat(body)],
+    ['new TSK-002', ['new', '--type=task', '--parent=EPIC-001', '--title=Task two'].concat(body)],
+    ['new TSK-003', ['new', '--type=task', '--parent=EPIC-001', '--title=Task three'].concat(body)],
+  ] as [string, string[]][]) {
+    const r = H.runNj(args, envFor({ cwd: TEMPLATE, env: at(NOW) }));
+    if (r.missing || r.status !== 0) T.check('fixture: ' + what, false, r.status + ' ' + J(r.stderr));
+  }
+}
 function model(label: string): Model {
   const dir = H.freshDir(label);
-  const bl = path.join(dir, 'backlog');
-  const body = ['--description=Something.', '--acceptance=- [ ] It works'];
-  ok(run(['init'], { cwd: dir }), 'nj init');
-  ok(run(['new', '--type=epic', '--title=Epic', '--description=The epic.'], { cwd: dir, env: at(NOW) }), 'new epic');
-  ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=Task one'].concat(body), { cwd: dir, env: at(NOW) }), 'new TSK-001');
-  ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=Task two'].concat(body), { cwd: dir, env: at(NOW) }), 'new TSK-002');
-  ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=Task three'].concat(body), { cwd: dir, env: at(NOW) }), 'new TSK-003');
-  return { dir, bl };
+  fs.cpSync(TEMPLATE, dir, { recursive: true, preserveTimestamps: true });
+  return { dir, bl: path.join(dir, 'backlog') };
 }
 
 function taskPath(id: string) { return path.join('tasks', id + '.md'); }
@@ -98,165 +116,183 @@ function resultOf(json: any, id: string) {
 
 /* An unreadable stub (a dangling symlink), § 6, tombstoned so `new` would
  * never re-mint the id — the same fixture pattern ac-27-claim.ts uses. */
-function addUnreadableStub(x: Model, id: string) {
+function addUnreadableStub(t: Ctx, x: Model, id: string) {
   const stub = elementFile(x, id);
   try { fs.symlinkSync(path.join(x.dir, 'no-such-target'), stub); }
-  catch (e) { T.check('fixture: unreadable stub ' + id, false, (e as NodeJS.ErrnoException).code); }
+  catch (e) { t.check('fixture: unreadable stub ' + id, false, (e as NodeJS.ErrnoException).code); }
   fs.writeFileSync(path.join(x.bl, '.nanojira', 'ids', id), '');
 }
+
+function topKeys(json: any) { return json ? Object.keys(json).sort() : null; }
+
+/* ===================================================================== */
+/* H18's run, started first (see the H18 leg): NJ_FAULT=before-compare    */
+/* with no marker waits out ~10 s, which the other legs overlap.          */
+/* ===================================================================== */
+const h18 = (() => {
+  const y = model('ac31-h18');
+  const before18 = bytes(elementFile(y, 'TSK-001'));
+  const t0 = Date.now();
+  const done = H.runJsonAsync(['set', '--id=TSK-001,TSK-002', '--priority=urgent'],
+    { cwd: y.dir, env: Object.assign(at(NOW), { NJ_FAULT: 'before-compare' }), timeout: 20000 })
+    .then((r18) => ({ r18, elapsed: Date.now() - t0 }));
+  return { y, before18, done };
+})();
+
+const legs: Array<(t: Ctx) => Promise<void>> = [
 
 /* ===================================================================== */
 /* H1 — a single --id=A (no comma) is unaffected: unwrapped shape          */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h1');
-  const r = runJ(['set', '--id=TSK-001', '--priority=high'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H1 single --id: exit 0', r, 0);
-  T.check('H1 single --id: no results array, today\'s unwrapped shape',
+  const r = await runJ(['set', '--id=TSK-001', '--priority=high'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H1 single --id: exit 0', r, 0);
+  t.check('H1 single --id: no results array, today\'s unwrapped shape',
     !!r.json && r.json.ok === true && !('results' in r.json) && r.json.id === 'TSK-001', J(r.json));
-}
+},
 
 /* ===================================================================== */
 /* H2 — the basic batch: all succeed, wrapper shape, order preserved       */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h2');
-  const r = runJ(['set', '--id=TSK-003,TSK-001,TSK-002', '--priority=high'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H2 batch all succeed: exit 0', r, 0);
-  T.check('H2 top level: {ok: true, results}', !!r.json && r.json.ok === true && Array.isArray(r.json.results), J(r.json));
-  T.eq('H2 results are in the order --id named them (not sorted)',
+  const r = await runJ(['set', '--id=TSK-003,TSK-001,TSK-002', '--priority=high'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H2 batch all succeed: exit 0', r, 0);
+  t.check('H2 top level: {ok: true, results}', !!r.json && r.json.ok === true && Array.isArray(r.json.results), J(r.json));
+  t.eq('H2 results are in the order --id named them (not sorted)',
     (r.json.results || []).map((e: any) => e.id), ['TSK-003', 'TSK-001', 'TSK-002']);
-  T.check('H2 every result has ok:true and the single-write shape plus id',
+  t.check('H2 every result has ok:true and the single-write shape plus id',
     (r.json.results || []).every((e: any) => e.ok === true && Array.isArray(e.changed) && e.entry && Array.isArray(e._problems)),
     J(r.json.results));
-  T.eq('H2 all three priorities actually changed', ['TSK-001', 'TSK-002', 'TSK-003'].map(id => priorityOf(x, id)), ['high', 'high', 'high']);
-}
+  t.eq('H2 all three priorities actually changed', ['TSK-001', 'TSK-002', 'TSK-003'].map(id => priorityOf(x, id)), ['high', 'high', 'high']);
+},
 
 /* ===================================================================== */
 /* H3 — preflight: an unknown ID aborts the whole batch; results names     */
 /* only the failing id (D136c), the two innocent ids are absent            */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h3');
   const before = [bytes(elementFile(x, 'TSK-001')), bytes(elementFile(x, 'TSK-002'))];
-  const r = runJ(['set', '--id=TSK-001,TSK-999,TSK-002', '--priority=high'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H3 unknown ID in batch: exit 1', r, 1);
-  T.check('H3 unknown ID: reported for the failing id', !!resultOf(r.json, 'TSK-999') && resultOf(r.json, 'TSK-999').error === 'not_found', J(r.json));
-  T.eq('H3 (D136c): results lists ONLY TSK-999, not the two innocent ids',
+  const r = await runJ(['set', '--id=TSK-001,TSK-999,TSK-002', '--priority=high'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H3 unknown ID in batch: exit 1', r, 1);
+  t.check('H3 unknown ID: reported for the failing id', !!resultOf(r.json, 'TSK-999') && resultOf(r.json, 'TSK-999').error === 'not_found', J(r.json));
+  t.eq('H3 (D136c): results lists ONLY TSK-999, not the two innocent ids',
     (r.json && r.json.results || []).map((e: any) => e.id), ['TSK-999']);
-  T.eq('H3 nothing written: TSK-001/TSK-002 byte-identical',
+  t.eq('H3 nothing written: TSK-001/TSK-002 byte-identical',
     [bytes(elementFile(x, 'TSK-001')), bytes(elementFile(x, 'TSK-002'))], before);
-}
+},
 
 /* ===================================================================== */
 /* H4 — preflight: a repeated ID (after trimming) is invalid_value          */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h4');
-  const r = runJ(['set', '--id=TSK-001, TSK-001', '--priority=high'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H4 repeated ID (incl. after trimming whitespace): exit 1', r, 1);
-  T.eq('H4 repeated ID: invalid_value (D136b: a batch-wide argument error)', r.json && r.json.error, 'invalid_value');
-  T.check('H4 repeated ID: the generic unwrapped shape, no results array at all (D136b)', !r.json || !('results' in r.json), J(r.json));
-  T.check('H4 repeated ID: nothing written', priorityOf(x, 'TSK-001') !== 'high', priorityOf(x, 'TSK-001'));
-}
+  const r = await runJ(['set', '--id=TSK-001, TSK-001', '--priority=high'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H4 repeated ID (incl. after trimming whitespace): exit 1', r, 1);
+  t.eq('H4 repeated ID: invalid_value (D136b: a batch-wide argument error)', r.json && r.json.error, 'invalid_value');
+  t.check('H4 repeated ID: the generic unwrapped shape, no results array at all (D136b)', !r.json || !('results' in r.json), J(r.json));
+  t.check('H4 repeated ID: nothing written', priorityOf(x, 'TSK-001') !== 'high', priorityOf(x, 'TSK-001'));
+},
 
 /* ===================================================================== */
 /* H5 — --id=A,B,C with --file is invalid_target (D136b: argument error)   */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h5');
-  const r = runJ(['set', '--id=TSK-001,TSK-002', '--file=' + taskPath('TSK-001'), '--priority=high'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H5 --id=A,B,C with --file: exit 1', r, 1);
-  T.eq('H5: invalid_target', r.json && r.json.error, 'invalid_target');
-  T.check('H5: no results array (D136b)', !r.json || !('results' in r.json), J(r.json));
-}
+  const r = await runJ(['set', '--id=TSK-001,TSK-002', '--file=' + taskPath('TSK-001'), '--priority=high'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H5 --id=A,B,C with --file: exit 1', r, 1);
+  t.eq('H5: invalid_target', r.json && r.json.error, 'invalid_target');
+  t.check('H5: no results array (D136b)', !r.json || !('results' in r.json), J(r.json));
+},
 
 /* ===================================================================== */
 /* H6 — preflight: an archived element aborts the whole batch; results     */
 /* names ONLY the failing id (D136c), the innocent id is absent, not       */
 /* merely unwritten                                                       */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h6');
-  ok(run(['set', '--id=TSK-003', '--status=done'], { cwd: x.dir, env: at(NOW) }), 'TSK-003 done');
-  ok(run(['archive', '--id=TSK-003'], { cwd: x.dir, env: later() }), 'archive TSK-003');
+  ok(t, await run(['set', '--id=TSK-003', '--status=done'], { cwd: x.dir, env: at(NOW) }), 'TSK-003 done');
+  ok(t, await run(['archive', '--id=TSK-003'], { cwd: x.dir, env: later() }), 'archive TSK-003');
   const before = bytes(elementFile(x, 'TSK-001'));
-  const r = runJ(['set', '--id=TSK-001,TSK-003', '--priority=high'], { cwd: x.dir, env: later() });
-  T.exit('H6 archived element in batch: exit 1', r, 1);
-  T.check('H6: reported as refused:archived for TSK-003', resultOf(r.json, 'TSK-003') && resultOf(r.json, 'TSK-003').error === 'refused:archived', J(r.json));
-  T.eq('H6 (D136c): results lists ONLY TSK-003, not the innocent TSK-001',
+  const r = await runJ(['set', '--id=TSK-001,TSK-003', '--priority=high'], { cwd: x.dir, env: later() });
+  t.exit('H6 archived element in batch: exit 1', r, 1);
+  t.check('H6: reported as refused:archived for TSK-003', resultOf(r.json, 'TSK-003') && resultOf(r.json, 'TSK-003').error === 'refused:archived', J(r.json));
+  t.eq('H6 (D136c): results lists ONLY TSK-003, not the innocent TSK-001',
     (r.json && r.json.results || []).map((e: any) => e.id), ['TSK-003']);
-  T.eq('H6: TSK-001 (the innocent id) is untouched — whole batch aborted', bytes(elementFile(x, 'TSK-001')), before);
-}
+  t.eq('H6: TSK-001 (the innocent id) is untouched — whole batch aborted', bytes(elementFile(x, 'TSK-001')), before);
+},
 
 /* ===================================================================== */
 /* H7 — preflight: an unreadable stub aborts the whole batch; results      */
 /* names only the failing id (D136c)                                      */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h7');
-  addUnreadableStub(x, 'TSK-009');
+  addUnreadableStub(t, x, 'TSK-009');
   const before = bytes(elementFile(x, 'TSK-001'));
-  const r = runJ(['set', '--id=TSK-001,TSK-009', '--priority=high'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H7 unreadable stub in batch: exit 1', r, 1);
-  T.check('H7: reported as refused:unreadable for TSK-009', resultOf(r.json, 'TSK-009') && resultOf(r.json, 'TSK-009').error === 'refused:unreadable', J(r.json));
-  T.eq('H7 (D136c): results lists ONLY TSK-009', (r.json && r.json.results || []).map((e: any) => e.id), ['TSK-009']);
-  T.eq('H7: TSK-001 untouched', bytes(elementFile(x, 'TSK-001')), before);
-}
+  const r = await runJ(['set', '--id=TSK-001,TSK-009', '--priority=high'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H7 unreadable stub in batch: exit 1', r, 1);
+  t.check('H7: reported as refused:unreadable for TSK-009', resultOf(r.json, 'TSK-009') && resultOf(r.json, 'TSK-009').error === 'refused:unreadable', J(r.json));
+  t.eq('H7 (D136c): results lists ONLY TSK-009', (r.json && r.json.results || []).map((e: any) => e.id), ['TSK-009']);
+  t.eq('H7: TSK-001 untouched', bytes(elementFile(x, 'TSK-001')), before);
+},
 
 /* ===================================================================== */
 /* H8 — a batch-wide argument error (unknown_field / invalid field value)  */
 /* is the generic unwrapped shape, no results array (D136b)                */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h8');
-  const r = runJ(['set', '--id=TSK-001,TSK-002', '--bogus=x'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H8 unknown field: exit 1', r, 1);
-  T.eq('H8: unknown_field, argument error (not per-ID)', r.json && r.json.error, 'unknown_field');
-  T.check('H8: no results array (D136b)', !r.json || !('results' in r.json), J(r.json));
-}
-{
+  const r = await runJ(['set', '--id=TSK-001,TSK-002', '--bogus=x'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H8 unknown field: exit 1', r, 1);
+  t.eq('H8: unknown_field, argument error (not per-ID)', r.json && r.json.error, 'unknown_field');
+  t.check('H8: no results array (D136b)', !r.json || !('results' in r.json), J(r.json));
+},
+async (t) => {
   const x = model('ac31-h8b');
-  const r = runJ(['set', '--id=TSK-001,TSK-002', '--status=not-a-status'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H8b invalid field value: exit 1', r, 1);
-  T.eq('H8b (D136b): invalid_value, the generic unwrapped shape', r.json && r.json.error, 'invalid_value');
-  T.check('H8b: no results array', !r.json || !('results' in r.json), J(r.json));
-  T.check('H8b: nothing written', priorityOf(x, 'TSK-001') !== 'not-a-status', priorityOf(x, 'TSK-001'));
-}
+  const r = await runJ(['set', '--id=TSK-001,TSK-002', '--status=not-a-status'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H8b invalid field value: exit 1', r, 1);
+  t.eq('H8b (D136b): invalid_value, the generic unwrapped shape', r.json && r.json.error, 'invalid_value');
+  t.check('H8b: no results array', !r.json || !('results' in r.json), J(r.json));
+  t.check('H8b: nothing written', priorityOf(x, 'TSK-001') !== 'not-a-status', priorityOf(x, 'TSK-001'));
+},
 
 /* ===================================================================== */
 /* H9 — runtime failure in the middle: a pre-existing claim on B fails     */
 /* only B; A and C still succeed (refused:claimed, § 12a)                  */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h9');
-  ok(run(['claim', '--id=TSK-002', '--as=bob'], { cwd: x.dir, env: at(NOW) }), 'bob claims TSK-002');
-  const r = runJ(['claim', '--id=TSK-001,TSK-002,TSK-003', '--as=alice'], { cwd: x.dir, env: later() });
-  T.exit('H9 one ID already claimed by another name: exit 1 (not every ID succeeded)', r, 1);
+  ok(t, await run(['claim', '--id=TSK-002', '--as=bob'], { cwd: x.dir, env: at(NOW) }), 'bob claims TSK-002');
+  const r = await runJ(['claim', '--id=TSK-001,TSK-002,TSK-003', '--as=alice'], { cwd: x.dir, env: later() });
+  t.exit('H9 one ID already claimed by another name: exit 1 (not every ID succeeded)', r, 1);
   const ra = resultOf(r.json, 'TSK-001'), rb = resultOf(r.json, 'TSK-002'), rc = resultOf(r.json, 'TSK-003');
-  T.check('H9 TSK-001 (A) succeeds', ra && ra.ok === true, J(ra));
-  T.check('H9 TSK-002 (B) fails with refused:claimed, naming the holder in hint', rb && rb.ok === false && rb.error === 'refused:claimed', J(rb));
-  T.check('H9 TSK-003 (C) still succeeds — a runtime failure on B does not stop C', rc && rc.ok === true, J(rc));
-  T.eq('H9 TSK-001 assignee is alice', assigneeOf(x, 'TSK-001'), 'alice');
-  T.eq('H9 TSK-002 assignee is still bob (the batch never touched it)', assigneeOf(x, 'TSK-002'), 'bob');
-  T.eq('H9 TSK-003 assignee is alice', assigneeOf(x, 'TSK-003'), 'alice');
-  T.check('H9 top-level ok is false (not every result succeeded)', r.json && r.json.ok === false, J(r.json));
-  T.eq('H9 (form 3, runtime): results names ALL THREE ids, succeeded or not — unlike a preflight abort',
+  t.check('H9 TSK-001 (A) succeeds', ra && ra.ok === true, J(ra));
+  t.check('H9 TSK-002 (B) fails with refused:claimed, naming the holder in hint', rb && rb.ok === false && rb.error === 'refused:claimed', J(rb));
+  t.check('H9 TSK-003 (C) still succeeds — a runtime failure on B does not stop C', rc && rc.ok === true, J(rc));
+  t.eq('H9 TSK-001 assignee is alice', assigneeOf(x, 'TSK-001'), 'alice');
+  t.eq('H9 TSK-002 assignee is still bob (the batch never touched it)', assigneeOf(x, 'TSK-002'), 'bob');
+  t.eq('H9 TSK-003 assignee is alice', assigneeOf(x, 'TSK-003'), 'alice');
+  t.check('H9 top-level ok is false (not every result succeeded)', r.json && r.json.ok === false, J(r.json));
+  t.eq('H9 (form 3, runtime): results names ALL THREE ids, succeeded or not — unlike a preflight abort',
     (r.json && r.json.results || []).map((e: any) => e.id), ['TSK-001', 'TSK-002', 'TSK-003']);
-}
+},
 
 /* ===================================================================== */
 /* H10 — STATUS.md: not touched when the whole batch fails preflight;      */
 /* correctly reflects every change after a partial-success batch           */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h10-preflight');
   const before = bytes(statusPath(x));
-  const r = runJ(['set', '--id=TSK-001,TSK-999', '--priority=high'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H10a preflight-failed batch: exit 1', r, 1);
-  T.eq('H10a STATUS.md untouched when nothing was written', bytes(statusPath(x)), before);
-}
-{
+  const r = await runJ(['set', '--id=TSK-001,TSK-999', '--priority=high'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H10a preflight-failed batch: exit 1', r, 1);
+  t.eq('H10a STATUS.md untouched when nothing was written', bytes(statusPath(x)), before);
+},
+async (t) => {
   /* Not independently black-box-observable: whether the regeneration
    * happens exactly once, vs. once per successfully-written ID that
    * happens to converge on the same final bytes either way. What IS
@@ -264,153 +300,151 @@ function addUnreadableStub(x: Model, id: string) {
    * fully-converged rendering after every ID's write phase — not a
    * snapshot frozen at an intermediate ID. */
   const x = model('ac31-h10-partial');
-  ok(run(['claim', '--id=TSK-002', '--as=bob'], { cwd: x.dir, env: at(NOW) }), 'bob claims TSK-002');
-  ok(run(['set', '--id=TSK-001', '--status=doing'], { cwd: x.dir, env: at(NOW) }), 'TSK-001 doing (for STATUS.md content)');
-  const r = runJ(['claim', '--id=TSK-001,TSK-002,TSK-003', '--as=alice', '--status=review'], { cwd: x.dir, env: later() });
-  T.exit('H10b partial-success batch: exit 1', r, 1);
-  T.eq('H10b STATUS.md reflects the fully-converged post-batch state (TSK-001/TSK-003 moved to review)',
+  ok(t, await run(['claim', '--id=TSK-002', '--as=bob'], { cwd: x.dir, env: at(NOW) }), 'bob claims TSK-002');
+  ok(t, await run(['set', '--id=TSK-001', '--status=doing'], { cwd: x.dir, env: at(NOW) }), 'TSK-001 doing (for STATUS.md content)');
+  const r = await runJ(['claim', '--id=TSK-001,TSK-002,TSK-003', '--as=alice', '--status=review'], { cwd: x.dir, env: later() });
+  t.exit('H10b partial-success batch: exit 1', r, 1);
+  t.eq('H10b STATUS.md reflects the fully-converged post-batch state (TSK-001/TSK-003 moved to review)',
     bytes(statusPath(x)), H.statusFor(x.bl));
-}
+},
 
 /* ===================================================================== */
 /* H11 — note and check also take --id=A,B,C                               */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h11-note');
-  const r = runJ(['note', '--id=TSK-001,TSK-002', 'A shared note'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H11 note batch: exit 0', r, 0);
-  T.check('H11 note batch: both files gained the note',
+  const r = await runJ(['note', '--id=TSK-001,TSK-002', 'A shared note'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H11 note batch: exit 0', r, 0);
+  t.check('H11 note batch: both files gained the note',
     ['TSK-001', 'TSK-002'].every(id => /A shared note/.test(bytes(elementFile(x, id)) || '')), 'missing on one');
-}
-{
+},
+async (t) => {
   const x = model('ac31-h11-check');
-  const r = runJ(['check', '--id=TSK-001,TSK-002', '--text=It works', '--on'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H11 check batch: exit 0', r, 0);
-  T.check('H11 check batch: both boxes ticked',
+  const r = await runJ(['check', '--id=TSK-001,TSK-002', '--text=It works', '--on'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H11 check batch: exit 0', r, 0);
+  t.check('H11 check batch: both boxes ticked',
     ['TSK-001', 'TSK-002'].every(id => /\[x\] It works/.test(bytes(elementFile(x, id)) || '')), 'missing on one');
-}
-{
+},
+async (t) => {
   /* check's own preflight (ambiguous_target / not_found) aborts the whole
    * batch, same as any other command's preflight condition. */
   const x = model('ac31-h11-check-ambiguous');
-  ok(run(['set', '--id=TSK-002', '--acceptance=- [ ] It works\n- [ ] It works'], { cwd: x.dir, env: at(NOW) }), 'TSK-002 two matching boxes');
+  ok(t, await run(['set', '--id=TSK-002', '--acceptance=- [ ] It works\n- [ ] It works'], { cwd: x.dir, env: at(NOW) }), 'TSK-002 two matching boxes');
   const before = bytes(elementFile(x, 'TSK-001'));
-  const r = runJ(['check', '--id=TSK-001,TSK-002', '--text=It works', '--on'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H11 check batch with an ambiguous target: exit 1', r, 1);
-  T.check('H11: reported as ambiguous_target for TSK-002',
+  const r = await runJ(['check', '--id=TSK-001,TSK-002', '--text=It works', '--on'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H11 check batch with an ambiguous target: exit 1', r, 1);
+  t.check('H11: reported as ambiguous_target for TSK-002',
     resultOf(r.json, 'TSK-002') && resultOf(r.json, 'TSK-002').error === 'ambiguous_target', J(r.json));
-  T.eq('H11 (D136c): results lists ONLY TSK-002, not the innocent TSK-001',
+  t.eq('H11 (D136c): results lists ONLY TSK-002, not the innocent TSK-001',
     (r.json && r.json.results || []).map((e: any) => e.id), ['TSK-002']);
-  T.eq('H11: TSK-001 untouched — whole batch aborted', bytes(elementFile(x, 'TSK-001')), before);
-}
+  t.eq('H11: TSK-001 untouched — whole batch aborted', bytes(elementFile(x, 'TSK-001')), before);
+},
 
 /* ===================================================================== */
 /* H12 — release also takes --id=A,B,C; changed: ["claim"]                 */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h12');
-  ok(run(['claim', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: at(NOW) }), 'alice claims TSK-001,TSK-002');
-  const r = runJ(['release', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: later() });
-  T.exit('H12 release batch: exit 0', r, 0);
-  T.check('H12 both results report changed: ["claim"]',
+  ok(t, await run(['claim', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: at(NOW) }), 'alice claims TSK-001,TSK-002');
+  const r = await runJ(['release', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: later() });
+  t.exit('H12 release batch: exit 0', r, 0);
+  t.check('H12 both results report changed: ["claim"]',
     (r.json.results || []).every((e: any) => e.ok === true && J(e.changed) === J(['claim'])), J(r.json.results));
-}
+},
 
 /* ===================================================================== */
 /* H13 — exit code: 0 only when every ID succeeded                        */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h13');
-  const r = runJ(['set', '--id=TSK-001,TSK-002,TSK-003', '--priority=urgent'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H13 every ID succeeds: exit 0', r, 0);
-  T.eq('H13 top-level ok is true', r.json && r.json.ok, true);
-}
+  const r = await runJ(['set', '--id=TSK-001,TSK-002,TSK-003', '--priority=urgent'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H13 every ID succeeds: exit 0', r, 0);
+  t.eq('H13 top-level ok is true', r.json && r.json.ok, true);
+},
 
 /* ===================================================================== */
 /* H14 — human (non --json) output: exits correctly, prints something     */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h14');
-  const rh = run(['set', '--id=TSK-001,TSK-002', '--priority=high'], { cwd: x.dir, env: at(NOW) });
-  T.exit('H14 human batch: exit 0', rh, 0);
-  T.check('H14 human batch: mentions both ids', /TSK-001/.test(rh.stdout) && /TSK-002/.test(rh.stdout), J(rh.stdout));
-}
+  const rh = await run(['set', '--id=TSK-001,TSK-002', '--priority=high'], { cwd: x.dir, env: at(NOW) });
+  t.exit('H14 human batch: exit 0', rh, 0);
+  t.check('H14 human batch: mentions both ids', /TSK-001/.test(rh.stdout) && /TSK-002/.test(rh.stdout), J(rh.stdout));
+},
 
 /* ===================================================================== */
 /* H15 — NJ_FAULT fires once per batch (D135): the first ID in execution   */
 /* order that reaches the hook fails; the hook is then spent, so every     */
 /* later ID writes normally                                                */
 /* ===================================================================== */
-{
+async (t) => {
   const x = model('ac31-h15');
   const before = bytes(elementFile(x, 'TSK-001'));
-  const r = runJ(['set', '--id=TSK-001,TSK-002,TSK-003', '--priority=urgent'],
+  const r = await runJ(['set', '--id=TSK-001,TSK-002,TSK-003', '--priority=urgent'],
     { cwd: x.dir, env: Object.assign(at(NOW), { NJ_FAULT: 'before-rename' }) });
-  T.exit('H15 a fault mid-batch: exit 1 (not every ID succeeded)', r, 1);
+  t.exit('H15 a fault mid-batch: exit 1 (not every ID succeeded)', r, 1);
   const ra = resultOf(r.json, 'TSK-001'), rb = resultOf(r.json, 'TSK-002'), rc = resultOf(r.json, 'TSK-003');
-  T.check('H15 the first ID in execution order (TSK-001) hits the fault',
+  t.check('H15 the first ID in execution order (TSK-001) hits the fault',
     ra && ra.ok === false && ra.error === 'fault:before-rename', J(ra));
-  T.eq('H15 TSK-001\'s file is untouched by the aborted write', bytes(elementFile(x, 'TSK-001')), before);
-  T.check('H15 the hook is spent: TSK-002 writes normally', rb && rb.ok === true, J(rb));
-  T.check('H15 the hook is spent: TSK-003 writes normally too', rc && rc.ok === true, J(rc));
-  T.eq('H15 TSK-002/TSK-003 actually got the priority written',
+  t.eq('H15 TSK-001\'s file is untouched by the aborted write', bytes(elementFile(x, 'TSK-001')), before);
+  t.check('H15 the hook is spent: TSK-002 writes normally', rb && rb.ok === true, J(rb));
+  t.check('H15 the hook is spent: TSK-003 writes normally too', rc && rc.ok === true, J(rc));
+  t.eq('H15 TSK-002/TSK-003 actually got the priority written',
     [priorityOf(x, 'TSK-002'), priorityOf(x, 'TSK-003')], ['urgent', 'urgent']);
-  T.check('H15 a single command is unchanged by batches existing: NJ_FAULT still aborts it outright',
-    (() => {
-      const y = model('ac31-h15-single');
-      const single = runJ(['set', '--id=TSK-001', '--priority=urgent'],
-        { cwd: y.dir, env: Object.assign(at(NOW), { NJ_FAULT: 'before-rename' }) });
-      return single.status === 1 && single.json && single.json.error === 'fault:before-rename' && !('results' in single.json);
-    })(), 'single-command NJ_FAULT regressed');
-}
+  const y = model('ac31-h15-single');
+  const single = await runJ(['set', '--id=TSK-001', '--priority=urgent'],
+    { cwd: y.dir, env: Object.assign(at(NOW), { NJ_FAULT: 'before-rename' }) });
+  t.check('H15 a single command is unchanged by batches existing: NJ_FAULT still aborts it outright',
+    single.status === 1 && single.json && single.json.error === 'fault:before-rename' && !('results' in single.json),
+    'single-command NJ_FAULT regressed');
+},
 
 /* ===================================================================== */
 /* H16 — every batch command's top-level keys are exactly {ok, results},  */
 /* on a runtime-completion result AND on a per-ID preflight abort (D137)  */
 /* ===================================================================== */
-function topKeys(json: any) { return json ? Object.keys(json).sort() : null; }
-{
+async (t) => {
   const x = model('ac31-h16-set');
-  const r1 = runJ(['set', '--id=TSK-001,TSK-002', '--priority=high'], { cwd: x.dir, env: at(NOW) });
-  T.eq('H16 set (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
+  const r1 = await runJ(['set', '--id=TSK-001,TSK-002', '--priority=high'], { cwd: x.dir, env: at(NOW) });
+  t.eq('H16 set (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
   const y = model('ac31-h16-set-abort');
-  const r2 = runJ(['set', '--id=TSK-001,TSK-999', '--priority=high'], { cwd: y.dir, env: at(NOW) });
-  T.eq('H16 set (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
-}
-{
+  const r2 = await runJ(['set', '--id=TSK-001,TSK-999', '--priority=high'], { cwd: y.dir, env: at(NOW) });
+  t.eq('H16 set (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
+},
+async (t) => {
   const x = model('ac31-h16-note');
-  const r1 = runJ(['note', '--id=TSK-001,TSK-002', 'shared note'], { cwd: x.dir, env: at(NOW) });
-  T.eq('H16 note (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
+  const r1 = await runJ(['note', '--id=TSK-001,TSK-002', 'shared note'], { cwd: x.dir, env: at(NOW) });
+  t.eq('H16 note (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
   const y = model('ac31-h16-note-abort');
-  const r2 = runJ(['note', '--id=TSK-001,TSK-999', 'shared note'], { cwd: y.dir, env: at(NOW) });
-  T.eq('H16 note (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
-}
-{
+  const r2 = await runJ(['note', '--id=TSK-001,TSK-999', 'shared note'], { cwd: y.dir, env: at(NOW) });
+  t.eq('H16 note (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
+},
+async (t) => {
   const x = model('ac31-h16-check');
-  const r1 = runJ(['check', '--id=TSK-001,TSK-002', '--text=It works', '--on'], { cwd: x.dir, env: at(NOW) });
-  T.eq('H16 check (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
+  const r1 = await runJ(['check', '--id=TSK-001,TSK-002', '--text=It works', '--on'], { cwd: x.dir, env: at(NOW) });
+  t.eq('H16 check (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
   const y = model('ac31-h16-check-abort');
-  const r2 = runJ(['check', '--id=TSK-001,TSK-999', '--text=It works', '--on'], { cwd: y.dir, env: at(NOW) });
-  T.eq('H16 check (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
-}
-{
+  const r2 = await runJ(['check', '--id=TSK-001,TSK-999', '--text=It works', '--on'], { cwd: y.dir, env: at(NOW) });
+  t.eq('H16 check (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
+},
+async (t) => {
   const x = model('ac31-h16-claim');
-  const r1 = runJ(['claim', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: at(NOW) });
-  T.eq('H16 claim (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
+  const r1 = await runJ(['claim', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: at(NOW) });
+  t.eq('H16 claim (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
   const y = model('ac31-h16-claim-abort');
-  const r2 = runJ(['claim', '--id=TSK-001,TSK-999', '--as=alice'], { cwd: y.dir, env: at(NOW) });
-  T.eq('H16 claim (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
-}
-{
+  const r2 = await runJ(['claim', '--id=TSK-001,TSK-999', '--as=alice'], { cwd: y.dir, env: at(NOW) });
+  t.eq('H16 claim (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
+},
+async (t) => {
   const x = model('ac31-h16-release');
-  ok(run(['claim', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: at(NOW) }), 'alice claims TSK-001,TSK-002 for H16');
-  const r1 = runJ(['release', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: later() });
-  T.eq('H16 release (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
+  ok(t, await run(['claim', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: at(NOW) }), 'alice claims TSK-001,TSK-002 for H16');
+  const r1 = await runJ(['release', '--id=TSK-001,TSK-002', '--as=alice'], { cwd: x.dir, env: later() });
+  t.eq('H16 release (runtime completion): top-level keys are exactly [files, ok, results]', topKeys(r1.json), ['files', 'ok', 'results']);
   const y = model('ac31-h16-release-abort');
-  ok(run(['claim', '--id=TSK-001', '--as=alice'], { cwd: y.dir, env: at(NOW) }), 'alice claims TSK-001 for H16 abort');
-  const r2 = runJ(['release', '--id=TSK-001,TSK-999', '--as=alice'], { cwd: y.dir, env: later() });
-  T.eq('H16 release (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
-}
+  ok(t, await run(['claim', '--id=TSK-001', '--as=alice'], { cwd: y.dir, env: at(NOW) }), 'alice claims TSK-001 for H16 abort');
+  const r2 = await runJ(['release', '--id=TSK-001,TSK-999', '--as=alice'], { cwd: y.dir, env: later() });
+  t.eq('H16 release (preflight abort): top-level keys are exactly [files, ok, results]', topKeys(r2.json), ['files', 'ok', 'results']);
+},
 
 /* ===================================================================== */
 /* H17 — NJ_FAULT=before-compare fires once in a batch too (D135/D137):    */
@@ -418,7 +452,7 @@ function topKeys(json: any) { return json ? Object.keys(json).sort() : null; }
 /* after the parallel edit, so it resolves to changed_in_parallel (§ 12),  */
 /* not the 10s timeout's fault:before-compare; TSK-002/TSK-003 still write */
 /* ===================================================================== */
-(async () => {
+async (t) => {
   function startNj(args: string[], o: RunOptsLite): Promise<RunResult> {
     const env = Object.assign({}, process.env, o.env || {});
     for (const k of ['NJ_AUTHOR', 'NJ_BACKLOG']) delete env[k];
@@ -434,65 +468,63 @@ function topKeys(json: any) { return json ? Object.keys(json).sort() : null; }
     return done;
   }
   const x = model('ac31-h17');
-  const before = bytes(elementFile(x, 'TSK-001'));
   const ready = H.faultReady('ac31-h17');
   const donePromise = startNj(['set', '--id=TSK-001,TSK-002,TSK-003', '--priority=urgent', '--json'],
     { cwd: x.dir, env: Object.assign(at(NOW), ready.env) });
   // NJ_FAULT_READY (§ 12, DECISIONS 201): TSK-001's first read is done, nj holds.
-  T.check('H17 nj reached the before-compare hold on TSK-001 (NJ_FAULT_READY written)', await ready.wait(donePromise), ready.file);
+  t.check('H17 nj reached the before-compare hold on TSK-001 (NJ_FAULT_READY written)', await ready.wait(donePromise), ready.file);
   const parallel = (bytes(elementFile(x, 'TSK-001')) || '').replace('status: todo', 'status: doing');
   fs.writeFileSync(elementFile(x, 'TSK-001'), parallel);         // a real concurrent edit
   fs.writeFileSync(path.join(x.bl, '.nj-fault-go'), '');         // release nj
   const r = await donePromise;
 
-  T.check('H17 the batch process does not crash or hang', r.status === 0 || r.status === 1, J(r));
+  t.check('H17 the batch process does not crash or hang', r.status === 0 || r.status === 1, J(r));
   let json = null; try { json = JSON.parse(r.stdout); } catch (e) { /* reported below */ }
-  T.check('H17 --json still parses', !!json, 'stdout: ' + J(r.stdout) + ' stderr: ' + J(r.stderr));
-  T.exit('H17 not every ID succeeded: exit 1', r, 1);
+  t.check('H17 --json still parses', !!json, 'stdout: ' + J(r.stdout) + ' stderr: ' + J(r.stderr));
+  t.exit('H17 not every ID succeeded: exit 1', r, 1);
   const ra = resultOf(json, 'TSK-001'), rb = resultOf(json, 'TSK-002'), rc = resultOf(json, 'TSK-003');
-  T.check('H17 TSK-001 fails with changed_in_parallel (§ 12: marker created after a parallel edit)',
+  t.check('H17 TSK-001 fails with changed_in_parallel (§ 12: marker created after a parallel edit)',
     ra && ra.ok === false && ra.error === 'changed_in_parallel', J(ra));
-  T.eq('H17 TSK-001\'s file reflects ONLY the parallel edit, not nj\'s own write',
+  t.eq('H17 TSK-001\'s file reflects ONLY the parallel edit, not nj\'s own write',
     bytes(elementFile(x, 'TSK-001')), parallel);
-  T.check('H17 the hook is spent: TSK-002 still writes normally', rb && rb.ok === true, J(rb));
-  T.check('H17 the hook is spent: TSK-003 still writes normally too', rc && rc.ok === true, J(rc));
-  T.eq('H17 TSK-002/TSK-003 actually got the priority written',
+  t.check('H17 the hook is spent: TSK-002 still writes normally', rb && rb.ok === true, J(rb));
+  t.check('H17 the hook is spent: TSK-003 still writes normally too', rc && rc.ok === true, J(rc));
+  t.eq('H17 TSK-002/TSK-003 actually got the priority written',
     [priorityOf(x, 'TSK-002'), priorityOf(x, 'TSK-003')], ['urgent', 'urgent']);
-  T.eq('H17 (form 3, runtime): results names all three ids', (json && json.results || []).map((e: any) => e.id), ['TSK-001', 'TSK-002', 'TSK-003']);
+  t.eq('H17 (form 3, runtime): results names all three ids', (json && json.results || []).map((e: any) => e.id), ['TSK-001', 'TSK-002', 'TSK-003']);
+},
 
-  /* =================================================================== */
-  /* H18 — NJ_FAULT=before-compare with NO marker ever created (D135,     */
-  /* D137): TSK-001 waits out the full ~10s timeout and fails with        */
-  /* fault:before-compare; the hook is then spent, so TSK-002 is written  */
-  /* WITHOUT a second ~10s wait — one timeout per batch, not one per ID.  */
-  /* Against 05e8bfa this currently hardExits the whole process instead,  */
-  /* killing TSK-002 along with it: expected red.                        */
-  /* =================================================================== */
-  {
-    const y = model('ac31-h18');
-    const before18 = bytes(elementFile(y, 'TSK-001'));
-    const t0 = Date.now();
-    const r18 = H.runJson(['set', '--id=TSK-001,TSK-002', '--priority=urgent'],
-      { cwd: y.dir, env: Object.assign(at(NOW), { NJ_FAULT: 'before-compare' }), timeout: 20000 });
-    const elapsed = Date.now() - t0;
-    T.check('H18 the batch process does not die outright: a status and JSON come back',
-      r18.status !== null && !r18.missing, J(r18));
-    T.check('H18 --json still parses', !!r18.json, 'stdout: ' + J(r18.stdout) + ' stderr: ' + J(r18.stderr));
-    T.exit('H18 not every ID succeeded: exit 1', r18, 1);
-    const ra18 = resultOf(r18.json, 'TSK-001'), rb18 = resultOf(r18.json, 'TSK-002');
-    T.check('H18 TSK-001 times out after ~10s and fails with fault:before-compare',
-      ra18 && ra18.ok === false && ra18.error === 'fault:before-compare', J(ra18));
-    T.eq('H18 TSK-001 is left unchanged (the aborted write touched nothing)', bytes(elementFile(y, 'TSK-001')), before18);
-    T.check('H18 the hook is spent: TSK-002 still gets written, not also timed out or killed',
-      rb18 && rb18.ok === true, J(rb18));
-    T.eq('H18 TSK-002 actually got the priority written', priorityOf(y, 'TSK-002'), 'urgent');
-    T.eq('H18 (form 3, runtime): results names both ids', (r18.json && r18.json.results || []).map((e: any) => e.id), ['TSK-001', 'TSK-002']);
-    /* 19 s, still short of a doubled 20 s: elapsed includes nj's own start,
-     * which a loaded machine (run-all's parallel pool, DECISIONS 199/201)
-     * can stretch by seconds. */
-    T.check('H18 one ~10s wait total, not one per ID (D135: the hook fires once)',
-      elapsed < 19000, 'elapsed ' + elapsed + 'ms — looks like a second ~10s wait happened');
-  }
+/* =================================================================== */
+/* H18 — NJ_FAULT=before-compare with NO marker ever created (D135,     */
+/* D137): TSK-001 waits out the full ~10s timeout and fails with        */
+/* fault:before-compare; the hook is then spent, so TSK-002 is written  */
+/* WITHOUT a second ~10s wait — one timeout per batch, not one per ID.  */
+/* Against 05e8bfa this currently hardExits the whole process instead,  */
+/* killing TSK-002 along with it: expected red. The run itself started  */
+/* before every other leg (h18 above).                                  */
+/* =================================================================== */
+async (t) => {
+  const { y, before18 } = h18;
+  const { r18, elapsed } = await h18.done;
+  t.check('H18 the batch process does not die outright: a status and JSON come back',
+    r18.status !== null && !r18.missing, J(r18));
+  t.check('H18 --json still parses', !!r18.json, 'stdout: ' + J(r18.stdout) + ' stderr: ' + J(r18.stderr));
+  t.exit('H18 not every ID succeeded: exit 1', r18, 1);
+  const ra18 = resultOf(r18.json, 'TSK-001'), rb18 = resultOf(r18.json, 'TSK-002');
+  t.check('H18 TSK-001 times out after ~10s and fails with fault:before-compare',
+    ra18 && ra18.ok === false && ra18.error === 'fault:before-compare', J(ra18));
+  t.eq('H18 TSK-001 is left unchanged (the aborted write touched nothing)', bytes(elementFile(y, 'TSK-001')), before18);
+  t.check('H18 the hook is spent: TSK-002 still gets written, not also timed out or killed',
+    rb18 && rb18.ok === true, J(rb18));
+  t.eq('H18 TSK-002 actually got the priority written', priorityOf(y, 'TSK-002'), 'urgent');
+  t.eq('H18 (form 3, runtime): results names both ids', (r18.json && r18.json.results || []).map((e: any) => e.id), ['TSK-001', 'TSK-002']);
+  /* 19 s, still short of a doubled 20 s: elapsed includes nj's own start,
+   * which a loaded machine (run-all's parallel pool, DECISIONS 199/201)
+   * can stretch by seconds. */
+  t.check('H18 one ~10s wait total, not one per ID (D135: the hook fires once)',
+    elapsed < 19000, 'elapsed ' + elapsed + 'ms — looks like a second ~10s wait happened');
+},
+];
 
-  T.finish();
-})();
+await H.runLegs(legs, { concurrency: 8 });
+T.finish();

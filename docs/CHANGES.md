@@ -5,6 +5,34 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nanojira --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 4.5.0
+
+The project-neutral CLI core is one source file, `src/core/kernel.ts`,
+that another project can copy unchanged, and a flag given without its
+value now names both forms in its message. Nothing that can break a
+caller: every command, flag, code and exit status is as in 4.4.0; only
+the `missing_value` message text is longer.
+
+- **Internal: the project-neutral CLI core is one file,
+  `src/core/kernel.ts`** — failure output, flag parsing, did-you-mean,
+  the `NJ_NOW` clock and `--fields`/`--quiet` validation, importing only
+  Node built-ins, so another project can copy it unchanged. No command,
+  flag, message or exit code changes. (DECISIONS 231, scans TSK-013)
+- **Changed: a flag given without its value names both forms** —
+  `--title needs a value (use --title=… or --title <value>)`, since
+  4.4.0 parses both; before it named only `--title=…`. Same code,
+  `missing_value`. (DECISIONS 231, scans TSK-013)
+- Building from source only: the test suite is faster and steadier
+  under load. Eleven slow files set up their fixtures faster or run their
+  cases as concurrent legs, four overlapping files are merged into the
+  files they duplicated, three redundant ones are removed, and `run-all`
+  shares one Node compile cache per
+  run (`NODE_DISABLE_COMPILE_CACHE=1` turns it off). Every security and
+  past-bug check is kept; the id sort across digit counts and the kernel
+  behaviours found by mutation testing are newly pinned. Three timing
+  tests that could fail on a loaded machine now wait until their child
+  process is ready instead of failing. (TSK-049)
+
 ## 4.4.0
 
 Flags parse from the flag table (`--name value` works for every flag

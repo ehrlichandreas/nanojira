@@ -908,4 +908,123 @@ function initCreates(desc: string, args: string[], o: EnvOpts, target: string, n
   T.eq('A9 the refused init left ./backlog empty', H.lsOrEmpty(path.join(c13, 'backlog')), []);
 }
 
+/* ---- AC-12 Discovery (merged from ac-12-discovery, TSK-049) -----------
+ *
+ * § 15 AC-12: "Discovery. `list` from a nested subdirectory finds the
+ * backlog; from an unrelated directory it exits 1 with a hard error (never a
+ * silent empty result); `NJ_BACKLOG` is honoured." § 4 "Backlog discovery"
+ * rules 1-3: NJ_BACKLOG wins; otherwise the upward walk takes the first
+ * directory holding backlog/.nanojira/config.json; nothing found is a hard
+ * error, never an empty backlog, never a fallback.
+ *
+ * A2/A3 above cover the same rules source by source; this block keeps
+ * AC-12's own scenario whole. Its five legs share no state and run
+ * concurrently; the "unrelated" leg also names the code (no_backlog, § 9),
+ * which ac-12 alone did not.
+ */
+{
+  const runA = (args: string[], o: EnvOpts) => H.runNjAsync(args, envFor(o));
+  const runJA = (args: string[], o: EnvOpts) => H.runJsonAsync(args, envFor(o));
+  /* § 4 leaves the *reporting* form of the discovered folder unpinned (the
+   * JSON example shows an absolute path); either form is accepted as long
+   * as it names the same folder. */
+  const reportsFrom = (json: any, runCwd: string, backlogDir: string) => {
+    const bl = json && json.backlog;
+    if (typeof bl !== 'string' || !bl) return false;
+    return samePath(path.isAbsolute(bl) ? bl : path.resolve(runCwd, bl), backlogDir);
+  };
+
+  const proj = H.mkBacklog({
+    label: 'ac21-ac12-nested',
+    files: { 'tasks/TSK-001.md': taskFile('TSK-001', 'Found from below') },
+    tombstones: ['TSK-001'],
+  });
+  const nested = mkdir(path.join(proj, 'work', 'notes'));
+  const unrelated = H.freshDir('ac21-ac12-unrelated');
+  const other = H.mkBacklog({
+    label: 'ac21-ac12-other',
+    files: { 'tasks/TSK-900.md': taskFile('TSK-900', 'Somewhere else') },
+    tombstones: ['TSK-900'],
+  });
+  /* the walk stops at the first directory containing the config: an inner
+   * backlog under sub/ of an outer one */
+  const outer = H.mkBacklog({
+    label: 'ac21-ac12-outer',
+    files: { 'tasks/TSK-001.md': taskFile('TSK-001', 'Outer backlog') },
+    tombstones: ['TSK-001'],
+  });
+  const inner = H.mkBacklog({
+    label: 'ac21-ac12-inner',
+    files: { 'tasks/TSK-002.md': taskFile('TSK-002', 'Inner backlog task') },
+    tombstones: ['TSK-002'],
+  });
+  mkdir(path.join(outer, 'sub'));
+  fs.renameSync(path.join(inner, 'backlog'), path.join(outer, 'sub', 'backlog'));
+  const deep = mkdir(path.join(outer, 'sub', 'deep'));
+
+  await H.runLegs([
+    async (t: H.BufferedContext) => {
+      const [r, rh] = await Promise.all([runJA(['list'], { cwd: nested }), runA(['list'], { cwd: nested })]);
+      t.exit('AC-12 list from a nested subdirectory exits 0', r, 0);
+      t.check('AC-12 list from a nested subdirectory finds the backlog (walk upward)',
+        ids(r.json).includes('TSK-001'), 'entries = ' + J(ids(r.json)));
+      t.check('AC-12 list --json reports the discovered backlog folder',
+        reportsFrom(r.json, nested, path.join(proj, 'backlog')),
+        'backlog = ' + J(r.json && r.json.backlog));
+      t.exit('AC-12 list (human) from a nested subdirectory', rh, 0);
+      t.contains('AC-12 the human list shows the discovered element', rh.stdout, 'TSK-001');
+    },
+    /* an unrelated directory is a hard error, never an empty result */
+    async (t: H.BufferedContext) => {
+      const [r, rj] = await Promise.all([runA(['list'], { cwd: unrelated }), runJA(['list'], { cwd: unrelated })]);
+      t.exit('AC-12 list from an unrelated directory is a hard error (exit 1)', r, 1);
+      t.check('AC-12 the hard error is not silent', out(r).trim().length > 0, 'no output at all');
+      t.check('AC-12 never a silent "0 entries" result (§ 4 rule 3)',
+        !/\b0\s*entr/i.test(out(r)), J(out(r)).slice(0, 300));
+      t.exit('AC-12 list --json from an unrelated directory is a hard error', rj, 1);
+      t.check('AC-12 nor a successful read shape with an entry list',
+        !(rj.json && Array.isArray(rj.json.entries)),
+        J(rj.json || rj.stdout).slice(0, 300));
+      t.eq('AC-12 the hard error from an unrelated directory is no_backlog (§ 9)', rj.json && rj.json.error, 'no_backlog');
+    },
+    /* NJ_BACKLOG overrides discovery; run from inside another backlog:
+     * rule 1 beats rule 2 */
+    async (t: H.BufferedContext) => {
+      const env = { NJ_BACKLOG: path.join(proj, 'backlog') };
+      const [r, r2] = await Promise.all([runJA(['list'], { cwd: unrelated, env }), runJA(['list'], { cwd: other, env })]);
+      t.exit('AC-12 NJ_BACKLOG is honoured from an unrelated directory', r, 0);
+      t.check('AC-12 NJ_BACKLOG: the pointed-at backlog is listed',
+        ids(r.json).includes('TSK-001'), 'entries = ' + J(ids(r.json)));
+      t.exit('AC-12 NJ_BACKLOG wins over the backlog found by the upward walk', r2, 0);
+      t.check('AC-12 NJ_BACKLOG: the env backlog is used, not the surrounding one',
+        ids(r2.json).includes('TSK-001') && !ids(r2.json).includes('TSK-900'),
+        'entries = ' + J(ids(r2.json)));
+    },
+    /* A NJ_BACKLOG that points nowhere must not fall back to the walk --
+     * that would silently answer from a different backlog.
+     * AMBIGUOUS: § 4 pins "use it" and forbids falling back, but does not
+     * spell out the exit code for a NJ_BACKLOG target that does not exist.
+     * Exit 1 is the code for every other hard error (§ 9). */
+    async (t: H.BufferedContext) => {
+      const r3 = await runJA(['list'], { cwd: nested, env: { NJ_BACKLOG: path.join(unrelated, 'nope') } });
+      t.exit('AC-12 NJ_BACKLOG pointing at a non-existent folder is a hard error', r3, 1);
+      t.check('AC-12 no fallback to the backlog the walk would have found',
+        !(r3.json && Array.isArray(r3.json.entries)),
+        J(r3.json || r3.stdout).slice(0, 300));
+    },
+    async (t: H.BufferedContext) => {
+      const r = await runJA(['list'], { cwd: deep });
+      t.exit('AC-12 list from two levels below a nested backlog', r, 0);
+      const got = ids(r.json);
+      t.check('AC-12 the nearest backlog wins (the first directory containing backlog/.nanojira/config.json)',
+        got.includes('TSK-002'), 'entries = ' + J(got));
+      t.check('AC-12 the outer backlog is not used', !got.includes('TSK-001'),
+        'entries = ' + J(got));
+      t.check('AC-12 list --json reports the inner backlog folder',
+        reportsFrom(r.json, deep, path.join(outer, 'sub', 'backlog')),
+        'backlog = ' + J(r.json && r.json.backlog));
+    },
+  ], { concurrency: 5 });
+}
+
 T.finish();

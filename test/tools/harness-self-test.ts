@@ -23,7 +23,8 @@
  *      `missing`, the same shape sync's own spawn-error path uses,
  *      instead of silently truncating output;
  *   8. a child that ignores SIGTERM is still stopped, on an overflow and
- *      on the timeout alike: SIGKILL after the kill grace (TSK-030).
+ *      on the timeout alike: SIGKILL after the kill grace (TSK-030);
+ *   9. makeSemaphore's urgent waiters go first (TSK-049).
  */
 import fs from 'fs';
 import path from 'path';
@@ -237,7 +238,20 @@ async function main() {
    * grace (opts.killGraceMs, shortened here; default 10 s like run-all's
    * pool). The child writes its pid first, so the test can check it is
    * gone. A guard ends the wait on a red run, which used to hang for good:
-   * the ignored SIGTERM was the only signal, so 'close' never came. */
+   * the ignored SIGTERM was the only signal, so 'close' never came.
+   *
+   * Under load, the child's own startup (installing the SIGTERM handler,
+   * writing its pid file) can take longer than the shortened timeout
+   * itself: the parent's SIGTERM then arrives before the handler is
+   * installed, the default action kills the child outright, and no pid
+   * file is ever written -- the precondition "the child ignores SIGTERM"
+   * never held, so the result (SIGTERM, not SIGKILL; no pid) is not a
+   * finding about the harness. Detected by the missing pid file: retried
+   * with a doubled timeout/killGraceMs, up to 3 tries, each against a
+   * fresh instance of the script (a stale pid file from an earlier try
+   * must never be read as this try's). The 3rd try's result is taken as
+   * final either way -- the four checks below still do the asserting,
+   * now on a result that is either genuine or has run out of retries. */
   {
     const dir = H.freshDir('t030-stubborn');
     const stubborn = (name: string, body: string) => {
@@ -247,21 +261,34 @@ async function main() {
       return p;
     };
     const legs: [string, string, H.RunOpts][] = [
-      ['an overflow', stubborn('flood', "const b = Buffer.alloc(65536, 120);\n" +
-        "const w = () => { while (process.stdout.write(b)); process.stdout.once('drain', w); };\nw();\n"),
-        { maxBuffer: 4096, killGraceMs: 300 }],
-      ['the timeout', stubborn('hang', 'setInterval(() => {}, 1000);\n'), { timeout: 300, killGraceMs: 300 }],
+      ['an overflow', 'flood', { maxBuffer: 4096, killGraceMs: 300 }],
+      ['the timeout', 'hang', { timeout: 300, killGraceMs: 300 }],
     ];
-    for (const [what, script, opts] of legs) {
-      const pidFile = script.replace(/\.mjs$/, '.pid');
-      const t0 = Date.now();
-      const r = await Promise.race([H.runPathAsync(script, [], opts), delay(8000).then(() => null)]);
-      const ms = Date.now() - t0;
-      const pid = fs.existsSync(pidFile) ? Number(fs.readFileSync(pidFile, 'utf8')) : 0;
-      let alive = false;
-      if (pid) { try { process.kill(pid, 0); alive = true; } catch { /* gone */ } }
-      if (alive) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
-      const detail = ms + ' ms; pid ' + pid + '; ' + JSON.stringify(r && Object.assign({}, r, { stdout: r.stdout.length + ' bytes' }));
+    const bodies: Record<string, string> = {
+      flood: "const b = Buffer.alloc(65536, 120);\nconst w = () => { while (process.stdout.write(b)); process.stdout.once('drain', w); };\nw();\n",
+      hang: 'setInterval(() => {}, 1000);\n',
+    };
+    const MAX_TRIES = 3;
+    for (const [what, name, opts0] of legs) {
+      let opts = opts0, r: H.RunResult | null = null, ms = 0, pid = 0, alive = false, tries = 0;
+      const history: string[] = [];
+      for (; tries < MAX_TRIES; tries++) {
+        const script = stubborn(name + '-try' + tries, bodies[name]);
+        const pidFile = script.replace(/\.mjs$/, '.pid');
+        const t0 = Date.now();
+        r = await Promise.race([H.runPathAsync(script, [], opts), delay(8000).then(() => null)]);
+        ms = Date.now() - t0;
+        pid = fs.existsSync(pidFile) ? Number(fs.readFileSync(pidFile, 'utf8')) : 0;
+        alive = false;
+        if (pid) { try { process.kill(pid, 0); alive = true; } catch { /* gone */ } }
+        if (alive) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
+        history.push('try ' + tries + ': ' + ms + ' ms, pid ' + pid + ', signal ' + (r && r.signal));
+        if (pid !== 0 || tries === MAX_TRIES - 1) break;
+        // No pid file: the child never got far enough to be a test of the
+        // SIGTERM-ignoring precondition. Give it more room and try again.
+        opts = Object.assign({}, opts, opts.timeout ? { timeout: opts.timeout * 2 } : {}, { killGraceMs: (opts.killGraceMs || 0) * 2 });
+      }
+      const detail = history.join(' | ') + '; last: ' + JSON.stringify(r && Object.assign({}, r, { stdout: r.stdout.length + ' bytes' }));
       T.check('self-test: ' + what + ' ends the run of a child that ignores SIGTERM', r !== null, detail);
       T.check('self-test: ... soon after the grace', ms < 5000, detail);
       T.check('self-test: ... and the child is gone', pid > 0 && !alive, detail);
@@ -271,6 +298,34 @@ async function main() {
           !!r && r.status === null && typeof r.missing === 'string' && r.missing.includes('maxBuffer exceeded'), detail);
       }
     }
+  }
+
+  /* 9. makeSemaphore: an urgent waiter goes before every plain one,
+   * urgent ones first-in-first-out among themselves (TSK-049). */
+  {
+    const sem = H.makeSemaphore(1);
+    const order: string[] = [];
+    await sem.acquire();
+    const waits = [['plain-a', false], ['urgent-b', true], ['plain-c', false], ['urgent-d', true]].map(([name, urgent]) =>
+      sem.acquire(urgent as boolean).then(() => { order.push(name as string); sem.release(); }));
+    sem.release();
+    await Promise.all(waits);
+    T.eq('self-test: makeSemaphore wakes urgent waiters first, each kind in order', order, ['urgent-b', 'urgent-d', 'plain-a', 'plain-c']);
+  }
+  /* … and a woken urgent waiter no longer counts as waiting: an urgent one
+   * queued while it holds the slot still goes before the plain one. */
+  {
+    const sem = H.makeSemaphore(1);
+    const order: string[] = [];
+    await sem.acquire();
+    const b = sem.acquire(true).then(() => { order.push('urgent-b'); });
+    const a = sem.acquire().then(() => { order.push('plain-a'); sem.release(); });
+    sem.release();
+    await b;
+    const e = sem.acquire(true).then(() => { order.push('urgent-e'); sem.release(); });
+    sem.release();
+    await Promise.all([a, e]);
+    T.eq('self-test: makeSemaphore, an urgent waiter queued after an urgent one woke still goes first', order, ['urgent-b', 'urgent-e', 'plain-a']);
   }
 
   T.finish();

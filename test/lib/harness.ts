@@ -268,7 +268,18 @@ function renderStatus(entries: StatusEntry[], statuses?: string[]): string {
   const st = statuses || JSON.parse(DEFAULT_CONFIG).statuses;
   const w = (e: StatusEntry) => (e.priority !== undefined ? STATUS_WEIGHT[e.priority] : undefined) || 2;
   const cmp = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
-  const order = (a: StatusEntry, b: StatusEntry) => (w(b) - w(a)) || cmp(a.id, b.id) || cmp(a.path, b.path);
+  /* Mirrors derive.ts's idSortKey/compareElements: a <prefix>-<digits> id
+   * sorts on the number, not the digit string, so TSK-1000 follows
+   * TSK-999 rather than preceding it as "1" < "9" would. */
+  const idSortKey = (id: string): [string, number, string] => {
+    const m = /^([A-Za-z]+)-(\d+)$/.exec(id);
+    return m ? [m[1], parseInt(m[2], 10), ''] : ['￿', 0, id];
+  };
+  const idCmp = (a: string, b: string) => {
+    const ka = idSortKey(a), kb = idSortKey(b);
+    return cmp(ka[0], kb[0]) || (ka[1] - kb[1]) || cmp(ka[2], kb[2]);
+  };
+  const order = (a: StatusEntry, b: StatusEntry) => (w(b) - w(a)) || idCmp(a.id, b.id) || cmp(a.path, b.path);
   const line = (e: StatusEntry) => '- [' + e.id + '](' + e.path + ')' + (e.title ? ' ' + e.title : '');
   const out = ['# Status'];
   for (const s of st) {
@@ -668,19 +679,25 @@ function describeRun(r: RunResult): string {
 function runNj(args: string[], opts?: RunOpts): RunResult { return runPath(NJ, args, opts); }
 
 /** A simple counting semaphore -- `acquire()` resolves once fewer than
- * `limit` holders are active, `release()` wakes the next waiter, FIFO.
- * Used by `runNjAsync` so a test file with many concurrent legs (see
- * `runLegs` above) does not spawn an unbounded number of `nanojira`
- * processes at once (DECISIONS 210) -- `runLegs`' own `concurrency` caps
- * how many legs run at a time; this caps spawns specifically, which
- * matters when a single leg itself issues more than one. */
-function makeSemaphore(limit: number): { acquire(): Promise<void>; release(): void } {
+ * `limit` holders are active, `release()` wakes the next waiter, FIFO;
+ * `acquire(true)` queues in front of every plain waiter (a long pole a
+ * test file wants started first). Used by `runNjAsync` so a test file with
+ * many concurrent legs (see `runLegs` above) does not spawn an unbounded
+ * number of `nanojira` processes at once (DECISIONS 210) -- `runLegs`' own
+ * `concurrency` caps how many legs run at a time; this caps spawns
+ * specifically, which matters when a single leg itself issues more than
+ * one. Exported for a file that caps processes of its own the same way. */
+export function makeSemaphore(limit: number): { acquire(urgent?: boolean): Promise<void>; release(): void } {
   let active = 0;
   const waiters: Array<() => void> = [];
+  let urgentWaiting = 0;
   return {
-    acquire(): Promise<void> {
+    acquire(urgent?: boolean): Promise<void> {
       if (active < limit) { active++; return Promise.resolve(); }
-      return new Promise((resolve) => waiters.push(resolve));
+      return new Promise((resolve) => {
+        if (urgent) waiters.splice(urgentWaiting++, 0, () => { urgentWaiting--; resolve(); });
+        else waiters.push(resolve);
+      });
     },
     release(): void {
       const next = waiters.shift();
@@ -897,8 +914,8 @@ function makeCheckAssertions(checkFn: TestContext['check']): CheckAssertions {
      * § 7's problem-code table — which condition produces which code at which
      * severity — and anything beyond it is a failure, not a tolerated extra.
      *
-     * Order-insensitive on purpose: § 9 pins doctor's problem *shape*, and the
-     * ordering question belongs to `edge/order-doctor-problems-severity.ts`.
+     * Order-insensitive on purpose: § 9 pins doctor's problem *shape* and
+     * states no order for `problems[]`, so none is pinned.
      */
     sameSet(desc, actual, expected) {
       const a = [...actual].map(String).sort();

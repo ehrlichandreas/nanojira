@@ -229,7 +229,7 @@ Incomplete), `total` = elements in scope. A reading, not a ruling.
 the tree, and separately fixes sort order as priority-desc then id-asc. Which
 wins *within a level* of the tree is not stated.
 
-**Affects:** `ac-14`.
+**Affects:** `ac-23` (block AC-14, formerly `ac-14`).
 
 ## 13. `changed` and `updated` for a write that changes nothing
 
@@ -276,6 +276,10 @@ still never passes both, which is harmless now.
 (no `T`, no `Z`, an offset instead of UTC, a bare date, a non-date).
 
 **Affects:** `fault/nj-now-invalid.js`.
+
+**Resolved since:** § 12 "Clock pinning" decides both (DECISIONS 207): empty
+means unset, and a value must be a real instant. `fault/nj-now-invalid.js`
+now pins `''` (exit 0), a month 13 and trailing text after the `Z` (exit 1).
 
 ## 16. Where does a section end?
 
@@ -587,15 +591,15 @@ contract.
 **Cheap fix if the spec owner rules:** § 9 gains the word "first" ("before the
 first `## Notes`"), and a double-`## Notes` fixture becomes assertable.
 
-**Affects:** `ac/ac-20-section-writes.js` (not asserted),
-`edge/state-note-appears-once.js` (not asserted).
+**Affects:** `ac/ac-20-section-writes.js` (not asserted; nor was it in
+`edge/state-note-appears-once.js`, removed in TSK-049).
 
 **And `nj` does not agree with itself here.** The two code paths that look for
 the heading choose opposite ends: `sectionHeadingIndex` returns on its **first**
 match, while the note-appending path assigns in a loop with no `break` and so
 keeps the **last**. Given two hand-placed `## Notes` headings, `nj note` appends
 under the second while `set --acceptance` writes before the first. The header of
-`edge/state-note-appears-once.js` claims the two paths share one notion of "the
+`edge/state-note-appears-once.js` (removed in TSK-049) claimed the two paths share one notion of "the
 one `## Notes` heading" — they do not.
 
 This is not reachable through the CLI, whose uniqueness invariant holds for
@@ -622,7 +626,8 @@ The third row is the trap: putting the unknown section at the *end* looks like
 the same fixture and tests nothing. The blind form existed twice in the oracle
 (`ac/ac-20-section-writes.js` and `edge/state-note-appears-once.js`); both were
 corrected by inserting the foreign section in the middle, and both now fail
-against the mutant that disables the Notes branch.
+against the mutant that disables the Notes branch. TSK-049 removed the second
+file and moved its "Notes only, no Description" case into `ac-20`.
 
 ## 31–35. Five error-precedence collisions — RULED UNPINNED
 
@@ -781,8 +786,7 @@ element-level findings carry an `element` field — and two files are two
 elements. The two passages pull in opposite directions.
 *Reading used by the oracle:* one per participating file.
 *Affects:* `edge/exit-doctor-fix.js` (two scenarios),
-`ac/ac-19-doctor-axis.js`, `edge/fix-duplicate-mtimes.js`,
-`edge/order-doctor-problems-severity.js`. `ac/ac-13` and `ac/ac-17` sidestep
+`ac/ac-19-doctor-axis.js`, `edge/fix-duplicate-mtimes.js`. `ac/ac-13` and `ac/ac-17` sidestep
 the question by pinning only the **code** set, not the count.
 
 **42. `config:invalid` cardinality — one per backlog, or one per broken § 5 rule?**
@@ -1249,7 +1253,7 @@ existed (today's warnings go to stdout with `⚠`). Asserted as a full line.
 
 **70. The sort weight of an unknown `priority`. — RULED (DECISIONS 100):**
 the default's weight (2), tied with `normal` and ordered by id — measured v2
-behaviour, kept; asserted in `ac-14` (list) and `ac-23` C3b (STATUS.md).
+behaviour, kept; asserted in `ac-23` block AC-14 (list) and `ac-23` C3b (STATUS.md).
 *Was:* STATUS.md sections use
 `list` order, and § 9 gives weights for `urgent`, `high`, `normal`, `low` and
 a missing priority (2). A value outside that set (`unknown:priority`) has no

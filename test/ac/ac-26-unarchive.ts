@@ -48,14 +48,14 @@ const UNARCHIVED_AT = '2026-09-21T21:00:00Z';
 function J(x: unknown): string { return JSON.stringify(x === undefined ? null : x); }
 
 type Model = { dir: string; bl: string };
-type Opts = { cwd: string; env?: Record<string, string | undefined> };
+type Opts = { cwd: string; env?: Record<string, string | undefined>; input?: string };
 
 const HOME = H.freshDir('ac26-home');
 function envFor(o: Opts) {
   const env: Record<string, string | undefined> = Object.assign({ HOME }, (o && o.env) || {});
   const unset: string[] = [];
   for (const k of ['NJ_BACKLOG', 'NJ_AUTHOR', 'NJ_FAULT']) if (env[k] === undefined) unset.push(k);
-  return { cwd: o.cwd, env, unsetEnv: unset };
+  return { cwd: o.cwd, env, unsetEnv: unset, input: o.input };
 }
 function run(args: string[], o: Opts): RunResult { return H.runNj(args, envFor(o)); }
 function runJ(args: string[], o: Opts): JsonRunResult { return H.runJson(args, envFor(o)); }
@@ -145,7 +145,10 @@ const OTHERS = ['EPIC-002', 'TSK-003'];
  */
 /* Built through the real binary once per layout, then copied: the backlog
  * stores no absolute path and NJ_NOW is pinned, so every copy is
- * byte-identical to a fresh build (mtimes kept from the template; DECISIONS 209). */
+ * byte-identical to a fresh build (mtimes kept from the template; DECISIONS 209).
+ * One `new --input` plan writes the same bytes as six `new` and four
+ * `set --status=done` calls, in every layout below (checked by diff -r for
+ * TSK-049), at two spawns per layout instead of eleven. */
 const templates = new Map<string, string>();
 function template(layout?: any): string {
   const key = J(layout || null);
@@ -155,17 +158,14 @@ function template(layout?: any): string {
   const bl = path.join(dir, 'backlog');
   ok(run(['init'], { cwd: dir }), 'nj init');
   if (layout) setLayout(bl, layout);
-  const n = (args: string[]) => ok(run(['new'].concat(args), { cwd: dir, env: at(NOW) }), 'nj new ' + args.join(' '));
-  const body = ['--description=Something.', '--acceptance=- [x] It works'];
-  n(['--type=epic', '--title=Epic one', '--description=The first epic.']);
-  n(['--type=task', '--parent=EPIC-001', '--title=Task one'].concat(body));
-  n(['--type=subtask', '--parent=TSK-001', '--title=Sub one'].concat(body));
-  n(['--type=task', '--parent=EPIC-001', '--title=Task two', '--priority=high'].concat(body));
-  n(['--type=epic', '--title=Epic two', '--description=The other epic.']);
-  n(['--type=task', '--parent=EPIC-002', '--title=Task three'].concat(body));
-  for (const id of ['SUB-001', 'TSK-001', 'TSK-002', 'EPIC-001']) {
-    ok(run(['set', '--id=' + id, '--status=done'], { cwd: dir, env: at(NOW) }), 'set ' + id + ' done');
-  }
+  const body = { description: 'Something.', acceptance: '- [x] It works' };
+  const plan = [
+    { type: 'epic', title: 'Epic one', description: 'The first epic.', status: 'done', children: [
+      { type: 'task', title: 'Task one', ...body, status: 'done', children: [{ type: 'subtask', title: 'Sub one', ...body, status: 'done' }] },
+      { type: 'task', title: 'Task two', priority: 'high', ...body, status: 'done' }] },
+    { type: 'epic', title: 'Epic two', description: 'The other epic.', children: [{ type: 'task', title: 'Task three', ...body }] },
+  ];
+  ok(run(['new', '--input=-'], { cwd: dir, env: at(NOW), input: JSON.stringify(plan) }), 'nj new --input (the six elements)');
   templates.set(key, dir);
   return dir;
 }
@@ -176,6 +176,28 @@ function model(label: string, layout?: any): Model {
   return { dir, bl: path.join(dir, 'backlog') };
 }
 function archive(x: Model, id: string): JsonRunResult { return ok(runJ(['archive', '--id=' + id], { cwd: x.dir, env: at(ARCHIVED_AT) }), 'archive ' + id); }
+/* A model in a state that is only setup for the legs using it -- `steps`
+ * run once on a model() of `layout`, the result copied like model() does. */
+const states = new Map<string, string>();
+function stateModel(label: string, name: string, layout: any, steps: (x: Model) => void): Model {
+  const key = name + ' ' + J(layout || null);
+  let src = states.get(key);
+  if (!src) {
+    const x = model('ac26-state', layout);
+    steps(x);
+    states.set(key, src = x.dir);
+  }
+  const dir = H.freshDir(label);
+  fs.cpSync(src, dir, { recursive: true, preserveTimestamps: true });
+  return { dir, bl: path.join(dir, 'backlog') };
+}
+/* EPIC-001's subtree archived. */
+const archivedModel = (label: string, layout?: any) => stateModel(label, 'archived', layout, (x) => { archive(x, 'EPIC-001'); });
+/* hierarchy: EPIC-001 doing (active), TSK-001 and its subtask archived. */
+const taskArchivedModel = (label: string) => stateModel(label, 'task archived', { group: 'hierarchy' }, (x) => {
+  run(['set', '--id=EPIC-001', '--status=doing'], { cwd: x.dir, env: at(NOW) });
+  archive(x, 'TSK-001');
+});
 function unarchive(x: Model, args: string | string[], env?: Record<string, string>): JsonRunResult {
   return runJ(['unarchive'].concat(typeof args === 'string' ? ['--id=' + args] : args), { cwd: x.dir, env: Object.assign(at(UNARCHIVED_AT), env || {}) });
 }
@@ -394,13 +416,11 @@ for (const [name, layout] of [['type', null], ['hierarchy', { group: 'hierarchy'
     refused('U4 [' + name + '] an active element: refused:not_archived', x, ['--id=EPIC-002'], 'refused:not_archived');
   }
   {
-    const x = model('ac26-pa', layout);
-    archive(x, 'EPIC-001');
+    const x = archivedModel('ac26-pa', layout);
     refused('U4 [' + name + '] a task whose epic is archived: refused:parent_archived', x, ['--id=TSK-001'], 'refused:parent_archived');
   }
   {
-    const x = model('ac26-ur', layout);
-    archive(x, 'EPIC-001');
+    const x = archivedModel('ac26-ur', layout);
     const stub = name === 'type' ? 'tasks/TSK-009.md' : 'EPIC-002/TSK-009/TSK-009.md';
     mkdir(path.dirname(path.join(x.bl, stub)));
     try { fs.symlinkSync(path.join(x.dir, 'no-such-target'), path.join(x.bl, stub)); }        // § 7 file:unreadable
@@ -415,28 +435,22 @@ for (const [name, layout] of [['type', null], ['hierarchy', { group: 'hierarchy'
 }
 {
   /* exists: a folder where a file goes (type, flat), a file where a folder goes (hierarchy) */
-  const x = model('ac26-ex-type');
-  archive(x, 'EPIC-001');
+  const x = archivedModel('ac26-ex-type');
   mkdir(path.join(x.bl, 'tasks', 'TSK-002.md'));
   refused('U4 [type] a folder at a target file path: exists', x, ['--id=EPIC-001'], 'exists');
 }
 {
-  const x = model('ac26-ex-flat', { group: 'flat' });
-  archive(x, 'EPIC-001');
+  const x = archivedModel('ac26-ex-flat', { group: 'flat' });
   mkdir(path.join(x.bl, 'SUB-001.md'));
   refused('U4 [flat] a folder at a target file path: exists', x, ['--id=EPIC-001'], 'exists');
 }
 {
-  const x = model('ac26-ex-hier', { group: 'hierarchy' });
-  run(['set', '--id=EPIC-001', '--status=doing'], { cwd: x.dir, env: at(NOW) });
-  archive(x, 'TSK-001');
+  const x = taskArchivedModel('ac26-ex-hier');
   write(path.join(x.bl, 'EPIC-001', 'TSK-001'), 'a file where the task folder must go\n');
   refused('U4 [hierarchy] a file where the task folder must go: exists', x, ['--id=TSK-001'], 'exists');
 }
 {
-  const x = model('ac26-ex-merge', { group: 'hierarchy' });
-  run(['set', '--id=EPIC-001', '--status=doing'], { cwd: x.dir, env: at(NOW) });
-  archive(x, 'TSK-001');
+  const x = taskArchivedModel('ac26-ex-merge');
   mkdir(path.join(x.bl, 'EPIC-001', 'TSK-001', 'SUB-001.md'));
   refused('U4 [hierarchy] inside the merge, a folder at a target file path: exists', x, ['--id=TSK-001'], 'exists');
 }
@@ -472,8 +486,7 @@ for (const [name, layout] of [['type', null], ['hierarchy', { group: 'hierarchy'
   doctorClean(tag, x);
 }
 {
-  const x = model('ac26-mis-in', { group: 'hierarchy' });
-  archive(x, 'EPIC-001');
+  const x = archivedModel('ac26-mis-in', { group: 'hierarchy' });
   write(path.join(x.bl, 'archive', 'EPIC-001', 'EPIC-009.md'), H.element({ id: 'EPIC-009', type: 'epic', title: 'Foreign',
     status: 'done', created: NOW, updated: NOW, archived: NOW }, '# Foreign\n\n## Description\nD.\n'));
   write(path.join(idsDir(x.bl), 'EPIC-009'), '');
@@ -509,31 +522,26 @@ for (const [name, layout, archRel, want] of [
 /* DECISIONS 104 (81): unreadable → not_archived → parent_archived →
  * misplaced → exists. (unreadable-first is asserted above.) */
 {
-  const x = model('ac26-p-na-pa');
-  archive(x, 'EPIC-001');
+  const x = archivedModel('ac26-p-na-pa');
   try { fs.renameSync(path.join(x.bl, 'archive', 'TSK-002.md'), path.join(x.bl, 'tasks', 'TSK-002.md')); }
   catch (e) { T.check('fixture: bring TSK-002 back by hand', false, (e as NodeJS.ErrnoException).code + ' ' + J(places(x.bl))); }
   refused('U4 precedence: an active element under an archived parent is refused:not_archived, not parent_archived', x,
     ['--id=TSK-002'], 'refused:not_archived');
 }
 {
-  const x = model('ac26-p-pa-ex');
-  archive(x, 'EPIC-001');
+  const x = archivedModel('ac26-p-pa-ex');
   mkdir(path.join(x.bl, 'tasks', 'TSK-001.md'));
   refused('U4 precedence: parent_archived before exists', x, ['--id=TSK-001'], 'refused:parent_archived');
 }
 {
-  const x = model('ac26-p-pa-mis', { group: 'hierarchy' });
-  archive(x, 'EPIC-001');
+  const x = archivedModel('ac26-p-pa-mis', { group: 'hierarchy' });
   write(path.join(x.bl, 'archive', 'EPIC-001', 'TSK-001', 'EPIC-009.md'), H.element({ id: 'EPIC-009', type: 'epic', title: 'Foreign',
     status: 'done', created: NOW, updated: NOW, archived: NOW }, '# Foreign\n\n## Description\nD.\n'));
   write(path.join(idsDir(x.bl), 'EPIC-009'), '');
   refused('U4 precedence (hierarchy): parent_archived before misplaced', x, ['--id=TSK-001'], 'refused:parent_archived');
 }
 {
-  const x = model('ac26-p-mis-ex', { group: 'hierarchy' });
-  run(['set', '--id=EPIC-001', '--status=doing'], { cwd: x.dir, env: at(NOW) });
-  archive(x, 'TSK-001');
+  const x = taskArchivedModel('ac26-p-mis-ex');
   write(path.join(x.bl, 'archive', 'EPIC-001', 'TSK-001', 'EPIC-009.md'), H.element({ id: 'EPIC-009', type: 'epic', title: 'Foreign',
     status: 'done', created: NOW, updated: NOW, archived: NOW }, '# Foreign\n\n## Description\nD.\n'));
   write(path.join(idsDir(x.bl), 'EPIC-009'), '');
@@ -545,8 +553,7 @@ for (const [name, layout, archRel, want] of [
 /* U5 — interface: flags, targets, the § 9 read-only amendment            */
 /* ===================================================================== */
 {
-  const x = model('ac26-if');
-  archive(x, 'EPIC-001');
+  const x = archivedModel('ac26-if');
   const known = run(['unarchive', '--id=EPIC-001', '--bogus=1'], { cwd: x.dir });
   T.exit('U5 unarchive --bogus: exit 1', known, 1);
   const line = /^Known flags: (.*)$/m.exec((known.stdout || '') + '\n' + (known.stderr || ''));
@@ -619,8 +626,7 @@ for (const [name, layout] of [['type', null], ['hierarchy', { group: 'hierarchy'
 for (const [name, layout] of [['type', null], ['hierarchy', { group: 'hierarchy' }]] as [string, any][]) {
   for (const hook of ['before-rename', 'after-tmp-write']) {
     const tag = 'U6 [' + name + '] NJ_FAULT=' + hook;
-    const x = model('ac26-fault', layout);
-    archive(x, 'EPIC-001');
+    const x = archivedModel('ac26-fault', layout);
     const before = state(x.bl, SUBTREE);
     const r = unarchive(x, 'EPIC-001', { NJ_FAULT: hook });
     T.exit(tag + ': exit 1', r, 1);
@@ -667,8 +673,7 @@ function startNj(args: string[], cwd: string, env?: Record<string, string>): Pro
 (async () => {
   for (const [name, layout, arch] of [['type', null, 'archive'], ['hierarchy', { group: 'hierarchy' }, 'archive']] as [string, any, string][]) {
     const tag = 'U6 [' + name + '] NJ_FAULT=before-compare with a parallel edit';
-    const x = model('ac26-cmp', layout);
-    archive(x, 'EPIC-001');
+    const x = archivedModel('ac26-cmp', layout);
     const ready = H.faultReady('ac26-cmp');
     const done = startNj(['unarchive', '--id=EPIC-001', '--json'], x.dir, ready.env);
     // NJ_FAULT_READY (§ 12, DECISIONS 201): nj's first read is done, it holds.

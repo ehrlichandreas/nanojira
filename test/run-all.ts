@@ -114,7 +114,17 @@ if (tests.length === 0) {
  * harness keeps its fixtures on purpose: then it stays, its path is
  * printed, and what is in it is not a failure. */
 const RUN_ROOT = fs.mkdtempSync(path.join(fs.realpathSync(process.env.NJ_TEST_ROOT || '/tmp'), 'nj-run-'));
-const CHILD_ENV = Object.assign({}, process.env, { NJ_TEST_ROOT: RUN_ROOT, TMPDIR: RUN_ROOT, TEMP: RUN_ROOT, TMP: RUN_ROOT });
+/* Node's compile cache (NODE_COMPILE_CACHE, TSK-049), one per run: every
+ * test file and every nanojira it spawns compiles the same few scripts, so
+ * the first process caches them for the rest. It lives in the run root,
+ * so a run that is killed leaves it nowhere else, and it is removed before
+ * the leak sweep (also under NJ_KEEP=1: it is no fixture).
+ * NODE_DISABLE_COMPILE_CACHE=1 turns it off for a run (Node's own switch). */
+const COMPILE_CACHE = '.node-compile-cache';
+const CHILD_ENV = Object.assign({}, process.env, {
+  NJ_TEST_ROOT: RUN_ROOT, TMPDIR: RUN_ROOT, TEMP: RUN_ROOT, TMP: RUN_ROOT,
+  NODE_COMPILE_CACHE: path.join(RUN_ROOT, COMPILE_CACHE),
+});
 
 const TIMEOUT_MS = 600000;
 /* A file still running TIMEOUT_MS after it started is a FAIL, whatever it
@@ -287,6 +297,7 @@ if (cannotRun.length) {
   for (const f of cannotRun.slice(0, 5)) console.log('  ' + f);
   if (cannotRun.length > 5) console.log('  … and ' + (cannotRun.length - 5) + ' more');
 }
+fs.rmSync(path.join(RUN_ROOT, COMPILE_CACHE), { recursive: true, force: true });
 const leftover = fs.readdirSync(RUN_ROOT).sort();
 const keep = process.env.NJ_KEEP === '1' && leftover.length > 0;
 if (leftover.length) {

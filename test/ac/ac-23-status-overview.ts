@@ -17,7 +17,8 @@
  *
  * Sections: C1 init, C2 every write command in sequence, C3 link paths per
  * group, C4 problem elements, C5 stale / deleted / conflicted and read
- * commands, C6 statusFile false, C7 an unwritable STATUS.md.
+ * commands, C6 statusFile false, C7 an unwritable STATUS.md. At the end,
+ * AC-14 (list/tree order), merged in from ac-14-determinism (TSK-049).
  *
  * GOLDENS. test/golden/status-*.md are hand-written from § 4's format. The
  * intermediate states of C2 are rendered by `H.renderStatus()` — the same
@@ -583,6 +584,164 @@ for (const [how, block, unblock] of UNWRITABLE_CASES) {
     T.check(tag + ' the next doctor reports no backlog:status_stale',
       !(H.doctorSet(doc) || ['<no problems array>']).includes('backlog:status_stale:warning'), J(H.doctorSet(doc)));
   }
+}
+
+/* ---- AC-14 Determinism (merged from ac-14-determinism, TSK-049) --------
+ *
+ * § 15 AC-14: "Determinism. `list`/`tree` ordering is priority-desc,
+ * id-asc, stable across platforms and calls." § 9 "Sort order" of `list`,
+ * `tree` and bare `nj`: priority weight descending (urgent 4, high 3,
+ * normal 2, low 1, missing 2), then `id` ascending. Never filesystem order.
+ *
+ * The fixture is written in a deliberately scrambled order, so readdir()
+ * order is neither the expected one nor sorted. A missing priority weighs 2,
+ * the same as `normal` -- which is why TSK-003 sorts between TSK-002 and
+ * TSK-007. The legs only read and run concurrently.
+ *
+ * SORT GAP (TSK-049): an id's number orders as a number, not as text. The
+ * AC-14 fixture's ids all have one significant digit, so text and number
+ * agree there and nothing in the suite told the two apart; the last leg
+ * crosses a digit count (TSK-009/TSK-010, TSK-099/TSK-100,
+ * TSK-999/TSK-1000) at one priority.
+ */
+{
+  const task = (id: string, title: string, priority?: string): string => {
+    const f: Record<string, unknown> = { id, type: 'task', parent: 'EPIC-001', title, status: 'todo' };
+    if (priority) f.priority = priority;
+    f.created = NOW;
+    f.updated = NOW;
+    return H.element(f, H.completeBody(title));
+  };
+  const epic = (id: string, title: string, priority?: string): string => {
+    const f: Record<string, unknown> = { id, type: 'epic', title, status: 'todo' };
+    if (priority) f.priority = priority;
+    f.created = NOW;
+    f.updated = NOW;
+    return H.element(f, '# ' + title + '\n\n## Description\nSomething.\n');
+  };
+  const ids = (json: any): string[] => json && Array.isArray(json.entries) ? json.entries.map((e: any) => e.id) : [];
+
+  /* Files are written in this order on purpose. Note that TSK-006 is
+   * written before TSK-004 although it must sort after it: anything that
+   * reports the directory listing fails. */
+  const FILES = {
+    'tasks/TSK-006.md': task('TSK-006', 'High, written first', 'high'),
+    'tasks/TSK-003.md': task('TSK-003', 'No priority at all'),
+    'tasks/TSK-001.md': task('TSK-001', 'Low', 'low'),
+    'tasks/TSK-007.md': task('TSK-007', 'Normal', 'normal'),
+    'tasks/TSK-005.md': task('TSK-005', 'Urgent', 'urgent'),
+    'tasks/TSK-002.md': task('TSK-002', 'Normal, lower id', 'normal'),
+    'tasks/TSK-004.md': task('TSK-004', 'High, written last', 'high'),
+    'epics/EPIC-001.md': epic('EPIC-001', 'Auth', 'urgent'),
+  };
+  const TOMBSTONES = ['EPIC-001', 'TSK-001', 'TSK-002', 'TSK-003', 'TSK-004',
+    'TSK-005', 'TSK-006', 'TSK-007'];
+
+  /* urgent(4): TSK-005 -- the epic is urgent too and EPIC-001 < TSK-005
+   * high(3):   TSK-004, TSK-006
+   * normal(2): TSK-002, TSK-003 (missing priority), TSK-007
+   * low(1):    TSK-001 */
+  const EXPECTED_TASKS = ['TSK-005', 'TSK-004', 'TSK-006', 'TSK-002', 'TSK-003', 'TSK-007', 'TSK-001'];
+  const EXPECTED_ALL = ['EPIC-001'].concat(EXPECTED_TASKS);
+
+  const d = H.mkBacklog({ label: 'ac23-ac14-order', files: FILES, tombstones: TOMBSTONES });
+  const d2 = H.mkBacklog({ label: 'ac23-ac14-order2', files: FILES, tombstones: TOMBSTONES });
+  /* an unknown priority weighs as the default (DECISIONS 100, 70): § 9 names
+   * weights for the four values and a missing priority; a value outside
+   * them (`unknown:priority`) sorts with the default's 2 -- measured v2
+   * behaviour, kept. TSK-003 must land between the two normals, by id. */
+  const u = H.mkBacklog({
+    label: 'ac23-ac14-unknown-priority',
+    files: {
+      'epics/EPIC-001.md': epic('EPIC-001', 'Auth'),
+      'tasks/TSK-001.md': task('TSK-001', 'Urgent', 'urgent'),
+      'tasks/TSK-002.md': task('TSK-002', 'Normal', 'normal'),
+      'tasks/TSK-003.md': task('TSK-003', 'Weird priority', 'someday'),
+      'tasks/TSK-004.md': task('TSK-004', 'Normal too', 'normal'),
+      'tasks/TSK-005.md': task('TSK-005', 'Low', 'low'),
+    },
+    tombstones: ['EPIC-001', 'TSK-001', 'TSK-002', 'TSK-003', 'TSK-004', 'TSK-005'],
+  });
+  const GAP = ['TSK-009', 'TSK-010', 'TSK-099', 'TSK-100', 'TSK-999', 'TSK-1000'];
+  const gapFiles: Record<string, string> = { 'epics/EPIC-001.md': epic('EPIC-001', 'Auth') };
+  for (const id of GAP.slice().reverse()) gapFiles['tasks/' + id + '.md'] = task(id, 'Gap ' + id, 'normal');
+  const g = H.mkBacklog({ label: 'ac23-ac14-sort-gap', files: gapFiles, tombstones: ['EPIC-001'].concat(GAP) });
+
+  await H.runLegs([
+    /* list: priority desc, then id asc */
+    async (t: H.BufferedContext) => {
+      const [r, ra] = await Promise.all([H.runJsonAsync(['list', '--type=task'], { cwd: d }), H.runJsonAsync(['list'], { cwd: d })]);
+      t.exit('AC-14 list --type=task --json', r, 0);
+      t.eq('AC-14 list order is priority-desc, then id-asc', ids(r.json), EXPECTED_TASKS);
+      const order = ids(r.json);
+      t.check('AC-14 a missing priority weighs as much as normal (2): TSK-002 < TSK-003 < TSK-007',
+        order.indexOf('TSK-002') < order.indexOf('TSK-003') &&
+        order.indexOf('TSK-003') < order.indexOf('TSK-007'),
+        'order = ' + order.join(', '));
+      t.check('AC-14 high beats normal (TSK-006 before TSK-002)',
+        order.indexOf('TSK-006') < order.indexOf('TSK-002'), 'order = ' + order.join(', '));
+      t.check('AC-14 low sorts last (TSK-001)', order.indexOf('TSK-001') === order.length - 1,
+        'order = ' + order.join(', '));
+      t.exit('AC-14 list --json without a type filter', ra, 0);
+      t.eq('AC-14 list puts the urgent epic before the urgent task (id ascending across types)',
+        ids(ra.json), EXPECTED_ALL);
+    },
+    /* tree: same order, depth-first */
+    async (t: H.BufferedContext) => {
+      const [r, rh] = await Promise.all([H.runJsonAsync(['tree'], { cwd: d }), H.runNjAsync(['tree'], { cwd: d })]);
+      t.exit('AC-14 tree --json', r, 0);
+      t.eq('AC-14 tree is depth-first with the same sort inside a parent',
+        ids(r.json), EXPECTED_ALL);
+      t.exit('AC-14 tree (human)', rh, 0);
+      t.check('AC-14 the human tree lists the children in the same order',
+        ['TSK-005', 'TSK-004', 'TSK-006', 'TSK-002', 'TSK-003', 'TSK-007', 'TSK-001']
+          .every((id, i, all) => rh.stdout.indexOf(id) >= 0 &&
+            (i === 0 || rh.stdout.indexOf(all[i - 1]) < rh.stdout.indexOf(id))),
+        J(rh.stdout).slice(0, 400));
+    },
+    /* stable across calls: each command twice, one after the other */
+    async (t: H.BufferedContext) => {
+      const runs: [string, string[]][] = [
+        ['list', ['list']],
+        ['list --json', ['list', '--json']],
+        ['tree', ['tree']],
+        ['tree --json', ['tree', '--json']],
+      ];
+      const pairs = await Promise.all(runs.map(async ([, args]) => {
+        const a = await H.runNjAsync(args, { cwd: d });
+        const b = await H.runNjAsync(args, { cwd: d });
+        return [a, b];
+      }));
+      runs.forEach(([name], i) => {
+        const [a, b] = pairs[i];
+        t.exit('AC-14 ' + name + ' (first run)', a, 0);
+        t.check('AC-14 ' + name + ' prints byte-identical stdout on a second call',
+          a.stdout === b.stdout,
+          J(a.stdout).slice(0, 200) + '\n     vs ' + J(b.stdout).slice(0, 200));
+      });
+    },
+    /* the same fixture in another directory orders the same way */
+    async (t: H.BufferedContext) => {
+      const [r, tr] = await Promise.all([H.runJsonAsync(['list'], { cwd: d2 }), H.runJsonAsync(['tree'], { cwd: d2 })]);
+      t.exit('AC-14 list from a second copy of the fixture', r, 0);
+      t.eq('AC-14 the order does not depend on the directory or the inode numbers',
+        ids(r.json), EXPECTED_ALL);
+      t.exit('AC-14 tree from a second copy of the fixture', tr, 0);
+      t.eq('AC-14 tree order is the same in the second copy', ids(tr.json), EXPECTED_ALL);
+    },
+    async (t: H.BufferedContext) => {
+      const r = await H.runJsonAsync(['list', '--type=task'], { cwd: u });
+      t.exit('AC-14 list with an unknown priority value', r, 0);
+      t.eq('AC-14 an unknown priority sorts with the default weight, tied with normal, by id',
+        ids(r.json), ['TSK-001', 'TSK-002', 'TSK-003', 'TSK-004', 'TSK-005']);
+    },
+    async (t: H.BufferedContext) => {
+      const r = await H.runJsonAsync(['list', '--type=task'], { cwd: g });
+      t.exit('AC-14 list over the sort-gap fixture', r, 0);
+      t.eq('AC-14 sort gap: the id number orders as a number across a digit count (TSK-009 < TSK-010 < TSK-099 < TSK-100 < TSK-999 < TSK-1000)',
+        ids(r.json), GAP);
+    },
+  ], { concurrency: 6 });
 }
 
 T.finish();

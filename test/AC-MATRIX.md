@@ -51,9 +51,9 @@ says so.
 | 9 | Atomicity | `ac/ac-09-atomicity.js` + `fault/nj-fault-points.js` | **pass** | |
 | 10 | Dependencies | `ac/ac-10-dependencies.js` | **pass** | |
 | 11 | Archive rules | `ac/ac-11-archive-rules.js` + `edge/rm-and-archive-refusals.js` | **pass** | `AMBIGUITIES.md` 7 |
-| 12 | Discovery | `ac/ac-12-discovery.js` | **pass** | |
+| 12 | Discovery | `ac/ac-21-backlog-location.js` (block AC-12) | **pass** | |
 | 13 | JSON contract | `ac/ac-13-json-contract.js` | **pass** | `AMBIGUITIES.md` 11, 13 |
-| 14 | Determinism | `ac/ac-14-determinism.js` | **pass** | `AMBIGUITIES.md` 12 |
+| 14 | Determinism | `ac/ac-23-status-overview.js` (block AC-14) | **pass** | `AMBIGUITIES.md` 12 |
 | 15 | No dependencies | `ac/ac-15-no-dependencies.js` | **pass** | **partially covered** — "without network" is not observable without a sandbox (`AMBIGUITIES.md` 21) |
 | 16 | Language | `ac/ac-16-language.js` | **pass** | `AMBIGUITIES.md` 10 |
 | 17 | Configuration (extended by spec v3) | `ac/ac-17-configuration.js` | **fail**, expected | v2 half (statuses) green; the v3 layout half (§ 5 layout block: unknown key, group, folder-name pattern, duplicates, ID shape, `backlog`, case-insensitivity, `statusFile`; valid partial blocks; no block = explicit defaults) is written before V3-2, plus `--fix` writing nothing while `config:invalid` holds (D93 F3): 377 of 552 fail against c3-baseline, no crash. `DECISIONS.md` 91 B13/B14, 92 Q1, 93 F3; **D102 (no placement codes while config:invalid): 20 checks red by design against ccbc951 until the V3-2 follow-up**. The `COMMANDS` array (D128) now covers every command, including `unarchive`/`claim`/`release` (v3.1, already implemented, pass) and `check` (v3.2, not yet — 23 of 864 checks fail against the current `dist/nj`, every one a `check` leg) |
@@ -133,7 +133,7 @@ separately so a green AC row can never be mistaken for full coverage.
 | `done` with open children | `edge/done-open-children.js` | **pass** | incl. `--force` does not bypass |
 | `rm` / `archive` refusals | `edge/rm-and-archive-refusals.js` | **pass** | |
 | partial tombstone loss | `edge/tombstone-partial-loss.js` | **pass** | the *warning*, not the error |
-| acceptance-section shapes | `edge/acceptance-section-shapes.js` | **pass** | `AMBIGUITIES.md` (boundary) |
+| acceptance-section shapes | `ac/ac-05-empty-sections.js` (SHAPES) | **pass** | `AMBIGUITIES.md` (boundary) |
 | frontmatter grammar | `edge/frontmatter-grammar.js` | **pass** | `AMBIGUITIES.md` 9 |
 
 ## Running the matrix

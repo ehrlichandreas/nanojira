@@ -28,6 +28,14 @@ import path from 'path';
 import * as H from '../lib/harness.ts';
 const T = H.T;
 
+/* Every section below is a runLegs leg (DECISIONS 210): each builds and
+ * touches only its own fixture, so all of them overlap in wall time, and
+ * runLegs flushes their checks in declared order -- the check sequence is
+ * the one the serial file produced. */
+type Ctx = H.BufferedContext;
+const LEGS: Array<(t: Ctx) => Promise<unknown>> = [];
+function leg(fn: (t: Ctx) => Promise<unknown>): void { LEGS.push(fn); }
+
 /* Stringify for failure details: never throws on undefined. Extra args
  * (as passed by config()/layoutConfig() below, in the style of
  * JSON.stringify's replacer/indent) are accepted but intentionally ignored —
@@ -135,7 +143,7 @@ function taskFixture(id: string, title: string, status: string, parent?: string)
  * leg is unchanged from the original serial body; runLegs flushes legs in
  * their declared (array) order, so the overall check sequence this produces
  * is byte-identical to the old serial loop's. */
-await H.runLegs(INVALID.map((bad) => async (t: H.BufferedContext) => {
+for (const bad of INVALID) leg(async (t) => {
   const d = H.mkBacklog({
     label: 'ac17-' + bad.label.replace(/[^a-z0-9]+/gi, '-'),
     config: config(bad.statuses),
@@ -191,7 +199,7 @@ await H.runLegs(INVALID.map((bad) => async (t: H.BufferedContext) => {
     J(j).slice(0, 300));
   await noOverviewCreated(t, 'config ' + bad.label, d);
   return null;
-}));
+});
 
 /* ---- v3: the layout block (§ 5) ------------------------------------------ */
 
@@ -256,7 +264,7 @@ function fixtureWith(label: string, cfg: string) {
 /* Same independence argument as the INVALID legs above: each `bad` case
  * owns its own fixture, so the 17 iterations convert to runLegs legs too
  * (DECISIONS 210). */
-await H.runLegs(INVALID_LAYOUT.map((bad) => async (t: H.BufferedContext) => {
+for (const bad of INVALID_LAYOUT) leg(async (t) => {
   const d = fixtureWith(bad.label, layoutConfig(bad.layout));
   const before = snapshot(path.join(d, 'backlog'));
 
@@ -279,7 +287,7 @@ await H.runLegs(INVALID_LAYOUT.map((bad) => async (t: H.BufferedContext) => {
   t.exit('layout: doctor (human) exits 2 (' + bad.label + ')', await H.runNjAsync(['doctor'], { cwd: d }), 2);
   await noOverviewCreated(t, 'layout: ' + bad.label, d);
   return null;
-}));
+});
 
 /* An unknown key INSIDE `layout`/`layout.folders` (DECISIONS 166, amending
  * the original pre-v3.7 behaviour, where these two cases lived in
@@ -290,18 +298,18 @@ const UNKNOWN_KEY_LAYOUT = [
   { label: 'unknown key inside layout.folders',
     layout: { group: 'type', folders: Object.assign({}, FOLDERS, { docs: 'docs' }) } },
 ];
-for (const bad of UNKNOWN_KEY_LAYOUT) {
+for (const bad of UNKNOWN_KEY_LAYOUT) leg(async (t) => {
   const d = fixtureWith(bad.label, layoutConfig(bad.layout));
-  const r = H.runJson(['list'], { cwd: d });
-  T.exit('layout: list still exits 0 (' + bad.label + ')', r, 0);
+  const r = await H.runJsonAsync(['list'], { cwd: d });
+  t.exit('layout: list still exits 0 (' + bad.label + ')', r, 0);
 
-  const rj = H.runJson(['doctor'], { cwd: d });
-  T.exit('layout: doctor exits 0 (warning only, ' + bad.label + ')', rj, 0);
-  T.check('layout: doctor reports config:unknown_key (' + bad.label + ')',
+  const rj = await H.runJsonAsync(['doctor'], { cwd: d });
+  t.exit('layout: doctor exits 0 (warning only, ' + bad.label + ')', rj, 0);
+  t.check('layout: doctor reports config:unknown_key (' + bad.label + ')',
     (H.doctorSet(rj) || []).includes('config:unknown_key:warning'), J(rj.json && rj.json.problems));
-  T.check('layout: config:invalid is NOT reported (' + bad.label + ')',
+  t.check('layout: config:invalid is NOT reported (' + bad.label + ')',
     !(H.doctorSet(rj) || []).includes('config:invalid:error'), J(rj.json && rj.json.problems));
-}
+});
 
 /* Valid layout blocks: every part is optional (§ 5). The elements lie in
  * the type folders, so under `flat` they are misplaced — but the
@@ -316,34 +324,34 @@ const VALID_LAYOUT = [
   { label: 'a folders subset (archive only)', layout: { group: 'type', folders: { archive: 'shelf' } } },
   { label: 'an empty folders object', layout: { folders: {} } },
 ];
-for (const ok of VALID_LAYOUT) {
+for (const ok of VALID_LAYOUT) leg(async (t) => {
   const d = fixtureWith('ok-' + ok.label, layoutConfig(ok.layout));
-  const r = H.runJson(['list'], { cwd: d });
-  T.exit('layout: a valid layout block is accepted by list (' + ok.label + ')', r, 0);
-  const rj = H.runJson(['doctor'], { cwd: d });
-  T.check('layout: doctor raises no config:invalid (' + ok.label + ')',
+  const r = await H.runJsonAsync(['list'], { cwd: d });
+  t.exit('layout: a valid layout block is accepted by list (' + ok.label + ')', r, 0);
+  const rj = await H.runJsonAsync(['doctor'], { cwd: d });
+  t.check('layout: doctor raises no config:invalid (' + ok.label + ')',
     Array.isArray(rj.json && rj.json.problems) && !rj.json.problems.some((p: any) => p.code === 'config:invalid'),
     (rj.parseError || J(rj.json)).slice(0, 300));
-}
+});
 
 /* "A configuration without `layout` is valid and behaves exactly like the
  * defaults": the same backlog, once without `layout` and once with the
  * block `nj init` writes (§ 5), answers every read identically. */
-{
+leg(async (t) => {
   const DEFAULT_LAYOUT = { group: 'type', folders: FOLDERS, statusFile: true };
   const without = fixtureWith('default-without', config(['todo', 'doing', 'blocked', 'review', 'done']));
   const withBlock = fixtureWith('default-with', layoutConfig(DEFAULT_LAYOUT));
   const mask = (x: unknown, d: string) => J(x).split(fs.realpathSync(path.join(d, 'backlog'))).join('<BL>')
     .split(path.join(d, 'backlog')).join('<BL>');
   for (const args of [[], ['list'], ['list', '--all'], ['tree'], ['show', '--id=TSK-001'], ['doctor']]) {
-    const a = H.runJson(args, { cwd: without });
-    const b = H.runJson(args, { cwd: withBlock });
+    const a = await H.runJsonAsync(args, { cwd: without });
+    const b = await H.runJsonAsync(args, { cwd: withBlock });
     const label = args.join(' ') || 'bare nj';
-    T.exit('layout: ' + label + ' with the default layout block exits like without it', b, a.status as number);
-    T.eq('layout: ' + label + ' answers the same with and without the default layout block',
+    t.exit('layout: ' + label + ' with the default layout block exits like without it', b, a.status as number);
+    t.eq('layout: ' + label + ' answers the same with and without the default layout block',
       mask(b.json, withBlock), mask(a.json, without));
   }
-}
+});
 
 /* ---- § 14 / DECISIONS 93 F3: --fix writes nothing while config:invalid --- */
 
@@ -352,27 +360,27 @@ for (const ok of VALID_LAYOUT) {
 for (const [label, cfg] of [
   ['invalid statuses', config(['todo', 'done', 'doing'])],
   ['invalid layout block', layoutConfig({ group: 'tree' })],
-]) {
+]) leg(async (t) => {
   const d = fixtureWith('fix-' + label, cfg);
   fs.rmSync(path.join(d, 'backlog', H.IDS_REL, 'TSK-001'));
   const before = snapshot(path.join(d, 'backlog'));
-  const r = H.runJson(['doctor', '--fix'], { cwd: d });
-  T.exit('--fix on an invalid config (' + label + '): exit 2', r, 2);
+  const r = await H.runJsonAsync(['doctor', '--fix'], { cwd: d });
+  t.exit('--fix on an invalid config (' + label + '): exit 2', r, 2);
   const changed = changedFiles(before, snapshot(path.join(d, 'backlog')));
-  T.check('--fix on an invalid config writes nothing (' + label + ')',
+  t.check('--fix on an invalid config writes nothing (' + label + ')',
     changed.length === 0, 'changed: ' + changed.join(', '));
-}
-{
+});
+leg(async (t) => {
   /* the F3 scenario: --backlog one level too high, at a project directory */
   const d = fixtureWith('fix-project-dir', config(['todo', 'doing', 'blocked', 'review', 'done']));
   fs.writeFileSync(path.join(d, 'README.md'), '# A project\n');
   const before = snapshot(d);
-  const r = H.runJson(['doctor', '--fix', '--backlog=' + d], { cwd: d });
-  T.exit('--fix with --backlog at a project directory: exit 2 (no configuration there)', r, 2);
+  const r = await H.runJsonAsync(['doctor', '--fix', '--backlog=' + d], { cwd: d });
+  t.exit('--fix with --backlog at a project directory: exit 2 (no configuration there)', r, 2);
   const changed = changedFiles(before, snapshot(d));
-  T.check('--fix with --backlog at a project directory writes nothing into it',
+  t.check('--fix with --backlog at a project directory writes nothing into it',
     changed.length === 0, 'changed: ' + changed.join(', '));
-}
+});
 
 /* ---- DECISIONS 102: no placement judgement while config:invalid ------------
  * § 5 (amended): "While the configuration is invalid (`config:invalid`), no
@@ -432,46 +440,49 @@ const PLACEMENT: PlacementCase[] = [
     files: { 'EPIC-001.md': E1, 'TSK-001.md': T1, 'TSK-002.md': T2 } },
 ];
 const LOCATION = ['type:folder', 'layout:misplaced'];
-for (const c of PLACEMENT) {
+for (const c of PLACEMENT) leg(async (t) => {
   const tag = 'D102 [' + c.label + ']';
   const d = H.mkBacklog({ label: 'ac17-d102', config: layoutConfig(c.valid), files: c.files,
     tombstones: ['EPIC-001', 'TSK-001', 'TSK-002'] });
   const bl = path.join(d, 'backlog');
-  const ok = H.runJson(['doctor'], { cwd: d });
-  T.exit(tag + ' fixture: with the valid layout, doctor exits 0', ok, 0);
-  T.eq(tag + ' fixture: with the valid layout, every file is at its place', H.doctorSet(ok), []);
+  const ok = await H.runJsonAsync(['doctor'], { cwd: d });
+  t.exit(tag + ' fixture: with the valid layout, doctor exits 0', ok, 0);
+  t.eq(tag + ' fixture: with the valid layout, every file is at its place', H.doctorSet(ok), []);
 
   fs.writeFileSync(path.join(bl, H.CONFIG_REL), layoutConfig(c.invalid));
   const tree = mdTree(bl);
 
-  const rj = H.runJson(['doctor'], { cwd: d });
-  T.exit(tag + ' doctor exits 2', rj, 2);
+  const rj = await H.runJsonAsync(['doctor'], { cwd: d });
+  t.exit(tag + ' doctor exits 2', rj, 2);
   const probs = (rj.json && Array.isArray(rj.json.problems)) ? rj.json.problems : [];
-  T.check(tag + ' doctor reports no type:folder / layout:misplaced (§ 5, D102)',
+  t.check(tag + ' doctor reports no type:folder / layout:misplaced (§ 5, D102)',
     Array.isArray(rj.json && rj.json.problems) && !probs.some((p: any) => LOCATION.includes(p.code)),
     J(probs.filter((p: any) => LOCATION.includes(p.code))).slice(0, 300));
-  T.sameSet(tag + ' doctor reports exactly config:invalid',
+  t.sameSet(tag + ' doctor reports exactly config:invalid',
     [...new Set(H.doctorSet(rj) || ['<no problems array>'])], ['config:invalid:error']);
-  const rh = H.runNj(['doctor'], { cwd: d });
+  const rh = await H.runNjAsync(['doctor'], { cwd: d });
   /* the only finding is backlog-level, so the human report names no element
    * — independent of how a location finding would be worded */
-  T.check(tag + ' the human doctor names no element (no per-file placement finding)',
+  t.check(tag + ' the human doctor names no element (no per-file placement finding)',
     !/\b(EPIC|TSK)-00[12]\b/.test(rh.stdout), J(rh.stdout).slice(0, 300));
 
   /* list refuses on an invalid configuration (§ 5), so its entries — and
    * their _problems — cannot carry a location code either */
-  const ls = H.runJson(['list'], { cwd: d });
-  T.exit(tag + ' list --json exits 1', ls, 1);
-  T.eq(tag + ' list --json: invalid_config, not a read with entries',
+  const ls = await H.runJsonAsync(['list'], { cwd: d });
+  t.exit(tag + ' list --json exits 1', ls, 1);
+  t.eq(tag + ' list --json: invalid_config, not a read with entries',
     J({ error: ls.json && ls.json.error, entries: !!(ls.json && ls.json.entries) }),
     J({ error: 'invalid_config', entries: false }));
 
-  const fix = H.runJson(['doctor', '--fix'], { cwd: d });
-  T.exit(tag + ' doctor --fix exits 2 and moves nothing', fix, 2);
-  T.eq(tag + ' doctor --fix left every file where it was', mdTree(bl), tree);
-  T.check(tag + ' doctor --fix reports no location code either',
+  const fix = await H.runJsonAsync(['doctor', '--fix'], { cwd: d });
+  t.exit(tag + ' doctor --fix exits 2 and moves nothing', fix, 2);
+  t.eq(tag + ' doctor --fix left every file where it was', mdTree(bl), tree);
+  t.check(tag + ' doctor --fix reports no location code either',
     !((fix.json && fix.json.problems) || []).some((p: any) => LOCATION.includes(p.code)),
     J(fix.json && fix.json.problems).slice(0, 300));
-}
+});
+
+/* concurrency: legs in flight; runNjAsync still caps the spawns at 4. */
+await H.runLegs(LEGS, { concurrency: 8 });
 
 T.finish();

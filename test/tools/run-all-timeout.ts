@@ -120,10 +120,10 @@ const GC = "import fs from 'node:fs';\nprocess.on('SIGTERM', () => {});\n" +
 const src = fs.readFileSync(RUN_ALL, 'utf8');
 T.check('R: run-all has a per-file timeout constant', /^const TIMEOUT_MS = \d+;$/m.test(src), '');
 T.check('R: run-all has a kill grace constant', /^const KILL_GRACE_MS = \d+;$/m.test(src), '');
-const patched = src.replace(/^const TIMEOUT_MS = \d+;$/m, 'const TIMEOUT_MS = 1500;')
-  .replace(/^const KILL_GRACE_MS = \d+;$/m, 'const KILL_GRACE_MS = 1000;');
 
-function runCase(label: string, args: string[]) {
+function runCase(label: string, args: string[], timeoutMs: number, graceMs: number) {
+  const patched = src.replace(/^const TIMEOUT_MS = \d+;$/m, 'const TIMEOUT_MS = ' + timeoutMs + ';')
+    .replace(/^const KILL_GRACE_MS = \d+;$/m, 'const KILL_GRACE_MS = ' + graceMs + ';');
   const base = H.freshDir('t028-' + label);
   fs.mkdirSync(path.join(base, 'test', 'ac'), { recursive: true });
   fs.writeFileSync(path.join(base, 'test', 'run-all.ts'), patched);
@@ -169,19 +169,40 @@ function killLeftovers(base: string) {
     if (cmd.includes(base + '/test/') && Number(p) !== process.pid) { try { process.kill(Number(p), 'SIGKILL'); } catch (e) { /* gone */ } }
   }
 }
+/* Under load, the grandchild (test/gc.mjs, spawned by d-orphan.ts and
+ * e-holder.ts) can take longer to actually start and write its pid file
+ * than the whole shortened run-all pass (timeout + kill grace + the 2 s
+ * poll in grandchildState): run-all kills the file -- and whatever it
+ * had managed to spawn by then -- before the grandchild ever wrote its
+ * pid, so grandchildState reports 'never started', not 'gone'. That is
+ * the "started a grandchild, ignores SIGTERM" precondition not holding
+ * for this try, not a finding about the process-group kill (TSK-029).
+ * Retried with both constants doubled, up to 3 tries; the asserts below
+ * read the actually-used timeoutMs back out of `c`, so they still check
+ * exactly the same things on whichever try's result is taken. */
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 for (const [label, args] of [['R1 pooled', ['--jobs=2']], ['R2 serial', ['--jobs=1']]] as [string, string[]][]) {
-  const c = runCase(label.split(' ')[0].toLowerCase(), args);
-  const tail = ('exit ' + c.status + ', ' + c.ms + ' ms\n' + c.out).split('\n').slice(-14).join('\n');
-  T.eq(label + ': run-all exits 1', c.status, 1);
-  T.check(label + ': only the passing file passes', /^passed\s+1 \/ 5$/m.test(c.out), tail);
-  T.check(label + ': the file that deferred SIGTERM and printed PASS is a FAIL', /^  ac\/b-defer\.ts$/m.test(c.out), tail);
-  T.check(label + ': the file that ignores SIGTERM is a FAIL', /^  ac\/c-ignore\.ts$/m.test(c.out), tail);
+  const MAX_TRIES = 3;
+  let timeoutMs = 1500, graceMs = 1000, c: ReturnType<typeof runCase>, tries = 0;
+  const history: string[] = [];
+  for (; tries < MAX_TRIES; tries++) {
+    c = runCase(label.split(' ')[0].toLowerCase() + '-try' + tries, args, timeoutMs, graceMs);
+    history.push('try ' + tries + ': timeout=' + timeoutMs + ' grace=' + graceMs + ' d=' + c.alive.d + ' e=' + c.alive.e);
+    if (c.alive.d !== 'never started' && c.alive.e !== 'never started') break;
+    timeoutMs *= 2; graceMs *= 2;
+  }
+  const tail = history.join(' | ') + '\nexit ' + c!.status + ', ' + c!.ms + ' ms\n' + c!.out.split('\n').slice(-14).join('\n');
+  T.eq(label + ': run-all exits 1', c!.status, 1);
+  T.check(label + ': only the passing file passes', /^passed\s+1 \/ 5$/m.test(c!.out), tail);
+  T.check(label + ': the file that deferred SIGTERM and printed PASS is a FAIL', /^  ac\/b-defer\.ts$/m.test(c!.out), tail);
+  T.check(label + ': the file that ignores SIGTERM is a FAIL', /^  ac\/c-ignore\.ts$/m.test(c!.out), tail);
   T.check(label + ': the files that started a grandchild are FAILs',
-    /^  ac\/d-orphan\.ts$/m.test(c.out) && /^  ac\/e-holder\.ts$/m.test(c.out), tail);
-  T.check(label + ': all four name the timeout', (c.out.match(/timed out after 1\.5 s/g) || []).length === 4, tail);
-  T.check(label + ': and the run ends soon, not after the sleep or never', c.ms < 25000, tail);
-  T.eq(label + ': the orphaned grandchild that ignores SIGTERM is gone', c.alive.d, 'gone');
-  T.eq(label + ': the grandchild holding the pipes is gone', c.alive.e, 'gone');
+    /^  ac\/d-orphan\.ts$/m.test(c!.out) && /^  ac\/e-holder\.ts$/m.test(c!.out), tail);
+  T.check(label + ': all four name the timeout',
+    (c!.out.match(new RegExp(esc('timed out after ' + (timeoutMs / 1000) + ' s'), 'g')) || []).length === 4, tail);
+  T.check(label + ': and the run ends soon, not after the sleep or never', c!.ms < 25000, tail);
+  T.eq(label + ': the orphaned grandchild that ignores SIGTERM is gone', c!.alive.d, 'gone');
+  T.eq(label + ': the grandchild holding the pipes is gone', c!.alive.e, 'gone');
 }
 
 {

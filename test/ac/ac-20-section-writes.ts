@@ -108,6 +108,50 @@ function mkTask(label: string, body: string) {
 }
 
 {
+  /* Notes present, NO Description section at all (moved here from
+   * edge/state-note-appears-once, TSK-049; it closed a gap in the insert
+   * rule). § 9: acceptance is inserted "before ## Notes when present" --
+   * full stop, not "before Notes, provided a description section also
+   * exists". If the insertion point falls back to "after description" (not
+   * found) or "at the end" instead of the Notes anchor, acceptance lands
+   * after Notes. The fixture must not already carry an `## Acceptance
+   * Criteria` section -- with one present, `set --acceptance` replaces it in
+   * place and the insertion-point logic asserted here never runs at all. */
+  const d = H.mkBacklog({
+    label: 'ac20-ins-notes-no-description',
+    files: {
+      'epics/EPIC-001.md': H.element({
+        id: 'EPIC-001', type: 'epic', title: 'Auth', status: 'todo',
+        created: C, updated: C,
+      }, H.completeBody('Auth')),
+      'tasks/TSK-001.md': H.element({
+        id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'Notes, no description',
+        status: 'todo', created: C, updated: C,
+      }, '# Notes, no description\n\n## Notes\n' +
+        '- 2026-09-20T10:00:00Z human: Pre-existing finding\n'),
+    },
+    tombstones: ['EPIC-001', 'TSK-001'],
+  });
+  const rs = H.runNj(['set', '--id=TSK-001', '--acceptance=- [ ] Criterion'],
+    { cwd: d, env: { NJ_NOW: LATER } });
+  T.exit('set --acceptance on a body with Notes but no Description', rs, 0);
+
+  const body = fs.readFileSync(taskPath(d), 'utf8');
+  const lines = body.split('\n');
+  T.eq('## Notes still appears exactly once', lines.filter((l) => l === '## Notes').length, 1);
+  T.contains('the acceptance section was written', body, '## Acceptance Criteria');
+  T.contains('the pre-existing note survived', body, 'Pre-existing finding');
+  T.check('no ## Description section was invented',
+    !body.includes('## Description'), JSON.stringify(body));
+
+  const accIdx = lines.indexOf('## Acceptance Criteria');
+  const notesIdx = lines.indexOf('## Notes');
+  T.check('acceptance sits before ## Notes even with no ## Description at all',
+    accIdx >= 0 && notesIdx >= 0 && accIdx < notesIdx,
+    'acceptance at ' + accIdx + ', notes at ' + notesIdx);
+}
+
+{
   /* § 9 l. 486–487: "`description` after the H1 block (or at the start of the
    * body when there is no H1, after any leading blank lines)" — not glued onto
    * the closing frontmatter '---'. */

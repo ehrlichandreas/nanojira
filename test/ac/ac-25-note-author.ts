@@ -28,11 +28,16 @@
  * dependence on the storage layout (V3-4 lands before v3.1).
  *
  * Written before v3.1 exists: red everywhere until it is implemented.
+ *
+ * Speed (TSK-049): every case below owns its backlog copies, so the cases
+ * run as runLegs legs (DECISIONS 210) with the async spawns; checks flush
+ * in the order below, the same as the serial file.
  */
 import fs from 'fs';
 import path from 'path';
 import * as H from '../lib/harness.ts';
 const T = H.T;
+type Ctx = H.BufferedContext;
 
 H.requireNj();
 
@@ -52,8 +57,8 @@ function envFor(o: RunOptsIn) {
   for (const k of ['NJ_AUTHOR', 'NJ_BACKLOG']) if (env[k] === undefined) unset.push(k);
   return { cwd: o.cwd, env, unsetEnv: unset };
 }
-function run(args: string[], o: RunOptsIn) { return H.runNj(args, envFor(o)); }
-function runJ(args: string[], o: RunOptsIn) { return H.runJson(args, envFor(o)); }
+function run(args: string[], o: RunOptsIn) { return H.runNjAsync(args, envFor(o)); }
+function runJ(args: string[], o: RunOptsIn) { return H.runJsonAsync(args, envFor(o)); }
 const later = (env?: EnvMap) => Object.assign({ NJ_NOW: LATER }, env || {});
 
 /* ---- fixtures (nj init / nj new only) --------------------------------- */
@@ -75,7 +80,8 @@ function places(bl: string): Record<string, string> {
 /* A backlog with EPIC-001 and TSK-001; `assignee` optional. Built through
  * the real binary once per assignee, then copied: the backlog stores no
  * absolute path and NJ_NOW is pinned, so every copy is byte-identical to a
- * fresh build (mtimes kept from the template; DECISIONS 209). */
+ * fresh build (mtimes kept from the template; DECISIONS 209). Both
+ * templates are built before the legs start. */
 const templates = new Map<string, string>();
 function template(assignee?: string | null): string {
   const key = J(assignee || null);
@@ -89,12 +95,14 @@ function template(assignee?: string | null): string {
       .concat(assignee ? ['--assignee=' + assignee] : []),
   ];
   for (const s of steps) {
-    const r = run(s, { cwd: dir });
+    const r = H.runNj(s, envFor({ cwd: dir }));
     if (r.missing || r.status !== 0) T.check('fixture: nj ' + s.join(' '), false, r.status + ' ' + J(r.stderr));
   }
   templates.set(key, dir);
   return dir;
 }
+template('alice');
+template(null);
 function backlog(label: string, assignee?: string | null): { dir: string; bl: string } {
   const src = template(assignee);
   const dir = H.freshDir(label);
@@ -125,69 +133,29 @@ const noteLine = (signer: string) => '- ' + LATER + ' ' + signer + ': ' + TEXT;
  * Note in two twin backlogs — with `env` and without NJ_AUTHOR — and
  * require the first file to be the second with only the signer replaced.
  */
-function signs(desc: string, env: EnvMap | undefined, assignee: string | null | undefined, expectSigner: string) {
+async function signs(t: Ctx, desc: string, env: EnvMap | undefined, assignee: string | null | undefined, expectSigner: string) {
   const a = backlog('ac25-a', assignee);
   const b = backlog('ac25-b', assignee);
-  const ra = runJ(['note', '--id=TSK-001', TEXT], { cwd: a.dir, env: later(env) });
-  const rb = runJ(['note', '--id=TSK-001', TEXT], { cwd: b.dir, env: later() });
-  T.exit(desc + ': note exit 0', ra, 0);
-  T.check(desc + ': --json result {ok:true, changed:["body"]} (§ 10)',
+  const [ra, rb] = await Promise.all([
+    runJ(['note', '--id=TSK-001', TEXT], { cwd: a.dir, env: later(env) }),
+    runJ(['note', '--id=TSK-001', TEXT], { cwd: b.dir, env: later() }),
+  ]);
+  t.exit(desc + ': note exit 0', ra, 0);
+  t.check(desc + ': --json result {ok:true, changed:["body"]} (§ 10)',
     !!ra.json && ra.json.ok === true && J(ra.json.changed) === J(['body']), J(ra.json).slice(0, 300));
   const control = bytes(taskFile(b));
   const baseSigner = assignee || '?';
-  T.check(desc + ': fixture — the v3 control signs with ' + J(baseSigner), rb.status === 0 && !!control && control.includes(noteLine(baseSigner) + '\n'),
+  t.check(desc + ': fixture — the v3 control signs with ' + J(baseSigner), rb.status === 0 && !!control && control.includes(noteLine(baseSigner) + '\n'),
     J(control));
   const want = control === null ? null : control.replace(noteLine(baseSigner) + '\n', noteLine(expectSigner) + '\n');
-  T.eq(desc + ': signed ' + J(expectSigner) + ', the file otherwise byte-identical to the v3 note', bytes(taskFile(a)), want);
+  t.eq(desc + ': signed ' + J(expectSigner) + ', the file otherwise byte-identical to the v3 note', bytes(taskFile(a)), want);
   return a;
 }
+const signsLeg = (desc: string, env: EnvMap | undefined, assignee: string | null | undefined, expectSigner: string) =>
+  async (t: Ctx) => { await signs(t, desc, env, assignee, expectSigner); };
 
-/* ===================================================================== */
-/* N1 — NJ_AUTHOR signs, with or without assignee; the value is trimmed    */
-/* ===================================================================== */
-
-{
-  const a = signs('N1 NJ_AUTHOR=reviewer, element with an assignee', { NJ_AUTHOR: 'reviewer' }, 'alice', 'reviewer');
-  const t = bytes(taskFile(a)) || '';
-  T.check('N1 NJ_AUTHOR never changes assignee: assignee is still alice', /^assignee: alice$/m.test(t), J(t));
-  const s = runJ(['show', '--id=TSK-001'], { cwd: a.dir });
-  const e = s.json && Array.isArray(s.json.entries) ? s.json.entries[0] : null;
-  T.eq('N1 show: assignee is still alice', e && e.assignee, 'alice');
-}
-{
-  const a = signs('N1 NJ_AUTHOR=reviewer, element without assignee', { NJ_AUTHOR: 'reviewer' }, null, 'reviewer');
-  T.check('N1 NJ_AUTHOR never sets assignee: no assignee key appears', !/^assignee:/m.test(bytes(taskFile(a)) || ''),
-    J(bytes(taskFile(a))));
-}
-signs('N1 the value is trimmed (spaces)', { NJ_AUTHOR: '   reviewer  ' }, 'alice', 'reviewer');
-signs('N1 the value is trimmed (tabs)', { NJ_AUTHOR: '\treviewer\t' }, null, 'reviewer');
-signs('N1 inner spaces are kept', { NJ_AUTHOR: 'code reviewer' }, null, 'code reviewer');
-signs('N1 a non-ASCII name is signed as given', { NJ_AUTHOR: 'Rüdiger 漢字 🚀' }, 'alice', 'Rüdiger 漢字 🚀');
-signs('N1 a name like the assignee changes nothing but is still the signer', { NJ_AUTHOR: 'alice' }, 'alice', 'alice');
-/* DECISIONS 104 (76): only spaces and tabs are trimmed; Unicode spaces are
- * literal characters of the name. */
-signs('N1 Unicode spaces are literal, not trimmed (DECISIONS 104)', { NJ_AUTHOR: '\u00a0reviewer\u2003' }, 'alice', '\u00a0reviewer\u2003');
-signs('N1 a name of one NBSP is a valid name (DECISIONS 104)', { NJ_AUTHOR: ' \u00a0 ' }, null, '\u00a0');
-
-/* Unset or empty: exactly v3 (§ 0: empty counts as unset, like NJ_BACKLOG). */
-signs('N2 NJ_AUTHOR empty counts as unset: the assignee signs', { NJ_AUTHOR: '' }, 'alice', 'alice');
-signs('N2 NJ_AUTHOR empty counts as unset: "?" signs', { NJ_AUTHOR: '' }, null, '?');
-
-/* Two notes, two signers: consecutive lines directly below the heading (§ 10). */
-{
-  const x = backlog('ac25-two', 'alice');
-  run(['note', '--id=TSK-001', 'first'], { cwd: x.dir, env: later({ NJ_AUTHOR: 'reviewer' }) });
-  run(['note', '--id=TSK-001', 'second'], { cwd: x.dir, env: later() });
-  T.check('N3 two notes: the acting name, then the assignee, as consecutive lines',
-    (bytes(taskFile(x)) || '').includes('## Notes\n- ' + LATER + ' reviewer: first\n- ' + LATER + ' alice: second\n'),
-    J(bytes(taskFile(x))));
-}
-
-/* ===================================================================== */
-/* N4 — an invalid name: note exits 1 with invalid_env, writes nothing    */
-/* ===================================================================== */
-
-for (const [label, value] of [
+/* An invalid NJ_AUTHOR value (N4 below). */
+const BAD_NAMES: [string, string][] = [
   ['whitespace-only (A-1)', '   '],
   ['a tab only (A-1)', '\t'],
   ['multi-line', 'code\nreviewer'],
@@ -200,63 +168,118 @@ for (const [label, value] of [
   ['with CRLF then spaces (DECISIONS 104)', 'reviewer\r\n  '],
   ['containing ":"', 'agent:1'],
   ['a trailing ":"', 'reviewer:'],
-]) {
+];
+
+await H.runLegs<void>([
+
+/* ===================================================================== */
+/* N1 — NJ_AUTHOR signs, with or without assignee; the value is trimmed    */
+/* ===================================================================== */
+
+async (t) => {
+  const a = await signs(t, 'N1 NJ_AUTHOR=reviewer, element with an assignee', { NJ_AUTHOR: 'reviewer' }, 'alice', 'reviewer');
+  const tx = bytes(taskFile(a)) || '';
+  t.check('N1 NJ_AUTHOR never changes assignee: assignee is still alice', /^assignee: alice$/m.test(tx), J(tx));
+  const s = await runJ(['show', '--id=TSK-001'], { cwd: a.dir });
+  const e = s.json && Array.isArray(s.json.entries) ? s.json.entries[0] : null;
+  t.eq('N1 show: assignee is still alice', e && e.assignee, 'alice');
+},
+async (t) => {
+  const a = await signs(t, 'N1 NJ_AUTHOR=reviewer, element without assignee', { NJ_AUTHOR: 'reviewer' }, null, 'reviewer');
+  t.check('N1 NJ_AUTHOR never sets assignee: no assignee key appears', !/^assignee:/m.test(bytes(taskFile(a)) || ''),
+    J(bytes(taskFile(a))));
+},
+signsLeg('N1 the value is trimmed (spaces)', { NJ_AUTHOR: '   reviewer  ' }, 'alice', 'reviewer'),
+signsLeg('N1 the value is trimmed (tabs)', { NJ_AUTHOR: '\treviewer\t' }, null, 'reviewer'),
+signsLeg('N1 inner spaces are kept', { NJ_AUTHOR: 'code reviewer' }, null, 'code reviewer'),
+signsLeg('N1 a non-ASCII name is signed as given', { NJ_AUTHOR: 'Rüdiger 漢字 🚀' }, 'alice', 'Rüdiger 漢字 🚀'),
+signsLeg('N1 a name like the assignee changes nothing but is still the signer', { NJ_AUTHOR: 'alice' }, 'alice', 'alice'),
+/* DECISIONS 104 (76): only spaces and tabs are trimmed; Unicode spaces are
+ * literal characters of the name. */
+signsLeg('N1 Unicode spaces are literal, not trimmed (DECISIONS 104)', { NJ_AUTHOR: '\u00a0reviewer\u2003' }, 'alice', '\u00a0reviewer\u2003'),
+signsLeg('N1 a name of one NBSP is a valid name (DECISIONS 104)', { NJ_AUTHOR: ' \u00a0 ' }, null, '\u00a0'),
+
+/* Unset or empty: exactly v3 (§ 0: empty counts as unset, like NJ_BACKLOG). */
+signsLeg('N2 NJ_AUTHOR empty counts as unset: the assignee signs', { NJ_AUTHOR: '' }, 'alice', 'alice'),
+signsLeg('N2 NJ_AUTHOR empty counts as unset: "?" signs', { NJ_AUTHOR: '' }, null, '?'),
+
+/* Two notes, two signers: consecutive lines directly below the heading (§ 10). */
+async (t) => {
+  const x = backlog('ac25-two', 'alice');
+  await run(['note', '--id=TSK-001', 'first'], { cwd: x.dir, env: later({ NJ_AUTHOR: 'reviewer' }) });
+  await run(['note', '--id=TSK-001', 'second'], { cwd: x.dir, env: later() });
+  t.check('N3 two notes: the acting name, then the assignee, as consecutive lines',
+    (bytes(taskFile(x)) || '').includes('## Notes\n- ' + LATER + ' reviewer: first\n- ' + LATER + ' alice: second\n'),
+    J(bytes(taskFile(x))));
+},
+
+/* ===================================================================== */
+/* N4 — an invalid name: note exits 1 with invalid_env, writes nothing    */
+/* ===================================================================== */
+
+...BAD_NAMES.map(([label, value]) => async (t: Ctx) => {
   const desc = 'N4 NJ_AUTHOR ' + label;
   const x = backlog('ac25-bad', 'alice');
   const before = snapshot(x.dir);
-  const r = run(['note', '--id=TSK-001', TEXT], { cwd: x.dir, env: later({ NJ_AUTHOR: value }) });
-  T.exit(desc + ': note exit 1', r, 1);
-  T.check(desc + ': the prose starts with "Error: " (DECISIONS 88)', /^Error: /.test(r.stderr || ''), J(r.stderr));
-  T.check(desc + ': no stack trace', !/^\s+at\s+\S/m.test(r.stderr || ''), J(r.stderr));
+  const r = await run(['note', '--id=TSK-001', TEXT], { cwd: x.dir, env: later({ NJ_AUTHOR: value }) });
+  t.exit(desc + ': note exit 1', r, 1);
+  t.check(desc + ': the prose starts with "Error: " (DECISIONS 88)', /^Error: /.test(r.stderr || ''), J(r.stderr));
+  t.check(desc + ': no stack trace', !/^\s+at\s+\S/m.test(r.stderr || ''), J(r.stderr));
   /* DECISIONS 212 (TSK-025): the human output ends with a hint line naming
    * the variable (the message itself may span lines: it quotes the value). */
   const lastLine = (r.stderr || '').replace(/\n$/, '').split('\n').pop() || '';
-  T.check(desc + ': the last stderr line is a hint naming NJ_AUTHOR', !/^Error: /.test(lastLine) && /\bNJ_AUTHOR\b/.test(lastLine), J(r.stderr));
-  const rj = runJ(['note', '--id=TSK-001', TEXT], { cwd: x.dir, env: later({ NJ_AUTHOR: value }) });
-  T.exit(desc + ' --json: exit 1', rj, 1);
-  T.check(desc + ' --json: {ok:false} (§ 9)', !!rj.json && rj.json.ok === false, J(rj.json || rj.stdout).slice(0, 200));
-  T.eq(desc + ' --json: error is invalid_env', rj.json && rj.json.error, 'invalid_env');
-  T.eq(desc + ' --json: hint is the human hint line', rj.json && rj.json.hint, lastLine);
-  T.check(desc + ': nothing written — the whole backlog byte- and mtime-identical', J(snapshot(x.dir)) === J(before),
+  t.check(desc + ': the last stderr line is a hint naming NJ_AUTHOR', !/^Error: /.test(lastLine) && /\bNJ_AUTHOR\b/.test(lastLine), J(r.stderr));
+  const rj = await runJ(['note', '--id=TSK-001', TEXT], { cwd: x.dir, env: later({ NJ_AUTHOR: value }) });
+  t.exit(desc + ' --json: exit 1', rj, 1);
+  t.check(desc + ' --json: {ok:false} (§ 9)', !!rj.json && rj.json.ok === false, J(rj.json || rj.stdout).slice(0, 200));
+  t.eq(desc + ' --json: error is invalid_env', rj.json && rj.json.error, 'invalid_env');
+  t.eq(desc + ' --json: hint is the human hint line', rj.json && rj.json.hint, lastLine);
+  t.check(desc + ': nothing written — the whole backlog byte- and mtime-identical', J(snapshot(x.dir)) === J(before),
     'changed');
 
   /* "list/show/set under the same environment behave as without it";
-   * reads never fail on it (§ 0). */
+   * reads never fail on it (§ 0). Each pair runs together; the reads
+   * write nothing (the snapshot above already held after two notes). */
   const env = { NJ_AUTHOR: value };
-  for (const args of [[], ['list'], ['list', '--ready'], ['list', '--all'], ['show', '--id=TSK-001'], ['tree'], ['doctor']]) {
-    const w = run(args, { cwd: x.dir, env });
-    const wo = run(args, { cwd: x.dir });
-    T.check(desc + ': nj ' + (args.join(' ') || '(bare)') + ' behaves as without it (exit, stdout)',
+  const reads = [[], ['list'], ['list', '--ready'], ['list', '--all'], ['show', '--id=TSK-001'], ['tree'], ['doctor']];
+  const pairs = await Promise.all(reads.map((args) => Promise.all([run(args, { cwd: x.dir, env }), run(args, { cwd: x.dir })])));
+  reads.forEach((args, i) => {
+    const [w, wo] = pairs[i];
+    t.check(desc + ': nj ' + (args.join(' ') || '(bare)') + ' behaves as without it (exit, stdout)',
       w.status === wo.status && w.stdout === wo.stdout, 'with: ' + w.status + ' ' + J(w.stderr) + ' / without: ' + wo.status);
-  }
-}
-{
+  });
+}),
+async (t) => {
   /* Other writes ignore NJ_AUTHOR (§ A): set and new under an invalid value
    * give the same bytes as without it. */
   const a = backlog('ac25-set-a', 'alice');
   const b = backlog('ac25-set-b', 'alice');
   const bad = { NJ_AUTHOR: 'agent:1' };
-  const sa = runJ(['set', '--id=TSK-001', '--status=doing'], { cwd: a.dir, env: later(bad) });
-  const sb = runJ(['set', '--id=TSK-001', '--status=doing'], { cwd: b.dir, env: later() });
-  T.exit('N5 set under an invalid NJ_AUTHOR: exit 0', sa, 0);
-  T.eq('N5 set under an invalid NJ_AUTHOR: the file is what set writes without it', bytes(taskFile(a)), bytes(taskFile(b)));
-  T.eq('N5 set under an invalid NJ_AUTHOR: the same result object', sa.json, sb.json && JSON.parse(JSON.stringify(sb.json).split(b.dir).join(a.dir)));
-  const na = runJ(['new', '--type=task', '--parent=EPIC-001', '--title=Next'], { cwd: a.dir, env: later(bad) });
-  run(['new', '--type=task', '--parent=EPIC-001', '--title=Next'], { cwd: b.dir, env: later() });
-  T.exit('N5 new under an invalid NJ_AUTHOR: exit 0', na, 0);
-  T.eq('N5 new under an invalid NJ_AUTHOR: the new file is what new writes without it',
+  const [sa, sb] = await Promise.all([
+    runJ(['set', '--id=TSK-001', '--status=doing'], { cwd: a.dir, env: later(bad) }),
+    runJ(['set', '--id=TSK-001', '--status=doing'], { cwd: b.dir, env: later() }),
+  ]);
+  t.exit('N5 set under an invalid NJ_AUTHOR: exit 0', sa, 0);
+  t.eq('N5 set under an invalid NJ_AUTHOR: the file is what set writes without it', bytes(taskFile(a)), bytes(taskFile(b)));
+  t.eq('N5 set under an invalid NJ_AUTHOR: the same result object', sa.json, sb.json && JSON.parse(JSON.stringify(sb.json).split(b.dir).join(a.dir)));
+  const [na] = await Promise.all([
+    runJ(['new', '--type=task', '--parent=EPIC-001', '--title=Next'], { cwd: a.dir, env: later(bad) }),
+    run(['new', '--type=task', '--parent=EPIC-001', '--title=Next'], { cwd: b.dir, env: later() }),
+  ]);
+  t.exit('N5 new under an invalid NJ_AUTHOR: exit 0', na, 0);
+  t.eq('N5 new under an invalid NJ_AUTHOR: the new file is what new writes without it',
     bytes(path.join(a.bl, places(a.bl)['TSK-002'] || '<none>')), bytes(path.join(b.bl, places(b.bl)['TSK-002'] || '<none>')));
-  const va = runJ(['set', '--id=TSK-001', '--assignee=bob'], { cwd: a.dir, env: later({ NJ_AUTHOR: 'reviewer' }) });
-  T.exit('N5 set --assignee under a valid NJ_AUTHOR: exit 0', va, 0);
-  T.check('N5 NJ_AUTHOR never changes assignee: set --assignee=bob sets bob, not the acting name',
+  const va = await runJ(['set', '--id=TSK-001', '--assignee=bob'], { cwd: a.dir, env: later({ NJ_AUTHOR: 'reviewer' }) });
+  t.exit('N5 set --assignee under a valid NJ_AUTHOR: exit 0', va, 0);
+  t.check('N5 NJ_AUTHOR never changes assignee: set --assignee=bob sets bob, not the acting name',
     /^assignee: bob$/m.test(bytes(taskFile(a)) || ''), J(bytes(taskFile(a))));
-}
+},
 
 /* ===================================================================== */
 /* N7 — precedence (DECISIONS 104, 77): argument parsing → the acting name */
 /* → target resolution → refusals                                         */
 /* ===================================================================== */
-{
+async (t) => {
   const x = backlog('ac25-prec', 'alice');
   const bad = later({ NJ_AUTHOR: 'agent:1' });
   const cases: [string, string[], string][] = [
@@ -269,10 +292,10 @@ for (const [label, value] of [
   ];
   for (const [label, args, code] of cases) {
     const before = snapshot(x.dir);
-    const r = runJ(args, { cwd: x.dir, env: bad });
-    T.exit('N7 ' + label + ': exit 1', r, 1);
-    T.eq('N7 ' + label + ': ' + code, r.json && r.json.error, code);
-    T.check('N7 ' + label + ': nothing written', J(snapshot(x.dir)) === J(before), 'changed');
+    const r = await runJ(args, { cwd: x.dir, env: bad });
+    t.exit('N7 ' + label + ': exit 1', r, 1);
+    t.eq('N7 ' + label + ': ' + code, r.json && r.json.error, code);
+    t.check('N7 ' + label + ': nothing written', J(snapshot(x.dir)) === J(before), 'changed');
   }
   /* `--id` and `--file` given together ranks with argument parsing, like
    * "neither given" (DECISIONS 111): it beats an invalid NJ_AUTHOR, and a
@@ -280,70 +303,78 @@ for (const [label, value] of [
   {
     const fileArg = places(x.bl)['TSK-001'];
     const before = snapshot(x.dir);
-    const r = runJ(['note', '--id=TSK-001', '--file=' + fileArg, TEXT], { cwd: x.dir, env: bad });
-    T.exit('N7 --id and --file together beats the invalid name: exit 1', r, 1);
-    T.eq('N7 --id and --file together beats the invalid name: invalid_target', r.json && r.json.error, 'invalid_target');
-    T.check('N7 --id and --file together beats the invalid name: nothing written', J(snapshot(x.dir)) === J(before), 'changed');
+    const r = await runJ(['note', '--id=TSK-001', '--file=' + fileArg, TEXT], { cwd: x.dir, env: bad });
+    t.exit('N7 --id and --file together beats the invalid name: exit 1', r, 1);
+    t.eq('N7 --id and --file together beats the invalid name: invalid_target', r.json && r.json.error, 'invalid_target');
+    t.check('N7 --id and --file together beats the invalid name: nothing written', J(snapshot(x.dir)) === J(before), 'changed');
   }
   {
     const fileArg = places(x.bl)['TSK-001'];
     const before = snapshot(x.dir);
-    const r = runJ(['note', '--id=TSK-001', '--file=' + fileArg, TEXT], { cwd: x.dir, env: later({ NJ_AUTHOR: 'reviewer' }) });
-    T.exit('N7 --id and --file together under a valid NJ_AUTHOR: exit 1', r, 1);
-    T.eq('N7 --id and --file together under a valid NJ_AUTHOR: invalid_target', r.json && r.json.error, 'invalid_target');
-    T.check('N7 --id and --file together under a valid NJ_AUTHOR: nothing written', J(snapshot(x.dir)) === J(before), 'changed');
+    const r = await runJ(['note', '--id=TSK-001', '--file=' + fileArg, TEXT], { cwd: x.dir, env: later({ NJ_AUTHOR: 'reviewer' }) });
+    t.exit('N7 --id and --file together under a valid NJ_AUTHOR: exit 1', r, 1);
+    t.eq('N7 --id and --file together under a valid NJ_AUTHOR: invalid_target', r.json && r.json.error, 'invalid_target');
+    t.check('N7 --id and --file together under a valid NJ_AUTHOR: nothing written', J(snapshot(x.dir)) === J(before), 'changed');
   }
+},
+async (t) => {
   /* … and it beats a refusal: an archived element */
+  const bad = later({ NJ_AUTHOR: 'agent:1' });
   const y = backlog('ac25-prec-arch', 'alice');
   for (const a of [['set', '--id=TSK-001', '--status=done'], ['set', '--id=EPIC-001', '--status=done'], ['archive', '--id=EPIC-001']]) {
-    const r = run(a, { cwd: y.dir, env: later() });
-    if (r.missing || r.status !== 0) T.check('fixture: nj ' + a.join(' '), false, r.status + ' ' + J(r.stderr));
+    const r = await run(a, { cwd: y.dir, env: later() });
+    if (r.missing || r.status !== 0) t.check('fixture: nj ' + a.join(' '), false, r.status + ' ' + J(r.stderr));
   }
   const before = snapshot(y.dir);
-  const r = runJ(['note', '--id=TSK-001', TEXT], { cwd: y.dir, env: bad });
-  T.eq('N7 the invalid name beats refused:archived: invalid_env', r.json && r.json.error, 'invalid_env');
-  T.check('N7 … nothing written', J(snapshot(y.dir)) === J(before), 'changed');
-  const control = runJ(['note', '--id=TSK-001', TEXT], { cwd: y.dir, env: later() });
-  T.eq('N7 control: without NJ_AUTHOR the archived element is refused:archived', control.json && control.json.error, 'refused:archived');
-}
+  const r = await runJ(['note', '--id=TSK-001', TEXT], { cwd: y.dir, env: bad });
+  t.eq('N7 the invalid name beats refused:archived: invalid_env', r.json && r.json.error, 'invalid_env');
+  t.check('N7 … nothing written', J(snapshot(y.dir)) === J(before), 'changed');
+  const control = await runJ(['note', '--id=TSK-001', TEXT], { cwd: y.dir, env: later() });
+  t.eq('N7 control: without NJ_AUTHOR the archived element is refused:archived', control.json && control.json.error, 'refused:archived');
+},
 
 /* ===================================================================== */
 /* N6 — `--as` on `nj note` (§ 9 "The acting name", promoted with C,      */
 /* DECISIONS 110/117/b7ffad6): signs like NJ_AUTHOR, and outranks it      */
 /* ===================================================================== */
-{
+async (t) => {
   const a = backlog('ac25-asA', 'alice');
   const b = backlog('ac25-asB', 'alice');
-  const ra = runJ(['note', '--id=TSK-001', '--as=reviewer', TEXT], { cwd: a.dir, env: later() });
-  const rb = runJ(['note', '--id=TSK-001', TEXT], { cwd: b.dir, env: later() });
-  T.exit('N6 note --as=reviewer: exit 0', ra, 0);
+  const [ra, rb] = await Promise.all([
+    runJ(['note', '--id=TSK-001', '--as=reviewer', TEXT], { cwd: a.dir, env: later() }),
+    runJ(['note', '--id=TSK-001', TEXT], { cwd: b.dir, env: later() }),
+  ]);
+  t.exit('N6 note --as=reviewer: exit 0', ra, 0);
   const control = bytes(taskFile(b));
-  T.check('N6 fixture — the v3 control signs with alice', rb.status === 0 && !!control && control.includes(noteLine('alice') + '\n'), J(control));
+  t.check('N6 fixture — the v3 control signs with alice', rb.status === 0 && !!control && control.includes(noteLine('alice') + '\n'), J(control));
   const want = control === null ? null : control.replace(noteLine('alice') + '\n', noteLine('reviewer') + '\n');
-  T.eq('N6 note --as=reviewer: signed "reviewer", file otherwise byte-identical to the v3 note', bytes(taskFile(a)), want);
-  T.check('N6 note --as never changes assignee: assignee is still alice', /^assignee: alice$/m.test(bytes(taskFile(a)) || ''), J(bytes(taskFile(a))));
-}
-{
+  t.eq('N6 note --as=reviewer: signed "reviewer", file otherwise byte-identical to the v3 note', bytes(taskFile(a)), want);
+  t.check('N6 note --as never changes assignee: assignee is still alice', /^assignee: alice$/m.test(bytes(taskFile(a)) || ''), J(bytes(taskFile(a))));
+},
+async (t) => {
   const a = backlog('ac25-asOutranksA', 'alice');
   const b = backlog('ac25-asOutranksB', 'alice');
-  const ra = runJ(['note', '--id=TSK-001', '--as=reviewer', TEXT], { cwd: a.dir, env: later({ NJ_AUTHOR: 'other' }) });
-  const rb = runJ(['note', '--id=TSK-001', TEXT], { cwd: b.dir, env: later() });
-  T.exit('N6 note --as=reviewer with NJ_AUTHOR=other set too: exit 0', ra, 0);
+  const [ra] = await Promise.all([
+    runJ(['note', '--id=TSK-001', '--as=reviewer', TEXT], { cwd: a.dir, env: later({ NJ_AUTHOR: 'other' }) }),
+    runJ(['note', '--id=TSK-001', TEXT], { cwd: b.dir, env: later() }),
+  ]);
+  t.exit('N6 note --as=reviewer with NJ_AUTHOR=other set too: exit 0', ra, 0);
   const control = bytes(taskFile(b));
   const want = control === null ? null : control.replace(noteLine('alice') + '\n', noteLine('reviewer') + '\n');
-  T.eq('N6 --as outranks NJ_AUTHOR: signed "reviewer", not "other"', bytes(taskFile(a)), want);
-}
+  t.eq('N6 --as outranks NJ_AUTHOR: signed "reviewer", not "other"', bytes(taskFile(a)), want);
+},
 /* An empty --as is NOT unset the way an empty NJ_AUTHOR is (§ 9, DECISIONS
  * 119): "empty counts as unset" is stated for the environment variable only;
  * a name "from either source" must be non-empty. An explicit flag with no
  * name is a caller's mistake, same as whitespace-only/multi-line/colon. */
-for (const bad of ['', '  ', 'a\nb', 'a:b']) {
+...['', '  ', 'a\nb', 'a:b'].map((bad) => async (t: Ctx) => {
   const x = backlog('ac25-asInvalid', 'alice');
   const before = snapshot(x.dir);
-  const r = runJ(['note', '--id=TSK-001', '--as=' + bad, TEXT], { cwd: x.dir, env: later() });
-  T.exit('N6 note --as=' + J(bad) + ': exit 1 — invalid_value, not invalid_env', r, 1);
-  T.eq('N6 note --as=' + J(bad) + ': invalid_value', r.json && r.json.error, 'invalid_value');
-  T.check('N6 note --as=' + J(bad) + ': nothing written', J(snapshot(x.dir)) === J(before), 'changed');
-}
+  const r = await runJ(['note', '--id=TSK-001', '--as=' + bad, TEXT], { cwd: x.dir, env: later() });
+  t.exit('N6 note --as=' + J(bad) + ': exit 1 — invalid_value, not invalid_env', r, 1);
+  t.eq('N6 note --as=' + J(bad) + ': invalid_value', r.json && r.json.error, 'invalid_value');
+  t.check('N6 note --as=' + J(bad) + ': nothing written', J(snapshot(x.dir)) === J(before), 'changed');
+}),
+], { concurrency: 8 });
 
 T.finish();

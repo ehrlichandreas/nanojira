@@ -12,8 +12,10 @@
  *      byte-for-byte identical (claim generations, tombstones, STATUS.md
  *      and all), not merely "close".
  *   2. A static guard over src/: nothing may read the wall clock
- *      (`Date.now()` / `new Date(`) directly outside core/store.ts, the one
- *      module that owns `nowIso()`/`nowMs()`/`mtimeIso()`. Leg 1 alone would
+ *      (`Date.now()` / `new Date(`) directly outside core/store.ts, which
+ *      owns `mtimeIso()` and the fault hook deadlines, and the one
+ *      wall-clock fallback in core/kernel.ts's `nowIso()` (DECISIONS 231),
+ *      pinned by count. Leg 1 alone would
  *      only ever catch a clock-pinning regression if the scripted sequence
  *      happens to exercise the broken path AND the two runs happen to land
  *      in different real seconds -- this leg catches it unconditionally,
@@ -104,6 +106,15 @@ function scriptedRun(label: string, d: string): void {
   const paths2 = snap2.map((l) => l.split(' ')[0]);
   T.eq('AC-62: the two runs produce the same set of files', paths1, paths2);
   T.eq('AC-62: the two trees are byte-identical (same hash per file)', snap1, snap2);
+
+  /* Unpinned, the wall clock writes the same shape: whole seconds, no
+   * milliseconds (found by a mutant, TSK-050). */
+  const d3 = H.freshDir('ac62-wall');
+  H.runNj(['init'], { cwd: d3, unsetEnv: ['NJ_NOW'] });
+  H.runNj(['new', '--type=epic', '--title=Wall'], { cwd: d3, unsetEnv: ['NJ_NOW'] });
+  const wall = H.readOrNull(path.join(d3, 'backlog', 'epics', 'EPIC-001.md')) || '';
+  T.check('AC-62: without NJ_NOW, created is YYYY-MM-DDTHH:MM:SSZ (no milliseconds)',
+    /^created: \d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/m.test(wall), wall.slice(0, 300));
 }
 
 /* ---------------------------------------------------------------- */
@@ -118,6 +129,10 @@ function scriptedRun(label: string, d: string): void {
   // any count that drifts in either direction (a new one, or an old one
   // going away without this list being updated) fails below.
   const ALLOWED: Record<string, number> = {
+    // nowIso()'s wall-clock fallback, the one site that reads the clock
+    // when NJ_NOW is unset -- the clock itself (DECISIONS 231). Pinned as a
+    // count, not exempted wholesale, so any other read in the kernel fails.
+    ['core' + path.sep + 'kernel.ts']: 1,
     // njrcSwapFaultHook: NJ_FAULT=njrc-swap's own poll deadline, waiting on
     // a `.nj-fault-go` marker a test writes -- bounds a real wait, writes
     // nothing, so NJ_NOW must not reach it (same reasoning as store.ts's

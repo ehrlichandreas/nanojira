@@ -100,37 +100,44 @@ function snapshot(d: string): string[] {
 /* The fixture: built WITHOUT the hook, through the real binary -- once,
  * into a template that every fixture() then copies. The backlog stores no
  * absolute path (and NJ_NOW is pinned), so a copy is byte-identical to a
- * fresh build; five spawns per fixture were most of this file's wall time. */
-let template: string | null = null;
-function fixtureTemplate(): string {
-  if (template) return template;
+ * fresh build; five spawns per fixture were most of this file's wall time.
+ * The epic and its three tasks come from one `new --input` plan, which
+ * writes the same bytes as four `new` calls (checked by diff -r for
+ * TSK-049). A fixture with `pre` steps (run without the hook) has a
+ * template of its own, built from the first once. */
+const PLAN = JSON.stringify([{ type: 'epic', title: 'Auth', description: 'Login.', acceptance: '- [ ] works', children: [
+  { type: 'task', title: 'Login route', description: 'Wire it.', acceptance: '- [ ] wire the route' },
+  { type: 'task', title: 'Logout route', description: 'Unwire it.', acceptance: '- [ ] unwire' },
+  { type: 'task', title: 'Spare', description: 'Spare.', acceptance: '- [ ] spare' }] }]);
+const templates = new Map<string, string>();
+function fixtureTemplate(steps: string[][]): string {
+  const key = JSON.stringify(steps);
+  const have = templates.get(key);
+  if (have) return have;
   const d = H.freshDir('ac63-template');
-  const steps: string[][] = [
-    ['init'],
-    ['new', '--type=epic', '--title=Auth', '--description=Login.', '--acceptance=- [ ] works'],
-    ['new', '--type=task', '--parent=EPIC-001', '--title=Login route', '--description=Wire it.', '--acceptance=- [ ] wire the route'],
-    ['new', '--type=task', '--parent=EPIC-001', '--title=Logout route', '--description=Unwire it.', '--acceptance=- [ ] unwire'],
-    ['new', '--type=task', '--parent=EPIC-001', '--title=Spare', '--description=Spare.', '--acceptance=- [ ] spare'],
-  ];
-  for (const s of steps) {
-    const r = plain(d, s);
-    if (r.status !== 0) throw new Error('fixture template: ' + s.join(' ') + ' -> ' + H.describeRun(r));
+  if (steps.length === 0) {
+    for (const [s, input] of [[['init'], undefined], [['new', '--input=-'], PLAN]] as Array<[string[], string | undefined]>) {
+      const r = plain(d, s, input);
+      if (r.status !== 0) throw new Error('fixture template: ' + s.join(' ') + ' -> ' + H.describeRun(r));
+    }
+  } else {
+    fs.cpSync(fixtureTemplate([]), path.join(d, 'backlog'), { recursive: true });
+    for (const s of steps) {
+      const r = plain(d, s);
+      if (r.status !== 0) throw new Error('pre: ' + s.join(' ') + ' -> ' + H.describeRun(r));
+    }
   }
-  return (template = path.join(d, 'backlog'));
+  const bl = path.join(d, 'backlog');
+  templates.set(key, bl);
+  return bl;
 }
-function fixture(label: string): { d: string; cap: string; bl: string } {
-  const src = fixtureTemplate();
+function fixture(label: string, pre: string[][] = []): { d: string; cap: string; bl: string } {
+  const src = fixtureTemplate(pre);
   const d = H.freshDir('ac63-' + label);
   const cap = H.freshDir('ac63cap-' + label);
   const bl = path.join(d, 'backlog');
   fs.cpSync(src, bl, { recursive: true });
   return { d, cap, bl };
-}
-function pre(d: string, steps: string[][]) {
-  for (const s of steps) {
-    const r = plain(d, s);
-    if (r.status !== 0) throw new Error('pre: ' + s.join(' ') + ' -> ' + H.describeRun(r));
-  }
 }
 
 /* ---------------------------------------------------------------- */
@@ -167,8 +174,7 @@ const WRITERS: WriterCase[] = [
 ];
 
 for (const w of WRITERS) {
-  const { d, cap, bl } = fixture('a');
-  if (w.pre) pre(d, w.pre);
+  const { d, cap, bl } = fixture('a', w.pre);
   if (w.prepare) w.prepare(bl);
   const r = hooked(d, cap, w.args.concat(['--json']), undefined, w.input);
   T.exit('A ' + w.name + ': exit', r, w.exit ?? 0);
@@ -235,8 +241,7 @@ for (const w of WRITERS) {
 /* C. never fires on a refusal, a read, a dry run, inside a hook     */
 /* ---------------------------------------------------------------- */
 {
-  const { d, cap } = fixture('c');
-  pre(d, [['new', '--type=epic', '--title=Old', '--status=done'], ['archive', '--id=EPIC-002'],
+  const { d, cap } = fixture('c', [['new', '--type=epic', '--title=Old', '--status=done'], ['archive', '--id=EPIC-002'],
     ['claim', '--id=TSK-002', '--as=bob']]);
   const before = snapshot(d);
   const refusals: Array<[string, string[], string]> = [
@@ -455,11 +460,14 @@ for (const w of WRITERS) {
   {
     const { d, cap } = fixture('f2-holder');
     const r = H.runNj(['set', '--id=TSK-001', '--status=doing', '--json'],
-      { cwd: d, env: { NJ_ON_CHANGE: 'sleep 20 & echo $! > "$AC63_CAP/bgpid"', AC63_CAP: cap }, timeout: 60000 });
+      { cwd: d, env: { NJ_ON_CHANGE: 'sleep 60 & echo $! > "$AC63_CAP/bgpid"', AC63_CAP: cap }, timeout: 30000 });
     const pid = pidIn(cap, 'bgpid');
     T.exit('F2 a job backgrounded on the inherited stderr: exit 0', r, 0);
-    // 12 s: a loaded pool stretches nj's own start; the job's 20 s stays out of reach.
-    T.check('F2 ... the call returns, not after the job\'s 20 s', (r.ms || 0) < 12000, r.ms + ' ms');
+    // 12 s: a loaded pool stretches nj's own start; the job's 60 s stays out of reach.
+    // 60 s, not 20, and a 30 s timeout: a job left alive outlasts the call
+    // and is still alive for goneSoon below, so a missing kill fails on
+    // liveness too, not only on this bound.
+    T.check('F2 ... the call returns, not after the job\'s 60 s', (r.ms || 0) < 12000, r.ms + ' ms');
     T.check('F2 ... the hook recorded the job\'s pid', pid > 0, '');
     T.check('F2 ... and the job is gone', pid > 0 && goneSoon(pid), 'pid ' + pid);
     T.eq('F2 ... one warning line names the kill', r.stderr, LEFT);
@@ -661,9 +669,9 @@ if (typeof process.getuid === 'function' && process.getuid() !== 0) {
   for (const k of DRY) {
     const prose = k.name.includes('prose');
     const args = k.args.concat(['--dry-run'], prose ? [] : ['--json']);
-    const f = fixture('k');
-    const twin = fixture('k-twin');
-    for (const x of [f, twin]) { if (k.pre) pre(x.d, k.pre); if (k.prepare) k.prepare(x.bl); }
+    const f = fixture('k', k.pre);
+    const twin = fixture('k-twin', k.pre);
+    for (const x of [f, twin]) { if (k.prepare) k.prepare(x.bl); }
     const before = snapshot(f.d);
     // The batch leg's runtime failure is real: NJ_FAULT, catchable in a batch.
     const fault: Record<string, string> = k.name.includes('runtime failure') ? { NJ_FAULT: 'after-tmp-write' } : {};

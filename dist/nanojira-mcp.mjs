@@ -5,7 +5,7 @@ import * as path8 from "node:path";
 import { spawn } from "node:child_process";
 
 // src/core/args.ts
-import * as fs7 from "node:fs";
+import * as fs8 from "node:fs";
 import * as path6 from "node:path";
 
 // src/core/constants.ts
@@ -18,7 +18,9 @@ var FOLDER_ROLES = ["epics", "tasks", "subtasks", "archive"];
 var GROUPS = ["type", "hierarchy", "flat"];
 var V3_DIR_REL = ".nanojira";
 var V3_CONFIG_REL = ".nanojira/config.json";
+var V3_INDEX_REL = ".nanojira/index.json";
 var LEGACY_CONFIG_REL = ".nanojira.json";
+var LEGACY_INDEX_REL = ".nanojira-index.json";
 var DEFAULT_CONFIG = {
   schema: 1,
   statuses: ["todo", "doing", "blocked", "review", "done"],
@@ -83,7 +85,7 @@ var SEVERITY = {
 };
 
 // src/core/dry-run.ts
-import * as fs6 from "node:fs";
+import * as fs7 from "node:fs";
 import * as os from "node:os";
 import * as path5 from "node:path";
 
@@ -129,19 +131,11 @@ function readRegularFile(file, cap, opts = {}) {
 }
 
 // src/core/store.ts
-import * as fs5 from "node:fs";
+import * as fs6 from "node:fs";
 import * as path4 from "node:path";
 
-// src/core/touched.ts
+// src/core/kernel.ts
 import * as fs4 from "node:fs";
-import * as path3 from "node:path";
-
-// src/core/store.ts
-function sleepMs(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-// src/core/output.ts
 var Fail = class extends Error {
   hint;
   code;
@@ -154,18 +148,17 @@ var Fail = class extends Error {
 function fail(code, message, hint) {
   throw new Fail(message, hint, code);
 }
+var decorateFailure = (res) => res;
+function setFailureDecorator(fn) {
+  decorateFailure = fn;
+}
 process.stdout.on("error", (err) => {
   if (err.code === "EPIPE") process.exit(0);
   throw err;
 });
-
-// src/core/args.ts
-var FLAG_ALIASES = /* @__PURE__ */ new Map([["depends-on", "depends_on"]]);
-function sameValue(name, a, b) {
-  if (a === b) return true;
-  return name === "backlog" && typeof a === "string" && typeof b === "string" && a !== "" && b !== "" && path6.resolve(a) === path6.resolve(b);
-}
-function parseArgs(argv, kinds) {
+function parseArgs(argv, kinds, opts) {
+  const aliases = opts?.aliases;
+  const sameValue2 = opts?.sameValue ?? ((_name, a, b) => a === b);
   const flags = /* @__PURE__ */ new Map();
   const positional = [];
   const repeated = [];
@@ -179,12 +172,12 @@ function parseArgs(argv, kinds) {
     if (options && a.startsWith("--")) {
       const eq = a.indexOf("=");
       const typed = eq === -1 ? a.slice(2) : a.slice(2, eq);
-      const name = FLAG_ALIASES.get(typed) ?? typed;
+      const name = aliases?.get(typed) ?? typed;
       let value = eq === -1 ? true : a.slice(eq + 1);
       if (value === true && kinds !== void 0 && Object.hasOwn(kinds, name) && kinds[name] === "string" && i + 1 < argv.length && !argv[i + 1].startsWith("--")) {
         value = argv[++i];
       }
-      if (flags.has(name) && !sameValue(name, flags.get(name), value) && !repeated.some((r) => r.name === name)) {
+      if (flags.has(name) && !sameValue2(name, flags.get(name), value) && !repeated.some((r) => r.name === name)) {
         repeated.push({ name, typed });
       }
       flags.set(name, value);
@@ -197,8 +190,92 @@ function parseArgs(argv, kinds) {
 function flagString(flags, name) {
   const v = flags.get(name);
   if (v === void 0) return void 0;
-  if (v === true) return fail("missing_value", `--${name} needs a value (use --${name}=\u2026)`);
+  if (v === true) return fail("missing_value", `--${name} needs a value (use --${name}=\u2026 or --${name} <value>)`);
   return v;
+}
+function osaDistance(a, b) {
+  const m = a.length, n = b.length;
+  const d = [];
+  for (let i = 0; i <= m; i++) d.push([i]);
+  for (let j = 1; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        v = Math.min(v, d[i - 2][j - 2] + 1);
+      }
+      d[i][j] = v;
+    }
+  }
+  return d[m][n];
+}
+function nearestMatch(value, allowed) {
+  const threshold = value.length <= 4 ? 1 : 2;
+  let best = [];
+  let bestDist = Infinity;
+  for (const v of allowed) {
+    const d = osaDistance(value, v);
+    if (d < bestDist) {
+      bestDist = d;
+      best = [v];
+    } else if (d === bestDist) best.push(v);
+  }
+  return bestDist <= threshold && best.length === 1 ? best[0] : null;
+}
+
+// src/core/touched.ts
+import * as fs5 from "node:fs";
+import * as path3 from "node:path";
+var journal = /* @__PURE__ */ new Map();
+var root = null;
+function listed(rel) {
+  if (rel === "" || rel.startsWith("..") || path3.isAbsolute(rel)) return false;
+  if (rel === V3_INDEX_REL || rel === LEGACY_INDEX_REL || rel === ".nanojira/claims" || rel.startsWith(".nanojira/claims/")) return false;
+  const base = rel.slice(rel.lastIndexOf("/") + 1);
+  return !base.startsWith(".nj-tmp-") && !base.startsWith(".nj-rm-");
+}
+function touchedFiles(backlog) {
+  const rel = (abs) => path3.relative(backlog, abs).split(path3.sep).join("/");
+  const out2 = [];
+  for (const [abs, e] of journal) {
+    const p = rel(abs);
+    if (!listed(p)) continue;
+    if (e.op === "moved") {
+      const from = rel(e.from);
+      out2.push(listed(from) ? { path: p, op: "moved", from } : { path: p, op: "created" });
+    } else {
+      out2.push({ path: p, op: e.op });
+    }
+  }
+  return out2.sort((a, b) => a.path < b.path ? -1 : a.path > b.path ? 1 : 0);
+}
+function failureFiles() {
+  if (root === null || journal.size === 0) return void 0;
+  const files = touchedFiles(root);
+  return files.length > 0 ? files : void 0;
+}
+
+// src/core/store.ts
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+// src/core/output.ts
+function withFailureFiles(res) {
+  const files = failureFiles();
+  return files === void 0 ? res : Object.assign({}, res, { files });
+}
+setFailureDecorator(withFailureFiles);
+
+// src/core/args.ts
+var FLAG_ALIASES = /* @__PURE__ */ new Map([["depends-on", "depends_on"]]);
+function sameValue(name, a, b) {
+  if (a === b) return true;
+  return name === "backlog" && typeof a === "string" && typeof b === "string" && a !== "" && b !== "" && path6.resolve(a) === path6.resolve(b);
+}
+function parseArgs2(argv, kinds) {
+  return parseArgs(argv, kinds, { aliases: FLAG_ALIASES, sameValue });
 }
 
 // src/core/flag-table.ts
@@ -392,12 +469,12 @@ function flagDoc(command, name) {
 }
 
 // src/core/config.ts
-import * as fs8 from "node:fs";
+import * as fs9 from "node:fs";
 import * as os2 from "node:os";
 import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.4.0";
+var VERSION = "4.5.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -613,13 +690,13 @@ function sourceName(src) {
   return src.kind === "flag" ? "--backlog" : src.kind === "env" ? "NJ_BACKLOG" : src.file;
 }
 function holdsBacklog(dir) {
-  return fs8.existsSync(path7.join(dir, V3_CONFIG_REL)) || fs8.existsSync(path7.join(dir, LEGACY_CONFIG_REL));
+  return fs9.existsSync(path7.join(dir, V3_CONFIG_REL)) || fs9.existsSync(path7.join(dir, LEGACY_CONFIG_REL));
 }
 function claim(dir, src, lenient) {
   const shown = src.kind === "njrc" ? escapeInvisible(dir) : dir;
   if (!isDir(dir)) fail(SOURCE_CODE[src.kind], `no backlog at ${shown} (from ${sourceName(src)})`);
   if (lenient || holdsBacklog(dir)) return dir;
-  if (fs8.existsSync(path7.join(dir, V3_DIR_REL))) {
+  if (fs9.existsSync(path7.join(dir, V3_DIR_REL))) {
     fail(
       "backlog_without_config",
       `${shown} exists but has no ${V3_CONFIG_REL}`,
@@ -657,7 +734,7 @@ function njrcLocation(dir) {
 function readNjrc(file) {
   let link;
   try {
-    link = fs8.lstatSync(file);
+    link = fs9.lstatSync(file);
   } catch (e) {
     return searchMiss(e, path7.dirname(file));
   }
@@ -666,13 +743,13 @@ function readNjrc(file) {
   njrcSwapFaultHook(path7.dirname(file));
   let fd;
   try {
-    fd = fs8.openSync(file, fs8.constants.O_RDONLY | fs8.constants.O_NONBLOCK);
+    fd = fs9.openSync(file, fs9.constants.O_RDONLY | fs9.constants.O_NONBLOCK);
   } catch (e) {
     if (e.code === "ELOOP") return bad("it is a symlink loop (ELOOP)");
     if (e.code === "ENOENT") {
       let fresh;
       try {
-        fresh = fs8.lstatSync(file);
+        fresh = fs9.lstatSync(file);
       } catch {
         return null;
       }
@@ -683,7 +760,7 @@ function readNjrc(file) {
   try {
     let st;
     try {
-      st = fs8.fstatSync(fd);
+      st = fs9.fstatSync(fd);
     } catch (e) {
       return bad(`cannot stat it -- ${e.code || e.message}`);
     }
@@ -691,20 +768,20 @@ function readNjrc(file) {
     if (!st.isFile()) return bad(st.isDirectory() ? "it is a directory, not a file" : "it is not a regular file");
     let raw;
     try {
-      raw = fs8.readFileSync(fd, "utf8");
+      raw = fs9.readFileSync(fd, "utf8");
     } catch (e) {
       return bad(`cannot read it -- ${e.code || e.message}`);
     }
     return raw.startsWith("\uFEFF") ? raw.slice(1) : raw;
   } finally {
-    fs8.closeSync(fd);
+    fs9.closeSync(fd);
   }
 }
 function njrcSwapFaultHook(dir) {
   if (process.env.NJ_FAULT !== "njrc-swap") return;
   const marker = path7.join(dir, ".nj-fault-go");
   const deadline = Date.now() + 1e4;
-  while (!fs8.existsSync(marker)) {
+  while (!fs9.existsSync(marker)) {
     if (Date.now() >= deadline) return;
     sleepMs(50);
   }
@@ -782,7 +859,7 @@ function findBacklog(flags, lenient) {
 }
 function isDir(p) {
   try {
-    return fs8.statSync(p).isDirectory();
+    return fs9.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -793,13 +870,13 @@ function searchMiss(e, dir) {
 }
 function searchIsDir(p) {
   try {
-    return fs8.statSync(p).isDirectory();
+    return fs9.statSync(p).isDirectory();
   } catch (e) {
     return searchMiss(e, path7.dirname(p)) ?? false;
   }
 }
 function isLegacyBacklog(backlog) {
-  return fs8.existsSync(path7.join(backlog, LEGACY_CONFIG_REL));
+  return fs9.existsSync(path7.join(backlog, LEGACY_CONFIG_REL));
 }
 
 // src/core/suggest.ts
@@ -809,36 +886,6 @@ var SYNONYMS = {
   priority: { medium: "normal" }
 };
 var FIELD_LABEL = { type: "types", status: "statuses", priority: "priorities" };
-function osaDistance(a, b) {
-  const m = a.length, n = b.length;
-  const d = [];
-  for (let i = 0; i <= m; i++) d.push([i]);
-  for (let j = 1; j <= n; j++) d[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      let v = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
-        v = Math.min(v, d[i - 2][j - 2] + 1);
-      }
-      d[i][j] = v;
-    }
-  }
-  return d[m][n];
-}
-function nearestMatch(value, allowed) {
-  const threshold = value.length <= 4 ? 1 : 2;
-  let best = [];
-  let bestDist = Infinity;
-  for (const v of allowed) {
-    const d = osaDistance(value, v);
-    if (d < bestDist) {
-      bestDist = d;
-      best = [v];
-    } else if (d === bestDist) best.push(v);
-  }
-  return bestDist <= threshold && best.length === 1 ? best[0] : null;
-}
 function suggestValue(field, value, allowed) {
   const synonym = SYNONYMS[field][value];
   if (synonym !== void 0 && allowed.includes(synonym)) return synonym;
@@ -969,7 +1016,7 @@ function rejectStartup(message) {
   process.exit(1);
 }
 function main() {
-  const argv = parseArgs(process.argv.slice(2), { backlog: "string", "allow-destructive": "boolean", version: "boolean" });
+  const argv = parseArgs2(process.argv.slice(2), { backlog: "string", "allow-destructive": "boolean", version: "boolean" });
   for (const name of argv.flags.keys()) {
     if (!KNOWN_STARTUP_FLAGS.includes(name)) rejectStartup(`unknown argument '--${name}'.`);
   }
@@ -1064,7 +1111,7 @@ function main() {
     const childArgv = [njPath, name, ...flagArgs, `--backlog=${backlog}`, "--json"];
     const child = spawn(process.execPath, childArgv, { env: process.env, stdio: ["ignore", "pipe", "pipe"] });
     liveChildren.add(child);
-    let out = "";
+    let out2 = "";
     let err = "";
     let answered = false;
     let finished = false;
@@ -1100,7 +1147,7 @@ function main() {
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (c) => {
-      out += c;
+      out2 += c;
     });
     child.stderr.on("data", (c) => {
       if (!answered) err += c;
@@ -1146,7 +1193,7 @@ function main() {
       answer(() => {
         let parsed = null;
         try {
-          parsed = JSON.parse(out);
+          parsed = JSON.parse(out2);
         } catch {
         }
         if (parsed === null) {

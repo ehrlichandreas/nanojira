@@ -154,17 +154,20 @@ function setConfig(dir: string, f: (c: any) => void) {
 }
 
 /** EPIC-001 > TSK-001 (todo, acceptance ticked), TSK-002 (todo, tagged,
- * acceptance open); EPIC-002 done > TSK-003 done. */
+ * acceptance open); EPIC-002 done > TSK-003 done. One `new --input` plan
+ * writes the same bytes as five `new` and two `set --status=done` calls,
+ * under every configuration below (checked by diff -r for TSK-049). */
+const BASE_PLAN = JSON.stringify([
+  { type: 'epic', title: 'E1', description: 'D.', children: [
+    { type: 'task', title: 'T1', description: 'D.', acceptance: '- [x] a' },
+    { type: 'task', title: 'T2', description: 'D.', acceptance: '- [ ] b', tags: ['api'] }] },
+  { type: 'epic', title: 'E2', description: 'D.', status: 'done', children: [
+    { type: 'task', title: 'T3', description: 'D.', acceptance: '- [x] c', status: 'done' }] },
+]);
 function base(dir: string, configure?: (dir: string) => void) {
   ok(run(['init'], dir), 'init');
   if (configure) configure(dir);
-  ok(run(['new', '--type=epic', '--title=E1', '--description=D.'], dir), 'EPIC-001');
-  ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=T1', '--description=D.', '--acceptance=- [x] a'], dir), 'TSK-001');
-  ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=T2', '--description=D.', '--acceptance=- [ ] b', '--tags=api'], dir), 'TSK-002');
-  ok(run(['new', '--type=epic', '--title=E2', '--description=D.'], dir), 'EPIC-002');
-  ok(run(['new', '--type=task', '--parent=EPIC-002', '--title=T3', '--description=D.', '--acceptance=- [x] c'], dir), 'TSK-003');
-  ok(run(['set', '--id=TSK-003', '--status=done'], dir), 'TSK-003 done');
-  ok(run(['set', '--id=EPIC-002', '--status=done'], dir), 'EPIC-002 done');
+  ok(run(['new', '--input=-'], dir, { input: BASE_PLAN }), 'EPIC-001, TSK-001, TSK-002, EPIC-002, TSK-003');
 }
 
 const BASE = (dir: string) => base(dir);
@@ -182,6 +185,18 @@ function fromTemplate(setup: (dir: string) => void, dir: string) {
   }
   fs.cpSync(t, dir, { recursive: true, preserveTimestamps: true });
 }
+
+/** A fixture that starts as BASE: BASE's template copied in, then `then`
+ * on top. Used as a setup, it is itself built once and copied. */
+const fromBase = (then: (dir: string) => void) => (dir: string) => { fromTemplate(BASE, dir); then(dir); };
+const claimed = (id: string) => fromBase((d) => { ok(run(['claim', `--id=${id}`, '--as=alice'], d), 'claim'); });
+/** BASE with TSK-001 / TSK-002 claimed by alice. */
+const CLAIMED_1 = claimed('TSK-001');
+const CLAIMED_2 = claimed('TSK-002');
+/** BASE under `layout.group = hierarchy`. */
+const HIERARCHY = (dir: string) => base(dir, (x) => setConfig(x, (c) => { c.layout.group = 'hierarchy'; }));
+/** BASE under a layout block of `{ group: 'hierarchy' }` alone (section H). */
+const HIER_BASE = (dir: string) => base(dir, (x) => setConfig(x, (c) => { c.layout = { group: 'hierarchy' }; }));
 
 interface Probe {
   label: string;
@@ -255,56 +270,54 @@ function sectionA() {
   probe({ label: 'a-set-batch', setup: BASE, args: () => ['set', '--id=TSK-001,TSK-002', '--priority=low'] });
   probe({
     label: 'a-set-parent-hierarchy', args: () => ['set', '--id=TSK-002', '--parent=EPIC-002'],
-    setup: (d) => base(d, (x) => setConfig(x, (c) => { c.layout.group = 'hierarchy'; })),
+    setup: HIERARCHY,
   });
   probe({ label: 'a-note', setup: BASE, args: () => ['note', '--id=TSK-002', 'a dry note'] });
   probe({ label: 'a-check', setup: BASE, args: () => ['check', '--id=TSK-002', '--text=b'] });
   probe({ label: 'a-claim', setup: BASE, args: () => ['claim', '--id=TSK-002', '--as=alice', '--status=doing'] });
   probe({
     label: 'a-claim-done', args: () => ['claim', '--id=TSK-001', '--as=alice', '--status=done'],
-    setup: (d) => { base(d); ok(run(['claim', '--id=TSK-001', '--as=alice'], d), 'claim'); },
+    setup: CLAIMED_1,
   });
   probe({
     label: 'a-release', args: () => ['release', '--id=TSK-002', '--as=alice'],
-    setup: (d) => { base(d); ok(run(['claim', '--id=TSK-002', '--as=alice'], d), 'claim'); },
+    setup: CLAIMED_2,
   });
   probe({ label: 'a-next', setup: BASE, args: () => ['next', '--as=bob', '--status=doing'] });
   probe({ label: 'a-archive', setup: BASE, args: () => ['archive', '--id=EPIC-002'] });
   probe({
     label: 'a-unarchive', args: () => ['unarchive', '--id=EPIC-002'],
-    setup: (d) => { base(d); ok(run(['archive', '--id=EPIC-002'], d), 'archive'); },
+    setup: fromBase((d) => { ok(run(['archive', '--id=EPIC-002'], d), 'archive'); }),
   });
   probe({ label: 'a-rm', setup: BASE, args: () => ['rm', '--id=TSK-002'] });
   probe({
     label: 'a-rm-cascade', args: () => ['rm', '--id=EPIC-001', '--cascade'],
-    setup: (d) => { base(d); ok(run(['claim', '--id=TSK-001', '--as=alice'], d), 'claim'); },
+    setup: CLAIMED_1,
   });
   probe({
     label: 'a-doctor-fix', args: () => ['doctor', '--fix'],
-    setup: (d) => {
-      base(d);
+    setup: fromBase((d) => {
       const bl = backlogOf(d);
       fs.unlinkSync(path.join(bl, 'STATUS.md'));
       fs.unlinkSync(path.join(bl, '.nanojira', 'ids', 'TSK-001'));
       fs.renameSync(path.join(bl, 'tasks', 'TSK-002.md'), path.join(bl, 'epics', 'TSK-002.md'));
       edit(path.join(bl, 'tasks', 'TSK-001.md'), (s) => s.replace('# T1', '# Other heading'));
-    },
+    }),
   });
   // The copy keeps every mtime: --fix fills a missing created/updated from
   // the file's own mtime, so a copy stamped "now" would write other bytes.
   probe({
     label: 'a-doctor-fix-mtime', args: () => ['doctor', '--fix'],
-    setup: (d) => {
-      base(d);
+    setup: fromBase((d) => {
       const f = path.join(backlogOf(d), 'tasks', 'TSK-002.md');
       edit(f, (s) => s.replace(/^updated: .*\n/m, '').replace(/^created: .*\n/m, ''));
       fs.utimesSync(f, new Date('2026-01-02T03:04:05Z'), new Date('2026-01-02T03:04:05Z'));
-    },
+    }),
   });
   // Two dry runs in a row report the same would-be id: nothing was reserved.
   {
     const dir = H.freshDir('a-not-reserved');
-    base(dir);
+    fromTemplate(BASE, dir);
     const r1 = runJ(['new', '--type=epic', '--title=X', '--dry-run'], dir);
     const r2 = runJ(['new', '--type=epic', '--title=X', '--dry-run'], dir);
     T.check('A not reserved: both dry runs report EPIC-003', r1.json && r1.json.id === 'EPIC-003' && r2.json && r2.json.id === 'EPIC-003', J([r1.json && r1.json.id, r2.json && r2.json.id]));
@@ -323,7 +336,7 @@ function sectionB() {
   T.check('B archive of an open epic is refused:*', nd.dry.json && /^refused:/.test(nd.dry.json.error), J(nd.dry.json));
   const cl = probe({
     label: 'b-claimed', args: () => ['claim', '--id=TSK-002', '--as=bob'],
-    setup: (d) => { base(d); ok(run(['claim', '--id=TSK-002', '--as=alice'], d), 'claim'); },
+    setup: CLAIMED_2,
   });
   T.eq('B refused:claimed', cl.dry.json && cl.dry.json.error, 'refused:claimed');
   const pl = probe({
@@ -343,7 +356,7 @@ function sectionB() {
 
 function sectionC() {
   const dir = H.freshDir('c-reads');
-  base(dir);
+  fromTemplate(BASE, dir);
   const fp = fingerprint(backlogOf(dir));
   for (const args of [['list'], ['show', '--id=TSK-001'], ['show', '--id=TSK-001', '--notes=last:1'], ['find', 'T1'], ['tree'], ['tags'],
     ['log', '--id=TSK-001'], ['log', '--id=TSK-001', '--last=1'], []]) {
@@ -398,7 +411,7 @@ function sectionE() {
   T.contains('E prose: directories carry a trailing slash', i.dry.stdout, '  create  epics/\n');
   const f = probe({ label: 'e-prose-fail', setup: BASE, args: () => ['set', '--id=TSK-099', '--status=doing'], json: false });
   T.eq('E prose failure: stdout is the summary alone', f.dry.stdout, 'Dry run: nothing written. The real call would change nothing.\n');
-  const df = probe({ label: 'e-prose-doctor-fix', setup: (d) => { base(d); fs.unlinkSync(path.join(backlogOf(d), 'STATUS.md')); }, args: () => ['doctor', '--fix'], json: false });
+  const df = probe({ label: 'e-prose-doctor-fix', setup: fromBase((d) => { fs.unlinkSync(path.join(backlogOf(d), 'STATUS.md')); }), args: () => ['doctor', '--fix'], json: false });
   T.contains('E prose: doctor --fix names the backlog relative to the cwd, not the scratch copy', df.dry.stdout, 'backlog/: ');
 }
 
@@ -425,7 +438,7 @@ function sectionG() {
   }
   const locked: string[] = [];
   const setup = (d: string) => {
-    base(d);
+    fromTemplate(BASE, d);
     const p = path.join(backlogOf(d), 'tasks', 'locked');
     fs.mkdirSync(p);
     fs.writeFileSync(path.join(p, 'x.md'), 'x');
@@ -524,7 +537,7 @@ function sectionH() {
   // parent's ID folder through one. The dry run reports that write and
   // makes it in the scratch copy only.
   const HIER = (dir: string) => {
-    base(dir, (d) => setConfig(d, (c) => { c.layout = { group: 'hierarchy' }; }));
+    fromTemplate(HIER_BASE, dir);
     const b = backlogOf(dir), o = path.join(dir, 'outside');
     fs.mkdirSync(o);
     // EPIC-001.md stays readable at the top level; its ID folder moves out.

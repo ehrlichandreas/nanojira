@@ -53,8 +53,15 @@ function envFor(o: RunOptsIn) {
   const env: Record<string, string | undefined> = Object.assign({ HOME }, (o && o.env) || {});
   return { cwd: o.cwd, env, unsetEnv: env.NJ_BACKLOG === undefined ? ['NJ_BACKLOG'] : [], input: o.input };
 }
-function run(args: string[], o: RunOptsIn) { return H.runNj(args, envFor(o)); }
-function runJ(args: string[], o: RunOptsIn) { return H.runJson(args, envFor(o)); }
+/* Async: every section below is a runLegs leg (DECISIONS 210) -- each one
+ * builds and touches only its own fixture, so they overlap in wall time;
+ * runLegs flushes their checks in declared order, so the check sequence is
+ * the one the serial file produced. */
+function run(args: string[], o: RunOptsIn) { return H.runNjAsync(args, envFor(o)); }
+function runJ(args: string[], o: RunOptsIn) { return H.runJsonAsync(args, envFor(o)); }
+type Ctx = H.BufferedContext;
+const LEGS: Array<(t: Ctx) => Promise<unknown>> = [];
+function leg(fn: (t: Ctx) => Promise<unknown>): void { LEGS.push(fn); }
 
 /* ---- the v2 layout, by hand ------------------------------------------- */
 
@@ -187,10 +194,10 @@ function snapshot(root: string): string[] {
   })(root, '.');
   return out;
 }
-function sameTree(desc: string, before: string[], after: string[]) {
+function sameTree(t: Ctx, desc: string, before: string[], after: string[]) {
   const gone = before.filter((l: string) => !after.includes(l));
   const added = after.filter((l: string) => !before.includes(l));
-  return T.check(desc, gone.length === 0 && added.length === 0,
+  return t.check(desc, gone.length === 0 && added.length === 0,
     (gone.length ? 'before only: ' + J(gone.slice(0, 6)) + '\n     ' : '') +
     (added.length ? 'after only:  ' + J(added.slice(0, 6)) : ''));
 }
@@ -256,24 +263,30 @@ interface BuildResult {
 /* `build()` gives a FRESH {o, root} per run: against an nj that does write,
  * the human run would otherwise consume the fixture (rm, archive) and the
  * --json run would fail for an unrelated reason. */
+/* The human and the --json run each get their own fixture, so they are two
+ * legs. */
 function refusal(desc: string, argsOrFn: string[] | ((x: BuildResult) => string[]), build: () => BuildResult) {
   const argsOf = (x: BuildResult) => (typeof argsOrFn === 'function' ? argsOrFn(x) : argsOrFn);
-  let x = build();
-  let before = snapshot(x.root);
-  const r = run(argsOf(x), x.o);
-  T.exit(desc + ': exit 1', r, 1);
-  T.check(desc + ': stderr points at `nj doctor --fix` (§ 4)', /doctor --fix/.test(r.stderr || ''), 'stderr = ' + J(r.stderr));
-  T.check(desc + ': no stack trace', !/^\s+at\s+\S/m.test(r.stderr || ''), J(r.stderr));
-  sameTree(desc + ': changes nothing — the whole tree identical before/after (AC-24)', before, snapshot(x.root));
-  x = build();
-  before = snapshot(x.root);
-  const rj = runJ(argsOf(x), x.o);
-  T.exit(desc + ' --json: exit 1', rj, 1);
-  T.check(desc + ' --json: {ok:false} (§ 9)', !!rj.json && rj.json.ok === false, J(rj.json || rj.stdout).slice(0, 300));
-  T.eq(desc + ' --json: error is legacy_layout', rj.json && rj.json.error, 'legacy_layout');
-  T.check(desc + ' --json: never a read shape', !(rj.json && (Array.isArray(rj.json.entries) || Array.isArray(rj.json.ready))),
-    J(rj.json).slice(0, 300));
-  sameTree(desc + ' --json: changes nothing', before, snapshot(x.root));
+  leg(async (t) => {
+    const x = build();
+    const before = snapshot(x.root);
+    const r = await run(argsOf(x), x.o);
+    t.exit(desc + ': exit 1', r, 1);
+    t.check(desc + ': stderr points at `nj doctor --fix` (§ 4)', /doctor --fix/.test(r.stderr || ''), 'stderr = ' + J(r.stderr));
+    t.check(desc + ': no stack trace', !/^\s+at\s+\S/m.test(r.stderr || ''), J(r.stderr));
+    sameTree(t, desc + ': changes nothing — the whole tree identical before/after (AC-24)', before, snapshot(x.root));
+  });
+  leg(async (t) => {
+    const x = build();
+    const before = snapshot(x.root);
+    const rj = await runJ(argsOf(x), x.o);
+    t.exit(desc + ' --json: exit 1', rj, 1);
+    t.check(desc + ' --json: {ok:false} (§ 9)', !!rj.json && rj.json.ok === false, J(rj.json || rj.stdout).slice(0, 300));
+    t.eq(desc + ' --json: error is legacy_layout', rj.json && rj.json.error, 'legacy_layout');
+    t.check(desc + ' --json: never a read shape', !(rj.json && (Array.isArray(rj.json.entries) || Array.isArray(rj.json.ready))),
+      J(rj.json).slice(0, 300));
+    sameTree(t, desc + ' --json: changes nothing', before, snapshot(x.root));
+  });
 }
 
 /* Found by the upward search, from the project root and from a subfolder. */
@@ -314,42 +327,42 @@ refusal('L1 .njrc → <v2 backlog>, list', ['list'], viaSource('rc'));
 
 /* `init` at a v2 backlog: `exists`, like any occupied target (DECISIONS
  * 101, AMBIGUITIES 72), and it must not touch it. */
-{
+leg(async (t) => {
   const x = legacy('ac24-init');
   const before = snapshot(x.dir);
-  const r = run(['init'], { cwd: x.dir });
-  T.exit('L1 init where a v2 backlog is: exit 1', r, 1);
-  const rj = runJ(['init'], { cwd: x.dir });
-  T.check('L1 init where a v2 backlog is --json: {ok:false}', !!rj.json && rj.json.ok === false, J(rj.json || rj.stdout));
-  T.eq('L1 init where a v2 backlog is --json: error is exists (DECISIONS 101)', rj.json && rj.json.error, 'exists');
-  sameTree('L1 init where a v2 backlog is: changes nothing', before, snapshot(x.dir));
-}
+  const r = await run(['init'], { cwd: x.dir });
+  t.exit('L1 init where a v2 backlog is: exit 1', r, 1);
+  const rj = await runJ(['init'], { cwd: x.dir });
+  t.check('L1 init where a v2 backlog is --json: {ok:false}', !!rj.json && rj.json.ok === false, J(rj.json || rj.stdout));
+  t.eq('L1 init where a v2 backlog is --json: error is exists (DECISIONS 101)', rj.json && rj.json.error, 'exists');
+  sameTree(t, 'L1 init where a v2 backlog is: changes nothing', before, snapshot(x.dir));
+});
 
 /* ===================================================================== */
 /* L2 — doctor: backlog:legacy_layout, exit 2, reads the v2 places        */
 /* ===================================================================== */
 
-{
+leg(async (t) => {
   const x = legacy('ac24-doctor');
   const before = snapshot(x.dir);
-  const r = run(['doctor'], { cwd: x.dir });
-  T.exit('L2 doctor on a v2 backlog: exit 2', r, 2);
-  const rj = runJ(['doctor'], { cwd: x.dir });
-  T.exit('L2 doctor --json: exit 2', rj, 2);
-  T.check('L2 doctor --json: the doctor shape {backlog, ok:false, problems[]} (§ 9)',
+  const r = await run(['doctor'], { cwd: x.dir });
+  t.exit('L2 doctor on a v2 backlog: exit 2', r, 2);
+  const rj = await runJ(['doctor'], { cwd: x.dir });
+  t.exit('L2 doctor --json: exit 2', rj, 2);
+  t.check('L2 doctor --json: the doctor shape {backlog, ok:false, problems[]} (§ 9)',
     !!rj.json && rj.json.ok === false && Array.isArray(rj.json.problems), J(rj.json).slice(0, 300));
   /* The fixture is otherwise clean. Neither STATUS.md nor TAGS.md exists in
    * a v2 backlog, and both *File keys default to true, so their absence is
    * what § 14 predicts (`backlog:status_stale`/`backlog:tags_stale`, both
    * warning). RULED (DECISIONS 101, AMBIGUITIES 74): doctor runs every
    * other check against the v2 places. */
-  T.sameSet('L2 doctor: backlog:legacy_layout (error) — and nothing but the missing STATUS.md/TAGS.md',
+  t.sameSet('L2 doctor: backlog:legacy_layout (error) — and nothing but the missing STATUS.md/TAGS.md',
     H.doctorSet(rj) || ['<no problems array>'], LEGACY_SET.concat(['backlog:status_stale:warning', 'backlog:tags_stale:warning']));
   const f = (rj.json && rj.json.problems || []).find((p: any) => p && p.code === 'backlog:legacy_layout');
-  T.check('L2 backlog:legacy_layout is backlog-level: no element (§ 9)', !!f && f.element === undefined, J(f));
-  sameTree('L2 doctor changes nothing', before, snapshot(x.dir));
-}
-{
+  t.check('L2 backlog:legacy_layout is backlog-level: no element (§ 9)', !!f && f.element === undefined, J(f));
+  sameTree(t, 'L2 doctor changes nothing', before, snapshot(x.dir));
+});
+leg(async (t) => {
   /* doctor reads the v2 places (§ 14): the configuration from
    * .nanojira.json (its statuses decide `unknown:status`), the tombstones
    * from .ids/ (a missing one is `id:no_tombstone`). */
@@ -358,12 +371,12 @@ refusal('L1 .njrc → <v2 backlog>, list', ['list'], viaSource('rc'));
       complete('In review')),
   });
   const x = legacy('ac24-doctor-reads', { elements: els });
-  const rj = runJ(['doctor'], { cwd: x.dir });
-  T.exit('L2 doctor on a v2 backlog with findings: exit 2', rj, 2);
-  T.sameSet('L2 doctor reads .nanojira.json and .ids/: `review` is unknown to the v2 statuses, TSK-005 has no tombstone',
+  const rj = await runJ(['doctor'], { cwd: x.dir });
+  t.exit('L2 doctor on a v2 backlog with findings: exit 2', rj, 2);
+  t.sameSet('L2 doctor reads .nanojira.json and .ids/: `review` is unknown to the v2 statuses, TSK-005 has no tombstone',
     H.doctorSet(rj) || ['<no problems array>'],
     LEGACY_SET.concat(['backlog:status_stale:warning', 'backlog:tags_stale:warning', 'unknown:status:warning', 'id:no_tombstone:warning']));
-}
+});
 
 /* ===================================================================== */
 /* L3 — doctor --fix migrates                                             */
@@ -381,7 +394,7 @@ function outsideBookkeeping(map: Record<string, string>): Record<string, string>
   return out;
 }
 
-function migrated(desc: string, x: { dir: string; bl: string }, fix: () => H.JsonRunResult, gitignoreWant: string | null, wantNote: boolean) {
+async function migrated(t: Ctx, desc: string, x: { dir: string; bl: string }, fix: () => Promise<H.JsonRunResult>, gitignoreWant: string | null, wantNote: boolean) {
   const before = files(x.bl);
   const tombs: Record<string, string | null> = {};
   for (const id of ls(path.join(x.bl, V2_IDS))) tombs[id] = bytes(path.join(x.bl, V2_IDS, id));
@@ -395,183 +408,183 @@ function migrated(desc: string, x: { dir: string; bl: string }, fix: () => H.Jso
   const tombStat: Record<string, string | null> = {};
   for (const id of Object.keys(tombs)) tombStat[id] = statOf(path.join(x.bl, V2_IDS, id));
 
-  const r = fix();
-  T.exit(desc + ': doctor --fix exit 0 — no error remains (§ 14)', r, 0);
-  T.check(desc + ': fixed[] reports the migration', !!r.json && Array.isArray(r.json.fixed) && r.json.fixed.length > 0,
+  const r = await fix();
+  t.exit(desc + ': doctor --fix exit 0 — no error remains (§ 14)', r, 0);
+  t.check(desc + ': fixed[] reports the migration', !!r.json && Array.isArray(r.json.fixed) && r.json.fixed.length > 0,
     'fixed = ' + J(r.json && r.json.fixed));
-  T.sameSet(desc + ': problems[] after the repair is empty', H.doctorSet(r) || ['<no problems array>'], []);
+  t.sameSet(desc + ': problems[] after the repair is empty', H.doctorSet(r) || ['<no problems array>'], []);
 
-  T.eq(desc + ': .nanojira/config.json holds the v2 configuration byte for byte', bytes(path.join(x.bl, V3_CONFIG)), cfg);
-  T.check(desc + ': .nanojira.json is gone from the top level', !fs.existsSync(path.join(x.bl, V2_CONFIG)), 'still there');
-  T.eq(desc + ': .nanojira/ids/ holds every tombstone', ls(path.join(x.bl, V3_IDS)), Object.keys(tombs).sort());
+  t.eq(desc + ': .nanojira/config.json holds the v2 configuration byte for byte', bytes(path.join(x.bl, V3_CONFIG)), cfg);
+  t.check(desc + ': .nanojira.json is gone from the top level', !fs.existsSync(path.join(x.bl, V2_CONFIG)), 'still there');
+  t.eq(desc + ': .nanojira/ids/ holds every tombstone', ls(path.join(x.bl, V3_IDS)), Object.keys(tombs).sort());
   const moved: Record<string, string | null> = {};
   for (const id of Object.keys(tombs)) moved[id] = bytes(path.join(x.bl, V3_IDS, id));
-  T.eq(desc + ': every tombstone keeps its content', moved, tombs);
-  T.check(desc + ': .ids/ is gone from the top level', !fs.existsSync(path.join(x.bl, V2_IDS)), 'still there');
-  T.eq(desc + ': the configuration was moved by rename (same inode and mtime)', statOf(path.join(x.bl, V3_CONFIG)), cfgStat);
-  T.eq(desc + ': .ids/ was moved by one rename (the folder keeps its inode)',
+  t.eq(desc + ': every tombstone keeps its content', moved, tombs);
+  t.check(desc + ': .ids/ is gone from the top level', !fs.existsSync(path.join(x.bl, V2_IDS)), 'still there');
+  t.eq(desc + ': the configuration was moved by rename (same inode and mtime)', statOf(path.join(x.bl, V3_CONFIG)), cfgStat);
+  t.eq(desc + ': .ids/ was moved by one rename (the folder keeps its inode)',
     statOf(path.join(x.bl, V3_IDS)) && statOf(path.join(x.bl, V3_IDS))!.split('@')[0], idsStat && idsStat.split('@')[0]);
   const tombAfter: Record<string, string | null> = {};
   for (const id of Object.keys(tombs)) tombAfter[id] = statOf(path.join(x.bl, V3_IDS, id));
-  T.eq(desc + ': every tombstone keeps its inode and mtime (moved, not rewritten)', tombAfter, tombStat);
-  T.check(desc + ': .nanojira-index.json is deleted', !fs.existsSync(path.join(x.bl, V2_INDEX)), 'still there');
-  T.eq(desc + ': every element file is byte-identical',
+  t.eq(desc + ': every tombstone keeps its inode and mtime (moved, not rewritten)', tombAfter, tombStat);
+  t.check(desc + ': .nanojira-index.json is deleted', !fs.existsSync(path.join(x.bl, V2_INDEX)), 'still there');
+  t.eq(desc + ': every element file is byte-identical',
     outsideBookkeeping(files(x.bl)), outsideBookkeeping(before));
-  T.eq(desc + ': .gitignore', bytes(path.join(x.bl, '.gitignore')), gitignoreWant);
+  t.eq(desc + ': .gitignore', bytes(path.join(x.bl, '.gitignore')), gitignoreWant);
   const notes = r.json && Array.isArray(r.json.notes) ? r.json.notes : [];
   if (wantNote) {
-    T.check(desc + ': a note says .gitignore was left alone (§ 14)', notes.some((n: any) => J(n).includes('.gitignore')), 'notes = ' + J(notes));
+    t.check(desc + ': a note says .gitignore was left alone (§ 14)', notes.some((n: any) => J(n).includes('.gitignore')), 'notes = ' + J(notes));
   }
   /* README.md (§ 14 step 0, DECISIONS 102) */
   const readme = bytes(path.join(x.bl, 'README.md'));
   if (readmeBefore === V2_README) {
-    T.check(desc + ': the pristine v2 README is replaced by the v3 text', readme !== null && readme !== V2_README, J(readme).slice(0, 200));
-    T.check(desc + ': the v3 README names .nanojira/', (readme || '').includes('.nanojira/'), J(readme).slice(0, 300));
-    T.check(desc + ': the v3 README no longer names the v2 places (.ids/, .nanojira.json, .nanojira-index.json)',
+    t.check(desc + ': the pristine v2 README is replaced by the v3 text', readme !== null && readme !== V2_README, J(readme).slice(0, 200));
+    t.check(desc + ': the v3 README names .nanojira/', (readme || '').includes('.nanojira/'), J(readme).slice(0, 300));
+    t.check(desc + ': the v3 README no longer names the v2 places (.ids/, .nanojira.json, .nanojira-index.json)',
       !/\.ids\/|\.nanojira\.json|\.nanojira-index\.json/.test(readme || ''), J(readme).slice(0, 300));
   } else {
-    T.eq(desc + ': a README that is not the v2 init text is left alone, byte for byte', readme, readmeBefore);
-    T.check(desc + ': a note says README.md was left alone (§ 14)', notes.some((n: any) => J(n).includes('README')), 'notes = ' + J(notes));
+    t.eq(desc + ': a README that is not the v2 init text is left alone, byte for byte', readme, readmeBefore);
+    t.check(desc + ': a note says README.md was left alone (§ 14)', notes.some((n: any) => J(n).includes('README')), 'notes = ' + J(notes));
   }
 
-  const d = runJ(['doctor'], { cwd: x.dir });
-  T.exit(desc + ': a following doctor exits 0', d, 0);
-  T.sameSet(desc + ': a following doctor is clean', H.doctorSet(d) || ['<no problems array>'], []);
+  const d = await runJ(['doctor'], { cwd: x.dir });
+  t.exit(desc + ': a following doctor exits 0', d, 0);
+  t.sameSet(desc + ': a following doctor is clean', H.doctorSet(d) || ['<no problems array>'], []);
 
-  const l = runJ(['list', '--all'], { cwd: x.dir });
-  T.exit(desc + ': list works on the migrated backlog', l, 0);
-  T.eq(desc + ': list --all shows every element', (l.json && l.json.entries || []).map((e: any) => e.id).sort(),
+  const l = await runJ(['list', '--all'], { cwd: x.dir });
+  t.exit(desc + ': list works on the migrated backlog', l, 0);
+  t.eq(desc + ': list --all shows every element', (l.json && l.json.entries || []).map((e: any) => e.id).sort(),
     ['EPIC-001', 'SUB-001', 'TSK-001', 'TSK-003', 'TSK-004']);
   for (const [type, extra] of [['epic', []], ['task', ['--parent=EPIC-001']], ['subtask', ['--parent=TSK-001']]] as [string, string[]][]) {
-    const n = runJ(['new', '--type=' + type, '--title=After migration'].concat(extra), { cwd: x.dir });
-    T.exit(desc + ': nj new --type=' + type + ' after the migration', n, 0);
-    T.eq(desc + ': the next ' + type + ' is above every existing number (tombstones included)', n.json && n.json.id, NEXT[type]);
+    const n = await runJ(['new', '--type=' + type, '--title=After migration'].concat(extra), { cwd: x.dir });
+    t.exit(desc + ': nj new --type=' + type + ' after the migration', n, 0);
+    t.eq(desc + ': the next ' + type + ' is above every existing number (tombstones included)', n.json && n.json.id, NEXT[type]);
   }
-  T.check(desc + ': new tombstones land in .nanojira/ids/', ls(path.join(x.bl, V3_IDS)).includes(NEXT.task),
+  t.check(desc + ': new tombstones land in .nanojira/ids/', ls(path.join(x.bl, V3_IDS)).includes(NEXT.task),
     J(ls(path.join(x.bl, V3_IDS))));
-  T.check(desc + ': and .ids/ is not recreated', !fs.existsSync(path.join(x.bl, V2_IDS)), 'recreated');
+  t.check(desc + ': and .ids/ is not recreated', !fs.existsSync(path.join(x.bl, V2_IDS)), 'recreated');
 }
 
-{
+leg(async (t) => {
   /* The default v2 .gitignore: the verbatim line is replaced, the other
    * line kept. */
   const x = legacy('ac24-fix');
-  migrated('L3 search', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }), '.nanojira/index.json\n.nj-tmp-*\n', false);
-}
-{
+  await migrated(t, 'L3 search', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }), '.nanojira/index.json\n.nj-tmp-*\n', false);
+});
+leg(async (t) => {
   const x = legacy('ac24-fix-flag', { index: false });
   const cwd = path.join(x.dir, 'elsewhere');
   fs.mkdirSync(cwd);
-  migrated('L3 --backlog, no index file', x, () => runJ(['doctor', '--fix', '--backlog=' + x.bl], { cwd }),
+  await migrated(t, 'L3 --backlog, no index file', x, () => runJ(['doctor', '--fix', '--backlog=' + x.bl], { cwd }),
     '.nanojira/index.json\n.nj-tmp-*\n', false);
-}
-{
+});
+leg(async (t) => {
   /* User lines around the verbatim one: only that line changes. */
   const x = legacy('ac24-fix-gi-extra', { gitignore: '# mine\nnode_modules/\n.nanojira-index.json\n*.log\n.nj-tmp-*\n' });
-  migrated('L3 .gitignore with user lines', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }),
+  await migrated(t, 'L3 .gitignore with user lines', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }),
     '# mine\nnode_modules/\n.nanojira/index.json\n*.log\n.nj-tmp-*\n', false);
-}
+});
 /* CRLF (DECISIONS 101): the verbatim match ignores a trailing \r, and the
  * replacement keeps the line's own ending. */
-{
+leg(async (t) => {
   const x = legacy('ac24-fix-gi-crlf', { gitignore: '.nanojira-index.json\r\n.nj-tmp-*\r\n' });
-  migrated('L3 a CRLF .gitignore', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }),
+  await migrated(t, 'L3 a CRLF .gitignore', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }),
     '.nanojira/index.json\r\n.nj-tmp-*\r\n', false);
-}
-{
+});
+leg(async (t) => {
   const x = legacy('ac24-fix-gi-mixed', { gitignore: '# mine\n.nanojira-index.json\r\n.nj-tmp-*\n' });
-  migrated('L3 a mixed-ending .gitignore: only that line, its CRLF kept', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }),
+  await migrated(t, 'L3 a mixed-ending .gitignore: only that line, its CRLF kept', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }),
     '# mine\n.nanojira/index.json\r\n.nj-tmp-*\n', false);
-}
-{
+});
+leg(async (t) => {
   /* the last line without any line end */
   const x = legacy('ac24-fix-gi-noeol', { gitignore: '.nj-tmp-*\n.nanojira-index.json' });
-  migrated('L3 the verbatim line as the last line without a newline', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }),
+  await migrated(t, 'L3 the verbatim line as the last line without a newline', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }),
     '.nj-tmp-*\n.nanojira/index.json', false);
-}
+});
 
 /* Not verbatim → .gitignore left alone, and a note says so. */
 for (const [label, gi] of [
   ['without the line', '.nj-tmp-*\n'],
   ['with a rooted "/.nanojira-index.json"', '/.nanojira-index.json\n.nj-tmp-*\n'],
   ['with a trailing comment on the line', '.nanojira-index.json # index\n.nj-tmp-*\n'],
-]) {
+]) leg(async (t) => {
   const x = legacy('ac24-fix-gi', { gitignore: gi });
-  migrated('L3 .gitignore ' + label, x, () => runJ(['doctor', '--fix'], { cwd: x.dir }), gi, true);
-}
-{
+  await migrated(t, 'L3 .gitignore ' + label, x, () => runJ(['doctor', '--fix'], { cwd: x.dir }), gi, true);
+});
+leg(async (t) => {
   /* RULED (DECISIONS 101, AMBIGUITIES 74): "otherwise … left alone and a
    * note says so" covers an absent file as well: not created, and noted. */
   const x = legacy('ac24-fix-nogi', { gitignore: null });
-  migrated('L3 no .gitignore at all (not created)', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }), null, true);
-}
-{
+  await migrated(t, 'L3 no .gitignore at all (not created)', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }), null, true);
+});
+leg(async (t) => {
   /* RULED (DECISIONS 101, AMBIGUITIES 73): an EMPTY `.nanojira/` beside the v2 files is
    * neither v3 place (`config.json`, `ids/`), so step 0 proceeds. */
   const x = legacy('ac24-fix-emptydir');
   fs.mkdirSync(path.join(x.bl, V3_DIR));
-  migrated('L3 an empty .nanojira/ already present', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }),
+  await migrated(t, 'L3 an empty .nanojira/ already present', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }),
     '.nanojira/index.json\n.nj-tmp-*\n', false);
-}
-{
+});
+leg(async (t) => {
   /* DECISIONS 102: the README a v2 init wrote is replaced by the v3 text */
   const x = legacy('ac24-fix-readme', { readme: V2_README });
-  migrated('L3 the pristine v2 README', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }), '.nanojira/index.json\n.nj-tmp-*\n', false);
-}
-{
+  await migrated(t, 'L3 the pristine v2 README', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }), '.nanojira/index.json\n.nj-tmp-*\n', false);
+});
+leg(async (t) => {
   /* one byte off the v2 text is a user's README: left alone, noted */
   const x = legacy('ac24-fix-readme-edited', { readme: V2_README + 'My own line.\n' });
-  migrated('L3 a v2 README with one line added', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }), '.nanojira/index.json\n.nj-tmp-*\n', false);
-}
-{
+  await migrated(t, 'L3 a v2 README with one line added', x, () => runJ(['doctor', '--fix'], { cwd: x.dir }), '.nanojira/index.json\n.nj-tmp-*\n', false);
+});
+leg(async (t) => {
   /* Human output of the same repair: exit 0 as well. */
   const x = legacy('ac24-fix-human');
-  const r = run(['doctor', '--fix'], { cwd: x.dir });
-  T.exit('L3 doctor --fix (human): exit 0', r, 0);
-  T.check('L3 doctor --fix (human): migrated', fs.existsSync(path.join(x.bl, V3_CONFIG)) && !fs.existsSync(path.join(x.bl, V2_CONFIG)),
+  const r = await run(['doctor', '--fix'], { cwd: x.dir });
+  t.exit('L3 doctor --fix (human): exit 0', r, 0);
+  t.check('L3 doctor --fix (human): migrated', fs.existsSync(path.join(x.bl, V3_CONFIG)) && !fs.existsSync(path.join(x.bl, V2_CONFIG)),
     J(ls(x.bl)));
-}
+});
 
 /* ===================================================================== */
 /* L4 — v2 and v3 places both present: nothing moves, nothing is written  */
 /* ===================================================================== */
 
-function ambiguous(desc: string, x: { dir: string; bl: string }) {
+async function ambiguous(t: Ctx, desc: string, x: { dir: string; bl: string }) {
   const before = snapshot(x.dir);
-  const r = runJ(['doctor', '--fix'], { cwd: x.dir });
-  T.exit(desc + ': doctor --fix exit 2 (DECISIONS 95 B21)', r, 2);
-  T.check(desc + ': backlog:legacy_layout still reported as an error',
+  const r = await runJ(['doctor', '--fix'], { cwd: x.dir });
+  t.exit(desc + ': doctor --fix exit 2 (DECISIONS 95 B21)', r, 2);
+  t.check(desc + ': backlog:legacy_layout still reported as an error',
     (H.doctorSet(r) || []).includes('backlog:legacy_layout:error'), J(r.json && r.json.problems).slice(0, 300));
-  T.check(desc + ': fixed[] is empty — no step wrote anything (§ 14, DECISIONS 93)',
+  t.check(desc + ': fixed[] is empty — no step wrote anything (§ 14, DECISIONS 93)',
     !!r.json && Array.isArray(r.json.fixed) && r.json.fixed.length === 0, 'fixed = ' + J(r.json && r.json.fixed));
-  sameTree(desc + ': nothing moved, merged or written — the whole tree identical', before, snapshot(x.dir));
-  const h = run(['doctor', '--fix'], { cwd: x.dir });
-  T.exit(desc + ' (human): exit 2', h, 2);
-  sameTree(desc + ' (human): still nothing written', before, snapshot(x.dir));
+  sameTree(t, desc + ': nothing moved, merged or written — the whole tree identical', before, snapshot(x.dir));
+  const h = await run(['doctor', '--fix'], { cwd: x.dir });
+  t.exit(desc + ' (human): exit 2', h, 2);
+  sameTree(t, desc + ' (human): still nothing written', before, snapshot(x.dir));
 }
-{
+leg(async (t) => {
   const x = legacy('ac24-both-cfg');
   fs.mkdirSync(path.join(x.bl, V3_DIR));
   fs.writeFileSync(path.join(x.bl, V3_CONFIG), '{"schema": 1, "statuses": ["todo", "done"]}\n');
-  ambiguous('L4 .nanojira.json and .nanojira/config.json both present', x);
-}
-{
+  await ambiguous(t, 'L4 .nanojira.json and .nanojira/config.json both present', x);
+});
+leg(async (t) => {
   const x = legacy('ac24-both-ids');
   fs.mkdirSync(path.join(x.bl, V3_IDS), { recursive: true });
   fs.writeFileSync(path.join(x.bl, V3_IDS, 'TSK-001'), '');
-  ambiguous('L4 .ids/ and .nanojira/ids/ both present', x);
-}
-{
+  await ambiguous(t, 'L4 .ids/ and .nanojira/ids/ both present', x);
+});
+leg(async (t) => {
   const x = legacy('ac24-both-ids-empty');
   fs.mkdirSync(path.join(x.bl, V3_IDS), { recursive: true });
-  ambiguous('L4 .ids/ and an empty .nanojira/ids/ both present', x);
-}
-{
+  await ambiguous(t, 'L4 .ids/ and an empty .nanojira/ids/ both present', x);
+});
+leg(async (t) => {
   const x = legacy('ac24-both-all');
   fs.mkdirSync(path.join(x.bl, V3_IDS), { recursive: true });
   fs.writeFileSync(path.join(x.bl, V3_CONFIG), V2_CONFIG_BYTES);
-  ambiguous('L4 both places of both present', x);
-}
+  await ambiguous(t, 'L4 both places of both present', x);
+});
 
 /* ===================================================================== */
 /* L5 — an interrupted step 0: the renames happened, the fix-ups did not  */
@@ -636,12 +649,12 @@ function interrupted(label: string, o?: InterruptedOpts): { dir: string; bl: str
  * for the part that changed nothing. `gitignoreApplies`/`readmeApplies`:
  * whether that fix-up was expected to change this fixture's starting bytes.
  */
-function interruptedFix(desc: string, x: { dir: string; bl: string }, gitignoreWant: string | null, gitignoreApplies: boolean, readmeApplies: boolean) {
+async function interruptedFix(t: Ctx, desc: string, x: { dir: string; bl: string }, gitignoreWant: string | null, gitignoreApplies: boolean, readmeApplies: boolean) {
   /* Non-vacuous: this is NOT a legacy backlog — no top-level `.nanojira.json`
    * means `backlog:legacy_layout` does not fire, which is exactly why step 0
    * (gated on that finding, before G2) never ran again. */
-  const pre = runJ(['doctor'], { cwd: x.dir });
-  T.check(desc + ': fixture is not seen as legacy (no backlog:legacy_layout)',
+  const pre = await runJ(['doctor'], { cwd: x.dir });
+  t.check(desc + ': fixture is not seen as legacy (no backlog:legacy_layout)',
     !(H.doctorSet(pre) || []).includes('backlog:legacy_layout:error'), J(pre.json && pre.json.problems).slice(0, 300));
 
   const before = outsideBookkeeping(files(x.bl));
@@ -649,92 +662,92 @@ function interruptedFix(desc: string, x: { dir: string; bl: string }, gitignoreW
   for (const id of ls(path.join(x.bl, V3_IDS))) tombsBefore[id] = bytes(path.join(x.bl, V3_IDS, id));
   const cfgBefore = bytes(path.join(x.bl, V3_CONFIG));
 
-  const r = runJ(['doctor', '--fix'], { cwd: x.dir });
-  T.exit(desc + ': doctor --fix exit 0 — no error remains (§ 14)', r, 0);
-  T.sameSet(desc + ': problems[] after the repair is empty', H.doctorSet(r) || ['<no problems array>'], []);
+  const r = await runJ(['doctor', '--fix'], { cwd: x.dir });
+  t.exit(desc + ': doctor --fix exit 0 — no error remains (§ 14)', r, 0);
+  t.sameSet(desc + ': problems[] after the repair is empty', H.doctorSet(r) || ['<no problems array>'], []);
 
-  T.eq(desc + ': every element file is still byte-identical (G2 touches no element)',
+  t.eq(desc + ': every element file is still byte-identical (G2 touches no element)',
     outsideBookkeeping(files(x.bl)), before);
   const tombsAfter: Record<string, string | null> = {};
   for (const id of ls(path.join(x.bl, V3_IDS))) tombsAfter[id] = bytes(path.join(x.bl, V3_IDS, id));
-  T.eq(desc + ': every tombstone is still byte-identical', tombsAfter, tombsBefore);
-  T.eq(desc + ': .nanojira/config.json is still byte-identical', bytes(path.join(x.bl, V3_CONFIG)), cfgBefore);
+  t.eq(desc + ': every tombstone is still byte-identical', tombsAfter, tombsBefore);
+  t.eq(desc + ': .nanojira/config.json is still byte-identical', bytes(path.join(x.bl, V3_CONFIG)), cfgBefore);
 
   const notes = r.json && Array.isArray(r.json.notes) ? r.json.notes : [];
-  T.eq(desc + ': no note is produced — this backlog was never legacy (§ 14, DECISIONS 108 G2)', notes, []);
+  t.eq(desc + ': no note is produced — this backlog was never legacy (§ 14, DECISIONS 108 G2)', notes, []);
   const fixed = r.json && Array.isArray(r.json.fixed) ? r.json.fixed : [];
 
-  T.eq(desc + ': .gitignore', bytes(path.join(x.bl, '.gitignore')), gitignoreWant);
+  t.eq(desc + ': .gitignore', bytes(path.join(x.bl, '.gitignore')), gitignoreWant);
   if (gitignoreApplies) {
-    T.check(desc + ': fixed[] reports the .gitignore replacement', fixed.some((n: any) => J(n).includes('.gitignore')), J(fixed));
+    t.check(desc + ': fixed[] reports the .gitignore replacement', fixed.some((n: any) => J(n).includes('.gitignore')), J(fixed));
   } else {
-    T.check(desc + ': fixed[] does not mention .gitignore — nothing to do', !fixed.some((n: any) => J(n).includes('.gitignore')), J(fixed));
+    t.check(desc + ': fixed[] does not mention .gitignore — nothing to do', !fixed.some((n: any) => J(n).includes('.gitignore')), J(fixed));
   }
 
   const readme = bytes(path.join(x.bl, 'README.md'));
   if (readmeApplies) {
-    T.check(desc + ': the pristine v2 README is replaced by the v3 text', readme !== null && readme !== V2_README, J(readme).slice(0, 200));
-    T.check(desc + ': the v3 README names .nanojira/', (readme || '').includes('.nanojira/'), J(readme).slice(0, 300));
-    T.check(desc + ': the v3 README no longer names the v2 places (.ids/, .nanojira.json, .nanojira-index.json)',
+    t.check(desc + ': the pristine v2 README is replaced by the v3 text', readme !== null && readme !== V2_README, J(readme).slice(0, 200));
+    t.check(desc + ': the v3 README names .nanojira/', (readme || '').includes('.nanojira/'), J(readme).slice(0, 300));
+    t.check(desc + ': the v3 README no longer names the v2 places (.ids/, .nanojira.json, .nanojira-index.json)',
       !/\.ids\/|\.nanojira\.json|\.nanojira-index\.json/.test(readme || ''), J(readme).slice(0, 300));
-    T.check(desc + ': fixed[] reports the README replacement', fixed.some((n: any) => J(n).includes('README')), J(fixed));
+    t.check(desc + ': fixed[] reports the README replacement', fixed.some((n: any) => J(n).includes('README')), J(fixed));
   } else {
-    T.check(desc + ': fixed[] does not mention README — nothing to do', !fixed.some((n: any) => J(n).includes('README')), J(fixed));
+    t.check(desc + ': fixed[] does not mention README — nothing to do', !fixed.some((n: any) => J(n).includes('README')), J(fixed));
   }
 
-  const d = runJ(['doctor'], { cwd: x.dir });
-  T.exit(desc + ': a following doctor exits 0', d, 0);
-  T.sameSet(desc + ': a following doctor is clean', H.doctorSet(d) || ['<no problems array>'], []);
+  const d = await runJ(['doctor'], { cwd: x.dir });
+  t.exit(desc + ': a following doctor exits 0', d, 0);
+  t.sameSet(desc + ': a following doctor is clean', H.doctorSet(d) || ['<no problems array>'], []);
 
   /* "a second --fix is a no-op" (DECISIONS 108 G2): both fix-ups already
    * match (or were already left alone), so nothing is written again. */
   const treeAfterFirst = snapshot(x.dir);
-  const r2 = runJ(['doctor', '--fix'], { cwd: x.dir });
-  T.exit(desc + ': a second doctor --fix: exit 0', r2, 0);
-  T.eq(desc + ': a second doctor --fix is a no-op: fixed[] is empty', r2.json && r2.json.fixed, []);
-  T.eq(desc + ': a second doctor --fix is a no-op: notes[] is empty', r2.json && r2.json.notes, []);
-  sameTree(desc + ': a second doctor --fix is a no-op: nothing written', treeAfterFirst, snapshot(x.dir));
+  const r2 = await runJ(['doctor', '--fix'], { cwd: x.dir });
+  t.exit(desc + ': a second doctor --fix: exit 0', r2, 0);
+  t.eq(desc + ': a second doctor --fix is a no-op: fixed[] is empty', r2.json && r2.json.fixed, []);
+  t.eq(desc + ': a second doctor --fix is a no-op: notes[] is empty', r2.json && r2.json.notes, []);
+  sameTree(t, desc + ': a second doctor --fix is a no-op: nothing written', treeAfterFirst, snapshot(x.dir));
 
-  const l = runJ(['list', '--all'], { cwd: x.dir });
-  T.exit(desc + ': list works on the repaired backlog', l, 0);
-  T.eq(desc + ': list --all shows every element', (l.json && l.json.entries || []).map((e: any) => e.id).sort(),
+  const l = await runJ(['list', '--all'], { cwd: x.dir });
+  t.exit(desc + ': list works on the repaired backlog', l, 0);
+  t.eq(desc + ': list --all shows every element', (l.json && l.json.entries || []).map((e: any) => e.id).sort(),
     ['EPIC-001', 'SUB-001', 'TSK-001', 'TSK-003', 'TSK-004']);
 }
 
-{
+leg(async (t) => {
   /* Both fix-ups apply: the default verbatim .gitignore and the pristine
    * v2 README, with nothing else to migrate. */
   const x = interrupted('ac24-g2-both');
-  interruptedFix('L5 an interrupted step 0, both fix-ups due', x,
+  await interruptedFix(t, 'L5 an interrupted step 0, both fix-ups due', x,
     '.nanojira/index.json\n.nj-tmp-*\n', true, true);
-}
-{
+});
+leg(async (t) => {
   /* The README was edited: left alone, SILENTLY (not legacy); .gitignore
    * still fixed, reported. */
   const x = interrupted('ac24-g2-readme-edited', { readme: V2_README + 'My own line.\n' });
-  interruptedFix('L5 an interrupted step 0, README already edited', x,
+  await interruptedFix(t, 'L5 an interrupted step 0, README already edited', x,
     '.nanojira/index.json\n.nj-tmp-*\n', true, false);
-}
-{
+});
+leg(async (t) => {
   /* .gitignore is not verbatim (the pattern reworded): left alone,
    * SILENTLY; the README still gets replaced, reported. */
   const x = interrupted('ac24-g2-gi-reworded', { gitignore: '# index\n.nj-tmp-*\n' });
-  interruptedFix('L5 an interrupted step 0, .gitignore not verbatim', x,
+  await interruptedFix(t, 'L5 an interrupted step 0, .gitignore not verbatim', x,
     '# index\n.nj-tmp-*\n', false, true);
-}
-{
+});
+leg(async (t) => {
   /* Neither applies: both left alone, SILENTLY, exit 0 all the same —
    * a fix-up that doesn't apply is not a fault, and not a note either
    * on a backlog this was never legacy (§ 14, DECISIONS 108 G2). */
   const x = interrupted('ac24-g2-neither', { gitignore: '.nj-tmp-*\n', readme: CUSTOM_README });
-  interruptedFix('L5 an interrupted step 0, neither fix-up applies', x, '.nj-tmp-*\n', false, false);
-}
-{
+  await interruptedFix(t, 'L5 an interrupted step 0, neither fix-up applies', x, '.nj-tmp-*\n', false, false);
+});
+leg(async (t) => {
   /* No .gitignore at all: not created, SILENTLY (DECISIONS 101/74 for the
    * rule; 108 G2 follow-up for the silence on a non-legacy backlog). */
   const x = interrupted('ac24-g2-nogi', { gitignore: null });
-  interruptedFix('L5 an interrupted step 0, no .gitignore at all', x, null, false, true);
-}
+  await interruptedFix(t, 'L5 an interrupted step 0, no .gitignore at all', x, null, false, true);
+});
 
 /* ===================================================================== */
 /* G1 — a stray top-level .ids/ left by a crash BETWEEN step 0's two      */
@@ -779,36 +792,36 @@ function strayIds(label: string, strayTombstones: Record<string, string>): { dir
   return { dir, bl };
 }
 
-{
+leg(async (t) => {
   /* Every tombstone in the stray .ids/ is already mirrored in
    * .nanojira/ids/ (a subset of the real set): --fix removes the stray
    * directory outright, notes it, changes nothing else, and a repeat run
    * is a no-op. */
   const mirrored = { 'EPIC-001': '', 'TSK-001': 'kept\n' };
   const x = strayIds('ac24-g1-mirrored', mirrored);
-  const pre = runJ(['doctor'], { cwd: x.dir });
-  T.check('G1 fixture: not seen as legacy', !(H.doctorSet(pre) || []).includes('backlog:legacy_layout:error'),
+  const pre = await runJ(['doctor'], { cwd: x.dir });
+  t.check('G1 fixture: not seen as legacy', !(H.doctorSet(pre) || []).includes('backlog:legacy_layout:error'),
     J(pre.json && pre.json.problems).slice(0, 300));
-  T.check('G1 fixture: the stray .ids/ exists before --fix', fs.existsSync(path.join(x.bl, V2_IDS)), 'missing');
+  t.check('G1 fixture: the stray .ids/ exists before --fix', fs.existsSync(path.join(x.bl, V2_IDS)), 'missing');
 
   const before = outsideBookkeeping(files(x.bl));
-  const r = runJ(['doctor', '--fix'], { cwd: x.dir });
-  T.check('G1 mirrored: --fix does not fail the run', r.status === 0 || r.status === 2, J(r.json));
-  T.check('G1 mirrored: the stray .ids/ is gone', !fs.existsSync(path.join(x.bl, V2_IDS)), 'still there');
-  T.eq('G1 mirrored: .nanojira/ids/ is untouched (every real tombstone, unchanged content)',
+  const r = await runJ(['doctor', '--fix'], { cwd: x.dir });
+  t.check('G1 mirrored: --fix does not fail the run', r.status === 0 || r.status === 2, J(r.json));
+  t.check('G1 mirrored: the stray .ids/ is gone', !fs.existsSync(path.join(x.bl, V2_IDS)), 'still there');
+  t.eq('G1 mirrored: .nanojira/ids/ is untouched (every real tombstone, unchanged content)',
     Object.keys(TOMBSTONES).sort().map(id => bytes(path.join(x.bl, V3_IDS, id))),
     Object.keys(TOMBSTONES).sort().map(id => TOMBSTONES[id]));
-  T.eq('G1 mirrored: every element file is byte-identical', outsideBookkeeping(files(x.bl)), before);
+  t.eq('G1 mirrored: every element file is byte-identical', outsideBookkeeping(files(x.bl)), before);
   const notes = (r.json && r.json.notes) || [];
-  T.check('G1 mirrored: a note says the stray .ids/ was removed (§ 14)',
+  t.check('G1 mirrored: a note says the stray .ids/ was removed (§ 14)',
     notes.some((n: any) => J(n).includes('.ids')), 'notes = ' + J(notes));
 
-  const r2 = runJ(['doctor', '--fix'], { cwd: x.dir });
-  T.check('G1 mirrored: a second --fix is a no-op for this (no .ids/ to remove, no note about it)',
+  const r2 = await runJ(['doctor', '--fix'], { cwd: x.dir });
+  t.check('G1 mirrored: a second --fix is a no-op for this (no .ids/ to remove, no note about it)',
     !((r2.json && r2.json.notes) || []).some((n: any) => J(n).includes('.ids')), J(r2.json && r2.json.notes));
-  T.check('G1 mirrored: doctor stays clean of this (no crash, no new finding)', r2.status === 0 || r2.status === 2, J(r2.json));
-}
-{
+  t.check('G1 mirrored: doctor stays clean of this (no crash, no new finding)', r2.status === 0 || r2.status === 2, J(r2.json));
+});
+leg(async (t) => {
   /* A tombstone in the stray .ids/ that .nanojira/ids/ does NOT have:
    * never discard a tombstone that exists nowhere else (§ 8) — the stray
    * directory is left alone entirely, including its mirrored siblings. */
@@ -817,14 +830,19 @@ function strayIds(label: string, strayTombstones: Record<string, string>): { dir
   const before = outsideBookkeeping(files(x.bl));
   const beforeStray = fs.readdirSync(path.join(x.bl, V2_IDS)).sort();
 
-  const r = runJ(['doctor', '--fix'], { cwd: x.dir });
-  T.check('G1 unmirrored: --fix does not fail the run', r.status === 0 || r.status === 2, J(r.json));
-  T.check('G1 unmirrored: the stray .ids/ is left alone entirely', fs.existsSync(path.join(x.bl, V2_IDS)), 'removed');
-  T.eq('G1 unmirrored: every tombstone in it is untouched, including the mirrored one',
-    fs.readdirSync(path.join(x.bl, V2_IDS)).sort(), beforeStray);
-  T.eq('G1 unmirrored: TSK-999 — found nowhere else — is not discarded (§ 8 never-reuse)',
+  const r = await runJ(['doctor', '--fix'], { cwd: x.dir });
+  t.check('G1 unmirrored: --fix does not fail the run', r.status === 0 || r.status === 2, J(r.json));
+  t.check('G1 unmirrored: the stray .ids/ is left alone entirely', fs.existsSync(path.join(x.bl, V2_IDS)), 'removed');
+  t.eq('G1 unmirrored: every tombstone in it is untouched, including the mirrored one',
+    // A mutant that deletes the stray .ids/ must show as this failed
+    // check, not a throw that ends the leg (Scout C24-7).
+    fs.existsSync(path.join(x.bl, V2_IDS)) ? fs.readdirSync(path.join(x.bl, V2_IDS)).sort() : null, beforeStray);
+  t.eq('G1 unmirrored: TSK-999 — found nowhere else — is not discarded (§ 8 never-reuse)',
     bytes(path.join(x.bl, V2_IDS, 'TSK-999')), 'orphan\n');
-  T.eq('G1 unmirrored: every element file is byte-identical', outsideBookkeeping(files(x.bl)), before);
-}
+  t.eq('G1 unmirrored: every element file is byte-identical', outsideBookkeeping(files(x.bl)), before);
+});
+
+/* concurrency: legs in flight; runNjAsync still caps the spawns at 4. */
+await H.runLegs(LEGS, { concurrency: 8 });
 
 T.finish();

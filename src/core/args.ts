@@ -3,12 +3,14 @@
 // Command-line flag parsing.
 
 import type { Flags } from './types.ts';
+import type { FlagKinds, Repeat } from './kernel.ts';
 
 import * as fs from 'fs';
 import * as path from 'path';
 import { SECTION_ROLES } from './constants.ts';
 import { armDryRun } from './dry-run.ts';
 import { fail } from './output.ts';
+import { parseArgs as kernelParseArgs, allowedControlSet as kernelAllowedControlSet, checkFlags as kernelCheckFlags, flagString, readStdin as kernelReadStdin } from './kernel.ts';
 import { normalizeSectionContent } from './parse.ts';
 
 // -------------------------------------------------------------- arg parsing
@@ -24,9 +26,13 @@ function displayFlagName(name: string): string {
   return name;
 }
 
-/** A flag's kind, from the command's flag table (`core/cli-flags.ts`'s
- * `flagKinds`): a `string` flag also takes its value as the next token. */
-type FlagKinds = Record<string, 'string' | 'boolean'>;
+/** Two values of one flag that mean the same: equal, or for `--backlog` two
+ * paths that resolve alike (`B`, `B/`, `./B`). Every other flag compares
+ * exactly (TSK-034). */
+function sameValue(name: string, a: string | true, b: string | true): boolean {
+  if (a === b) return true;
+  return name === 'backlog' && typeof a === 'string' && typeof b === 'string' && a !== '' && b !== '' && path.resolve(a) === path.resolve(b);
+}
 
 /**
  * `--` ends the options: every later token is a positional, even one that
@@ -43,43 +49,12 @@ type FlagKinds = Record<string, 'string' | 'boolean'>;
  * `nanojira` refuses it, `nanojira-mcp`'s own startup flags are unchanged.
  * An identical repeat (`--json` twice, the same `--backlog`) is not a
  * conflict and is not reported.
+ *
+ * The kernel's `parseArgs` (DECISIONS 231), given nanojira's flag aliases
+ * and `sameValue` above.
  */
-interface Repeat { name: string; typed: string }
-
-/** Two values of one flag that mean the same: equal, or for `--backlog` two
- * paths that resolve alike (`B`, `B/`, `./B`). Every other flag compares
- * exactly (TSK-034). */
-function sameValue(name: string, a: string | true, b: string | true): boolean {
-  if (a === b) return true;
-  return name === 'backlog' && typeof a === 'string' && typeof b === 'string' && a !== '' && b !== '' && path.resolve(a) === path.resolve(b);
-}
-
 function parseArgs(argv: string[], kinds?: FlagKinds) {
-  const flags: Flags = new Map();
-  const positional = [];
-  const repeated: Repeat[] = [];
-  let options = true;
-  for (let i = 0; i < argv.length; i++) {
-    const a = argv[i];
-    if (options && a === '--') { options = false; continue; }
-    if (options && a.startsWith('--')) {
-      const eq = a.indexOf('=');
-      const typed = eq === -1 ? a.slice(2) : a.slice(2, eq);
-      const name = FLAG_ALIASES.get(typed) ?? typed;
-      let value: string | true = eq === -1 ? true : a.slice(eq + 1);
-      if (value === true && kinds !== undefined && Object.hasOwn(kinds, name) && kinds[name] === 'string'
-        && i + 1 < argv.length && !argv[i + 1].startsWith('--')) {
-        value = argv[++i];
-      }
-      if (flags.has(name) && !sameValue(name, flags.get(name) as string | true, value) && !repeated.some((r) => r.name === name)) {
-        repeated.push({ name, typed });
-      }
-      flags.set(name, value);
-    } else {
-      positional.push(a);
-    }
-  }
-  return { flags, positional, repeated };
+  return kernelParseArgs(argv, kinds, { aliases: FLAG_ALIASES, sameValue });
 }
 
 function refuseRepeated(repeated: Repeat[]): void {
@@ -97,31 +72,17 @@ const GLOBAL_CONTROLS = ['backlog'];
  * from `isWrite` rather than listed per command; `init` and `doctor`
  * (`--fix`), which pass `isWrite: false`, list it themselves. */
 function allowedControlSet(commandControls: Iterable<string>, isWrite: boolean): Set<string> {
-  return new Set([...commandControls, ...GLOBAL_CONTROLS, ...(isWrite ? ['dry-run'] : [])]);
+  return kernelAllowedControlSet(commandControls, [...GLOBAL_CONTROLS, ...(isWrite ? ['dry-run'] : [])]);
 }
 
 function checkFlags(flags: Flags, allowedFields: string[], commandControls: Set<string>, isWrite: boolean) {
-  const allowedControls = allowedControlSet(commandControls, isWrite);
-  for (const name of flags.keys()) {
-    if (allowedControls.has(name)) continue;
-    if (allowedFields.includes(name)) continue;
-    const suffix = isWrite ? ' Nothing written.' : '';
-    // Every flag the command takes, as documented (`--depends-on`), not
-    // the subset an earlier version listed (TSK-038, DECISIONS 230).
-    const known = Array.from(new Set([...allowedFields, ...allowedControls])).map(displayFlagName).sort();
-    fail('unknown_field', `unknown field '${name}'.${suffix}`, `Known flags: ${known.map((f) => '--' + f).join(', ')}`);
-  }
+  // Every flag the command takes, as documented (`--depends-on`), not
+  // the subset an earlier version listed (TSK-038, DECISIONS 230).
+  kernelCheckFlags(flags, allowedFields, allowedControlSet(commandControls, isWrite), isWrite, displayFlagName);
   if (flags.has('dry-run')) {
     armDryRun();
     if (flags.get('dry-run') !== true) fail('invalid_value', '--dry-run takes no value', 'pass --dry-run on its own');
   }
-}
-
-function flagString(flags: Flags, name: string): string | undefined {
-  const v = flags.get(name);
-  if (v === undefined) return undefined;
-  if (v === true) return fail('missing_value', `--${name} needs a value (use --${name}=…)`);
-  return v;
 }
 
 function parseListFlag(flags: Flags, name: string) {
@@ -136,9 +97,7 @@ function parseListFlag(flags: Flags, name: string) {
 }
 
 function readStdin(): string {
-  try { return fs.readFileSync(0, 'utf8'); } catch (e: any) {
-    return fail('invalid_value', `cannot read stdin — ${e.message}`, 'pipe the text in, or pass a path with --<role>-file=<path>');
-  }
+  return kernelReadStdin('pipe the text in, or pass a path with --<role>-file=<path>');
 }
 
 // Value sources per role are mutually exclusive, and only one role may read

@@ -89,6 +89,12 @@ function sectionA() {
     T.exit('A3 set --fields naming an absent field exits 0', r, 0);
     T.eq('A3 absent field is omitted, not null', Object.keys(r.json.entry), ['id', 'priority']);
   }
+  {
+    // An empty segment is skipped, not an unknown field '' (found by a
+    // mutant, TSK-050).
+    const r = runJ(['set', `--id=${t}`, '--priority=low', '--fields=id,,title'], { cwd: x.dir });
+    T.eq('A4 --fields=id,,title: the empty segment is ignored', r.status === 0 ? Object.keys(r.json.entry) : J(r.json), ['id', 'title']);
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -118,6 +124,12 @@ function sectionB() {
     T.contains('B2 hint suggests the close field name', r.json.hint, "did you mean 'status'?");
     const after = fs.readFileSync(path.join(x.bl, 'tasks', t + '.md'), 'utf8');
     T.eq('B2 nothing written on a near-miss either', after, before);
+  }
+  {
+    // The hint's own label, exactly (found by a mutant, TSK-050).
+    const r = runJ(['set', `--id=${t}`, '--status=doing', '--fields=titel'], { cwd: x.dir });
+    T.check('B4 --fields=titel: the hint is "did you mean \'title\'? Known entry fields: …"',
+      String(r.json && r.json.hint).startsWith("did you mean 'title'? Known entry fields: id, "), J(r.json));
   }
   {
     const r = runJ(['set', `--id=${t}`, '--fields='], { cwd: x.dir });

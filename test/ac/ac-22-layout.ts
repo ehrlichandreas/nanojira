@@ -185,12 +185,17 @@ function expectedFiles(L: Layout, model: ElModel): string[] {
 
 function isDir(p: string): boolean { try { return fs.statSync(p).isDirectory(); } catch (e) { return false; } }
 
-function run(args: string[], bl: string): RunResult { return H.runNj(args, { cwd: path.dirname(bl), unsetEnv: ['NJ_BACKLOG'] }); }
-function runJ(args: string[], bl: string): JsonRunResult { return H.runJson(args, { cwd: path.dirname(bl), unsetEnv: ['NJ_BACKLOG'] }); }
-/* Async twins, used only inside runLegs legs (DECISIONS 210) — the sync
- * run/runJ above stay as they are for every loop that was not converted. */
+/* Async: every section runs as a runLegs leg (DECISIONS 210). */
 function runAsync(args: string[], bl: string): Promise<RunResult> { return H.runNjAsync(args, { cwd: path.dirname(bl), unsetEnv: ['NJ_BACKLOG'] }); }
 function runJAsync(args: string[], bl: string): Promise<JsonRunResult> { return H.runJsonAsync(args, { cwd: path.dirname(bl), unsetEnv: ['NJ_BACKLOG'] }); }
+
+/* Every section below is a runLegs leg (DECISIONS 210): each builds and
+ * touches only its own fixture, so all of them overlap in wall time, and
+ * runLegs flushes their checks in declared order -- the check sequence is
+ * the one the serial file produced. */
+type Ctx = H.BufferedContext;
+const LEGS: Array<(t: Ctx) => Promise<unknown>> = [];
+function leg(fn: (t: Ctx) => Promise<unknown>): void { LEGS.push(fn); }
 
 function entriesById(json: any): Record<string, any> {
   const m: Record<string, any> = {};
@@ -256,7 +261,7 @@ const VARIANTS = [
  * Check content/order within one leg is unchanged from the old serial
  * body; runLegs flushes legs in their declared (array) order, so the
  * overall sequence this produces is byte-identical to the serial loop's. */
-await H.runLegs(VARIANTS.map((V) => async (t: H.BufferedContext) => {
+for (const V of VARIANTS) leg(async (t) => {
   const tag = 'B1 [' + V.name + ']';
   const fx = mkLayoutBacklog('ac22-b1', V.block, baseModel());
   const { bl, L, model } = fx;
@@ -348,12 +353,12 @@ await H.runLegs(VARIANTS.map((V) => async (t: H.BufferedContext) => {
     ['EPIC-001', 'EPIC-002', 'SUB-001', 'SUB-002', 'SUB-005', 'TSK-001', 'TSK-002', 'TSK-005']);
   await doctorClean(t, tag + ' after every operation', bl);
   return null;
-}));
+});
 
 /* § 11 / DECISIONS 90, 94: under hierarchy an archive folder left by an
  * earlier archive of a descendant is a merge target, not an occupied path —
  * recursively: existing folders are merged into, at every level. */
-for (const block of [{ group: 'hierarchy' }, { group: 'hierarchy', folders: Object.assign({}, DEFAULT_FOLDERS, { archive: 'shelf' }) }]) {
+for (const block of [{ group: 'hierarchy' }, { group: 'hierarchy', folders: Object.assign({}, DEFAULT_FOLDERS, { archive: 'shelf' }) }]) leg(async (t) => {
   const tag = 'B1 [hierarchy merge, archive ' + (block.folders ? 'shelf' : 'archive') + ']';
   const model: ElModel = {
     'EPIC-004': el('epic', undefined, 'done'),
@@ -364,25 +369,25 @@ for (const block of [{ group: 'hierarchy' }, { group: 'hierarchy', folders: Obje
   };
   const fx = mkLayoutBacklog('ac22-b1m', block, model);
   const { bl, L } = fx;
-  T.exit(tag + ' archive a subtask first: exit 0', runJ(['archive', '--id=SUB-010'], bl), 0);
+  t.exit(tag + ' archive a subtask first: exit 0', (await runJAsync(['archive', '--id=SUB-010'], bl)), 0);
   model['SUB-010'].archived = true;
-  T.eq(tag + ' the subtask lies below two created ancestor folders', mdFiles(bl), expectedFiles(L, model));
-  T.exit(tag + ' then its task: exit 0 — merged one level down (D94)', runJ(['archive', '--id=TSK-009'], bl), 0);
+  t.eq(tag + ' the subtask lies below two created ancestor folders', mdFiles(bl), expectedFiles(L, model));
+  t.exit(tag + ' then its task: exit 0 — merged one level down (D94)', (await runJAsync(['archive', '--id=TSK-009'], bl)), 0);
   model['TSK-009'].archived = true; model['SUB-009'].archived = true;
-  T.eq(tag + ' the task subtree merged into the existing folders', mdFiles(bl), expectedFiles(L, model));
-  const ae = runJ(['archive', '--id=EPIC-004'], bl);
-  T.exit(tag + ' then the epic: exit 0 — the ancestor folder is not "occupied"', ae, 0);
+  t.eq(tag + ' the task subtree merged into the existing folders', mdFiles(bl), expectedFiles(L, model));
+  const ae = (await runJAsync(['archive', '--id=EPIC-004'], bl));
+  t.exit(tag + ' then the epic: exit 0 — the ancestor folder is not "occupied"', ae, 0);
   model['EPIC-004'].archived = true; model['TSK-010'].archived = true;
-  T.eq(tag + ' the epic subtree merged into the existing archive folder', mdFiles(bl), expectedFiles(L, model));
-  archivedBytes(T, tag, bl, L, model, Object.keys(model));
-  T.check(tag + ' the emptied source folder is removed', !fs.existsSync(path.join(bl, 'EPIC-004')), H.lsOrEmpty(bl).join(','));
-  await doctorClean(T, tag + ' after the three archives', bl);
-}
+  t.eq(tag + ' the epic subtree merged into the existing archive folder', mdFiles(bl), expectedFiles(L, model));
+  archivedBytes(t, tag, bl, L, model, Object.keys(model));
+  t.check(tag + ' the emptied source folder is removed', !fs.existsSync(path.join(bl, 'EPIC-004')), H.lsOrEmpty(bl).join(','));
+  await doctorClean(t, tag + ' after the three archives', bl);
+});
 
 /* DECISIONS 91 B16: archive writes archived:/updated in place first, then
  * moves; NJ_FAULT=before-rename fires before the first rename — so the
  * previous revision is intact and nothing moves (§ 12, AC-9's hook). */
-for (const block of [undefined, { group: 'hierarchy' }]) {
+for (const block of [undefined, { group: 'hierarchy' }]) leg(async (t) => {
   const tag = 'B1 [' + (block ? 'hierarchy' : 'type, v2') + ' archive, NJ_FAULT=before-rename]';
   const model: ElModel = {
     'EPIC-004': el('epic', undefined, 'done'),
@@ -392,18 +397,18 @@ for (const block of [undefined, { group: 'hierarchy' }]) {
   const fx = mkLayoutBacklog('ac22-b1f', block, model);
   const { bl, L } = fx;
   const before = mdFiles(bl);
-  const r = H.runNj(['archive', '--id=EPIC-004'], { cwd: path.dirname(bl), unsetEnv: ['NJ_BACKLOG'], env: { NJ_FAULT: 'before-rename' } });
-  T.exit(tag + ': exit 1', r, 1);
-  T.eq(tag + ': nothing moved', mdFiles(bl), before);
+  const r = (await H.runNjAsync(['archive', '--id=EPIC-004'], { cwd: path.dirname(bl), unsetEnv: ['NJ_BACKLOG'], env: { NJ_FAULT: 'before-rename' } }));
+  t.exit(tag + ': exit 1', r, 1);
+  t.eq(tag + ': nothing moved', mdFiles(bl), before);
   for (const id of Object.keys(model)) {
-    T.eq(tag + ': ' + id + ' is the previous revision',
+    t.eq(tag + ': ' + id + ' is the previous revision',
       H.readOrNull(path.join(bl, placeOf(L, model, id))), elementBytes(id, model[id]));
   }
-}
+});
 
 /* D94: only a file at a file's target path, or a file/folder mismatch, is a
  * conflict — then `exists`, all targets verified first, nothing moves. */
-{
+leg(async (t) => {
   const tag = 'B1 [hierarchy merge conflict]';
   const model: ElModel = {
     'EPIC-004': el('epic', undefined, 'done'),
@@ -413,13 +418,13 @@ for (const block of [undefined, { group: 'hierarchy' }]) {
   const { bl } = fx;
   writeFile(bl, 'archive/EPIC-004/TSK-010', 'a file where the task folder must go\n');
   const before = mdFiles(bl);
-  const r = runJ(['archive', '--id=EPIC-004'], bl);
-  T.exit(tag + ': exit 1', r, 1);
-  T.eq(tag + ': exists', r.json && r.json.error, 'exists');
-  T.eq(tag + ': nothing moved', mdFiles(bl), before);
-  T.eq(tag + ': the blocking file is untouched',
+  const r = (await runJAsync(['archive', '--id=EPIC-004'], bl));
+  t.exit(tag + ': exit 1', r, 1);
+  t.eq(tag + ': exists', r.json && r.json.error, 'exists');
+  t.eq(tag + ': nothing moved', mdFiles(bl), before);
+  t.eq(tag + ': the blocking file is untouched',
     H.readOrNull(path.join(bl, 'archive', 'EPIC-004', 'TSK-010')), 'a file where the task folder must go\n');
-}
+});
 
 /* § 11 / § 9 / DECISIONS 92 Q4: under hierarchy an epic or task archives as
  * its folder, so its subtree must lie inside it and nothing foreign may.
@@ -431,7 +436,7 @@ for (const [what, arrange] of [
   ['a foreign element file lies inside the folder', (bl: string) => {
     fs.renameSync(path.join(bl, 'EPIC-001', 'TSK-012'), path.join(bl, 'EPIC-005', 'TSK-012'));
   }],
-] as [string, (bl: string) => void][]) {
+] as [string, (bl: string) => void][]) leg(async (t) => {
   const tag = 'B1 [hierarchy refused:misplaced, ' + what + ']';
   const model: ElModel = {
     'EPIC-001': el('epic', undefined, 'todo'),
@@ -443,13 +448,13 @@ for (const [what, arrange] of [
   const { bl } = fx;
   arrange(bl);
   const before = mdFiles(bl);
-  const r = run(['archive', '--id=EPIC-005'], bl);
-  T.exit(tag + ': exit 1', r, 1);
-  T.contains(tag + ': points at nj doctor --fix', out(r), 'doctor --fix');
-  const rj = runJ(['archive', '--id=EPIC-005'], bl);
-  T.eq(tag + ' --json: refused:misplaced', rj.json && rj.json.error, 'refused:misplaced');
-  T.eq(tag + ': nothing moved', mdFiles(bl), before);
-}
+  const r = (await runAsync(['archive', '--id=EPIC-005'], bl));
+  t.exit(tag + ': exit 1', r, 1);
+  t.contains(tag + ': points at nj doctor --fix', out(r), 'doctor --fix');
+  const rj = (await runJAsync(['archive', '--id=EPIC-005'], bl));
+  t.eq(tag + ' --json: refused:misplaced', rj.json && rj.json.error, 'refused:misplaced');
+  t.eq(tag + ': nothing moved', mdFiles(bl), before);
+});
 
 /* ===================================================================== */
 /* B2 — list, tree, show and --json give the same answers in every group, */
@@ -488,7 +493,7 @@ function maskJson(x: any, bl: string): any {
   return typeof x === 'string' ? maskPaths(x, bl) : x;
 }
 
-{
+leg(async (t) => {
   const groups: [string, Block][] = [
     ['type, no layout block', undefined],
     ['type, renamed folders', { group: 'type', folders: RENAMED }],
@@ -497,23 +502,31 @@ function maskJson(x: any, bl: string): any {
   ];
   const fxs: [string, ReturnType<typeof mkLayoutBacklog>][] = groups.map(([n, b]) => [n, mkLayoutBacklog('ac22-b2', b, sameAnswerModel())]);
   const [refName, ref] = fxs[0];
-  for (const [label, args] of READS) {
-    const rj = runJ(args, ref.bl);
-    const rh = run(args, ref.bl);
+  /* The four fixtures are read at the same time, each one's reads in the
+   * serial order (--json, then human, read after read) -- a read may write
+   * the index cache, so one fixture never sees two reads at once. The
+   * checks below then compare in the serial file's order. */
+  const answers = await Promise.all(fxs.map(async ([, fx]) => {
+    const res: [JsonRunResult, RunResult][] = [];
+    for (const [, args] of READS) res.push([await runJAsync(args, fx.bl), await runAsync(args, fx.bl)]);
+    return res;
+  }));
+  for (const [i, [label]] of READS.entries()) {
+    const [rj, rh] = answers[0][i];
     const refJ = J(maskJson(rj.json, ref.bl));
     const refH = maskPaths(rh.stdout, ref.bl);
-    T.check('B2 reference (' + refName + ') ' + label + ' --json parses', rj.json !== null, rj.stdout.slice(0, 200));
-    for (const [name, fx] of fxs.slice(1)) {
-      const oj = runJ(args, fx.bl);
-      const oh = run(args, fx.bl);
-      T.eq('B2 ' + label + ' --json: exit code in ' + name + ' equals ' + refName, oj.status, rj.status);
-      T.eq('B2 ' + label + ' --json: same answer in ' + name + ' as in ' + refName + ' (paths masked)',
+    t.check('B2 reference (' + refName + ') ' + label + ' --json parses', rj.json !== null, rj.stdout.slice(0, 200));
+    for (const [k, [name, fx]] of fxs.entries()) {
+      if (k === 0) continue;
+      const [oj, oh] = answers[k][i];
+      t.eq('B2 ' + label + ' --json: exit code in ' + name + ' equals ' + refName, oj.status, rj.status);
+      t.eq('B2 ' + label + ' --json: same answer in ' + name + ' as in ' + refName + ' (paths masked)',
         J(maskJson(oj.json, fx.bl)), refJ);
-      T.eq('B2 ' + label + ' (human): same output in ' + name + ' as in ' + refName + ' (paths masked)',
+      t.eq('B2 ' + label + ' (human): same output in ' + name + ' as in ' + refName + ' (paths masked)',
         maskPaths(oh.stdout, fx.bl), refH);
     }
   }
-}
+});
 
 /* ===================================================================== */
 /* B3 — changing group or a folder name on a populated backlog            */
@@ -551,7 +564,7 @@ const MIGRATIONS = [
 /* Each M builds and only touches its own fixture — the 7 iterations share
  * no state, so they run as independent runLegs legs (DECISIONS 210), same
  * argument and order guarantee as the VARIANTS conversion above. */
-await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
+for (const M of MIGRATIONS) leg(async (t) => {
   const tag = 'B3 [' + M.name + ']';
   const other = M.code === 'type:folder' ? 'layout:misplaced' : 'type:folder';
   const fx = mkLayoutBacklog('ac22-b3', M.from, migrationModel());
@@ -649,11 +662,11 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   }
   await doctorClean(t, tag + ' after --fix', bl);
   return null;
-}));
+});
 
 /* DECISIONS 92 Q2, the other half: below the old archive folder WITHOUT
  * `archived:` a file belongs to its active place — --fix never archives. */
-{
+leg(async (t) => {
   const tag = 'B3 [type, archive → shelf, file without archived:]';
   const fx = mkLayoutBacklog('ac22-b3q2', undefined, migrationModel());
   const { bl } = fx;
@@ -661,19 +674,19 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   writeFile(bl, 'archive/TSK-011.md', bytes);
   fs.writeFileSync(path.join(bl, IDS_REL, 'TSK-011'), '');
   writeConfig(bl, { group: 'type', folders: Object.assign({}, DEFAULT_FOLDERS, { archive: 'shelf' }) });
-  const byId = entriesById(runJ(['list'], bl).json);
-  T.check(tag + ' it is active now (not below the archive folder) and type:folder',
+  const byId = entriesById((await runJAsync(['list'], bl)).json);
+  t.check(tag + ' it is active now (not below the archive folder) and type:folder',
     !!byId['TSK-011'] && (byId['TSK-011']._problems || []).includes('type:folder'), J(byId['TSK-011']));
-  T.exit(tag + ' doctor --fix: exit 0', runJ(['doctor', '--fix'], bl), 0);
-  T.eq(tag + ' --fix moved it to its active place, not into shelf/',
+  t.exit(tag + ' doctor --fix: exit 0', (await runJAsync(['doctor', '--fix'], bl)), 0);
+  t.eq(tag + ' --fix moved it to its active place, not into shelf/',
     H.readOrNull(path.join(bl, 'tasks', 'TSK-011.md')), bytes);
-  T.check(tag + ' nothing of it in shelf/', !fs.existsSync(path.join(bl, 'shelf', 'TSK-011.md')), '');
-}
+  t.check(tag + ' nothing of it in shelf/', !fs.existsSync(path.join(bl, 'shelf', 'TSK-011.md')), '');
+});
 
 /* § 14 step 3: "every target must be free, otherwise that element is
  * reported and stays" — made testable without a duplicate id by putting a
  * directory, or a non-.md file, at the target path (DECISIONS 97). */
-{
+leg(async (t) => {
   const tag = 'B3 [type, target not free: a directory named like the file]';
   const fx = mkLayoutBacklog('ac22-b3nf', undefined, migrationModel());
   const { bl } = fx;
@@ -682,17 +695,17 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   fs.mkdirSync(path.join(bl, 'tasks', 'TSK-002.md'));
   fs.writeFileSync(path.join(bl, 'tasks', 'TSK-002.md', 'keep.txt'), 'blocker\n');
   const bytes = fs.readFileSync(wrong, 'utf8');
-  const fix = runJ(['doctor', '--fix'], bl);
-  T.exit(tag + ' doctor --fix: exit 2 — type:folder remains', fix, 2);
-  T.eq(tag + ' the element stays where it was, unchanged', H.readOrNull(wrong), bytes);
-  T.eq(tag + ' the blocking directory is untouched',
+  const fix = (await runJAsync(['doctor', '--fix'], bl));
+  t.exit(tag + ' doctor --fix: exit 2 — type:folder remains', fix, 2);
+  t.eq(tag + ' the element stays where it was, unchanged', H.readOrNull(wrong), bytes);
+  t.eq(tag + ' the blocking directory is untouched',
     H.lsOrEmpty(path.join(bl, 'tasks', 'TSK-002.md')), ['keep.txt']);
-  const after = runJ(['doctor'], bl);
-  T.check(tag + ' it is still reported',
+  const after = (await runJAsync(['doctor'], bl));
+  t.check(tag + ' it is still reported',
     ((after.json && after.json.problems) || []).some((p: any) => p.code === 'type:folder' && p.element === 'TSK-002'),
     J(after.json && after.json.problems).slice(0, 300));
-}
-{
+});
+leg(async (t) => {
   const tag = 'B3 [hierarchy, target not free: a file where the folder must go]';
   const model: ElModel = { 'EPIC-001': el('epic', undefined, 'todo'), 'EPIC-002': el('epic', undefined, 'todo') };
   const fx = mkLayoutBacklog('ac22-b3nh', { group: 'hierarchy' }, model);
@@ -702,40 +715,40 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   fs.renameSync(path.join(bl, 'EPIC-002'), moved);
   fs.writeFileSync(path.join(bl, 'EPIC-002'), 'a plain file where the epic folder must go\n');
   const bytes = fs.readFileSync(path.join(moved, 'EPIC-002.md'), 'utf8');
-  const fix = runJ(['doctor', '--fix'], bl);
-  T.exit(tag + ' doctor --fix: exit 2 — layout:misplaced remains', fix, 2);
-  T.eq(tag + ' the epic stays where it was, unchanged', H.readOrNull(path.join(moved, 'EPIC-002.md')), bytes);
-  T.eq(tag + ' the blocking file is untouched', H.readOrNull(path.join(bl, 'EPIC-002')),
+  const fix = (await runJAsync(['doctor', '--fix'], bl));
+  t.exit(tag + ' doctor --fix: exit 2 — layout:misplaced remains', fix, 2);
+  t.eq(tag + ' the epic stays where it was, unchanged', H.readOrNull(path.join(moved, 'EPIC-002.md')), bytes);
+  t.eq(tag + ' the blocking file is untouched', H.readOrNull(path.join(bl, 'EPIC-002')),
     'a plain file where the epic folder must go\n');
-  const after = runJ(['doctor'], bl);
-  T.check(tag + ' it is still reported',
+  const after = (await runJAsync(['doctor'], bl));
+  t.check(tag + ' it is still reported',
     ((after.json && after.json.problems) || []).some((p: any) => p.code === 'layout:misplaced' && p.element === 'EPIC-002'),
     J(after.json && after.json.problems).slice(0, 300));
-}
+});
 
 /* v2 behaviour, group `type` without a layout block: a file in the wrong
  * type folder is `type:folder`, and --fix moves it byte-identically. */
-{
+leg(async (t) => {
   const tag = 'B3 [type, v2: task in the subtasks folder]';
   const fx = mkLayoutBacklog('ac22-b3v2', undefined, migrationModel());
   const { bl } = fx;
   const wrong = path.join(bl, 'subtasks', 'TSK-002.md');
   fs.renameSync(path.join(bl, 'tasks', 'TSK-002.md'), wrong);
   const bytes = fs.readFileSync(wrong, 'utf8');
-  const p = entriesById(runJ(['list'], bl).json)['TSK-002'];
-  T.check(tag + ' reports type:folder', !!p && (p._problems || []).includes('type:folder'), J(p));
-  T.exit(tag + ' doctor --fix: exit 0', runJ(['doctor', '--fix'], bl), 0);
-  T.eq(tag + ' the file is in tasks/ again', mdFiles(bl), expectedFiles(fx.L, fx.model));
-  T.eq(tag + ' byte-identical after the move', H.readOrNull(path.join(bl, 'tasks', 'TSK-002.md')), bytes);
-  await doctorClean(T, tag + ' after --fix', bl);
-}
+  const p = entriesById((await runJAsync(['list'], bl)).json)['TSK-002'];
+  t.check(tag + ' reports type:folder', !!p && (p._problems || []).includes('type:folder'), J(p));
+  t.exit(tag + ' doctor --fix: exit 0', (await runJAsync(['doctor', '--fix'], bl)), 0);
+  t.eq(tag + ' the file is in tasks/ again', mdFiles(bl), expectedFiles(fx.L, fx.model));
+  t.eq(tag + ' byte-identical after the move', H.readOrNull(path.join(bl, 'tasks', 'TSK-002.md')), bytes);
+  await doctorClean(t, tag + ' after --fix', bl);
+});
 
 /* ===================================================================== */
 /* B4 — hierarchy: a hand-edited parent makes the file layout:misplaced,  */
 /*      --fix moves it (§ 4, § 14 step 3)                                 */
 /* ===================================================================== */
 
-{
+leg(async (t) => {
   const tag = 'B4 [hierarchy, hand-edited parent]';
   const model: ElModel = {
     'EPIC-001': el('epic', undefined, 'todo'),
@@ -746,7 +759,7 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   };
   const fx = mkLayoutBacklog('ac22-b4', { group: 'hierarchy' }, model);
   const { bl, L } = fx;
-  await doctorClean(T, tag + ' before the edit', bl);
+  await doctorClean(t, tag + ' before the edit', bl);
 
   const oldFile = path.join(bl, 'EPIC-001', 'TSK-002', 'TSK-002.md');
   const edited = fs.readFileSync(oldFile, 'utf8').replace('parent: EPIC-001\n', 'parent: EPIC-002\n');
@@ -755,29 +768,29 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   const subBytes = fs.readFileSync(path.join(bl, 'EPIC-001', 'TSK-002', 'SUB-002.md'), 'utf8');
   model['TSK-002'].parent = 'EPIC-002';
 
-  const byId = entriesById(runJ(['list'], bl).json);
-  T.check(tag + ' TSK-002 reports layout:misplaced',
+  const byId = entriesById((await runJAsync(['list'], bl)).json);
+  t.check(tag + ' TSK-002 reports layout:misplaced',
     !!byId['TSK-002'] && (byId['TSK-002']._problems || []).includes('layout:misplaced'), J(byId['TSK-002']));
-  T.check(tag + ' TSK-002 reports the new parent',
+  t.check(tag + ' TSK-002 reports the new parent',
     !!byId['TSK-002'] && byId['TSK-002'].parent === 'EPIC-002', J(byId['TSK-002']));
   /* SUB-002's place follows its parent chain, which now runs through EPIC-002 */
-  T.check(tag + ' SUB-002, below it, reports layout:misplaced too',
+  t.check(tag + ' SUB-002, below it, reports layout:misplaced too',
     !!byId['SUB-002'] && (byId['SUB-002']._problems || []).includes('layout:misplaced'), J(byId['SUB-002']));
-  T.check(tag + ' TSK-003, untouched, reports nothing',
+  t.check(tag + ' TSK-003, untouched, reports nothing',
     !!byId['TSK-003'] && (byId['TSK-003']._problems || []).length === 0, J(byId['TSK-003']));
-  T.exit(tag + ' doctor: exit 2', runJ(['doctor'], bl), 2);
+  t.exit(tag + ' doctor: exit 2', (await runJAsync(['doctor'], bl)), 2);
 
-  const fix = runJ(['doctor', '--fix'], bl);
-  T.exit(tag + ' doctor --fix: exit 0', fix, 0);
-  T.eq(tag + ' --fix moved the subtree under EPIC-002', mdFiles(bl), expectedFiles(L, model));
-  T.eq(tag + ' the task folder moved with its top folder — other content came along (§ 14 step 3)',
+  const fix = (await runJAsync(['doctor', '--fix'], bl));
+  t.exit(tag + ' doctor --fix: exit 0', fix, 0);
+  t.eq(tag + ' --fix moved the subtree under EPIC-002', mdFiles(bl), expectedFiles(L, model));
+  t.eq(tag + ' the task folder moved with its top folder — other content came along (§ 14 step 3)',
     H.readOrNull(path.join(bl, 'EPIC-002', 'TSK-002', 'keep.txt')), 'rides along\n');
-  T.eq(tag + ' TSK-002 is byte-identical to the hand-edited file',
+  t.eq(tag + ' TSK-002 is byte-identical to the hand-edited file',
     H.readOrNull(path.join(bl, 'EPIC-002', 'TSK-002', 'TSK-002.md')), edited);
-  T.eq(tag + ' SUB-002 is byte-identical',
+  t.eq(tag + ' SUB-002 is byte-identical',
     H.readOrNull(path.join(bl, 'EPIC-002', 'TSK-002', 'SUB-002.md')), subBytes);
-  await doctorClean(T, tag + ' after --fix', bl);
-}
+  await doctorClean(t, tag + ' after --fix', bl);
+});
 
 /* ===================================================================== */
 /* B5 — hierarchy: an unresolvable parent chain is reported, never moved  */
@@ -785,7 +798,7 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
 /*      has a place — the top of the tree — and is judged like any other   */
 /* ===================================================================== */
 
-{
+leg(async (t) => {
   const tag = 'B5 [hierarchy, unresolvable chain]';
   const fx = mkLayoutBacklog('ac22-b5', { group: 'hierarchy' }, {
     'EPIC-001': el('epic', undefined, 'todo'),
@@ -801,26 +814,26 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   }
   const filesBefore = mdFiles(bl);
 
-  const pre = runJ(['doctor'], bl);
-  T.exit(tag + ' doctor: exit 2', pre, 2);
+  const pre = (await runJAsync(['doctor'], bl));
+  t.exit(tag + ' doctor: exit 2', pre, 2);
   const probs = (pre.json && Array.isArray(pre.json.problems)) ? pre.json.problems : [];
-  T.check(tag + ' TSK-007 is reported parent:dangling',
+  t.check(tag + ' TSK-007 is reported parent:dangling',
     probs.some((p: any) => p.code === 'parent:dangling' && p.element === 'TSK-007'), J(probs).slice(0, 400));
-  const byId = entriesById(runJ(['list'], bl).json);
+  const byId = entriesById((await runJAsync(['list'], bl)).json);
   for (const id of ['TSK-007', 'SUB-007']) {
-    T.check(tag + ' ' + id + ' carries no layout code — its place cannot be computed',
+    t.check(tag + ' ' + id + ' carries no layout code — its place cannot be computed',
       !!byId[id] && !(byId[id]._problems || []).includes('layout:misplaced'), J(byId[id]));
   }
 
-  const fix = runJ(['doctor', '--fix'], bl);
-  T.exit(tag + ' doctor --fix: exit 2 — parent:dangling remains', fix, 2);
-  T.eq(tag + ' --fix moved nothing', mdFiles(bl), filesBefore);
+  const fix = (await runJAsync(['doctor', '--fix'], bl));
+  t.exit(tag + ' doctor --fix: exit 2 — parent:dangling remains', fix, 2);
+  t.eq(tag + ' --fix moved nothing', mdFiles(bl), filesBefore);
   for (const [rel, bytes] of Object.entries(dangling)) {
-    T.eq(tag + ' ' + rel + ' is untouched', H.readOrNull(path.join(bl, rel)), bytes);
+    t.eq(tag + ' ' + rel + ' is untouched', H.readOrNull(path.join(bl, rel)), bytes);
   }
-}
+});
 
-{
+leg(async (t) => {
   const tag = 'B5 [hierarchy, task without parent]';
   const model: ElModel = {
     'EPIC-001': el('epic', undefined, 'todo'),
@@ -829,25 +842,25 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   };
   const fx = mkLayoutBacklog('ac22-b5o', { group: 'hierarchy' }, model);
   const { bl, L } = fx;
-  T.eq(tag + ' fixture: at the top of the tree', mdFiles(bl), ['EPIC-001/EPIC-001.md', 'TSK-008/SUB-008.md', 'TSK-008/TSK-008.md']);
-  const clean = runJ(['doctor'], bl);
-  T.exit(tag + ' at its place: doctor exits 0 (parent:orphaned is a warning)', clean, 0);
-  T.sameSet(tag + ' at its place: only parent:orphaned', H.doctorSet(clean) || ['<no problems array>'], ['parent:orphaned:warning']);
-  const ready = runJ(['list', '--ready'], bl);
-  T.check(tag + ' parent:orphaned alone does not block --ready (§ 7, D91 B15)',
+  t.eq(tag + ' fixture: at the top of the tree', mdFiles(bl), ['EPIC-001/EPIC-001.md', 'TSK-008/SUB-008.md', 'TSK-008/TSK-008.md']);
+  const clean = (await runJAsync(['doctor'], bl));
+  t.exit(tag + ' at its place: doctor exits 0 (parent:orphaned is a warning)', clean, 0);
+  t.sameSet(tag + ' at its place: only parent:orphaned', H.doctorSet(clean) || ['<no problems array>'], ['parent:orphaned:warning']);
+  const ready = (await runJAsync(['list', '--ready'], bl));
+  t.check(tag + ' parent:orphaned alone does not block --ready (§ 7, D91 B15)',
     !!entriesById(ready.json)['TSK-008'], J(Object.keys(entriesById(ready.json))));
 
   /* moved by hand under EPIC-001: misplaced, and --fix moves it back */
   fs.renameSync(path.join(bl, 'TSK-008'), path.join(bl, 'EPIC-001', 'TSK-008'));
   const bytes = fs.readFileSync(path.join(bl, 'EPIC-001', 'TSK-008', 'TSK-008.md'), 'utf8');
-  const byId = entriesById(runJ(['list'], bl).json);
-  T.check(tag + ' moved under an epic by hand: layout:misplaced',
+  const byId = entriesById((await runJAsync(['list'], bl)).json);
+  t.check(tag + ' moved under an epic by hand: layout:misplaced',
     !!byId['TSK-008'] && (byId['TSK-008']._problems || []).includes('layout:misplaced'), J(byId['TSK-008']));
-  const fix = runJ(['doctor', '--fix'], bl);
-  T.exit(tag + ' doctor --fix: exit 0', fix, 0);
-  T.eq(tag + ' --fix moved it back to the top of the tree', mdFiles(bl), expectedFiles(L, model));
-  T.eq(tag + ' byte-identical', H.readOrNull(path.join(bl, 'TSK-008', 'TSK-008.md')), bytes);
-}
+  const fix = (await runJAsync(['doctor', '--fix'], bl));
+  t.exit(tag + ' doctor --fix: exit 0', fix, 0);
+  t.eq(tag + ' --fix moved it back to the top of the tree', mdFiles(bl), expectedFiles(L, model));
+  t.eq(tag + ' byte-identical', H.readOrNull(path.join(bl, 'TSK-008', 'TSK-008.md')), bytes);
+});
 
 /* ===================================================================== */
 /* B6 — elements are found wherever they lie (§ 4): every *.md below the  */
@@ -855,7 +868,7 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
 /*      exactly when below the archive folder                             */
 /* ===================================================================== */
 
-{
+leg(async (t) => {
   /* group type: a task in a stray subfolder is found, is type:folder, and
    * --fix moves it to tasks/ */
   const tag = 'B6 [type]';
@@ -865,35 +878,35 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   const bytes = elementBytes('TSK-009', el('task', 'EPIC-001', 'todo'));
   writeFile(bl, stray, bytes);
   fs.writeFileSync(path.join(bl, IDS_REL, 'TSK-009'), '');
-  const byId = entriesById(runJ(['list'], bl).json);
-  T.check(tag + ' a *.md in a stray subfolder is read as an element', !!byId['TSK-009'], J(Object.keys(byId)));
-  T.check(tag + ' and carries type:folder',
+  const byId = entriesById((await runJAsync(['list'], bl)).json);
+  t.check(tag + ' a *.md in a stray subfolder is read as an element', !!byId['TSK-009'], J(Object.keys(byId)));
+  t.check(tag + ' and carries type:folder',
     !!byId['TSK-009'] && (byId['TSK-009']._problems || []).includes('type:folder'), J(byId['TSK-009']));
-  T.exit(tag + ' show finds it', runJ(['show', '--id=TSK-009'], bl), 0);
-  T.exit(tag + ' doctor --fix: exit 0', runJ(['doctor', '--fix'], bl), 0);
-  T.eq(tag + ' --fix moved it to tasks/, byte-identical',
+  t.exit(tag + ' show finds it', (await runJAsync(['show', '--id=TSK-009'], bl)), 0);
+  t.exit(tag + ' doctor --fix: exit 0', (await runJAsync(['doctor', '--fix'], bl)), 0);
+  t.eq(tag + ' --fix moved it to tasks/, byte-identical',
     H.readOrNull(path.join(bl, 'tasks', 'TSK-009.md')), bytes);
-  T.check(tag + ' the stray place is empty now', !fs.existsSync(path.join(bl, stray)), '');
-  await doctorClean(T, tag + ' after --fix', bl);
-}
+  t.check(tag + ' the stray place is empty now', !fs.existsSync(path.join(bl, stray)), '');
+  await doctorClean(t, tag + ' after --fix', bl);
+});
 
-{
+leg(async (t) => {
   const tag = 'B6 [flat]';
   const fx = mkLayoutBacklog('ac22-b6f', { group: 'flat' }, migrationModel());
   const { bl } = fx;
   const bytes = elementBytes('TSK-009', el('task', 'EPIC-001', 'todo'));
   writeFile(bl, 'misc/TSK-009.md', bytes);
   fs.writeFileSync(path.join(bl, IDS_REL, 'TSK-009'), '');
-  const byId = entriesById(runJ(['list'], bl).json);
-  T.check(tag + ' a *.md in a subfolder carries layout:misplaced',
+  const byId = entriesById((await runJAsync(['list'], bl)).json);
+  t.check(tag + ' a *.md in a subfolder carries layout:misplaced',
     !!byId['TSK-009'] && (byId['TSK-009']._problems || []).includes('layout:misplaced'), J(byId['TSK-009']));
-  T.exit(tag + ' doctor --fix: exit 0', runJ(['doctor', '--fix'], bl), 0);
-  T.eq(tag + ' --fix moved it to the backlog top level, byte-identical',
+  t.exit(tag + ' doctor --fix: exit 0', (await runJAsync(['doctor', '--fix'], bl)), 0);
+  t.eq(tag + ' --fix moved it to the backlog top level, byte-identical',
     H.readOrNull(path.join(bl, 'TSK-009.md')), bytes);
-  await doctorClean(T, tag + ' after --fix', bl);
-}
+  await doctorClean(t, tag + ' after --fix', bl);
+});
 
-{
+leg(async (t) => {
   /* .nanojira/ is never scanned, whatever it holds; nor is any other
    * directory whose name starts with "." (DECISIONS 91 B11). STATUS.md is
    * V3-3's and not asserted here. */
@@ -906,21 +919,21 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   const outside = H.freshDir('ac22-outside');
   fs.writeFileSync(path.join(outside, 'TSK-013.md'), elementBytes('TSK-013', el('task', 'EPIC-001', 'todo')));
   fs.symlinkSync(outside, path.join(bl, 'linked'));
-  const all = runJ(['list', '--all'], bl);
+  const all = (await runJAsync(['list', '--all'], bl));
   const seen = Object.keys(entriesById(all.json));
-  T.check(tag + ' a *.md under .nanojira/ is not an element', !seen.includes('TSK-010'), J(seen));
-  T.check(tag + ' a *.md under another dot-directory is not an element (B11)', !seen.includes('TSK-012'), J(seen));
-  T.check(tag + ' a directory symlink is never followed (B11)', !seen.includes('TSK-013'), J(seen));
+  t.check(tag + ' a *.md under .nanojira/ is not an element', !seen.includes('TSK-010'), J(seen));
+  t.check(tag + ' a *.md under another dot-directory is not an element (B11)', !seen.includes('TSK-012'), J(seen));
+  t.check(tag + ' a directory symlink is never followed (B11)', !seen.includes('TSK-013'), J(seen));
   fs.symlinkSync(bl, path.join(bl, 'epics', 'loop'));
-  const looped = H.runJson(['list', '--all'], { cwd: path.dirname(bl), unsetEnv: ['NJ_BACKLOG'], timeout: 20000 });
-  T.exit(tag + ' a symlink loop neither hangs nor crashes (B11): list exits 0', looped, 0);
-  T.eq(tag + ' and lists the same elements', Object.keys(entriesById(looped.json)), seen);
-  T.check(tag + ' the suffix is case-sensitive: *.MD is not an element (B11)', !seen.includes('TSK-015'), J(seen));
-  T.eq(tag + ' the top-level README.md is not an element: --all lists exactly the model',
+  const looped = (await H.runJsonAsync(['list', '--all'], { cwd: path.dirname(bl), unsetEnv: ['NJ_BACKLOG'], timeout: 20000 }));
+  t.exit(tag + ' a symlink loop neither hangs nor crashes (B11): list exits 0', looped, 0);
+  t.eq(tag + ' and lists the same elements', Object.keys(entriesById(looped.json)), seen);
+  t.check(tag + ' the suffix is case-sensitive: *.MD is not an element (B11)', !seen.includes('TSK-015'), J(seen));
+  t.eq(tag + ' the top-level README.md is not an element: --all lists exactly the model',
     Object.keys(entriesById(all.json)).sort(), Object.keys(fx.model).sort());
-}
+});
 
-{
+leg(async (t) => {
   /* a symlinked FILE is read like a file (DECISIONS 91 B11) */
   const tag = 'B6 [file symlink]';
   const fx = mkLayoutBacklog('ac22-b6s', undefined, migrationModel());
@@ -930,24 +943,24 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   fs.writeFileSync(target, elementBytes('TSK-014', el('task', 'EPIC-001', 'todo')));
   fs.symlinkSync(target, path.join(bl, 'tasks', 'TSK-014.md'));
   fs.writeFileSync(path.join(bl, IDS_REL, 'TSK-014'), '');
-  T.check(tag + ' a symlinked element file is read', !!entriesById(runJ(['list'], bl).json)['TSK-014'], '');
-}
+  t.check(tag + ' a symlinked element file is read', !!entriesById((await runJAsync(['list'], bl)).json)['TSK-014'], '');
+});
 
-{
+leg(async (t) => {
   /* README.md below the top level is an element file and is reported
    * (DECISIONS 91 B12) */
   const tag = 'B6 [README.md below the top level]';
   const fx = mkLayoutBacklog('ac22-b6r', undefined, migrationModel());
   const { bl } = fx;
   writeFile(bl, 'epics/README.md', '# Notes about epics\n');
-  const r = runJ(['doctor'], bl);
-  T.exit(tag + ' doctor exits 2', r, 2);
+  const r = (await runJAsync(['doctor'], bl));
+  t.exit(tag + ' doctor exits 2', r, 2);
   const probs = (r.json && Array.isArray(r.json.problems)) ? r.json.problems : [];
-  T.check(tag + ' a finding names epics/README.md',
+  t.check(tag + ' a finding names epics/README.md',
     probs.some((p: any) => J(p).includes('README.md')), J(probs).slice(0, 400));
-}
+});
 
-{
+leg(async (t) => {
   /* a hand-written `archived:` at a valid active place is no finding
    * (DECISIONS 92 Q2, v2 behaviour) */
   const tag = 'B6 [archived: at an active place]';
@@ -955,13 +968,13 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   const { bl } = fx;
   writeFile(bl, 'tasks/TSK-016.md', elementBytes('TSK-016', el('task', 'EPIC-001', 'done', { archived: true })));
   fs.writeFileSync(path.join(bl, IDS_REL, 'TSK-016'), '');
-  const e = entriesById(runJ(['list'], bl).json)['TSK-016'];
-  T.check(tag + ' it is active — listed without --all', !!e, '');
-  T.check(tag + ' and carries no location code',
+  const e = entriesById((await runJAsync(['list'], bl)).json)['TSK-016'];
+  t.check(tag + ' it is active — listed without --all', !!e, '');
+  t.check(tag + ' and carries no location code',
     !!e && !(e._problems || []).some((c: any) => c === 'type:folder' || c === 'layout:misplaced'), J(e));
-}
+});
 
-{
+leg(async (t) => {
   /* a directory below the backlog that cannot be listed is reported, never
    * silently skipped: backlog:unreadable_dir, error, backlog-level
    * (§ 7, DECISIONS 93 F9) */
@@ -976,19 +989,19 @@ await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   try {
     const canList = (() => { try { fs.readdirSync(locked); return true; } catch (e) { return false; } })();
     if (canList) {
-      T.check(tag + ' not covered: this process can list a mode-000 directory (running as root?)', false, locked);
+      t.check(tag + ' not covered: this process can list a mode-000 directory (running as root?)', false, locked);
     } else {
-      const r = runJ(['doctor'], bl);
-      T.exit(tag + ' doctor exits 2', r, 2);
-      T.sameSet(tag + ' doctor reports exactly backlog:unreadable_dir',
+      const r = (await runJAsync(['doctor'], bl));
+      t.exit(tag + ' doctor exits 2', r, 2);
+      t.sameSet(tag + ' doctor reports exactly backlog:unreadable_dir',
         H.doctorSet(r) || ['<no problems array>'], ['backlog:unreadable_dir:error']);
       const f = ((r.json && r.json.problems) || []).find((p: any) => p.code === 'backlog:unreadable_dir');
-      T.check(tag + ' the finding is backlog-level (no element)', !!f && !f.element, J(f));
+      t.check(tag + ' the finding is backlog-level (no element)', !!f && !f.element, J(f));
     }
   } finally {
     fs.chmodSync(locked, 0o755);
   }
-}
+});
 
 /* An element whose type cannot be determined (no `type`, no known ID
  * prefix) carries type:folder in every group (DECISIONS 92). */
@@ -996,18 +1009,18 @@ for (const [name, block, rel] of [
   ['type, v2', undefined, 'tasks/BUG-001.md'],
   ['flat', { group: 'flat' }, 'BUG-001.md'],
   ['hierarchy', { group: 'hierarchy' }, 'BUG-001.md'],
-] as [string, Block, string][]) {
+] as [string, Block, string][]) leg(async (t) => {
   const tag = 'B6 [' + name + ', undeterminable type]';
   const fx = mkLayoutBacklog('ac22-b6b', block, migrationModel());
   writeFile(fx.bl, rel, H.element({ id: 'BUG-001', title: 'Odd one', status: 'todo', created: NOW, updated: NOW },
     '# Odd one\n\n## Description\nSomething.\n'));
-  const all = runJ(['list', '--all'], fx.bl);
+  const all = (await runJAsync(['list', '--all'], fx.bl));
   const e = Object.values(entriesById(all.json)).find((x: any) => JSON.stringify(x).includes('BUG-001'));
-  T.check(tag + ' the file is read and carries type:folder',
+  t.check(tag + ' the file is read and carries type:folder',
     !!e && (e._problems || []).includes('type:folder'), J(e || Object.keys(entriesById(all.json))));
-}
+});
 
-{
+leg(async (t) => {
   /* archived exactly when below the archive folder (group type, v2) */
   const tag = 'B6 [archived by location]';
   const fx = mkLayoutBacklog('ac22-b6a', undefined, migrationModel());
@@ -1015,9 +1028,12 @@ for (const [name, block, rel] of [
   const done = el('task', 'EPIC-001', 'done');
   writeFile(bl, 'archive/TSK-011.md', elementBytes('TSK-011', done));
   fs.writeFileSync(path.join(bl, IDS_REL, 'TSK-011'), '');
-  T.check(tag + ' a file below archive/ is hidden from list',
-    !entriesById(runJ(['list'], bl).json)['TSK-011'], '');
-  T.check(tag + ' and listed with --all', !!entriesById(runJ(['list', '--all'], bl).json)['TSK-011'], '');
-}
+  t.check(tag + ' a file below archive/ is hidden from list',
+    !entriesById((await runJAsync(['list'], bl)).json)['TSK-011'], '');
+  t.check(tag + ' and listed with --all', !!entriesById((await runJAsync(['list', '--all'], bl)).json)['TSK-011'], '');
+});
+
+/* concurrency: legs in flight; runNjAsync still caps the spawns at 4. */
+await H.runLegs(LEGS, { concurrency: 8 });
 
 T.finish();

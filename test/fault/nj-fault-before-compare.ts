@@ -18,6 +18,12 @@
  * it once it is holding, so the test plants its change only after nj's first
  * read. Until then the test slept 1 s and hoped, which a loaded machine could
  * outlast.
+ *
+ * The --json codes of two hooks (closing NC3) live here too, merged from
+ * fault/fault-hook-json.ts (TSK-049): `fault:before-rename`, and
+ * `fault:before-compare` on the 10 s timeout path. That timeout run starts
+ * at the top and runs alongside the human timeout leg below, so the file
+ * waits out nj's 10 s hold once, not twice; its checks come last.
  */
 import fs from 'fs';
 import path from 'path';
@@ -73,6 +79,48 @@ function parallelVersion() {
   }, '# Backend API Endpoints\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n');
 }
 
+/* The fixture fault/fault-hook-json.ts used: an epic and its complete task. */
+function hookJsonFixture(label: string) {
+  return H.mkBacklog({
+    label,
+    files: {
+      'epics/EPIC-001.md': H.element({ id: 'EPIC-001', type: 'epic', title: 'Auth', status: 'todo', created: H.FIXED_NOW, updated: H.FIXED_NOW }, H.completeBody('Auth')),
+      'tasks/TSK-001.md': H.element({ id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'T', status: 'todo', created: H.FIXED_NOW, updated: H.FIXED_NOW }, H.completeBody('T')),
+    },
+    tombstones: ['EPIC-001', 'TSK-001'],
+  });
+}
+
+/* All three `NJ_FAULT` hooks pinned as exact `--json` error codes (§ 12,
+ * § 9's closed vocabulary). `fault:after-tmp-write` is pinned in
+ * edge/failure-vocabulary.ts; these are the other two. Started at once,
+ * asserted at the end of the file. */
+function startHookJson() {
+  const rename = H.runJsonAsync(['set', '--id=TSK-001', '--status=doing'],
+    { cwd: hookJsonFixture('fault-json-before-rename'), env: { NJ_FAULT: 'before-rename' } });
+  /* fault:before-compare: never drop .nj-fault-go, so it times out
+   * deterministically after 10 s and hardExit's fault:before-compare fires.
+   * 30 s, not 15 s, around the fixed ~10 s hook wait: node start + bundle
+   * load on a loaded machine (run-all's parallel pool, DECISIONS 199) can
+   * eat a 5 s margin. Only the lower bound is asserted. */
+  const d = hookJsonFixture('fault-json-before-compare');
+  const start = Date.now();
+  const compare = H.runJsonAsync(['set', '--id=TSK-001', '--status=doing'],
+    { cwd: d, env: { NJ_FAULT: 'before-compare' }, timeout: 30000 })
+    .then(r => ({ r, elapsed: Date.now() - start }));
+  return { rename, compare };
+}
+
+async function checkHookJson(started: ReturnType<typeof startHookJson>) {
+  const r = await started.rename;
+  T.exit('NJ_FAULT=before-rename --json exit 1', r, 1);
+  T.eq('the code is fault:before-rename', r.json && r.json.error, 'fault:before-rename');
+  const { r: rc, elapsed } = await started.compare;
+  T.exit('NJ_FAULT=before-compare --json exit 1 (after ~10s timeout)', rc, 1);
+  T.eq('the code is fault:before-compare', rc.json && rc.json.error, 'fault:before-compare');
+  T.check('roughly a 10s wait happened (not an immediate different failure)', elapsed >= 9000, 'elapsed=' + elapsed + 'ms');
+}
+
 async function playParallelWrite(d: string, ready: ReturnType<typeof H.faultReady>, done: Promise<RunResult>) {
   const file = path.join(d, 'backlog', TASK);
   T.check('nj reached the before-compare hold (NJ_FAULT_READY written)', await ready.wait(done), ready.file);
@@ -83,6 +131,7 @@ async function playParallelWrite(d: string, ready: ReturnType<typeof H.faultRead
 
 /* ---- without --force: the write must be refused ------------------------ */
 (async () => {
+  const hookJson = startHookJson();
   {
     const d = fixture('fault-before-compare');
     const file = path.join(d, 'backlog', TASK);
@@ -156,6 +205,8 @@ async function playParallelWrite(d: string, ready: ReturnType<typeof H.faultRead
     T.check('… at once, not after the 10 s poll', Date.now() - t0 < 9000, 'elapsed ' + (Date.now() - t0) + ' ms');
     T.check('… and writes nothing', fs.readFileSync(path.join(d, 'backlog', TASK), 'utf8').includes('status: todo'), '');
   }
+
+  await checkHookJson(hookJson);
 
   T.finish();
 })().catch(e => {

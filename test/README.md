@@ -181,7 +181,11 @@ never land on a `TMPDIR` that is on disk. Anything still in the run root
 after the last file is a leak: the run fails, lists what is left (not which
 file left it — the root is shared), and removes the run root. Under
 `NJ_KEEP=1` the run root stays and its path is printed instead
-(`test/tools/run-all-leak-sweep.ts`).
+(`test/tools/run-all-leak-sweep.ts`). The run root also holds the run's
+Node compile cache, `.node-compile-cache` (`NODE_COMPILE_CACHE`, shared by
+every file and every `nanojira` it starts); it is removed before the leak
+sweep, even under `NJ_KEEP=1`, and `NODE_DISABLE_COMPILE_CACHE=1` turns it
+off for a run.
 
 **Until `nanojira` exists, every test fails** with `FAIL <file> — CANNOT RUN`. That is
 the correct signal: the oracle is complete and the implementation is not. It is

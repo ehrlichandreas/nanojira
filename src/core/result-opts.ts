@@ -5,49 +5,21 @@
 // list/find/show (DECISIONS 229), so the flag
 // validation and the result-shrinking they do lives in one place, applied
 // as the last step before a single-ID JSON result or a batch item is
-// serialised. A separate file from core/output.ts (not args.ts either):
-// args.ts already exports `fail`, which output.ts defines, so output.ts
-// cannot import `flagString` back from args.ts without a cycle — this file
-// sits above both.
+// serialised. A separate file from core/output.ts, which the trimming
+// builds on; the flag validation itself is the kernel's.
 
 import type { Flags, Element, Config } from './types.ts';
+import type { OutputOpts } from './kernel.ts';
 
-import { flagString } from './args.ts';
-import { buildWriteResult, fail, out } from './output.ts';
-import { listHint } from './suggest.ts';
+import { buildWriteResult, out } from './output.ts';
+import { parseOutputOpts as kernelParseOutputOpts } from './kernel.ts';
 
-interface OutputOpts { quiet: boolean; fields?: string[] }
-
-/**
- * Parses and validates `--quiet`/`--fields` (§ 9): mutually exclusive with
- * each other, both require `--json` (there is no human-output meaning for
- * either — § 9 states this explicitly rather than leaving it to infer), and
- * every `--fields` name is checked against `allowedFields` — the caller's
- * own entry keys, `ENTRY_FIELDS` for the writes (the exact set `entryJson`
- * can produce) — before anything else in the caller runs, so a bad name is
- * refused before any write (the same "validate before the first write"
- * discipline every other flag value check in this codebase already has).
- * The caller-supplied list is agent-skills' generalisation of this
- * function (DECISIONS 229).
- */
+/** `--fields`/`--quiet` validation is the project-neutral kernel's
+ * `parseOutputOpts` (DECISIONS 231), given the caller's own entry keys —
+ * `ENTRY_FIELDS` for the writes, the exact set `entryJson` can produce
+ * (DECISIONS 229) — and this vocabulary's name for the hint. */
 function parseOutputOpts(flags: Flags, json: boolean, allowedFields: string[]): OutputOpts {
-  const quiet = flags.has('quiet');
-  const fieldsRaw = flagString(flags, 'fields');
-  if (quiet && fieldsRaw !== undefined) {
-    fail('invalid_value', '--quiet cannot be combined with --fields',
-      'use --fields=<list> to choose fields, or --quiet for {ok, id}');
-  }
-  if (quiet && !json) fail('invalid_value', '--quiet requires --json');
-  if (fieldsRaw !== undefined && !json) fail('invalid_value', '--fields requires --json');
-  if (fieldsRaw === undefined) return { quiet };
-  const names = fieldsRaw.split(',').map((s) => s.trim()).filter((s) => s !== '');
-  if (names.length === 0) fail('invalid_value', '--fields must not be empty');
-  for (const n of names) {
-    if (!allowedFields.includes(n)) {
-      fail('invalid_value', `unknown field '${n}' in --fields`, listHint('entry fields', n, allowedFields));
-    }
-  }
-  return { quiet, fields: names };
+  return kernelParseOutputOpts(flags, json, allowedFields, 'entry fields');
 }
 
 /**

@@ -27,6 +27,7 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'node:url';
+import { builtinModules } from 'node:module';
 import * as H from '../lib/harness.ts';
 const T = H.T;
 
@@ -122,17 +123,20 @@ const codesOf = (d: H.JsonRunResult) => (d.json && Array.isArray(d.json.problems
    * from the table would let a parser that drops a whole prefix group
    * (every backlog:* row, say) also drop that group from the scan, and
    * nothing would notice. `refused:*` is § 9's failure vocabulary
-   * (failure-vocabulary.ts), not a § 7 problem code; a new non-code
-   * literal of this shape shows up here as a red diff and has to be
-   * listed deliberately. */
+   * (failure-vocabulary.ts), not a § 7 problem code, and neither is a
+   * real built-in import specifier like `'node:fs'` (core/kernel.ts,
+   * DECISIONS 231) -- only a name `builtinModules` knows, so a code like
+   * `node:stale` is still scanned; a new non-code literal of this shape
+   * shows up here as a red diff and has to be listed deliberately. */
   const NOT_PROBLEM_CODES = new Set(['refused']);
+  const builtin = (lit: string) => lit.startsWith('node:') && builtinModules.includes(lit.slice(5));
   const literal = /['"`]([a-z][a-z0-9_]*:[a-z][a-z0-9_]*)['"`]/g;
   const seen = new Map<string, string>();
   (function walk(d: string) {
     for (const k of fs.readdirSync(d, { withFileTypes: true })) {
       const p = path.join(d, k.name);
       if (k.isDirectory()) walk(p);
-      else if (k.name.endsWith('.ts')) for (const m of fs.readFileSync(p, 'utf8').matchAll(literal)) if (!NOT_PROBLEM_CODES.has(m[1].split(':')[0]) && !seen.has(m[1])) seen.set(m[1], path.relative(ROOT, p));
+      else if (k.name.endsWith('.ts')) for (const m of fs.readFileSync(p, 'utf8').matchAll(literal)) if (!NOT_PROBLEM_CODES.has(m[1].split(':')[0]) && !builtin(m[1]) && !seen.has(m[1])) seen.set(m[1], path.relative(ROOT, p));
     }
   })(path.join(ROOT, 'src'));
   T.check('C the scan finds the source\'s codes at all', seen.size > 30, String(seen.size));

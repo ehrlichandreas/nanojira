@@ -57,6 +57,7 @@ const taskFile = path.join(bl, 'tasks', 'TSK-001.md');
   T.check('V3 --description-file - reads stdin', d.status === 0 && fs.readFileSync(taskFile, 'utf8').includes('from stdin'), J(d.json) + d.stderr);
   const dash = run(['new', '--type=epic', '--title', '--json']);
   T.check('V4 a value starting with -- is not taken: --title is missing_value', dash.json?.error === 'missing_value', J(dash.json) + dash.stderr);
+  T.check('V4 the message names both forms', dash.stderr.includes('--title needs a value (use --title=… or --title <value>)'), dash.stderr);
   const n = run(['note', '--id', 'TSK-001', '--as', 'Tester', '--json', '--', '--looks-like-a-flag']);
   T.check('V5 -- ends the options: note text "--looks-like-a-flag"',
     n.status === 0 && fs.readFileSync(taskFile, 'utf8').includes('--looks-like-a-flag'), J(n.json) + n.stderr);
@@ -120,6 +121,11 @@ const taskFile = path.join(bl, 'tasks', 'TSK-001.md');
   const sh = String(s.json?.hint);
   T.check('H set --bogus: --depends-on, not depends_on', s.json?.error === 'unknown_field' && sh.includes('--depends-on') && !sh.includes('depends_on'), sh);
   T.check('H set --bogus: names --id and --backlog too', sh.includes('--id,') && sh.includes('--backlog'), sh);
+  // Exact, so the order is pinned too: sorted (found by a mutant, TSK-050).
+  T.eq('H claim --bogus: the exact hint, sorted', hint,
+    'Known flags: --allow-open-children, --as, --backlog, --check-all, --dry-run, --fields, --file, --id, --json, --quiet, --status, --steal');
+  T.check('H set --bogus (a write): the message says nothing was written',
+    s.stderr.includes("Error: unknown field 'bogus'. Nothing written.\n"), s.stderr);
 }
 
 T.finish();

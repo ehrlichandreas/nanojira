@@ -11,14 +11,10 @@ import path from 'path';
 import * as H from '../lib/harness.ts';
 const T = H.T;
 
-/* Only unambiguous format violations belong here. Two plausible-looking cases
- * are deliberately NOT asserted, because the spec does not decide them:
- *   ''  — an empty value is "set but empty"; whether that is invalid or means
- *         "unset" is not stated.
- *   '2026-13-45T99:99:99Z' — shape-valid, semantically impossible. A regex
- *         validator accepts it; only a calendar check rejects it. § 12 says
- *         "an invalid value exits 1" without saying which kind of invalid.
- * Both are listed in AMBIGUITIES.md. Asserting either would be guessing. */
+/* Format violations. The two boundary cases AMBIGUITIES.md 15 left open
+ * are decided since (§ 12 "Clock pinning", DECISIONS 207: "empty means
+ * unset, otherwise exactly YYYY-MM-DDTHH:MM:SSZ and a real instant") and
+ * pinned at the end of this file, with trailing text after the Z. */
 const BAD = [
   '2026-09-21 18:00:00',      // no T, no Z — a plausible hand-written typo
   '2026-09-21T18:00:00',      // missing the Z
@@ -50,6 +46,21 @@ for (const value of BAD) {
   T.check('the element was created', body !== null, 'EPIC-001.md was not written');
   T.contains('created uses the pinned clock verbatim', body || '', 'created: 2026-01-02T03:04:05Z');
   T.contains('updated uses the pinned clock verbatim', body || '', 'updated: 2026-01-02T03:04:05Z');
+}
+
+/* The rule's edges, one check each (found by mutants, TSK-050): the shape
+ * is anchored at both ends, the instant must be real, and empty is unset. */
+for (const [value, refused, what] of [
+  ['2026-01-02T03:04:05Zx', true, 'trailing text after the Z is invalid_env'],
+  ['2026-13-02T03:04:05Z', true, 'a month 13 (right shape, no such instant) is invalid_env'],
+  ['', false, 'empty means unset: the wall clock, exit 0'],
+] as const) {
+  const d = H.freshDir('fault-now-edge');
+  H.runNj(['init'], { cwd: d });
+  const r = H.runJson(['new', '--type=epic', '--title=Auth'], { cwd: d, env: { NJ_NOW: value } });
+  // The code, not just exit 1: a missing backlog would exit 1 as well.
+  if (refused) T.eq('NJ_NOW=' + JSON.stringify(value) + ': ' + what, r.json && r.json.error, 'invalid_env');
+  else T.exit('NJ_NOW=' + JSON.stringify(value) + ': ' + what, r, 0);
 }
 
 T.finish();

@@ -271,4 +271,25 @@ function opsOf(r: { json?: any }): string[] {
   T.check('F9 doctor --fix: names STATUS.md', opsOf(r).includes('STATUS.md created'), J(opsOf(r)));
 }
 
+/* ===================================================================== */
+/* F10 — a hard exit still names what had landed                          */
+/* ===================================================================== */
+/* `hardExit` (fault hooks, exhausted allocator) skips the normal error
+ * handling; its --json failure object still carries `files` when part of
+ * the call is already on disk (DECISIONS 222). Since DECISIONS 231 that
+ * goes through the kernel's failure decorator, which output.ts registers. */
+{
+  const dir = flat('ac66-f10');
+  const bl = path.join(dir, 'backlog');
+  const before = snapshot(bl);
+  const r = H.runJson(['new', '--input=-'], {
+    cwd: dir, input: JSON.stringify({ type: 'epic', title: 'E2', description: 'D.' }),
+    env: Object.assign({}, ENV, { NJ_FAULT: 'after-tmp-write' }), unsetEnv: ['NJ_BACKLOG', 'NJ_ON_CHANGE'],
+  });
+  T.exit('F10 new --input under NJ_FAULT=after-tmp-write: exit 1', r, 1);
+  T.eq('F10 the code is fault:after-tmp-write', r.json && r.json.error, 'fault:after-tmp-write');
+  T.eq('F10 files: the tombstone that landed', J(r.json && r.json.files), J([{ path: '.nanojira/ids/EPIC-002', op: 'created' }]));
+  T.eq('F10 files matches the backlog', J(diffLines(before, snapshot(bl))), J(['.nanojira/ids/EPIC-002 created']));
+}
+
 T.finish();

@@ -5829,6 +5829,75 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        and encoding-empty-tag-assignee (`list --tag=`, accepted before as
        a filter matching nothing).
 
+231. **The CLI kernel is one project-neutral source file,
+     `src/core/kernel.ts`** (2026-10-22, TSK-050; scans' TSK-013).
+     - The finding: agent-skills copied nanojira's CLI conventions (flag
+       parsing, did-you-mean, `{ok, error, hint}`, `--json`, the clock,
+       `--fields`) into its own dependency-free core and generalised
+       them (caller-supplied global controls and allowed fields). The
+       owner's plan is to migrate the improved kernel back as one file
+       both projects copy verbatim, with no runtime dependency either
+       way.
+     - Lead settled: `kernel.ts` holds only the project-neutral parts —
+       `Fail`/`fail`, the `--json` state, `hardExit`, `out`,
+       `emitFailure` and the EPIPE handler; `parseArgs` with the flag
+       table as an optional spec (TSK-038's `--name value`, DECISIONS
+       230), `allowedControlSet` and `checkFlags` with the caller's
+       global controls, `flagString`, `readStdin`; `osaDistance`,
+       `nearestMatch`, `listHint`; `checkClockEnv`, `nowIso`, `nowMs`
+       (`NJ_NOW`); `parseOutputOpts` with the caller's allowed fields.
+       It imports only `node:*` built-ins and names no project; its
+       header says "copy verbatim, project-neutral". The domain parts
+       stay where they were.
+       `NJ_NOW` stays a literal name: it is the clock convention both
+       projects share, so the file stays verbatim-compatible.
+       No provenance stamp in `kernel.ts` either: it stays
+       project-neutral, and the copier records where it came from, as
+       agent-skills' own core README does. The flag spec is
+       `Record<name, kind>` (`{title: 'string'}`), nanojira's existing
+       flag-table shape; agent-skills' `FlagSpec` is `{name: {kind}}`, so
+       a copy back into agent-skills adapts its callers, not the file.
+     - How nanojira plugs in, byte-identical: every project choice is a
+       parameter. `args.ts` passes its flag aliases (`depends-on`), the
+       `--backlog` path sameness, `backlog` plus `dry-run` (writes) as
+       global controls, `displayFlagName` and its `--<role>-file`
+       stdin hint, and keeps the dry-run arming; `output.ts` registers
+       its `files`-adding failure decorator (DECISIONS 222) through
+       `setFailureDecorator` at load time; `result-opts.ts` passes the
+       hint label `entry fields`. `args`, `output`, `suggest`, `store`
+       and `result-opts` re-export what they took, so no other module's
+       imports changed. The EPIPE handler, the one load-time side
+       effect, moved with `out` into the kernel.
+     - Tests: `test/edge/kernel-neutral.ts` (17 checks): `kernel.ts`
+       imports only `node:*` (any quote, side-effect imports included)
+       and names no project; no file under `src/` or `dist/` contains
+       "agent-skills"; `parseArgs`'s spec param unit-pinned (string
+       takes the next token, boolean never, no spec or an unknown flag
+       is `true`, a `--` value is not taken, `-` is, `--` ends options,
+       aliases, caller sameness) and `allowedControlSet`'s global
+       controls. Red on 6 of 7 private mutants of `kernel.ts` (a bare
+       `fs` import, the name in the header, a dropped `--` guard, a
+       dropped string-kind test, `--` not ending options, global
+       controls dropped); the seventh (`!== 'boolean'` for `===
+       'string'`) is equivalent with two kinds. The behaviour is pinned
+       by the existing suite unchanged. Two static guards follow the
+       move: `ac-62-nj-now`'s raw-clock scan pins `kernel.ts` at exactly
+       one read, `nowIso()`'s wall-clock fallback (a count, like the
+       other allowed sites, not a file exemption: a `Date.now()` added
+       anywhere else in the kernel fails it), and `severity-vocabulary`
+       C skips a `node:<name>` literal only when `<name>` is a real
+       built-in (`builtinModules`), since `'node:fs'` matched its
+       `word:word` scan; a code like `node:stale` is still checked. Reviewer additions: `ac-66` F10 pins `files` on
+       the `hardExit` path (`NJ_FAULT=after-tmp-write new --input
+       --json` names `.nanojira/ids/EPIC-002` created; red on `hardExit`
+       without the decorator); the kernel-neutral scan catches a bare
+       `import './constants.ts'` and a double-quoted `"fs"`, and a
+       "Taken from nanojira." header.
+     - One output change, its own commit after the move: `flagString`'s
+       `missing_value` message names both forms, `(use --name=… or
+       --name <value>)`, as agent-skills' does, since 4.4.0 parses both
+       (DECISIONS 230). Pinned in `ac-72` V4.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now
