@@ -2,34 +2,36 @@
 
 // `nj tree`.
 
-const { checkFlags, flagString } = require('./args.js');
-const { context } = require('./context.js');
-const { compareElements, entryJson, countsOf } = require('./derive.js');
-const { childMap } = require('./load.js');
-const { fail, out, problemSuffix } = require('./output.js');
+import type { Flags, Element } from './types.ts';
 
-function cmdTree(flags) {
+import { checkFlags, flagString } from './args.ts';
+import { context } from './context.ts';
+import { compareElements, entryJson, countsOf } from './derive.ts';
+import { childMap } from './load.ts';
+import { fail, out, problemSuffix } from './output.ts';
+
+function cmdTree(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'all', 'id']), false);
   const ctx = context();
   const all = flags.has('all');
-  const scope = ctx.elements.filter((e) => all || !e.archived);
+  const scope = ctx.elements.filter((e: Element) => all || !e.archived);
   const id = flagString(flags, 'id');
 
-  let roots;
+  let roots: Element[];
   if (id !== undefined) {
-    const el = scope.find((e) => e.id === id);
-    if (!el) fail('not_found', `no element with id '${id}'`);
+    const el = scope.find((e: Element) => e.id === id);
+    if (!el) return fail('not_found', `no element with id '${id}'`);
     roots = [el];
   } else {
-    const ids = new Set(scope.map((e) => e.id));
-    roots = scope.filter((e) => e.parent === null || !ids.has(e.parent)).sort(compareElements);
+    const ids = new Set(scope.map((e: Element) => e.id));
+    roots = scope.filter((e: Element) => e.parent === null || !ids.has(e.parent)).sort(compareElements);
   }
 
-  const ordered = [];
+  const ordered: { el: Element; depth: number }[] = [];
   const visited = new Set();
   const byParent = childMap(scope);
   for (const a of byParent.values()) a.sort(compareElements);
-  const walk = (el, depth) => {
+  const walk = (el: Element, depth: number) => {
     if (visited.has(el.id)) return;
     visited.add(el.id);
     ordered.push({ el, depth });
@@ -54,4 +56,4 @@ function cmdTree(flags) {
   return 0;
 }
 
-module.exports = { cmdTree };
+export { cmdTree };

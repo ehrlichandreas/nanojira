@@ -2,15 +2,17 @@
 
 // Command-line flag parsing.
 
-const fs = require('fs');
-const { SECTION_ROLES } = require('./constants.js');
-const { fail } = require('./output.js');
-const { normalizeSectionContent } = require('./parse.js');
+import type { Flags } from './types.ts';
+
+import * as fs from 'fs';
+import { SECTION_ROLES } from './constants.ts';
+import { fail } from './output.ts';
+import { normalizeSectionContent } from './parse.ts';
 
 // -------------------------------------------------------------- arg parsing
 
-function parseArgs(argv) {
-  const flags = new Map();
+function parseArgs(argv: string[]) {
+  const flags: Flags = new Map();
   const positional = [];
   for (const a of argv) {
     if (a === '--') continue;
@@ -27,7 +29,7 @@ function parseArgs(argv) {
   return { flags, positional };
 }
 
-function checkFlags(flags, allowedFields, allowedControls, isWrite) {
+function checkFlags(flags: Flags, allowedFields: string[], allowedControls: Set<string>, isWrite: boolean) {
   for (const name of flags.keys()) {
     if (allowedControls.has(name)) continue;
     if (allowedFields.includes(name)) continue;
@@ -39,14 +41,14 @@ function checkFlags(flags, allowedFields, allowedControls, isWrite) {
   }
 }
 
-function flagString(flags, name) {
+function flagString(flags: Flags, name: string): string | undefined {
   const v = flags.get(name);
   if (v === undefined) return undefined;
-  if (v === true) fail('missing_value', `--${name} needs a value (use --${name}=…)`);
+  if (v === true) return fail('missing_value', `--${name} needs a value (use --${name}=…)`);
   return v;
 }
 
-function parseListFlag(flags, name) {
+function parseListFlag(flags: Flags, name: string) {
   const v = flagString(flags, name);
   if (v === undefined) return undefined;
   if (v === '') return [];
@@ -57,17 +59,17 @@ function parseListFlag(flags, name) {
   return items;
 }
 
-function readStdin() {
-  try { return fs.readFileSync(0, 'utf8'); } catch (e) {
-    fail('invalid_value', `cannot read stdin — ${e.message}`, 'pipe the text in, or pass a path with --<role>-file=<path>');
+function readStdin(): string {
+  try { return fs.readFileSync(0, 'utf8'); } catch (e: any) {
+    return fail('invalid_value', `cannot read stdin — ${e.message}`, 'pipe the text in, or pass a path with --<role>-file=<path>');
   }
 }
 
 // Value sources per role are mutually exclusive, and only one role may read
 // stdin — a stream can be drained once (§ 9). Everything is validated before
 // the first read, so a rejected invocation consumes nothing and writes nothing.
-function readSectionFlags(flags) {
-  const src = new Map();
+function readSectionFlags(flags: Flags) {
+  const src: Map<string, { inline?: string; file?: string }> = new Map();
   for (const role of SECTION_ROLES) {
     const inline = flagString(flags, role);
     const file = flagString(flags, role + '-file');
@@ -78,20 +80,20 @@ function readSectionFlags(flags) {
     if (inline !== undefined) src.set(role, { inline });
     else if (file !== undefined) src.set(role, { file });
   }
-  const viaStdin = SECTION_ROLES.filter((r) => src.has(r) && src.get(r).file === '-');
+  const viaStdin = SECTION_ROLES.filter((r: string) => src.has(r) && (src.get(r) as { inline?: string; file?: string }).file === '-');
   if (viaStdin.length > 1) {
     fail('invalid_value', `--${viaStdin[0]}-file=- and --${viaStdin[1]}-file=- both read stdin, which can only be consumed once. Nothing written.`,
       'read one role from a file or pass it inline');
   }
 
-  const wanted = new Map();
+  const wanted: Map<string, string> = new Map();
   for (const role of SECTION_ROLES) {
     if (!src.has(role)) continue;
-    const s = src.get(role);
+    const s = src.get(role) as { inline?: string; file?: string };
     if (s.inline !== undefined) { wanted.set(role, normalizeSectionContent(s.inline)); continue; }
     if (s.file === '-') { wanted.set(role, normalizeSectionContent(readStdin())); continue; }
     let raw;
-    try { raw = fs.readFileSync(s.file, 'utf8'); } catch (e) {
+    try { raw = fs.readFileSync(s.file as string, 'utf8'); } catch (e: any) {
       fail('not_found', `--${role}-file: cannot read '${s.file}' — ${e.message}. Nothing written.`,
         'give a readable path, or `-` to read stdin');
     }
@@ -100,4 +102,4 @@ function readSectionFlags(flags) {
   return wanted;
 }
 
-module.exports = { parseArgs, checkFlags, flagString, parseListFlag, readSectionFlags };
+export { parseArgs, checkFlags, flagString, parseListFlag, readSectionFlags };

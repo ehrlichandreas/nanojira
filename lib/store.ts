@@ -2,15 +2,17 @@
 
 // Storage: clock, tombstones, atomic writes.
 
-const fs = require('fs');
-const path = require('path');
-const { TYPE_PREFIX } = require('./constants.js');
-const { fail, hardExit } = require('./output.js');
-const { serialize } = require('./parse.js');
+import type { Element } from './types.ts';
+
+import * as fs from 'fs';
+import * as path from 'path';
+import { TYPE_PREFIX } from './constants.ts';
+import { fail, hardExit } from './output.ts';
+import { serialize } from './parse.ts';
 
 // -------------------------------------------------------------------- clock
 
-function nowIso() {
+function nowIso(): string {
   const pinned = process.env.NJ_NOW;
   if (pinned !== undefined && pinned !== '') {
     if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(pinned) || Number.isNaN(Date.parse(pinned))) {
@@ -21,7 +23,7 @@ function nowIso() {
   return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
-function mtimeIso(file) {
+function mtimeIso(file: string) {
   try {
     return new Date(fs.statSync(file).mtime).toISOString().replace(/\.\d{3}Z$/, 'Z');
   } catch {
@@ -30,15 +32,15 @@ function mtimeIso(file) {
 }
 
 // A sync sleep without dependencies — only used by the before-compare fault hook.
-function sleepMs(ms) {
+function sleepMs(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 // --------------------------------------------------------------- tombstones
 
-function readTombstones(backlog) {
+function readTombstones(backlog: string) {
   const dir = path.join(backlog, '.ids');
-  const out = new Set();
+  const out: Set<string> = new Set();
   let names;
   try { names = fs.readdirSync(dir); } catch { return out; }
   for (const n of names) {
@@ -48,13 +50,13 @@ function readTombstones(backlog) {
   return out;
 }
 
-function allocateId(backlog, type, elements) {
+function allocateId(backlog: string, type: string, elements: Element[]): string {
   const prefix = TYPE_PREFIX[type];
   const dir = path.join(backlog, '.ids');
   fs.mkdirSync(dir, { recursive: true });
 
   let max = 0;
-  const consider = (id) => {
+  const consider = (id: string) => {
     const m = new RegExp('^' + prefix + '-(\\d+)$').exec(id);
     if (m) {
       const n = parseInt(m[1], 10);
@@ -70,17 +72,17 @@ function allocateId(backlog, type, elements) {
     try {
       fs.closeSync(fs.openSync(path.join(dir, id), 'wx'));
       return id;
-    } catch (e) {
+    } catch (e: any) {
       if (e.code !== 'EEXIST') throw e;
       n++;
     }
   }
-  hardExit('id_allocation_failed', `nj: id allocation failed after 100 retries (${prefix})`);
+  return hardExit('id_allocation_failed', `nj: id allocation failed after 100 retries (${prefix})`);
 }
 
 // ------------------------------------------------------------ atomic writes
 
-function atomicWrite(target, content) {
+function atomicWrite(target: string, content: string) {
   const dir = path.dirname(target);
   const tmp = path.join(dir, `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
   const fault = process.env.NJ_FAULT;
@@ -105,7 +107,7 @@ function atomicWrite(target, content) {
 // NJ_FAULT=before-compare covers all three.
 // `hint` is caller-specific: `archive` takes no `--force`, so pointing at it
 // there would name a flag the command rejects as unknown_field.
-function compareGuard(el, force, backlog, hint) {
+function compareGuard(el: Element, force: boolean, backlog?: string, hint?: string) {
   // Fault hook: hold between the first read and the compare re-read so a test
   // can deterministically change the target underneath us (§ 12).
   if (process.env.NJ_FAULT === 'before-compare' && backlog) {
@@ -127,12 +129,12 @@ function compareGuard(el, force, backlog, hint) {
   }
 }
 
-function guardedWrite(el, content, force, backlog) {
+function guardedWrite(el: Element, content: string, force: boolean, backlog?: string) {
   compareGuard(el, force, backlog);
   atomicWrite(el.file, content);
 }
 
-function renderElement(el, fieldOverrides, bodyOverride) {
+function renderElement(el: Element, fieldOverrides: Map<string, string | string[] | undefined>, bodyOverride?: string) {
   const fields = new Map(el.fields);
   for (const [k, v] of fieldOverrides) {
     if (v === undefined) fields.delete(k);
@@ -143,4 +145,4 @@ function renderElement(el, fieldOverrides, bodyOverride) {
   return serialize(fields, order, bodyOverride === undefined ? el.body : bodyOverride);
 }
 
-module.exports = { nowIso, mtimeIso, readTombstones, allocateId, atomicWrite, compareGuard, guardedWrite, renderElement };
+export { nowIso, mtimeIso, readTombstones, allocateId, atomicWrite, compareGuard, guardedWrite, renderElement };

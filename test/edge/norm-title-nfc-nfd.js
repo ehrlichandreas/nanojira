@@ -2,7 +2,7 @@
 /* Edge — NC10 gap: does `title` survive Unicode composition form (NFC vs NFD)
  * byte-exact, or does `nj` normalise it?
  *
- * § 7 (Z. 252-253): "Titles are normalised on write: line breaks become spaces,
+ * § 7 (Z. 275-277): "Titles are normalised on write: line breaks become spaces,
  * leading and trailing whitespace is dropped. This is the single exception to
  * § 2's byte-exact rule." The exception is enumerated — line breaks and
  * surrounding whitespace, nothing about composition form — so composition

@@ -2,13 +2,15 @@
 
 // `nj list`.
 
-const { checkFlags, flagString } = require('./args.js');
-const { TYPES } = require('./constants.js');
-const { context } = require('./context.js');
-const { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } = require('./derive.js');
-const { fail, out, printEntryLine } = require('./output.js');
+import type { Flags, Element, Config } from './types.ts';
 
-function applyFilters(elements, flags, cfg) {
+import { checkFlags, flagString } from './args.ts';
+import { TYPES } from './constants.ts';
+import { context } from './context.ts';
+import { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } from './derive.ts';
+import { fail, out, printEntryLine } from './output.ts';
+
+function applyFilters(elements: Element[], flags: Flags, cfg: Config) {
   const all = flags.has('all');
   let list = elements.filter((e) => all || !e.archived);
   // A typo'd filter must be an error, never a silently empty result (§ 9).
@@ -38,10 +40,10 @@ function applyFilters(elements, flags, cfg) {
   return list.sort(compareElements);
 }
 
-function cmdList(flags) {
+function cmdList(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'ready', 'all', 'status', 'type', 'tag', 'parent', 'assignee']), false);
   const ctx = context();
-  const scope = ctx.elements.filter((e) => flags.has('all') || !e.archived);
+  const scope = ctx.elements.filter((e: Element) => flags.has('all') || !e.archived);
   const filtered = applyFilters(ctx.elements, flags, ctx.cfg);
 
   if (flags.has('ready')) {
@@ -58,7 +60,7 @@ function cmdList(flags) {
       out('');
       out('Complete first:');
       for (const e of blocked) {
-        out(`  ${e.id}  ${e.title}      ${elementProblems(e).filter((c) => c.startsWith('incomplete:')).join(' ')}`);
+        out(`  ${e.id}  ${e.title}      ${elementProblems(e).filter((c: string) => c.startsWith('incomplete:')).join(' ')}`);
       }
     }
     return 0;
@@ -73,4 +75,4 @@ function cmdList(flags) {
   return 0;
 }
 
-module.exports = { cmdList };
+export { cmdList };

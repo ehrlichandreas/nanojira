@@ -2,6 +2,8 @@
 
 // The text of `nj help`.
 
+import type {} from './types.ts';
+
 // --------------------------------------------------------------------- help
 
 const HELP = `nj — NanoJira, a local file-based task tool for agents
@@ -30,4 +32,4 @@ Every command accepts --json. Write commands accept --file=<path> instead of
 Exit codes: 0 success · 1 command failed · 2 doctor found at least one error.
 `;
 
-module.exports = { HELP };
+export { HELP };

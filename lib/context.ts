@@ -2,17 +2,19 @@
 
 // The per-command context: backlog, configuration, elements, target resolution.
 
-const fs = require('fs');
-const path = require('path');
-const { flagString } = require('./args.js');
-const { loadConfig, findBacklog } = require('./config.js');
-const { compareElements } = require('./derive.js');
-const { loadBacklog } = require('./load.js');
-const { fail } = require('./output.js');
+import type { Element, Context, Flags } from './types.ts';
+
+import * as fs from 'fs';
+import * as path from 'path';
+import { flagString } from './args.ts';
+import { loadConfig, findBacklog } from './config.ts';
+import { compareElements } from './derive.ts';
+import { loadBacklog } from './load.ts';
+import { fail } from './output.ts';
 
 // ------------------------------------------------------------------ context
 
-function context(opts) {
+function context(opts?: { lenient?: boolean; tolerateConfig?: boolean }): Context {
   const backlog = findBacklog(Boolean(opts && opts.lenient));
   const { config, errors } = loadConfig(backlog);
   if (errors.length > 0 && !(opts && opts.tolerateConfig)) {
@@ -22,7 +24,7 @@ function context(opts) {
   return { backlog, cfg: config, configErrors: errors, elements };
 }
 
-function resolveTarget(ctx, flags, forWrite) {
+function resolveTarget(ctx: Context, flags: Flags, forWrite?: boolean): Element {
   const file = flagString(flags, 'file');
   const id = flagString(flags, 'id');
   if (file !== undefined && id !== undefined) fail('invalid_target', 'use either --id or --file, not both');
@@ -33,7 +35,7 @@ function resolveTarget(ctx, flags, forWrite) {
     // A dangling symlink (or an unreadable stub) makes realpath throw on both
     // sides; resolving only the parent directory still lets the two paths meet
     // at the same real location (decision 48).
-    const real = (p) => {
+    const real = (p: string) => {
       try { return fs.realpathSync.native(p); } catch { /* dangling, missing or unreadable */ }
       const dir = path.dirname(p);
       let rdir;
@@ -42,12 +44,12 @@ function resolveTarget(ctx, flags, forWrite) {
     };
     const want = real(abs);
     const el = ctx.elements.find((e) => real(e.file) === want);
-    if (!el) fail('not_found', `no element file at '${abs}'`);
+    if (!el) return fail('not_found', `no element file at '${abs}'`);
     return el;
   }
-  if (id === undefined) fail('missing_argument', '--id is required');
+  if (id === undefined) return fail('missing_argument', '--id is required');
   const matches = ctx.elements.filter((e) => e.id === id);
-  if (matches.length === 0) fail('not_found', `no element with id '${id}'`);
+  if (matches.length === 0) return fail('not_found', `no element with id '${id}'`);
   if (matches.length > 1) {
     if (forWrite) {
       const paths = matches.map((m) => '  ' + m.file).join('\n');
@@ -59,7 +61,7 @@ function resolveTarget(ctx, flags, forWrite) {
   return matches[0];
 }
 
-function requireWritable(el) {
+function requireWritable(el: Element) {
   if (el.problems.has('file:unreadable')) {
     fail('refused:unreadable', `${el.id} (${el.file}) cannot be read — refusing to write`,
       'check the file and its permissions, then run `nj doctor`');
@@ -76,7 +78,7 @@ function requireWritable(el) {
 // for the whole backlog is the only answer that honours § 9's "a mode that
 // leaves orphaned elements does not exist"; single `rm` falls under the same
 // rule for the same reason.
-function requireNoStubs(ctx, verb) {
+function requireNoStubs(ctx: Context, verb: string) {
   const stubs = ctx.elements.filter((e) => e.problems.has('file:unreadable')).sort(compareElements);
   if (stubs.length === 0) return;
   const names = stubs.map((s) => `  ${s.id}  ${s.file}`).join('\n');
@@ -85,11 +87,11 @@ function requireNoStubs(ctx, verb) {
 }
 
 // Round one has no `nj unarchive`, so the archive is read-only (§ 9).
-function requireActive(el, verb) {
+function requireActive(el: Element, verb: string) {
   if (el.archived) {
     fail('refused:archived', `${el.id} is archived — ${verb} is refused on archived elements`,
       'archived elements are read-only in round one; `nj unarchive` is round two');
   }
 }
 
-module.exports = { context, resolveTarget, requireWritable, requireNoStubs, requireActive };
+export { context, resolveTarget, requireWritable, requireNoStubs, requireActive };

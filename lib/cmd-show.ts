@@ -2,20 +2,22 @@
 
 // `nj show`.
 
-const { checkFlags } = require('./args.js');
-const { context, resolveTarget } = require('./context.js');
-const { elementProblems, compareElements, entryJson, countsOf } = require('./derive.js');
-const { out } = require('./output.js');
+import type { Flags, Element } from './types.ts';
 
-function cmdShow(flags) {
+import { checkFlags } from './args.ts';
+import { context, resolveTarget } from './context.ts';
+import { elementProblems, compareElements, entryJson, countsOf } from './derive.ts';
+import { out } from './output.ts';
+
+function cmdShow(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'id', 'file']), false);
   const ctx = context();
   const el = resolveTarget(ctx, flags, false);
   const scope = ctx.elements;
   // Reads show every file claiming the id, each marked duplicate_id (§ 9).
-  const shown = flags.has('file') ? [el] : ctx.elements.filter((e) => e.id === el.id).sort(compareElements);
+  const shown = flags.has('file') ? [el] : ctx.elements.filter((e: Element) => e.id === el.id).sort(compareElements);
   if (flags.has('json')) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope.filter((e) => !e.archived)), entries: shown.map(entryJson) }, null, 2));
+    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope.filter((e: Element) => !e.archived)), entries: shown.map(entryJson) }, null, 2));
     return 0;
   }
   if (shown.length > 1) {
@@ -30,7 +32,7 @@ function cmdShow(flags) {
   return 0;
 }
 
-function showOne(el) {
+function showOne(el: Element) {
   out(`${el.id}  ${el.title}`);
   out(`  type      ${el.type}`);
   if (el.parent) out(`  parent    ${el.parent}`);
@@ -50,4 +52,4 @@ function showOne(el) {
   if (el.body !== '' && !el.body.endsWith('\n')) out('');
 }
 
-module.exports = { cmdShow };
+export { cmdShow };

@@ -1,0 +1,6254 @@
+{
+ "header": {
+  "testDigest": "64ad06103374d0fc2c9bc9a47c698f56a75090ca021699e6cbd9f263f84edcea",
+  "codeSha256": "51fd805a6880479aef50b635be7f553ca015c0b0836c5f71879b7ab9541219aa",
+  "codeFiles": 23,
+  "njSha256": "cc9fbdc2e218b5c6068e0498e9a699d0a31fabb4acfdaf8ba8c95172aaadbcb2",
+  "njPath": "/home/dev/workspace/portable/projects/nanojira/nj",
+  "node": "v24.21.0",
+  "date": "2026-09-23T01:50:54.624Z",
+  "suites": 62
+ },
+ "mutants": {
+  "doc-sum-warn": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-13-json-contract.js (202 checks)"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL ac-19-doctor-axis.js — 1 of 27 checks failed"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL doctor-fix-surface.js — 1 of 32 checks failed"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "doc-sum-err": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-13-json-contract.js (202 checks)"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 5,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL ac-18-tombstone-integrity.js — 1 of 21 checks failed"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL ac-19-doctor-axis.js — 1 of 27 checks failed"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS doctor-fix-surface.js (32 checks)"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "doc-sum-entries": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-13-json-contract.js (202 checks)"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 5,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL ac-19-doctor-axis.js — 2 of 27 checks failed"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL doctor-fix-surface.js — 1 of 32 checks failed"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "doc-prose-warnlines": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-13-json-contract.js (202 checks)"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL ac-19-doctor-axis.js — 1 of 27 checks failed"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS doctor-fix-surface.js (32 checks)"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "doc-json-nowarn": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 1,
+    "hits": 11,
+    "first": "FAIL ac-03-fault-tolerance.js — 21 of 271 checks failed"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL ac-09-atomicity.js — 4 of 24 checks failed"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 1,
+    "hits": 4,
+    "first": "FAIL ac-13-json-contract.js — 2 of 202 checks failed"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL ac-18-tombstone-integrity.js — 2 of 21 checks failed"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL ac-19-doctor-axis.js — 3 of 27 checks failed"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS doctor-fix-surface.js (32 checks)"
+   },
+   "edge/done-open-children.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL done-open-children.js — 2 of 15 checks failed"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 1,
+    "hits": 13,
+    "first": "FAIL exit-doctor-fix.js — 11 of 307 checks failed"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 1,
+    "hits": 4,
+    "first": "FAIL fix-duplicate-mtimes.js — 1 of 11 checks failed"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL order-doctor-problems-severity.js — 2 of 3 checks failed"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL tombstone-partial-loss.js — 3 of 11 checks failed"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 1,
+    "hits": 3,
+    "first": "FAIL unreadable-stub-refusals.js — 3 of 33 checks failed"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "counts-errors": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 1,
+    "hits": 19,
+    "first": "FAIL ac-03-fault-tolerance.js — 7 of 271 checks failed"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 1,
+    "hits": 3,
+    "first": "FAIL ac-13-json-contract.js — 1 of 202 checks failed"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-19-doctor-axis.js (27 checks)"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 8,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS doctor-fix-surface.js (32 checks)"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 1,
+    "hits": 11,
+    "first": "FAIL exit-fault-vocabulary.js — 1 of 125 checks failed"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 7,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "counts-incomplete": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 100,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 1,
+    "hits": 5,
+    "first": "FAIL ac-13-json-contract.js — 4 of 202 checks failed"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-19-doctor-axis.js (27 checks)"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL doctor-fix-surface.js — 1 of 32 checks failed"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "counts-total": {
+   "ac/ac-01-basic-run.js": {
+    "status": 1,
+    "hits": 4,
+    "first": "FAIL ac-01-basic-run.js — 1 of 74 checks failed"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 1,
+    "hits": 44,
+    "first": "FAIL ac-03-fault-tolerance.js — 20 of 271 checks failed"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 100,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 7,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 1,
+    "hits": 7,
+    "first": "FAIL ac-13-json-contract.js — 5 of 202 checks failed"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 9,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS ac-19-doctor-axis.js (27 checks)"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 8,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 8,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL doctor-fix-surface.js — 1 of 32 checks failed"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 11,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 7,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "write-toplevel-problems": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL ac-04-incompleteness.js — 1 of 30 checks failed"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 1,
+    "hits": 13,
+    "first": "FAIL ac-13-json-contract.js — 1 of 202 checks failed"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-19-doctor-axis.js (27 checks)"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS doctor-fix-surface.js (32 checks)"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "write-feedback-warn": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 12,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 41,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 1,
+    "hits": 8,
+    "first": "FAIL ac-04-incompleteness.js — 4 of 30 checks failed"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 802,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 185,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 8,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-13-json-contract.js (202 checks)"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 5,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 21,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 0,
+    "hits": 6,
+    "first": "PASS ac-19-doctor-axis.js (27 checks)"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 21,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 10,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS doctor-fix-surface.js (32 checks)"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 7,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 6,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 5,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "list-prose-marker": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL ac-04-incompleteness.js — 1 of 30 checks failed"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-13-json-contract.js (202 checks)"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL ac-19-doctor-axis.js — 1 of 27 checks failed"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS doctor-fix-surface.js (32 checks)"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "rm-dependents": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-13-json-contract.js (202 checks)"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-19-doctor-axis.js (27 checks)"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS doctor-fix-surface.js (32 checks)"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL rm-dependents.js — 2 of 29 checks failed"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "archive-entries": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL ac-13-json-contract.js — 3 of 202 checks failed"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-19-doctor-axis.js (27 checks)"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 1,
+    "hits": 3,
+    "first": "FAIL archive-hint-dependents.js — 1 of 11 checks failed"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS doctor-fix-surface.js (32 checks)"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "fix-notes": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-13-json-contract.js (202 checks)"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-19-doctor-axis.js (27 checks)"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 1,
+    "hits": 3,
+    "first": "FAIL doctor-fix-surface.js — 6 of 32 checks failed"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 1,
+    "hits": 6,
+    "first": "FAIL exit-doctor-fix.js — 12 of 307 checks failed"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "fix-fixed": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-13-json-contract.js (202 checks)"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-19-doctor-axis.js (27 checks)"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS doctor-fix-surface.js (32 checks)"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL encoding-json-key-order.js — 2 of 19 checks failed"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 1,
+    "hits": 9,
+    "first": "FAIL exit-doctor-fix.js — 20 of 307 checks failed"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "fix-prose-warn": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-13-json-contract.js (202 checks)"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-19-doctor-axis.js (27 checks)"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS doctor-fix-surface.js (32 checks)"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "bare-incomplete": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-03-fault-tolerance.js (271 checks)"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-13-json-contract.js (202 checks)"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-19-doctor-axis.js (27 checks)"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS doctor-fix-surface.js (32 checks)"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "read-extra-problem": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 10,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 1,
+    "hits": 80,
+    "first": "FAIL ac-03-fault-tolerance.js — 78 of 271 checks failed"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 1,
+    "hits": 13,
+    "first": "FAIL ac-04-incompleteness.js — 6 of 30 checks failed"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 1,
+    "hits": 25,
+    "first": "FAIL ac-05-empty-sections.js — 10 of 23 checks failed"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 100,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 10,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-09-atomicity.js (24 checks)"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 17,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 0,
+    "hits": 6,
+    "first": "PASS ac-11-archive-rules.js (38 checks)"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 1,
+    "hits": 48,
+    "first": "FAIL ac-13-json-contract.js — 13 of 202 checks failed"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 71,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 6,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-17-configuration.js (135 checks)"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-18-tombstone-integrity.js (21 checks)"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS ac-19-doctor-axis.js (27 checks)"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 1,
+    "hits": 16,
+    "first": "FAIL ac-20-section-writes.js — 2 of 70 checks failed"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 1,
+    "hits": 3,
+    "first": "FAIL det-fence-heading.js — 1 of 7 checks failed"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 8,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 9,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 13,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS cycle-parent-archived.js (5 checks)"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 0,
+    "hits": 11,
+    "first": "PASS cycle-parent-shapes.js (14 checks)"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 1,
+    "hits": 3,
+    "first": "FAIL doctor-fix-surface.js — 1 of 32 checks failed"
+   },
+   "edge/done-open-children.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS done-open-children.js (15 checks)"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 8,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 10,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-doctor-fix.js (307 checks)"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 0,
+    "hits": 16,
+    "first": "PASS exit-fault-vocabulary.js (125 checks)"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-duplicate-mtimes.js (11 checks)"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 7,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 3,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS order-doctor-problems-severity.js (3 checks)"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 0,
+    "hits": 7,
+    "first": "PASS rm-dependents.js (29 checks)"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 0,
+    "hits": 6,
+    "first": "PASS state-cycle-all-members.js (13 checks)"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 4,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 0,
+    "hits": 6,
+    "first": "PASS tombstone-partial-loss.js (11 checks)"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 0,
+    "hits": 6,
+    "first": "PASS unreadable-stub-refusals.js (33 checks)"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 2,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "doc-extra-warn-dirty": {
+   "ac/ac-01-basic-run.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-01-basic-run.js (74 checks)"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 1,
+    "hits": 21,
+    "first": "FAIL ac-03-fault-tolerance.js — 17 of 271 checks failed"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL ac-09-atomicity.js — 2 of 24 checks failed"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL ac-11-archive-rules.js — 1 of 38 checks failed"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL ac-13-json-contract.js — 1 of 202 checks failed"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-15-no-dependencies.js (22 checks)"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 1,
+    "hits": 10,
+    "first": "FAIL ac-17-configuration.js — 5 of 135 checks failed"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL ac-18-tombstone-integrity.js — 1 of 21 checks failed"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 1,
+    "hits": 4,
+    "first": "FAIL ac-19-doctor-axis.js — 4 of 27 checks failed"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL cycle-parent-archived.js — 1 of 5 checks failed"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL cycle-parent-shapes.js — 2 of 14 checks failed"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL doctor-fix-surface.js — 1 of 32 checks failed"
+   },
+   "edge/done-open-children.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL done-open-children.js — 1 of 15 checks failed"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 1,
+    "hits": 23,
+    "first": "FAIL exit-doctor-fix.js — 23 of 307 checks failed"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL exit-fault-vocabulary.js — 1 of 125 checks failed"
+   },
+   "edge/exit-precedence.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL exit-precedence.js — 2 of 76 checks failed"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL fix-duplicate-mtimes.js — 1 of 11 checks failed"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL order-doctor-problems-severity.js — 1 of 3 checks failed"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL rm-dependents.js — 1 of 29 checks failed"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL state-cycle-all-members.js — 2 of 13 checks failed"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL tombstone-partial-loss.js — 1 of 11 checks failed"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 1,
+    "hits": 3,
+    "first": "FAIL unreadable-stub-refusals.js — 3 of 33 checks failed"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  },
+  "doc-extra-warn": {
+   "ac/ac-01-basic-run.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL ac-01-basic-run.js — 1 of 74 checks failed"
+   },
+   "ac/ac-02-golden-files.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-02-golden-files.js (35 checks)"
+   },
+   "ac/ac-03-fault-tolerance.js": {
+    "status": 1,
+    "hits": 23,
+    "first": "FAIL ac-03-fault-tolerance.js — 19 of 271 checks failed"
+   },
+   "ac/ac-04-incompleteness.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-04-incompleteness.js (30 checks)"
+   },
+   "ac/ac-05-empty-sections.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-05-empty-sections.js (23 checks)"
+   },
+   "ac/ac-06-rejection.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-06-rejection.js (31 checks)"
+   },
+   "ac/ac-07-concurrency.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "  NOTE AC-7 retry leg: NOT COVERED — the 100-retry abort was not reached in this run (300 creators, none exhausted its p"
+   },
+   "ac/ac-08-id-immortality.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-08-id-immortality.js (25 checks)"
+   },
+   "ac/ac-09-atomicity.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL ac-09-atomicity.js — 2 of 24 checks failed"
+   },
+   "ac/ac-10-dependencies.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-10-dependencies.js (32 checks)"
+   },
+   "ac/ac-11-archive-rules.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL ac-11-archive-rules.js — 1 of 38 checks failed"
+   },
+   "ac/ac-12-discovery.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-12-discovery.js (20 checks)"
+   },
+   "ac/ac-13-json-contract.js": {
+    "status": 1,
+    "hits": 3,
+    "first": "FAIL ac-13-json-contract.js — 2 of 202 checks failed"
+   },
+   "ac/ac-14-determinism.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-14-determinism.js (23 checks)"
+   },
+   "ac/ac-15-no-dependencies.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL ac-15-no-dependencies.js — 1 of 22 checks failed"
+   },
+   "ac/ac-16-language.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS ac-16-language.js (49 checks)"
+   },
+   "ac/ac-17-configuration.js": {
+    "status": 1,
+    "hits": 10,
+    "first": "FAIL ac-17-configuration.js — 5 of 135 checks failed"
+   },
+   "ac/ac-18-tombstone-integrity.js": {
+    "status": 1,
+    "hits": 3,
+    "first": "FAIL ac-18-tombstone-integrity.js — 1 of 21 checks failed"
+   },
+   "ac/ac-19-doctor-axis.js": {
+    "status": 1,
+    "hits": 6,
+    "first": "FAIL ac-19-doctor-axis.js — 6 of 27 checks failed"
+   },
+   "ac/ac-20-section-writes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS ac-20-section-writes.js (70 checks)"
+   },
+   "fault/det-fence-heading.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-fence-heading.js (7 checks)"
+   },
+   "fault/det-id-retry.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS det-id-retry.js (29 checks)"
+   },
+   "fault/nj-fault-before-compare.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-before-compare.js (10 checks)"
+   },
+   "fault/nj-fault-points.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-fault-points.js (16 checks)"
+   },
+   "fault/nj-now-invalid.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS nj-now-invalid.js (22 checks)"
+   },
+   "edge/acceptance-section-shapes.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS acceptance-section-shapes.js (8 checks)"
+   },
+   "edge/archive-ac20-heading-match.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-heading-match.js (29 checks)"
+   },
+   "edge/archive-ac20-write-paths.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-ac20-write-paths.js (33 checks)"
+   },
+   "edge/archive-collision.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-collision.js (32 checks)"
+   },
+   "edge/archive-hint-dependents.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-hint-dependents.js (11 checks)"
+   },
+   "edge/archive-rm-byte-identity.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS archive-rm-byte-identity.js (59 checks)"
+   },
+   "edge/cycle-parent-archived.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL cycle-parent-archived.js — 1 of 5 checks failed"
+   },
+   "edge/cycle-parent-shapes.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL cycle-parent-shapes.js — 2 of 14 checks failed"
+   },
+   "edge/discovery-message.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS discovery-message.js (16 checks)"
+   },
+   "edge/doctor-fix-surface.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL doctor-fix-surface.js — 1 of 32 checks failed"
+   },
+   "edge/done-open-children.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL done-open-children.js — 1 of 15 checks failed"
+   },
+   "edge/duplicate-id-write-refusal.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS duplicate-id-write-refusal.js (12 checks)"
+   },
+   "edge/empty-value-rule.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS empty-value-rule.js (21 checks)"
+   },
+   "edge/encoding-changed-order.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-changed-order.js (8 checks)"
+   },
+   "edge/encoding-empty-tag-assignee.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-empty-tag-assignee.js (19 checks)"
+   },
+   "edge/encoding-json-key-order.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS encoding-json-key-order.js (19 checks)"
+   },
+   "edge/encoding-unicode-boundary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS encoding-unicode-boundary.js (12 checks)"
+   },
+   "edge/exit-doctor-fix.js": {
+    "status": 1,
+    "hits": 34,
+    "first": "FAIL exit-doctor-fix.js — 34 of 307 checks failed"
+   },
+   "edge/exit-fault-vocabulary.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL exit-fault-vocabulary.js — 1 of 125 checks failed"
+   },
+   "edge/exit-precedence.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS exit-precedence.js (76 checks)"
+   },
+   "edge/failure-vocabulary.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS failure-vocabulary.js (127 checks)"
+   },
+   "edge/fix-duplicate-mtimes.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL fix-duplicate-mtimes.js — 1 of 11 checks failed"
+   },
+   "edge/fix-mtime-snapshot.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS fix-mtime-snapshot.js (26 checks)"
+   },
+   "edge/frontmatter-grammar.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS frontmatter-grammar.js (14 checks)"
+   },
+   "edge/norm-tag-assignee-typos.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-tag-assignee-typos.js (15 checks)"
+   },
+   "edge/norm-title-nfc-nfd.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS norm-title-nfc-nfd.js (14 checks)"
+   },
+   "edge/order-doctor-problems-severity.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL order-doctor-problems-severity.js — 1 of 3 checks failed"
+   },
+   "edge/parent-refusals.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS parent-refusals.js (23 checks)"
+   },
+   "edge/rm-and-archive-refusals.js": {
+    "status": 0,
+    "hits": 1,
+    "first": "PASS rm-and-archive-refusals.js (30 checks)"
+   },
+   "edge/rm-dependents.js": {
+    "status": 1,
+    "hits": 1,
+    "first": "FAIL rm-dependents.js — 1 of 29 checks failed"
+   },
+   "edge/state-cycle-all-members.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL state-cycle-all-members.js — 2 of 13 checks failed"
+   },
+   "edge/state-done-on-done.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-done-on-done.js (11 checks)"
+   },
+   "edge/state-note-appears-once.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-note-appears-once.js (27 checks)"
+   },
+   "edge/state-tombstone-burn.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS state-tombstone-burn.js (15 checks)"
+   },
+   "edge/tombstone-partial-loss.js": {
+    "status": 1,
+    "hits": 2,
+    "first": "FAIL tombstone-partial-loss.js — 1 of 11 checks failed"
+   },
+   "edge/unreadable-stub-refusals.js": {
+    "status": 1,
+    "hits": 3,
+    "first": "FAIL unreadable-stub-refusals.js — 3 of 33 checks failed"
+   },
+   "edge/write-encoding.js": {
+    "status": 0,
+    "hits": 0,
+    "first": "PASS write-encoding.js (41 checks)"
+   }
+  }
+ }
+}

@@ -2,11 +2,13 @@
 
 // Parsing and serialising element files: frontmatter values, file layout, body sections.
 
-const { FIELD_ORDER, LIST_FIELDS, SECTION_ROLES } = require('./constants.js');
+import type { ParsedFile, Config } from './types.ts';
+
+import { FIELD_ORDER, LIST_FIELDS, SECTION_ROLES } from './constants.ts';
 
 // ------------------------------------------------------- frontmatter values
 
-function readQuoted(raw, i) {
+function readQuoted(raw: string, i: number) {
   let out = '';
   i++;
   for (;;) {
@@ -22,7 +24,7 @@ function readQuoted(raw, i) {
   }
 }
 
-function parseList(raw) {
+function parseList(raw: string) {
   const items = [];
   let i = 1;
   let closed = false;
@@ -49,8 +51,8 @@ function parseList(raw) {
   return items;
 }
 
-function parseValue(raw, isListField) {
-  let value;
+function parseValue(raw: string, isListField: boolean): string | string[] {
+  let value: string | string[];
   if (raw.startsWith('[')) {
     value = parseList(raw);
   } else if (raw.startsWith('"')) {
@@ -67,28 +69,28 @@ function parseValue(raw, isListField) {
   return value;
 }
 
-function quote(s) {
+function quote(s: string) {
   return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
 }
 
-function serializeScalar(v) {
+function serializeScalar(v: string | string[]) {
   const s = String(v).replace(/[\r\n]+/g, ' ');
   if (s === '' || s.startsWith('[') || s.startsWith('"')) return quote(s);
   return s;
 }
 
-function serializeItem(v) {
+function serializeItem(v: string) {
   const s = String(v).replace(/[\r\n]+/g, ' ');
   if (s === '' || s.includes(',') || s.includes(']') || s.startsWith('"') || s !== s.trim()) return quote(s);
   return s;
 }
 
-function serializeValue(v) {
+function serializeValue(v: string | string[]): string {
   if (Array.isArray(v)) return '[' + v.map(serializeItem).join(', ') + ']';
   return serializeScalar(v);
 }
 
-function isEmptyValue(v) {
+function isEmptyValue(v: string | string[] | undefined) {
   if (v === undefined || v === null) return true;
   if (Array.isArray(v)) return v.length === 0;
   return String(v) === '';
@@ -96,14 +98,14 @@ function isEmptyValue(v) {
 
 // --------------------------------------------------------------- file parse
 
-function parseFile(rawText) {
+function parseFile(rawText: string): ParsedFile {
   let text = rawText;
   if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
   text = text.replace(/\r\n/g, '\n');
 
-  const problems = [];
-  const fields = new Map();
-  const order = [];
+  const problems: { code: string; line?: number; message: string }[] = [];
+  const fields: Map<string, string | string[]> = new Map();
+  const order: string[] = [];
   const lines = text.split('\n');
 
   if (lines[0] !== '---') {
@@ -135,10 +137,10 @@ function parseFile(rawText) {
       problems.push({ code: 'frontmatter:unreadable', line: i + 1, message: `duplicate key '${key}'` });
       continue;
     }
-    let value;
+    let value: string | string[];
     try {
       value = parseValue(rawVal, LIST_FIELDS.has(key));
-    } catch (e) {
+    } catch (e: any) {
       problems.push({ code: 'frontmatter:unreadable', line: i + 1, message: `${key}: ${e.message}` });
       continue;
     }
@@ -149,7 +151,7 @@ function parseFile(rawText) {
   return { fields, order, body: lines.slice(end + 1).join('\n'), problems, parsed: true };
 }
 
-function serialize(fields, order, body) {
+function serialize(fields: Map<string, string | string[]>, order: string[], body: string) {
   const out = ['---'];
   const written = new Set();
   for (const k of FIELD_ORDER) {
@@ -157,7 +159,7 @@ function serialize(fields, order, body) {
     if (!fields.has(k)) continue;
     const v = fields.get(k);
     if (isEmptyValue(v)) continue;
-    out.push(k + ': ' + serializeValue(v));
+    out.push(k + ': ' + serializeValue(v as string | string[]));
   }
   // Unknown keys are preserved verbatim — including an empty value, which for a
   // known optional field would mean "omit" but for a foreign key means data (§ 7).
@@ -165,7 +167,7 @@ function serialize(fields, order, body) {
     if (written.has(k)) continue;
     written.add(k);
     if (!fields.has(k)) continue;
-    out.push(k + ': ' + serializeValue(fields.get(k)));
+    out.push(k + ': ' + serializeValue(fields.get(k) as string | string[]));
   }
   out.push('---');
   return out.join('\n') + '\n' + body;
@@ -173,7 +175,7 @@ function serialize(fields, order, body) {
 
 // --------------------------------------------------------------- body logic
 
-function h1Of(body) {
+function h1Of(body: string) {
   const lines = body.split('\n');
   for (const ln of lines) {
     if (ln.trim() === '') continue;
@@ -183,7 +185,7 @@ function h1Of(body) {
   return null;
 }
 
-function syncH1(body, title) {
+function syncH1(body: string, title: string) {
   const lines = body.split('\n');
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].trim() === '') continue;
@@ -196,7 +198,7 @@ function syncH1(body, title) {
   return body;
 }
 
-function sectionPresent(body, names) {
+function sectionPresent(body: string, names: string[]) {
   const want = names.map((n) => String(n).trim().toLowerCase());
   const lines = body.split('\n');
   for (let i = 0; i < lines.length; i++) {
@@ -212,7 +214,7 @@ function sectionPresent(body, names) {
   return false;
 }
 
-function normalizeTitle(t) {
+function normalizeTitle(t: string) {
   return String(t).replace(/[\r\n]+/g, ' ').trim();
 }
 
@@ -220,7 +222,7 @@ function normalizeTitle(t) {
 // case-insensitively with an optional trailing colon ignored — the same rule
 // sectionPresent reads by. Writes target the first match; a second heading for
 // the same role keeps counting for completeness (decision 12) and is left alone.
-function sectionHeadingIndex(lines, names) {
+function sectionHeadingIndex(lines: string[], names: string[]) {
   const want = names.map((n) => String(n).trim().toLowerCase());
   for (let i = 0; i < lines.length; i++) {
     const m = /^##[ \t]+(.*?)[ \t]*$/.exec(lines[i]);
@@ -231,14 +233,14 @@ function sectionHeadingIndex(lines, names) {
 }
 
 // A section ends at the next `#`/`##` heading; `###`+ is content (decision 11).
-function sectionEnd(lines, headingIdx) {
+function sectionEnd(lines: string[], headingIdx: number) {
   for (let i = headingIdx + 1; i < lines.length; i++) {
     if (/^#{1,2}[ \t]/.test(lines[i])) return i;
   }
   return lines.length;
 }
 
-function normalizeSectionContent(raw) {
+function normalizeSectionContent(raw: string) {
   let t = String(raw);
   if (t.charCodeAt(0) === 0xfeff) t = t.slice(1);
   t = t.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
@@ -249,7 +251,7 @@ function normalizeSectionContent(raw) {
 // the start of the body when there is no H1 — after the blank line that
 // separates body from frontmatter, which is structure, not content.
 // `acceptance` before `## Notes`, else after `description`, else at the end.
-function sectionInsertPoint(lines, role, cfg) {
+function sectionInsertPoint(lines: string[], role: 'description' | 'acceptance', cfg: Config) {
   if (role === 'description') {
     let i = 0;
     while (i < lines.length && lines[i].trim() === '') i++;
@@ -269,7 +271,7 @@ function sectionInsertPoint(lines, role, cfg) {
 // separator before the next section; at the end of the body the same trailing
 // empty element is the file's single closing newline, so one rule serves both
 // and everything outside the region stays byte-for-byte (§ 9).
-function writeSection(body, role, cfg, content) {
+function writeSection(body: string, role: 'description' | 'acceptance', cfg: Config, content: string) {
   const names = cfg.sections[role];
   const lines = body.split('\n');
   const contentLines = content === '' ? [] : content.split('\n');
@@ -284,15 +286,15 @@ function writeSection(body, role, cfg, content) {
 
 // Roles are applied in canonical order, so a freshly inserted `description`
 // is already there when `acceptance` looks for where to go (§ 9).
-function applySections(body, wanted, cfg) {
+function applySections(body: string, wanted: Map<string, string>, cfg: Config) {
   const changed = [];
   let result = body;
   for (const role of SECTION_ROLES) {
     if (!wanted.has(role)) continue;
-    const next = writeSection(result, role, cfg, wanted.get(role));
+    const next = writeSection(result, role, cfg, wanted.get(role) as string);
     if (next !== result) { result = next; changed.push(role); }
   }
   return { body: result, changed };
 }
 
-module.exports = { parseFile, serialize, h1Of, syncH1, sectionPresent, normalizeTitle, normalizeSectionContent, applySections };
+export { parseFile, serialize, h1Of, syncH1, sectionPresent, normalizeTitle, normalizeSectionContent, applySections };

@@ -9,10 +9,10 @@
  * ORDER — AMBIGUOUS, reading taken: § 9 never states an order for `changed`.
  * Frontmatter fields appear in § 7's canonical key order (the one order the
  * spec *does* fix, and the only one consistent with § 9's own principle,
- * Z. 391 — "one vocabulary in three places: command line, file, JSON
+ * Z. 414 — "one vocabulary in three places: command line, file, JSON
  * output" — a write result is exactly that JSON-output place), and section
  * roles (`description`, `acceptance`) are appended after the frontmatter
- * fields, in § 9's own canonical role order for section insertion (Z. 485).
+ * fields, in § 9's own canonical role order for section insertion (Z. 508).
  * Caveat, disclosed rather than hidden: `nj`'s own internal field-processing
  * order happens to already match § 7's canonical order, so a passing test
  * here cannot distinguish "the spec fixes this order" from "nj coincidentally
@@ -22,12 +22,12 @@
  *
  * MEMBERSHIP for `nj new` — RULED by the lead: all written frontmatter fields
  * EXCEPT `created`/`updated`, in § 7 canonical order, then the section roles.
- * Spec anchor: § 9 Z. 591 requires `changed` to *additionally* name the
+ * Spec anchor: § 9 Z. 614 requires `changed` to *additionally* name the
  * section roles `new`/`set` wrote — establishing `changed` as a full
  * accounting of what a write touched, not a list of the flags supplied, so on
  * a fresh creation every frontmatter field counts as written/changed. The
  * `created`/`updated` exclusion is the one point § 9 leaves open, and is
- * exactly what the ruling closes; it is not derivable from Z. 591 alone.
+ * exactly what the ruling closes; it is not derivable from Z. 614 alone.
  */
 const H = require('../lib/harness.js');
 const T = H.T;

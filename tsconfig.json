@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": true,
+    "noEmit": true,
+    "target": "ES2022",
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "strict": true,
+    "erasableSyntaxOnly": true,
+    "allowImportingTsExtensions": true
+  },
+  "files": [".nj.tsc-shadow.js"],
+  "include": ["lib/**/*.ts"]
+}

@@ -1,13 +1,13 @@
 'use strict';
 /* Edge — NC17 gap: order of `doctor`'s `problems[]`.
  *
- * RULED (lead): NOT pinned. § 9 (Z. 528-530) gives an explicit, normative sort
+ * RULED (lead): NOT pinned. § 9 (Z. 551-553) gives an explicit, normative sort
  * rule for `list`/`tree`/bare `nj` ("deterministic: priority … then id
  * ascending. Never filesystem order.") — proof the spec authors know how to
  * write an order rule when they mean one, and did write one, elsewhere in the
  * same section. No equivalent sentence exists for `doctor`'s `problems[]`
  * (confirmed: no hit for order/sort/first/before near "problems" anywhere in
- * SPECIFICATION.md). § 14's terminal transcript (Z. 861-863, two `ERROR`
+ * SPECIFICATION.md). § 14's terminal transcript (Z. 884-886, two `ERROR`
  * lines before one `WARNING` line) is worked-example prose, not a rule —
  * contrast the numbered `--fix` step list in the same section, which *is*
  * normative. An initial reading here ("errors precede warnings") was tested

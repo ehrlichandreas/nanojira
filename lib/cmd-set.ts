@@ -2,15 +2,22 @@
 
 // `nj set`.
 
-const { checkFlags, flagString, parseListFlag, readSectionFlags } = require('./args.js');
-const { PRIORITIES, SECTION_ROLES, SETTABLE_FIELDS } = require('./constants.js');
-const { context, resolveTarget, requireWritable, requireActive } = require('./context.js');
-const { loadElement, deriveGraph } = require('./load.js');
-const { fail, writeFeedback, emitWriteResult } = require('./output.js');
-const { syncH1, normalizeTitle, applySections } = require('./parse.js');
-const { nowIso, guardedWrite, renderElement } = require('./store.js');
+import type { Flags, Element, Context } from './types.ts';
 
-function cmdSet(flags) {
+import { checkFlags, flagString, parseListFlag, readSectionFlags } from './args.ts';
+import { PRIORITIES, SETTABLE_FIELDS } from './constants.ts';
+import { context, resolveTarget, requireWritable, requireActive } from './context.ts';
+import { loadElement, deriveGraph } from './load.ts';
+import { fail, writeFeedback, emitWriteResult } from './output.ts';
+import { syncH1, normalizeTitle, applySections } from './parse.ts';
+import { nowIso, guardedWrite, renderElement } from './store.ts';
+
+type SectionRole = 'description' | 'acceptance';
+// The two field namespaces `nj set` can touch: real Element properties, and
+// the section roles that live in the body rather than the frontmatter.
+type SetField = keyof Element | SectionRole;
+
+function cmdSet(flags: Flags) {
   checkFlags(flags, SETTABLE_FIELDS, new Set(['json', 'force', 'allow-open-children', 'id', 'file']), true);
   const json = flags.has('json');
   const force = flags.has('force');
@@ -32,9 +39,9 @@ function cmdSet(flags) {
   guardedWrite(el, renderElement(el, overrides, newBody), force, ctx.backlog);
 
   const fresh = loadElement(el.file, el.folder, ctx.cfg);
-  deriveGraph(ctx.elements.map((e) => (e.file === el.file ? fresh : e)), ctx.backlog);
+  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.backlog);
   if (json) emitWriteResult(true, fresh, changed);
-  else writeFeedback(fresh, ctx.cfg, `${fresh.id} → ${changed.map((c) => `${c}=${describeField(fresh, c)}`).join(', ')}`);
+  else writeFeedback(fresh, ctx.cfg, `${fresh.id} → ${changed.map((c: SetField) => `${c}=${describeField(fresh, c)}`).join(', ')}`);
   return 0;
 }
 
@@ -55,10 +62,10 @@ function cmdSet(flags) {
  * `newBody` stays undefined unless the title sync or a section write produced
  * one, because an unchanged body must be written back byte-identical.
  */
-function collectSetOverrides(ctx, el, flags, allowOpen) {
+function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen: boolean) {
   const sections = readSectionFlags(flags);
-  const overrides = new Map();
-  const changed = [];
+  const overrides: Map<string, string | string[] | undefined> = new Map();
+  const changed: SetField[] = [];
 
   const title = flagString(flags, 'title');
   let newBody;
@@ -78,7 +85,7 @@ function collectSetOverrides(ctx, el, flags, allowOpen) {
       fail('invalid_value', `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(', ')}`);
     }
     if (status === 'done') {
-      const open = el.children.filter((c) => !c.archived && c.status !== 'done');
+      const open = (el.children as Element[]).filter((c) => !c.archived && c.status !== 'done');
       if (open.length > 0 && !allowOpen) {
         const names = open.map((c) => `  ${c.id}  ${c.status.padEnd(8)} ${c.title}`).join('\n');
         fail('refused:children_open', `${el.id} has children that are not done — refusing to set done:\n${names}`,
@@ -100,16 +107,16 @@ function collectSetOverrides(ctx, el, flags, allowOpen) {
     changed.push('assignee');
   }
 
-  for (const field of ['tags', 'depends_on']) {
+  for (const field of ['tags', 'depends_on'] as const) {
     const v = parseListFlag(flags, field);
     if (v === undefined) continue;
     if (field === 'depends_on') {
       for (const d of v) {
-        if (!ctx.elements.some((e) => e.id === d)) fail('not_found', `depends_on target '${d}' does not exist`);
+        if (!ctx.elements.some((e: Element) => e.id === d)) fail('not_found', `depends_on target '${d}' does not exist`);
       }
     }
     const cur = el[field];
-    if (v.length !== cur.length || v.some((x, i) => x !== cur[i])) {
+    if (v.length !== cur.length || v.some((x: string, i: number) => x !== cur[i])) {
       overrides.set(field, v.length === 0 ? undefined : v);
       changed.push(field);
     }
@@ -122,16 +129,20 @@ function collectSetOverrides(ctx, el, flags, allowOpen) {
     const base = newBody === undefined ? el.body : newBody;
     const applied = applySections(base, sections, ctx.cfg);
     if (applied.body !== base) newBody = applied.body;
-    changed.push(...applied.changed);
+    changed.push(...(applied.changed as SectionRole[]));
   }
 
   return { overrides, changed, newBody };
 }
 
-function describeField(el, field) {
-  if (SECTION_ROLES.includes(field)) return '(body section)';
-  const v = el[field];
-  return Array.isArray(v) ? (v.length ? v.join(',') : '(empty)') : (v === '' ? '(empty)' : String(v));
+function isSectionRole(field: SetField): field is SectionRole {
+  return field === 'description' || field === 'acceptance';
 }
 
-module.exports = { cmdSet };
+function describeField(el: Element, field: SetField): string {
+  if (isSectionRole(field)) return '(body section)';
+  const v = el[field];
+  return Array.isArray(v) ? (v.length ? v.join(',') : '(empty)') : (typeof v === 'string' && v === '' ? '(empty)' : String(v));
+}
+
+export { cmdSet };

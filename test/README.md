@@ -11,8 +11,8 @@ behaviour: exit code, stdout, stderr, and the bytes of the files left behind.
 ## Which spec revision this targets
 
 Derived from the 781-line revision of `SPECIFICATION.md` (18:22). The oracle
-has since been reconciled against the **current 1015-line revision**
-(2026-09-21): the sections it is most tightly coupled to — § 7's problem-code
+has since been reconciled against the **revision of 2026-09-21**: the
+sections it is most tightly coupled to — § 7's problem-code
 table (29 rows / 30 distinct codes, including the added `file:unreadable` and
 `unknown:priority`), § 9's commands, JSON shapes, the two failure-code
 subsections ("Failure codes — closed vocabulary", "Failure codes — spec-named

@@ -2,15 +2,29 @@
 
 // `nj new`.
 
-const fs = require('fs');
-const path = require('path');
-const { checkFlags, flagString, parseListFlag, readSectionFlags } = require('./args.js');
-const { TYPE_DIR, TYPES, PARENT_TYPE, PRIORITIES, FIELD_ORDER, SECTION_ROLES, NEW_FIELDS } = require('./constants.js');
-const { context } = require('./context.js');
-const { loadElement, deriveGraph } = require('./load.js');
-const { fail, writeFeedback, emitWriteResult } = require('./output.js');
-const { serialize, normalizeTitle, applySections } = require('./parse.js');
-const { nowIso, allocateId, atomicWrite } = require('./store.js');
+import type { Flags, Context, Element } from './types.ts';
+
+import * as fs from 'fs';
+import * as path from 'path';
+import { checkFlags, flagString, parseListFlag, readSectionFlags } from './args.ts';
+import { TYPE_DIR, TYPES, PARENT_TYPE, PRIORITIES, FIELD_ORDER, SECTION_ROLES, NEW_FIELDS } from './constants.ts';
+import { context } from './context.ts';
+import { loadElement, deriveGraph } from './load.ts';
+import { fail, writeFeedback, emitWriteResult } from './output.ts';
+import { serialize, normalizeTitle, applySections } from './parse.ts';
+import { nowIso, allocateId, atomicWrite } from './store.ts';
+
+interface NewFlags {
+  type: string;
+  cleanTitle: string;
+  parent: string | undefined;
+  status: string | undefined;
+  priority: string | undefined;
+  assignee: string | undefined;
+  tags: string[] | undefined;
+  deps: string[] | undefined;
+  sections: Map<string, string>;
+}
 
 /**
  * Validate everything `nj new` needs, before anything is created.
@@ -24,22 +38,22 @@ const { nowIso, allocateId, atomicWrite } = require('./store.js');
  * burn a tombstone for a call it is going to refuse (§ 8, decision 31), so the
  * caller allocates only after this returns.
  */
-function validateNewFlags(ctx, flags) {
+function validateNewFlags(ctx: Context, flags: Flags): NewFlags {
   const type = flagString(flags, 'type');
-  if (type === undefined) fail('missing_argument', '--type is required', `Known types: ${TYPES.join(', ')}`);
-  if (!TYPES.includes(type)) fail('invalid_value', `unknown type '${type}'`, `Known types: ${TYPES.join(', ')}`);
+  if (type === undefined) return fail('missing_argument', '--type is required', `Known types: ${TYPES.join(', ')}`);
+  if (!TYPES.includes(type)) return fail('invalid_value', `unknown type '${type}'`, `Known types: ${TYPES.join(', ')}`);
 
   const title = flagString(flags, 'title');
-  if (title === undefined || normalizeTitle(title) === '') fail('missing_argument', '--title is required and must not be empty');
+  if (title === undefined || normalizeTitle(title) === '') return fail('missing_argument', '--title is required and must not be empty');
   const cleanTitle = normalizeTitle(title);
 
   const parent = flagString(flags, 'parent');
   if (type === 'epic') {
     if (parent !== undefined) fail('invalid_value', 'epics must not have a --parent');
   } else {
-    if (parent === undefined) fail('missing_argument', `--parent is required for ${type} (must be a ${PARENT_TYPE[type]})`);
-    const p = ctx.elements.find((e) => e.id === parent);
-    if (!p) fail('not_found', `parent '${parent}' does not exist`);
+    if (parent === undefined) return fail('missing_argument', `--parent is required for ${type} (must be a ${PARENT_TYPE[type]})`);
+    const p = ctx.elements.find((e: Element) => e.id === parent);
+    if (!p) return fail('not_found', `parent '${parent}' does not exist`);
     // An unreadable stub is refused for the same reason as an archived parent:
     // its type cannot be verified and § 6 forbids inventing facts (§ 9).
     if (p.problems.has('file:unreadable') || p.problems.has('frontmatter:unreadable')) {
@@ -68,7 +82,7 @@ function validateNewFlags(ctx, flags) {
   const deps = parseListFlag(flags, 'depends_on');
   if (deps !== undefined) {
     for (const d of deps) {
-      if (!ctx.elements.some((e) => e.id === d)) fail('not_found', `depends_on target '${d}' does not exist`);
+      if (!ctx.elements.some((e: Element) => e.id === d)) fail('not_found', `depends_on target '${d}' does not exist`);
     }
   }
 
@@ -79,7 +93,7 @@ function validateNewFlags(ctx, flags) {
   return { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections };
 }
 
-function cmdNew(flags) {
+function cmdNew(flags: Flags) {
   checkFlags(flags, NEW_FIELDS, new Set(['json']), true);
   const json = flags.has('json');
   const ctx = context();
@@ -90,7 +104,7 @@ function cmdNew(flags) {
   const id = allocateId(ctx.backlog, type, ctx.elements);
   const ts = nowIso();
 
-  const fields = new Map();
+  const fields: Map<string, string | string[]> = new Map();
   fields.set('id', id);
   fields.set('type', type);
   if (parent !== undefined) fields.set('parent', parent);
@@ -117,11 +131,11 @@ function cmdNew(flags) {
   const el = loadElement(file, TYPE_DIR[type], ctx.cfg);
   deriveGraph(ctx.elements.concat([el]), ctx.backlog);
 
-  const changed = FIELD_ORDER.filter((f) => fields.has(f) && f !== 'created' && f !== 'updated')
-    .concat(SECTION_ROLES.filter((r) => sections.has(r)));
+  const changed: string[] = FIELD_ORDER.filter((f: string) => fields.has(f) && f !== 'created' && f !== 'updated')
+    .concat(SECTION_ROLES.filter((r: string) => sections.has(r)));
   if (json) emitWriteResult(true, el, changed);
   else writeFeedback(el, ctx.cfg, `${id} created → ${file}`);
   return 0;
 }
 
-module.exports = { cmdNew };
+export { cmdNew };

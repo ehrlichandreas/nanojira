@@ -245,11 +245,20 @@ console.log('\n[SPEC] pinned changes');
   ok('unknown priority value survives a write untouched', /^priority: sky$/m.test(rd(path.join(bl,'tasks','TSK-007.md'))));
   ok('--fix never repairs unknown priority', (run(['doctor','--fix'], d, {}, LATER), /^priority: sky$/m.test(rd(path.join(bl,'tasks','TSK-007.md')))));
   // 30 codes
-  // nj plus lib/*.js: after the module split SEVERITY lives in lib/, and a probe
-  // that reads only the entry point would crash on a table it cannot find.
-  const libDir = path.join(path.dirname(NJ), 'lib');
-  const libSrc = (() => { try { return fs.readdirSync(libDir).filter((f) => f.endsWith('.js')).sort().map((f) => fs.readFileSync(path.join(libDir, f), 'utf8')); } catch { return []; } })();
-  const src = [fs.readFileSync(NJ, 'utf8')].concat(libSrc).join('\n'); const tbl = /const SEVERITY = \{([\s\S]*?)\n\};/.exec(src)[1]; const codes = tbl.match(/'([^']+)':/g).map(s => s.slice(1, -2));
+  // A static property of the SOURCE, not of whichever artifact is under
+  // behavioural test right now -- `NJ` may point at `nj`, at `dist/nj` (no
+  // sibling lib/ at all, and esbuild rewrites `const` to `var` in its CJS
+  // wrapper, so a regex anchored on the source's own declaration keyword
+  // stops matching the bundle), or some future build. Read the SOURCE
+  // (nj + lib/*.{js,ts} next to THIS script, not next to NJ) unconditionally.
+  // TSK-023: lib/*.ts declares SEVERITY with a type annotation
+  // (`const SEVERITY: Record<...> = {`), which the old anchor -- expecting
+  // `const SEVERITY = {` verbatim -- does not match. Proven broken first,
+  // against a probe .ts file with a typed declaration, before this fix.
+  const srcRoot = path.join(__dirname, '..', '..', '..');
+  const libDir = path.join(srcRoot, 'lib');
+  const libSrc = fs.readdirSync(libDir).filter((f) => f.endsWith('.js') || f.endsWith('.ts')).sort().map((f) => fs.readFileSync(path.join(libDir, f), 'utf8'));
+  const src = [fs.readFileSync(path.join(srcRoot, 'nj'), 'utf8')].concat(libSrc).join('\n'); const tbl = /(?:const|let|var) SEVERITY(?:\s*:[^=]+)? = \{([\s\S]*?)\n\};/.exec(src)[1]; const codes = tbl.match(/'([^']+)':/g).map(s => s.slice(1, -2));
   ok('SEVERITY has 30 distinct codes incl. file:unreadable + unknown:priority', new Set(codes).size === 30 && codes.includes('file:unreadable') && codes.includes('unknown:priority'), codes.length + ' ' + codes.join(','));
   // help --json
   const hj = run(['help','--json'], d); console.log('    note: `nj help --json` → exit ' + hj.status + ', stdout JSON? ' + (hj.json !== null));

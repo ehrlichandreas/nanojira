@@ -2,13 +2,15 @@
 
 // `nj init`.
 
-const fs = require('fs');
-const path = require('path');
-const { checkFlags } = require('./args.js');
-const { DEFAULT_CONFIG } = require('./constants.js');
-const { fail, out } = require('./output.js');
+import type { Flags } from './types.ts';
 
-function cmdInit(flags) {
+import * as fs from 'fs';
+import * as path from 'path';
+import { checkFlags } from './args.ts';
+import { DEFAULT_CONFIG } from './constants.ts';
+import { fail, out } from './output.ts';
+
+function cmdInit(flags: Flags) {
   checkFlags(flags, [], new Set(['json']), false);
   const json = flags.has('json');
   const backlog = path.resolve(process.cwd(), 'backlog');
@@ -57,4 +59,4 @@ Useful commands: \`nj\`, \`nj list --ready\`, \`nj show --id=…\`,
 \`nj new --type=task --parent=EPIC-001 --title="…"\`, \`nj doctor\`.
 `;
 
-module.exports = { cmdInit };
+export { cmdInit };
