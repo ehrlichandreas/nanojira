@@ -2,12 +2,12 @@
 
 // Loading elements and deriving the graph.
 
-import type { Element, ParsedFile, Config, Context, Skeleton, WithId, WithType, WithTitle, WithStatus, WithParent, WithOptionals, WithTimestamps, WithArchiveState, NonEmptyString } from './types.ts';
+import type { Element, ParsedFile, Config, Context, Layout, Scan, Skeleton, WithId, WithType, WithTitle, WithStatus, WithParent, WithOptionals, WithTimestamps, WithArchiveState, NonEmptyString } from './types.ts';
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { listMd } from './config.ts';
-import { PREFIX_TYPE, TYPE_DIR, TYPES, PARENT_TYPE, PRIORITIES } from './constants.ts';
+import { PREFIX_TYPE, TYPE_FOLDER_ROLE, TYPES, PARENT_TYPE, PRIORITIES } from './constants.ts';
+import { scanBacklog, folderOf, inArchive, samePlace, foldEq, expectedPlace, misplacedCode } from './layout.ts';
 import { parseFile, h1Of, sectionPresent, normalizeTitle } from './parse.ts';
 import { mtimeIso, readTombstones } from './store.ts';
 
@@ -21,14 +21,18 @@ function unreadableElement(file: string, folder: string, cfg: Config, err: any):
   const base = path.basename(file, '.md');
   const pm = /^(EPIC|TSK|SUB)-/.exec(base);
   const ts = mtimeIso(file);
+  // No frontmatter to read: the ID prefix, else the type folder it lies in.
+  const byFolder = cfg.layout.group === 'type'
+    ? Object.keys(TYPE_FOLDER_ROLE).find((t) => foldEq(cfg.layout.folders[TYPE_FOLDER_ROLE[t]], folder)) || null
+    : null;
   return {
     file, folder, raw: null, body: '', fields: new Map(), order: [],
     parsed: false, readable: false,
     detail: [{ code: 'file:unreadable', message: `cannot be read — ${err.message}` }],
     problems: new Set(['file:unreadable']),
-    archived: folder === 'archive',
+    archived: inArchive(folder, cfg.layout),
     id: base,
-    type: pm ? PREFIX_TYPE[pm[1]] : (Object.keys(TYPE_DIR).find((t) => TYPE_DIR[t] === folder) || null),
+    type: pm ? PREFIX_TYPE[pm[1]] : byFolder,
     title: '', status: cfg.statuses[0], parent: null, priority: 'normal',
     assignee: '', tags: [], depends_on: [],
     created: ts, updated: ts, archivedAt: null,
@@ -84,7 +88,8 @@ function deriveId(el: Skeleton, p: ParsedFile, base: string): WithId {
 }
 
 // The folder-lookup fallback that used to sit here is GONE, deliberately, not
-// merely simplified: `TYPE_DIR` is keyed by TYPE ('epic' -> 'epics'), so
+// merely simplified: `TYPE_DIR` (v2's type → folder table, now
+// `layout.folders`) was keyed by TYPE ('epic' -> 'epics'), so
 // looking it up BY FOLDER (`TYPE_DIR[folder]`) is always `undefined` for every
 // real folder, and the reverse search over `TYPE_DIR`'s values never matches
 // 'archive' either — both branches always produced `null`. This is not a bug
@@ -93,7 +98,11 @@ function deriveId(el: Skeleton, p: ParsedFile, base: string): WithId {
 // precedence outright — "frontmatter > prefix > folder precedence; the folder
 // loses". Reinstating a folder-based type would violate the spec, not repair
 // it; if this needs to come back, it needs a decision, not a refactor.
-function deriveType(el: WithId, p: ParsedFile, folder: string): WithType {
+// Where the file lies is checked against the layout in deriveGraph
+// (`markPlaces`): under `hierarchy` the place depends on the parent chain, which
+// one file alone cannot know. What stays here is the type that cannot be
+// determined at all — `type:folder` in every group, as in v2.
+function deriveType(el: WithId, p: ParsedFile): WithType {
   const pm = /^(EPIC|TSK|SUB)-/.exec(el.id);
   const prefixType = pm ? PREFIX_TYPE[pm[1]] : null;
 
@@ -108,7 +117,6 @@ function deriveType(el: WithId, p: ParsedFile, folder: string): WithType {
     type = null;
   }
   if (type === null) el.problems.add('type:folder');
-  else if (!el.archived && TYPE_DIR[type] !== folder) el.problems.add('type:folder');
   return { ...el, type };
 }
 
@@ -227,7 +235,7 @@ function deriveBody(el: WithArchiveState, p: ParsedFile, cfg: Config): WithArchi
   return el;
 }
 
-function loadElement(file: string, folder: string, cfg: Config): Element {
+function loadElement(file: string, backlog: string, cfg: Config, folder: string = folderOf(backlog, file)): Element {
   let raw;
   try {
     raw = fs.readFileSync(file, 'utf8');
@@ -242,11 +250,11 @@ function loadElement(file: string, folder: string, cfg: Config): Element {
   const skeleton: Skeleton = {
     file, folder, raw, body: p.body, fields: p.fields, order: p.order,
     parsed: p.parsed, readable: true, detail: p.problems, problems,
-    archived: folder === 'archive',
+    archived: inArchive(folder, cfg.layout),
   };
 
   const withId = deriveId(skeleton, p, base);
-  const withType = deriveType(withId, p, folder);
+  const withType = deriveType(withId, p);
   const withTitle = deriveTitle(withType, p);
   const withStatus = deriveStatus(withTitle, p, cfg);
   const withParent = deriveParent(withStatus, p);
@@ -258,15 +266,13 @@ function loadElement(file: string, folder: string, cfg: Config): Element {
   return final;
 }
 
-function loadBacklog(backlog: string, cfg: Config): Element[] {
-  const elements: Element[] = [];
-  for (const folder of ['epics', 'tasks', 'subtasks', 'archive']) {
-    for (const file of listMd(path.join(backlog, folder))) {
-      elements.push(loadElement(file, folder, cfg));
-    }
-  }
-  deriveGraph(elements, backlog);
-  return elements;
+// Elements are found wherever they lie (§ 4), so a layout change never breaks
+// a command between editing the configuration and running `doctor --fix`.
+function loadBacklog(backlog: string, cfg: Config, idsDir: string): { elements: Element[]; scan: Scan } {
+  const scan = scanBacklog(backlog, cfg.layout);
+  const elements = scan.files.map(({ file, folder }) => loadElement(file, backlog, cfg, folder));
+  deriveGraph(elements, idsDir, cfg.layout);
+  return { elements, scan };
 }
 
 /**
@@ -423,8 +429,24 @@ function markOpenChildren(elements: Element[], children: Map<string, Element[]>)
   }
 }
 
-function markMissingTombstones(elements: Element[], backlog: string) {
-  const ids = readTombstones(backlog);
+/**
+ * A file off the place its layout gives it (§ 4). Unreadable stubs are
+ * exempt, as in v2 — nothing about them is known but the file name — and so
+ * is an element whose place cannot be determined (unknown type, or a
+ * hierarchy parent chain that dangles or cycles): its own error says why
+ * (DECISIONS 91 B15).
+ */
+function markPlaces(elements: Element[], byId: Map<string, Element>, layout: Layout) {
+  const code = misplacedCode(layout);
+  for (const el of elements) {
+    if (!el.readable) continue;
+    const want = expectedPlace(el, byId, layout);
+    if (want !== null && !samePlace(want, el.folder, layout)) el.problems.add(code);
+  }
+}
+
+function markMissingTombstones(elements: Element[], idsDir: string) {
+  const ids = readTombstones(idsDir);
   for (const el of elements) {
     if (!ids.has(el.id)) el.problems.add('id:no_tombstone');
   }
@@ -447,8 +469,8 @@ function attachGraph(elements: Element[], byId: Map<string, Element>, children: 
 }
 
 /**
- * Ten steps over the element list: two index builds (indexById, childMap) and
- * eight passes. They are listed here in the order they
+ * Eleven steps over the element list: two index builds (indexById, childMap) and
+ * nine passes. They are listed here in the order they
  * must run: the index builds sit exactly where they sat before, because the
  * children index is built after the cycle pass and hoisting it would reorder
  * execution for no gain.
@@ -459,7 +481,7 @@ function attachGraph(elements: Element[], byId: Map<string, Element>, children: 
  * unobservable. The first pass that reads what another wrote makes the order
  * load-bearing, and nothing here would notice the breach.
  */
-function deriveGraph(elements: Element[], backlog: string) {
+function deriveGraph(elements: Element[], idsDir: string, layout: Layout) {
   const { byId, counts } = indexById(elements);
   markDuplicateIds(elements, counts);
   markParentEdges(elements, byId);
@@ -468,7 +490,8 @@ function deriveGraph(elements: Element[], backlog: string) {
   markDependsOnCycles(elements, byId);
   const children = childMap(elements);
   markOpenChildren(elements, children);
-  markMissingTombstones(elements, backlog);
+  markPlaces(elements, byId, layout);
+  markMissingTombstones(elements, idsDir);
   attachGraph(elements, byId, children);
   return byId;
 }

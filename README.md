@@ -3,12 +3,14 @@
 A local, file-based task tool for agents: Epics → Tasks → Subtasks, one
 Markdown file per element, no database, no server, no runtime dependencies.
 See `docs/SPECIFICATION.md` for the full spec.
+How to use it: `docs/GUIDE.md` (upgrading a v2 backlog: `docs/MIGRATION-v3.md`).
 
-`dist/nj` implements spec v2 plus v3 step V3-1 (backlog location via
-`--backlog`, `NJ_BACKLOG`, `.njrc`). `docs/SPECIFICATION.md` is spec v3,
-released for implementation (DECISIONS 87); the remaining steps — configurable
-layout, `STATUS.md`, `.nanojira/` — follow the plan in `docs/DECISIONS.md` 86
-and EPIC-006 in `backlog/`.
+`dist/nj` implements spec v3 (`docs/SPECIFICATION.md`): backlog location via
+`--backlog`, `NJ_BACKLOG` or `.njrc`; configurable layout (`type`,
+`hierarchy`, `flat`, folder names); a generated `STATUS.md`; internal files in
+`.nanojira/`. A v2 backlog is migrated once with `nj doctor --fix`
+(`docs/MIGRATION-v3.md`). Decisions behind it: `docs/DECISIONS.md` 86–108;
+independent verification reports: `docs/verification/`.
 
 ## Layout
 

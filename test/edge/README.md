@@ -40,6 +40,9 @@ is the reason they exist.
 | § 11 archive target collision — nothing moves | `archive-collision.js` |
 | § 14 empty known field vs empty unknown key | `empty-value-rule.js` |
 | § 14 `--fix` snapshots mtimes before step 1 | `fix-mtime-snapshot.js` |
+| § 4 `.njrc` ownership and the D96 odd files/lexing AC-21 lacks (FIFO, ELOOP, non-leading BOM, lone `\r`), § 14 `--fix` writes nothing while `config:invalid` holds, § 9 `io_error` incl. unsearchable ancestor (DECISIONS 93 F1/F3/F4, 96, 98) | `hardening-v3-1.js` |
+| § 4 `.njrc` ownership: a foreign-owned symlink (needs root; otherwise CANNOT RUN) | `hardening-njrc-foreign-link.js` |
+| the v3 coverage gaps, one section per clause ID of `../COVERAGE-v3.md` | `coverage-v3-gaps.js` |
 
 ## Why these are separate from the AC files
 

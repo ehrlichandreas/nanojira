@@ -299,9 +299,9 @@ function mkTask(label, body) {
 
 {
   /* § 9 l. 477–478 and § 15.20 l. 991–992: a rejected invocation is "rejected
-   * … with nothing written" — read here as including the tombstone in .ids/,
+   * … with nothing written" — read here as including the tombstone in .nanojira/ids/,
    * which is a written file. The spec states no validate-before-allocate
-   * order in so many words; the corpus records the .ids/ listing per call. */
+   * order in so many words; the corpus records the .nanojira/ids/ listing per call. */
   const d = H.freshDir('ac20-mutex-new');
   T.exit('nj init', H.runNj(['init'], { cwd: d }), 0);
   T.exit('new epic', H.runNj(['new', '--type=epic', '--title=Auth'], { cwd: d }), 0);

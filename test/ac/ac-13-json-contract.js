@@ -25,7 +25,8 @@ function J(x) { return JSON.stringify(x === undefined ? null : x); }
 
 const NOW = H.FIXED_NOW;
 
-/* The closed vocabulary of § 7. The table has 29 rows and 30 distinct codes:
+/* The closed vocabulary of § 7. The v2 table had 29 rows and 30 distinct codes
+ * (spec v3 adds four more, listed last below):
  * one row, `missing:created` / `missing:updated`, names two. Counting rows
  * gives 29, and counting only separator-bearing names gives 28 — both are
  * traps (AMBIGUITIES.md #22). Adding a code is additive; renaming or
@@ -61,6 +62,11 @@ const TABLE = [
   'backlog:stray_tmp',
   'backlog:ids_missing',
   'config:invalid',
+  /* spec v3 (DECISIONS 100): the codes v3 adds to § 7's table */
+  'layout:misplaced',
+  'backlog:unreadable_dir',
+  'backlog:legacy_layout',
+  'backlog:status_stale',
 ];
 
 /* Codes whose Doctor column is "—": workflow state that never becomes a doctor
@@ -221,7 +227,7 @@ function write(desc, args, cwd, expectId) {
     J(rj.entry || null).slice(0, 300));
   T.check('rm: the file is gone', !H.existsInBacklog(d, 'tasks/TSK-002.md'), 'tasks/TSK-002.md still there');
   T.check('rm: the tombstone stays (§ 8)',
-    fs.existsSync(path.join(d, 'backlog', '.ids', 'TSK-002')), '.ids/TSK-002 missing');
+    fs.existsSync(path.join(d, 'backlog', H.IDS_REL, 'TSK-002')), '.nanojira/ids/TSK-002 missing');
 
   write('nj set (subtask done)', ['set', '--id=SUB-001', '--status=done'], d, 'SUB-001');
   write('nj set (task done)', ['set', '--id=TSK-001', '--status=done'], d, 'TSK-001');

@@ -18,11 +18,11 @@ const complete = t => '# ' + t + '\n\n## Description\nD\n\n## Acceptance Criteri
 function sums(d) { const out = {}; const bl = path.join(d, 'backlog'); for (const dir of ['epics','tasks','subtasks','archive']) { let names = []; try { names = fs.readdirSync(path.join(bl, dir)).sort(); } catch {} for (const nme of names) { const c = rd(path.join(bl, dir, nme)); out[dir + '/' + nme] = c === null ? '<unreadable>' : sha(c); } } return out; }
 function mk(label) {
   const d = fs.mkdtempSync(SCRATCH_BASE + '/r3bc-' + label + '-'); const bl = path.join(d, 'backlog');
-  for (const s of ['epics','tasks','subtasks','archive','.ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
-  fs.writeFileSync(path.join(bl, '.nanojira.json'), CFG);
+  for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
+  fs.writeFileSync(path.join(bl, '.nanojira/config.json'), CFG);
   fs.writeFileSync(path.join(bl, 'epics', 'EPIC-001.md'), el({ id: 'EPIC-001', type: 'epic', title: 'E', status: 'done', created: NOW, updated: NOW }, '# E\n\n## Description\nD\n'));
   fs.writeFileSync(path.join(bl, 'tasks', 'TSK-001.md'), el({ id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'T', status: 'done', created: NOW, updated: NOW }, complete('T')));
-  for (const t of ['EPIC-001','TSK-001']) fs.writeFileSync(path.join(bl, '.ids', t), '');
+  for (const t of ['EPIC-001','TSK-001']) fs.writeFileSync(path.join(bl, '.nanojira/ids', t), '');
   return d;
 }
 function start(args, cwd, env) {

@@ -35,22 +35,22 @@ function entriesOf(r) { return (r.json && Array.isArray(r.json.entries)) ? r.jso
   const d = H.freshDir('ac01-init');
   T.exit('nj init', H.runNj(['init'], { cwd: d }), 0);
 
-  for (const sub of ['epics', 'tasks', 'subtasks', 'archive', '.ids']) {
+  for (const sub of ['epics', 'tasks', 'subtasks', 'archive', '.nanojira', H.IDS_REL]) {
     let isDir = false;
     try { isDir = fs.statSync(bl(d, sub)).isDirectory(); } catch (e) { isDir = false; }
     T.check('init creates backlog/' + sub + '/', isDir);
   }
-  for (const f of ['.nanojira.json', '.gitignore', 'README.md']) {
+  for (const f of [H.CONFIG_REL, '.gitignore', 'README.md']) {
     T.check('init creates backlog/' + f, exists(d, f));
   }
-  // AMBIGUOUS: the § 4 tree also lists backlog/.nanojira-index.json, but § 13
+  // AMBIGUOUS: the § 4 tree also lists backlog/.nanojira/index.json, but § 13
   // says "round one ships without an index". Whether init writes that file is
   // unpinned, so neither its presence nor its absence is asserted here.
 
   T.check('README.md is not empty', readText(bl(d, 'README.md')).trim().length > 0);
 
   let cfg = null;
-  try { cfg = JSON.parse(readText(bl(d, '.nanojira.json'))); } catch (e) { cfg = null; }
+  try { cfg = JSON.parse(readText(bl(d, H.CONFIG_REL))); } catch (e) { cfg = null; }
   T.check('config is valid JSON', cfg !== null);
   T.check('config schema is 1', !!cfg && cfg.schema === 1);
   T.eq('config statuses are the § 5 default', cfg && cfg.statuses,
@@ -60,14 +60,26 @@ function entriesOf(r) { return (r.json && Array.isArray(r.json.entries)) ? r.jso
     JSON.stringify(cfg.sections.description) === JSON.stringify(['Description']) &&
     JSON.stringify(cfg.sections.acceptance) === JSON.stringify(['Acceptance Criteria']),
     'sections: ' + JSON.stringify(cfg && cfg.sections));
+  /* § 5: "`init` writes the `layout` block out in full" (from V3-4, DECISIONS
+   * 92 Q1). */
+  T.eq('config carries the full § 5 layout block', cfg && cfg.layout, {
+    group: 'type',
+    folders: { epics: 'epics', tasks: 'tasks', subtasks: 'subtasks', archive: 'archive' },
+    statusFile: true,
+  });
+  T.check('init writes no v2 file (.nanojira.json, .ids/) at the top level',
+    !exists(d, '.nanojira.json') && !exists(d, '.ids'), JSON.stringify(H.lsOrEmpty(bl(d))));
 
   const gi = readText(bl(d, '.gitignore'));
   const giLines = gi.split('\n').map(s => s.trim()).filter(s => s.length > 0);
   // AMBIGUOUS: § 4 pins the two patterns, not their order or the trailing
   // newline. Asserted as: exactly these two lines, nothing else.
   T.eq('gitignore ignores exactly the two patterns',
-    giLines.slice().sort().join('|'), '.nanojira-index.json|.nj-tmp-*');
-  T.check('.ids/ is never ignored', !gi.split('\n').some(l => l.trim().startsWith('.ids')));
+    giLines.slice().sort().join('|'), '.nanojira/index.json|.nj-tmp-*');
+  /* § 4: "`.nanojira/ids/` is never ignored, by design" — neither by name nor
+   * by ignoring the whole `.nanojira/` folder. */
+  T.check('.nanojira/ids/ is never ignored', !gi.split('\n').some(l =>
+    /^\/?\.nanojira\/?(\*\*?)?$/.test(l.trim()) || /^\/?\.nanojira\/ids/.test(l.trim())), JSON.stringify(gi));
 
   T.exit('init refuses a second init (§ 4)', H.runNj(['init'], { cwd: d }), 1);
 }
@@ -166,7 +178,7 @@ function entriesOf(r) { return (r.json && Array.isArray(r.json.entries)) ? r.jso
   T.exit('nj rm', rm, 0);
   printed('nj rm prints something', rm);
   T.check('rm deleted the file', !exists(d, 'subtasks', 'SUB-001.md'));
-  T.check('rm left the tombstone in place (§ 8)', exists(d, '.ids', 'SUB-001'));
+  T.check('rm left the tombstone in place (§ 8)', exists(d, H.IDS_REL, 'SUB-001'));
 
   const archOpen = H.runNj(['archive', '--id=EPIC-001'], { cwd: d });
   T.exit('archive refuses while elements are open (§ 11)', archOpen, 1);

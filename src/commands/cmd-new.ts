@@ -7,12 +7,22 @@ import type { Flags, Context, Element } from '../core/types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { checkFlags, flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
-import { TYPE_DIR, TYPES, PARENT_TYPE, PRIORITIES, FIELD_ORDER, SECTION_ROLES, NEW_FIELDS } from '../core/constants.ts';
+import { TYPE_FOLDER_ROLE, TYPES, PARENT_TYPE, PRIORITIES, FIELD_ORDER, SECTION_ROLES, NEW_FIELDS } from '../core/constants.ts';
 import { context } from '../core/context.ts';
+import { folderOf, expectedPlace } from '../core/layout.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
-import { fail, writeFeedback, emitWriteResult } from '../core/output.ts';
+import { fail, hardExit, writeFeedback, emitWriteResult } from '../core/output.ts';
 import { serialize, normalizeTitle, applySections } from '../core/parse.ts';
+import { refreshStatus } from '../core/status.ts';
 import { nowIso, allocateId, atomicWrite } from '../core/store.ts';
+
+/** Whether `dir` already holds a file named `name`, comparing case-insensitively. */
+function collidesCaseInsensitively(dir: string, name: string): boolean {
+  let names: string[];
+  try { names = fs.readdirSync(dir); } catch { return false; }
+  const lower = name.toLowerCase();
+  return names.some((n) => n.toLowerCase() === lower);
+}
 
 interface NewFlags {
   type: string;
@@ -93,6 +103,24 @@ function validateNewFlags(ctx: Context, flags: Flags): NewFlags {
   return { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections };
 }
 
+/**
+ * The folder a new element goes into (§ 4). Under `hierarchy` it is its
+ * parent's place plus, for an epic or task, a folder of its own. A parent
+ * whose own place cannot be determined (its chain is broken) lends the folder
+ * its file lies in instead — the child is then as misplaced as the parent,
+ * and `doctor` reports both.
+ */
+function newPlace(ctx: Context, type: string, id: string, parent: string | undefined): string {
+  const { group, folders } = ctx.cfg.layout;
+  if (group === 'type') return folders[TYPE_FOLDER_ROLE[type]];
+  if (group === 'flat') return '';
+  const own = type === 'subtask' ? [] : [id];
+  if (parent === undefined) return own.join('/');
+  const p = ctx.elements.find((e: Element) => e.id === parent) as Element;
+  const at = expectedPlace(p, p.byId as Map<string, Element>, ctx.cfg.layout);
+  return [at === null ? folderOf(ctx.backlog, p.file) : at].concat(own).filter((s) => s !== '').join('/');
+}
+
 function cmdNew(flags: Flags) {
   checkFlags(flags, NEW_FIELDS, new Set(['json']), true);
   const json = flags.has('json');
@@ -101,7 +129,21 @@ function cmdNew(flags: Flags) {
   const { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections } =
     validateNewFlags(ctx, flags);
 
-  const id = allocateId(ctx.backlog, type, ctx.elements);
+  // A case-insensitively taken name is never overwritten (DECISIONS 106
+  // F10): the allocator sees only tracked IDs (tombstones and loaded
+  // elements), which a stray hand-written file with an unusual extension
+  // case (`TSK-001.MD`) is neither — `.md` is matched case-sensitively by
+  // the scan (§ 4 B11). A collision at the actual write path retries with a
+  // fresh id; each attempt's own tombstone raises the allocator's start
+  // value, so the retry is bounded exactly as allocation itself is (§ 8).
+  let id: string, dir: string, file: string;
+  for (let attempt = 0; ; attempt++) {
+    id = allocateId(ctx.idsDir, type, ctx.elements);
+    dir = path.join(ctx.backlog, ...newPlace(ctx, type, id, parent).split('/'));
+    file = path.join(dir, id + '.md');
+    if (!collidesCaseInsensitively(dir, id + '.md')) break;
+    if (attempt >= 100) return hardExit('id_allocation_failed', `nj: id allocation failed after 100 retries (${id} collides with an existing file)`);
+  }
   const ts = nowIso();
 
   const fields: Map<string, string | string[]> = new Map();
@@ -123,13 +165,14 @@ function cmdNew(flags: Flags) {
   // AC-2 fixture (AC-20).
   if (sections.size > 0) body = applySections(body, sections, ctx.cfg).body;
 
-  const dir = path.join(ctx.backlog, TYPE_DIR[type]);
+  // Under `hierarchy` the element's own folder (epic, task) is created first;
+  // one that already exists is reused (§ 12).
   fs.mkdirSync(dir, { recursive: true });
-  const file = path.join(dir, id + '.md');
   atomicWrite(file, serialize(fields, Array.from(fields.keys()), body));
 
-  const el = loadElement(file, TYPE_DIR[type], ctx.cfg);
-  deriveGraph(ctx.elements.concat([el]), ctx.backlog);
+  const el = loadElement(file, ctx.backlog, ctx.cfg);
+  deriveGraph(ctx.elements.concat([el]), ctx.idsDir, ctx.cfg.layout);
+  refreshStatus(ctx.backlog, ctx.cfg, ctx);
 
   const changed: string[] = FIELD_ORDER.filter((f: string) => fields.has(f) && f !== 'created' && f !== 'updated')
     .concat(SECTION_ROLES.filter((r: string) => sections.has(r)));

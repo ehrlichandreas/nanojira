@@ -20,10 +20,10 @@ function complete(t) { return '# ' + t + '\n\n## Description\nD\n\n## Acceptance
 function mk(label, files, tomb, cfg) {
   const d = fs.mkdtempSync(path.join(SCRATCH_BASE, label + '-'));
   const bl = path.join(d, 'backlog');
-  for (const s of ['epics','tasks','subtasks','archive','.ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
-  if (cfg !== null) fs.writeFileSync(path.join(bl, '.nanojira.json'), cfg || CFG);
+  for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
+  if (cfg !== null) fs.writeFileSync(path.join(bl, '.nanojira/config.json'), cfg || CFG);
   for (const [rel, c] of Object.entries(files || {})) { const p = path.join(bl, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, c); }
-  for (const t of tomb || []) fs.writeFileSync(path.join(bl, '.ids', t), '');
+  for (const t of tomb || []) fs.writeFileSync(path.join(bl, '.nanojira/ids', t), '');
   return d;
 }
 function run(args, cwd, env, now) {
@@ -200,14 +200,23 @@ console.log('\n[SPEC] pinned changes');
   // discovery
   const d0 = fs.mkdtempSync(SCRATCH_BASE + '/disc-'); fs.mkdirSync(path.join(d0, 'backlog', 'tasks'), { recursive: true }); fs.mkdirSync(path.join(d0, 'a', 'b'), { recursive: true });
   const r = run(['list'], d0); const rj = run(['list','--json'], path.join(d0, 'a', 'b'));
-  ok('backlog/ without config → exit 1, names the missing file, points at doctor', r.status === 1 && /\.nanojira\.json/.test(r.err) && /nj doctor/.test(r.err) && !/no backlog found/.test(r.err), r.err);
+  ok('backlog/ without config → exit 1, names the missing file, points at doctor', r.status === 1 && /\.nanojira\/config\.json/.test(r.err) && /nj doctor/.test(r.err) && !/no backlog found/.test(r.err), r.err);
   ok('… from nested dir, --json: {ok:false,error:backlog_without_config,hint}', rj.json && rj.json.ok === false && rj.json.error === 'backlog_without_config' && typeof rj.json.hint === 'string', rj.out);
   ok('… stdout is pure JSON (prose only on stderr)', rj.json !== null && rj.err.length > 0);
+  // v3 (DECISIONS 88, ruled in DECISIONS 90 B2): NJ_BACKLOG is a binding
+  // source. A directory without .nanojira/config.json is invalid_backlog_env
+  // with § 4's "no backlog at <abs> (from NJ_BACKLOG)"; v2 said
+  // backlog_without_config here. backlog_without_config is left only for a
+  // backlog/ reached by the upward search (the two checks above).
   const re = run(['list','--json'], '/', { NJ_BACKLOG: path.join(d0, 'backlog') });
-  ok('NJ_BACKLOG at configless dir → backlog_without_config', re.json && re.json.error === 'backlog_without_config', re.out);
+  ok('NJ_BACKLOG at configless dir → invalid_backlog_env (D88/D90)', re.status === 1 && re.json && re.json.error === 'invalid_backlog_env' && re.err.includes('no backlog at ' + path.join(d0, 'backlog') + ' (from NJ_BACKLOG)'), re.out + re.err);
   const dd = run(['doctor','--json'], d0);
   ok('doctor tolerates missing config → config:invalid, exit 2', dd.status === 2 && dd.json.problems.some(p => p.code === 'config:invalid'), dd.out);
-  const none = run(['list','--json'], os.homedir() + '/Downloads');
+  // A fresh empty directory, not $HOME/Downloads: that folder need not exist
+  // (an agent session's HOME has none), and then the spawn failed and this
+  // check was a standing environmental ✗ (docs/verification/v3-preflight.md
+  // A4). Once a ✗ gates, a ✗ that says nothing about nj must not exist.
+  const none = run(['list','--json'], fs.mkdtempSync(SCRATCH_BASE + '/nobacklog-'), { NJ_BACKLOG: '' });
   ok('no backlog at all → no_backlog', none.json && none.json.error === 'no_backlog', none.out);
   // failure shape variants
   const d = mk('spec', { 'epics/EPIC-001.md': el({ id: 'EPIC-001', type: 'epic', title: 'E', status: 'todo', created: NOW, updated: NOW }, '# E\n\n## Description\nD\n'),
@@ -232,12 +241,12 @@ console.log('\n[SPEC] pinned changes');
   ok('rm --json (2nd run → not_found now): exit 1', rmj.json.error === 'not_found');
   // LF / BOM
   const crlf = '﻿---\r\nid: EPIC-003\r\ntype: epic\r\ntitle: Win\r\nstatus: todo\r\ncreated: ' + NOW + '\r\nupdated: ' + NOW + '\r\n---\r\n\r\n# Win\r\n\r\n## Description\r\nD\r\n';
-  fs.writeFileSync(path.join(bl, 'epics', 'EPIC-003.md'), crlf); fs.writeFileSync(path.join(bl, '.ids', 'EPIC-003'), '');
+  fs.writeFileSync(path.join(bl, 'epics', 'EPIC-003.md'), crlf); fs.writeFileSync(path.join(bl, '.nanojira/ids', 'EPIC-003'), '');
   const s3 = run(['set','--id=EPIC-003','--status=doing','--json'], d, {}, LATER);
   const after = fs.readFileSync(path.join(bl, 'epics', 'EPIC-003.md'));
   ok('CRLF+BOM file → written as LF without BOM', s3.json.ok && !after.includes(0x0d) && !(after[0] === 0xef && after[1] === 0xbb), JSON.stringify(after.toString().slice(0, 80)));
   // unknown:priority
-  fs.writeFileSync(path.join(bl, 'tasks', 'TSK-007.md'), el({ id: 'TSK-007', type: 'task', parent: 'EPIC-001', title: 'P', status: 'todo', priority: 'sky', created: NOW, updated: NOW }, complete('P'))); fs.writeFileSync(path.join(bl, '.ids', 'TSK-007'), '');
+  fs.writeFileSync(path.join(bl, 'tasks', 'TSK-007.md'), el({ id: 'TSK-007', type: 'task', parent: 'EPIC-001', title: 'P', status: 'todo', priority: 'sky', created: NOW, updated: NOW }, complete('P'))); fs.writeFileSync(path.join(bl, '.nanojira/ids', 'TSK-007'), '');
   const dj = run(['doctor','--json'], d).json;
   ok('unknown:priority is a warning finding', dj.problems.some(p => p.code === 'unknown:priority' && p.severity === 'warning' && p.element === 'TSK-007'));
   ok('unknown:priority does not block ready', run(['list','--ready','--json'], d).json.entries.some(e => e.id === 'TSK-007'));
@@ -262,7 +271,30 @@ console.log('\n[SPEC] pinned changes');
     return fs.readdirSync(dir).filter((f) => f.endsWith('.js') || f.endsWith('.ts')).sort().map((f) => fs.readFileSync(path.join(dir, f), 'utf8'));
   });
   const src = [fs.readFileSync(path.join(srcRoot, 'nj.ts'), 'utf8')].concat(modSrc).join('\n'); const tbl = /(?:const|let|var) SEVERITY(?:\s*:[^=]+)? = \{([\s\S]*?)\n\};/.exec(src)[1]; const codes = tbl.match(/'([^']+)':/g).map(s => s.slice(1, -2));
-  ok('SEVERITY has 30 distinct codes incl. file:unreadable + unknown:priority', new Set(codes).size === 30 && codes.includes('file:unreadable') && codes.includes('unknown:priority'), codes.length + ' ' + codes.join(','));
+  // The pin used to be a bare count, "30 distinct codes". V3-2 added
+  // layout:misplaced and backlog:unreadable_dir on purpose (DECISIONS 91/93),
+  // which made it 32 and the pin a standing ✗ with nothing wrong. It now
+  // checks against the spec instead of a number: § 7's problem-code table
+  // (the step's own docs/SPECIFICATION.md) is the closed vocabulary. Every
+  // code nj declares must be in it, with the table's Doctor level
+  // ("—" = null); every code in it must be declared, except the ones whose
+  // step has not landed yet (PENDING, named with their step).
+  const PENDING = { 'backlog:status_stale': 'V3-3', 'backlog:legacy_layout': 'V3-4' };
+  const spec = fs.readFileSync(path.join(__dirname, '..', '..', '..', 'docs', 'SPECIFICATION.md'), 'utf8');
+  const s7 = /\n## 7\. [^\n]*\n([\s\S]*?)\n## 8\. /.exec(spec)[1];
+  const specLevel = {};
+  for (const row of s7.split('\n')) {
+    const m = /^\| ((?:`[^`]+`(?: \/ )?)+) \| [^|]* \| (error|warning|—) \| [^|]* \|$/.exec(row);
+    if (m) for (const c of m[1].match(/`([^`]+)`/g)) specLevel[c.slice(1, -1)] = m[2] === '—' ? null : m[2];
+  }
+  const level = {}; for (const m of tbl.matchAll(/'([^']+)':\s*('error'|'warning'|null)/g)) level[m[1]] = m[2] === 'null' ? null : m[2].slice(1, -1);
+  const outside = codes.filter((c) => !(c in specLevel));
+  const wrongLevel = codes.filter((c) => c in specLevel && specLevel[c] !== level[c]).map((c) => `${c}: ${level[c]} vs § 7 ${specLevel[c]}`);
+  const missing = Object.keys(specLevel).filter((c) => !codes.includes(c) && !PENDING[c]);
+  const pending = Object.keys(specLevel).filter((c) => !codes.includes(c) && PENDING[c]).map((c) => `${c} (${PENDING[c]})`);
+  ok(`SEVERITY = § 7's problem codes with their Doctor levels (D91/D93; ${codes.length} declared, ${Object.keys(specLevel).length} in § 7${pending.length ? ', pending: ' + pending.join(', ') : ''})`,
+    Object.keys(specLevel).length >= 30 && new Set(codes).size === codes.length && outside.length === 0 && wrongLevel.length === 0 && missing.length === 0,
+    `outside § 7: ${outside.join(', ') || '-'}; wrong level: ${wrongLevel.join('; ') || '-'}; missing: ${missing.join(', ') || '-'}; § 7 rows parsed: ${Object.keys(specLevel).length}`);
   // help --json
   const hj = run(['help','--json'], d); console.log('    note: `nj help --json` → exit ' + hj.status + ', stdout JSON? ' + (hj.json !== null));
   const cj = run(['--json','--help'], d); console.log('    note: `nj --json --help` → stdout JSON? ' + (cj.json !== null));
@@ -274,4 +306,9 @@ console.log('\n[SPEC] pinned changes');
   ok('archive refuses when target path occupied (D22) — exit 1, nothing moved', ar.status === 1 && fs.existsSync(path.join(d5,'backlog','epics','EPIC-001.md')), JSON.stringify(ar.json) + ' epics=' + fs.readdirSync(path.join(d5,'backlog','epics')));
   console.log('    state after: epics=' + fs.readdirSync(path.join(d5,'backlog','epics')) + ' tasks=' + fs.readdirSync(path.join(d5,'backlog','tasks')) + ' archive=' + fs.readdirSync(path.join(d5,'backlog','archive')) + ' ; doctor codes=' + run(['doctor','--json'], d5).json.problems.map(p=>p.code+'@'+p.element).join(' ') + ' ; retry child archive → ' + JSON.stringify(run(['archive','--id=TSK-001','--json'], d5).json)); console.log('    note: archive with occupied target → error=' + (ar.json && ar.json.error) + ' (EPIC moved first? ' + !fs.existsSync(path.join(d5,'backlog','epics','EPIC-001.md')) + ')');
 }
+// The summary line is the verdict's contract with baseline.js: it tells a ✗
+// (exit 1 after this line) apart from a crash (exit 1 without it, which is a
+// coverage gap there, not a finding). Keep the wording in step with
+// VERDICT_LINE in baseline.js.
 console.log(`\n${n - bad}/${n} checks passed, ${bad} failed`);
+process.exitCode = bad === 0 ? 0 : 1;

@@ -39,6 +39,15 @@ const LATER_NOW = '2026-09-21T19:30:00Z';
 
 const GOLDEN_DIR = path.join(__dirname, '..', 'golden');
 
+/* The v3 layout (§ 4, V3-4): everything only nj needs lives in `.nanojira/`.
+ * Every suite that names a bookkeeping path takes it from here, so a layout
+ * change is one edit. (`ac/ac-24-legacy-migration.js` spells the v2 paths
+ * out itself — its fixtures are the legacy layout on purpose.) */
+const CONFIG_REL = '.nanojira/config.json';
+const IDS_REL = '.nanojira/ids';
+const INDEX_REL = '.nanojira/index.json';
+const GITIGNORE = INDEX_REL + '\n.nj-tmp-*\n';
+
 const _tmpDirs = [];
 
 /** A fresh empty directory. Not a backlog — use mkBacklog() for that. */
@@ -66,19 +75,19 @@ function mkBacklog(opts) {
   const o = opts || {};
   const dir = freshDir(o.label || 'backlog');
   const bl = path.join(dir, 'backlog');
-  for (const sub of ['epics', 'tasks', 'subtasks', 'archive', '.ids']) {
+  for (const sub of ['epics', 'tasks', 'subtasks', 'archive', IDS_REL]) {
     fs.mkdirSync(path.join(bl, sub), { recursive: true });
   }
-  fs.writeFileSync(path.join(bl, '.nanojira.json'), o.config || DEFAULT_CONFIG);
-  fs.writeFileSync(path.join(bl, '.gitignore'),
-    '.nanojira-index.json\n.nj-tmp-*\n');
+  fs.writeFileSync(path.join(bl, CONFIG_REL), o.config || DEFAULT_CONFIG);
+  fs.writeFileSync(path.join(bl, '.gitignore'), GITIGNORE);
   fs.writeFileSync(path.join(bl, 'README.md'), '# Backlog\n\nFormat notes.\n');
   for (const [rel, body] of Object.entries(o.files || {})) {
     writeRaw(bl, rel, body);
   }
   for (const id of o.tombstones || []) {
-    fs.writeFileSync(path.join(bl, '.ids', id), '');
+    fs.writeFileSync(path.join(bl, IDS_REL, id), '');
   }
+  writeStatus(bl);
   return dir;
 }
 
@@ -90,6 +99,161 @@ const DEFAULT_CONFIG = JSON.stringify({
     acceptance: ['Acceptance Criteria'],
   },
 }, null, 2) + '\n';
+
+/* ------------------------------------------------------------------ */
+/* STATUS.md (spec v3 § 4) — one renderer for the whole oracle          */
+/* ------------------------------------------------------------------ */
+
+const STATUS_WEIGHT = { urgent: 4, high: 3, normal: 2, low: 1 };
+
+/**
+ * The § 4 overview for a list of ACTIVE entries {id, status, priority,
+ * title, path}. `status` is what `list` shows: a missing status is already
+ * statuses[0], an unreadable stub has none (→ `?`). One section per
+ * configured status, in order, even when empty; `## ? (n)` last, only when
+ * non-empty. Within a section: priority weight descending — missing or
+ * unknown = the default's 2 (DECISIONS 100) — then id ascending, then path
+ * (both files of a duplicate_id, DECISIONS 95). `- [ID](path) title`; no
+ * trailing space without a title. Sections separated by one empty line,
+ * exactly one final newline.
+ */
+function renderStatus(entries, statuses) {
+  const st = statuses || JSON.parse(DEFAULT_CONFIG).statuses;
+  const w = e => STATUS_WEIGHT[e.priority] || 2;
+  const cmp = (a, b) => (a < b ? -1 : a > b ? 1 : 0);
+  const order = (a, b) => (w(b) - w(a)) || cmp(a.id, b.id) || cmp(a.path, b.path);
+  const line = e => '- [' + e.id + '](' + e.path + ')' + (e.title ? ' ' + e.title : '');
+  const out = ['# Status'];
+  for (const s of st) {
+    const items = entries.filter(e => e.status === s).sort(order);
+    out.push('', '## ' + s + ' (' + items.length + ')');
+    if (items.length) out.push('', ...items.map(line));
+  }
+  const other = entries.filter(e => !st.includes(e.status)).sort(order);
+  if (other.length) out.push('', '## ? (' + other.length + ')', '', ...other.map(line));
+  return out.join('\n') + '\n';
+}
+
+/* The frontmatter fields STATUS.md needs, read per § 7's grammar: a `---`
+ * line first and the NEXT `---` closing it, split at the first `:`, one
+ * leading space stripped, `#` lines are comments, a quoted value unescaped;
+ * an empty known value is absent (§ 14). No block, or a block that is never
+ * closed (`frontmatter:unreadable` — nothing in it can be trusted, so no
+ * title and no status; the status is then derived, DECISIONS 95 B18) → no
+ * fields. */
+function statusFields(text) {
+  const t = text.replace(/^\uFEFF/, '').replace(/\r\n/g, '\n');
+  const lines = t.split('\n');
+  const f = {};
+  if (lines[0] !== '---') return f;
+  if (lines.indexOf('---', 1) === -1) return f;
+  for (let i = 1; i < lines.length && lines[i] !== '---'; i++) {
+    const l = lines[i];
+    if (l.startsWith('#')) continue;
+    const c = l.indexOf(':');
+    if (c < 0) continue;
+    const k = l.slice(0, c);
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) continue;
+    let v = l.slice(c + 1);
+    if (v.startsWith(' ')) v = v.slice(1);
+    if (v.startsWith('"') && v.endsWith('"') && v.length >= 2) v = v.slice(1, -1).replace(/\\(["\\])/g, '$1');
+    if (v !== '') f[k] = v;
+  }
+  return f;
+}
+
+/**
+ * The STATUS.md `nj` would write for a hand-built backlog, from what lies
+ * on disk: every `*.md` below it (the v3 scan, § 4 / DECISIONS 91 B11–B12:
+ * dot-directories and directory symlinks skipped, the top-level README.md
+ * and STATUS.md excluded), archived when below the archive folder, an
+ * unreadable file a stub under `?`. Returns null when the configuration
+ * cannot be read or switches the overview off (`statusFile: false`) — then
+ * nothing is rendered (DECISIONS 100: no overview while config:invalid).
+ */
+function statusFor(backlogDir) {
+  let cfg;
+  try { cfg = JSON.parse(fs.readFileSync(path.join(backlogDir, STATUS_CONFIG_REL), 'utf8')); } catch (e) { return null; }
+  if (!configValidForStatus(cfg)) return null;
+  const statuses = cfg.statuses;
+  const layout = cfg.layout || {};
+  if (layout.statusFile === false) return null;
+  const archive = (layout.folders && layout.folders.archive) || 'archive';
+  const entries = [];
+  (function walk(d, rel) {
+    let names;
+    try { names = fs.readdirSync(d).sort(); } catch (e) { return; }
+    for (const n of names) {
+      const r = rel ? rel + '/' + n : n;
+      const p = path.join(d, n);
+      let lst, st = null;
+      try { lst = fs.lstatSync(p); } catch (e) { continue; }
+      try { st = fs.statSync(p); } catch (e) { /* dangling symlink */ }
+      if (lst.isDirectory()) { if (!n.startsWith('.')) walk(p, r); continue; }
+      if (lst.isSymbolicLink() && st && st.isDirectory()) continue;
+      if (!n.endsWith('.md') || (!rel && (n === 'README.md' || n === 'STATUS.md'))) continue;
+      if (r === archive || r.startsWith(archive + '/')) continue;
+      let text = null;
+      try { text = fs.readFileSync(p, 'utf8'); } catch (e) { /* stub */ }
+      if (text === null) { entries.push({ id: n.slice(0, -3), status: undefined, title: undefined, path: r }); continue; }
+      const f = statusFields(text);
+      entries.push({ id: f.id || n.slice(0, -3), status: f.status || statuses[0], priority: f.priority, title: f.title, path: r });
+    }
+  })(backlogDir, '');
+  return renderStatus(entries, statuses);
+}
+
+/**
+ * Whether a parsed configuration satisfies § 5 — the statuses rule and the
+ * layout block. Anything else is `config:invalid`, under which nj renders no
+ * overview (DECISIONS 100); returning null for it keeps hand-built
+ * invalid-config fixtures free of STATUS.md, so a suite can see nj CREATE one
+ * (Verifier finding T3). `sections` is not validated here: § 5 gives it no
+ * rule beyond its shape, and no fixture breaks it.
+ */
+function configValidForStatus(cfg) {
+  if (!cfg || typeof cfg !== 'object') return false;
+  const st = cfg.statuses;
+  if (!Array.isArray(st) || st.length < 2) return false;
+  if (!st.every(x => typeof x === 'string' && /^[a-z_]+$/.test(x))) return false;
+  if (new Set(st).size !== st.length || st[st.length - 1] !== 'done') return false;
+  if (cfg.layout === undefined) return true;
+  const L = cfg.layout;
+  if (!L || typeof L !== 'object' || Array.isArray(L)) return false;
+  if (Object.keys(L).some(k => !['group', 'folders', 'statusFile'].includes(k))) return false;
+  if (L.group !== undefined && !['type', 'hierarchy', 'flat'].includes(L.group)) return false;
+  if (L.statusFile !== undefined && typeof L.statusFile !== 'boolean') return false;
+  if (L.folders !== undefined) {
+    const F = L.folders;
+    if (!F || typeof F !== 'object' || Array.isArray(F)) return false;
+    const KEYS = ['epics', 'tasks', 'subtasks', 'archive'];
+    if (Object.keys(F).some(k => !KEYS.includes(k))) return false;
+    const eff = KEYS.map(k => (F[k] === undefined ? k : F[k]));
+    for (const n of eff) {
+      if (typeof n !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(n)) return false;
+      if (/^(EPIC|TSK|SUB)-\d+$/i.test(n) || n.toLowerCase() === 'backlog') return false;
+    }
+    if (new Set(eff.map(n => n.toLowerCase())).size !== eff.length) return false;
+  }
+  return true;
+}
+
+/**
+ * Write a fresh STATUS.md into a hand-built backlog — `H.mkBacklog` does it
+ * for every fixture (DECISIONS 100), and a test that changes elements by
+ * hand afterwards calls it again before a `doctor` whose findings it pins.
+ * Accepts the project dir or the backlog dir. v2 and V3-2 never read a
+ * top-level STATUS.md, so the file is neutral for them.
+ */
+function writeStatus(dirOrBacklog) {
+  const bl = fs.existsSync(path.join(dirOrBacklog, STATUS_CONFIG_REL)) ? dirOrBacklog : path.join(dirOrBacklog, 'backlog');
+  const s = statusFor(bl);
+  if (s !== null) fs.writeFileSync(path.join(bl, 'STATUS.md'), s);
+  return s;
+}
+
+/* The configuration's place until V3-4 moves it (V3-4: '.nanojira/config.json'). */
+const STATUS_CONFIG_REL = '.nanojira/config.json';
 
 /** Write raw bytes into a backlog, creating parent folders. */
 function writeRaw(backlogRootOrProject, rel, content) {
@@ -412,7 +576,9 @@ function cleanup() {
 
 module.exports = {
   NJ, NODE, FIXED_NOW, LATER_NOW, DEFAULT_CONFIG,
+  CONFIG_REL, IDS_REL, INDEX_REL, GITIGNORE,
   T,
+  renderStatus, statusFor, writeStatus, configValidForStatus,
   freshDir, mkBacklog, writeRaw, readInBacklog, existsInBacklog, listFiles, lsOrEmpty, readOrNull,
   requireNj,
   element, mkElement, completeBody,

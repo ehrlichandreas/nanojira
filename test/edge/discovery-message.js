@@ -4,7 +4,7 @@
  * § 4 "Backlog discovery", step 3:
  *   "If nothing is found: exit 1 with a hard error. Never fall back to a
  *    relative path, never operate on an empty backlog, never auto-create
- *    outside `nj init`. If a `backlog/` exists but `.nanojira.json` is missing,
+ *    outside `nj init`. If a `backlog/` exists but `.nanojira/config.json` is missing,
  *    the error says exactly that and points at `nj doctor` (which tolerates the
  *    missing file and reports `config:invalid`) — never a plain 'no backlog
  *    found'."
@@ -29,22 +29,22 @@ const WALK = { unsetEnv: ['NJ_BACKLOG'] };
  * and a caller that reads both must not be able to confuse the two cases. */
 const prose = r => (r.stdout || '') + (r.stderr || '');
 
-/* ---- a `backlog/` that exists without its `.nanojira.json` -------------- */
+/* ---- a `backlog/` that exists without its `.nanojira/config.json` -------------- */
 
 const bare = H.mkBacklog({ label: 'edge-disc-noconfig', tombstones: [] });
-const bareConfig = path.join(bare, 'backlog', '.nanojira.json');
+const bareConfig = path.join(bare, 'backlog', H.CONFIG_REL);
 try { fs.rmSync(bareConfig); } catch (e) { /* the check below reports it */ }
-T.check('fixture: backlog/ exists, .nanojira.json is gone',
+T.check('fixture: backlog/ exists, .nanojira/config.json is gone',
   H.readOrNull(bareConfig) === null && H.lsOrEmpty(path.join(bare, 'backlog')).length > 0,
   JSON.stringify(H.lsOrEmpty(path.join(bare, 'backlog'))));
 
 const bareHuman = H.runNj(['list'], Object.assign({ cwd: bare }, WALK));
-T.exit('a backlog/ without .nanojira.json is a hard error (exit 1)', bareHuman, 1);
+T.exit('a backlog/ without .nanojira/config.json is a hard error (exit 1)', bareHuman, 1);
 T.check('the failure reaches stderr (§ 9: the prose error text additionally goes to stderr)',
   bareHuman.stderr.trim().length > 0, 'stderr was empty; stdout: ' + JSON.stringify(bareHuman.stdout));
 
 const bareMsg = prose(bareHuman);
-T.contains('the error names the missing file', bareMsg, '.nanojira.json');
+T.contains('the error names the missing file', bareMsg, H.CONFIG_REL);
 T.contains('the error points at nj doctor', bareMsg, 'nj doctor');
 /* The wording § 4 names as the wrong answer for this case. */
 T.check('the error is not a plain "no backlog found"',
@@ -82,7 +82,7 @@ T.check('the two discovery failures do not share one message',
  * looking for a file that was never meant to be there.
  *
  * AMBIGUOUS: § 4 does not forbid the absent case from *naming* the path it
- * searched — "looked for backlog/.nanojira.json upward from the working
+ * searched — "looked for backlog/.nanojira/config.json upward from the working
  * directory" is a search breadcrumb, not a config diagnosis, and a message that
  * says what it looked for is more useful than one that does not. So the oracle
  * asserts that no config defect is reported, not that the file name never

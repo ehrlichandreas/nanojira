@@ -143,4 +143,27 @@ const d = H.mkBacklog({ label: 'ac14-order', files: FILES, tombstones: TOMBSTONE
   T.eq('tree order is the same in the second copy', ids(t.json), EXPECTED_ALL);
 }
 
+/* ---- an unknown priority weighs as the default (DECISIONS 100, 70) --------
+ * § 9 names weights for the four values and a missing priority; a value
+ * outside them (`unknown:priority`) sorts with the default's 2 — measured v2
+ * behaviour, kept. TSK-003 must land between the two normals, by id. */
+{
+  const u = H.mkBacklog({
+    label: 'ac14-unknown-priority',
+    files: {
+      'epics/EPIC-001.md': epic('EPIC-001', 'Auth'),
+      'tasks/TSK-001.md': task('TSK-001', 'Urgent', 'urgent'),
+      'tasks/TSK-002.md': task('TSK-002', 'Normal', 'normal'),
+      'tasks/TSK-003.md': task('TSK-003', 'Weird priority', 'someday'),
+      'tasks/TSK-004.md': task('TSK-004', 'Normal too', 'normal'),
+      'tasks/TSK-005.md': task('TSK-005', 'Low', 'low'),
+    },
+    tombstones: ['EPIC-001', 'TSK-001', 'TSK-002', 'TSK-003', 'TSK-004', 'TSK-005'],
+  });
+  const r = H.runJson(['list', '--type=task'], { cwd: u });
+  T.exit('list with an unknown priority value', r, 0);
+  T.eq('an unknown priority sorts with the default weight, tied with normal, by id',
+    ids(r.json), ['TSK-001', 'TSK-002', 'TSK-003', 'TSK-004', 'TSK-005']);
+}
+
 T.finish();

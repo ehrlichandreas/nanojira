@@ -72,7 +72,7 @@ function snapshot(backlogDir) {
     for (const e of entries) {
       const r = rel ? rel + '/' + e.name : e.name;
       if (e.isDirectory()) { walk(path.join(dir, e.name), r); continue; }
-      if (e.name === '.nanojira-index.json') continue;
+      if (r === H.INDEX_REL) continue;
       map[r] = shaOf(path.join(dir, e.name));
     }
   })(backlogDir, '');

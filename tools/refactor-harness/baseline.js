@@ -52,21 +52,23 @@ function heartbeat(what) {
 }
 
 const mode = process.argv[2];
-if (mode !== 'record' && mode !== 'verify') {
-  process.stderr.write('usage: baseline.js <record|verify> --nj=<path to nj> [--scratch=<dir>] [--scripts=<dir>]\n');
+if (mode !== 'record' && mode !== 'verify' && mode !== 'digest') {
+  process.stderr.write('usage: baseline.js <record|verify> --nj=<path to nj> [--scratch=<dir>] [--scripts=<dir>]\n' +
+    '       baseline.js digest    (prints the test/ digest of this tree and the one the baseline pins)\n');
   process.exit(2);
 }
 
 const NJ = arg('nj', null);
-if (!NJ) {
+// `digest` involves no nj; it is handled once testDigest() is defined, below.
+if (mode !== 'digest' && !NJ) {
   process.stderr.write('baseline.js: --nj=<path> is required (no default, no PATH lookup)\n');
   process.exit(2);
 }
-if (!fs.existsSync(NJ)) {
+if (mode !== 'digest' && !fs.existsSync(NJ)) {
   process.stderr.write(`baseline.js: no nj at ${NJ}\n`);
   process.exit(2);
 }
-const NJ_ABS = path.resolve(NJ);
+const NJ_ABS = NJ ? path.resolve(NJ) : null;
 // Per RUN, not a fixed path. A shared scratch tree made two concurrent runs
 // tear at the same fixtures, and the result was indistinguishable from a real
 // regression: same exit 1, same wall of content diffs, no distinguishing
@@ -78,6 +80,13 @@ const NJ_ABS = path.resolve(NJ);
 // before anything is recorded, so the root may vary while the records stay
 // byte-identical. That is checked, not assumed (see README).
 const SCRATCH = path.resolve(arg('scratch', path.join(os.tmpdir(), `nj-s0-scratch-${process.pid}`)));
+// No signal handlers here, on purpose. The whole run is one synchronous
+// spawnSync loop that never returns to the event loop, so a JS handler would
+// never run -- and registering one turns off Node's default "die on SIGTERM",
+// which left a stopped run alive until gate.js's SIGKILL 10 s later (found
+// by testing the handler that stood here). The default death is the right
+// one; gate.js removes this pid's nj-s0-* files once the group is gone, and
+// its start-up prune covers whatever SIGKILL leaves.
 // In the repo, not in /tmp: this corpus part vanished on reboot and took
 // `record` down with it (code 4). Same lesson as the scoping sources.
 const SCRIPTS = path.resolve(arg('scripts', path.join(HERE, 'scratch')));
@@ -91,6 +100,12 @@ process.env.HARNESS_SCRATCH = SCRATCH;
 
 const cannotRun = [];   // coverage gaps — never counted as success
 const notRecorded = [];  // ran and passed, but NOT in the byte corpus
+// Red verdicts: an oracle suite that ran and failed, or a white-box probe
+// that ran to its summary and reported a ✗. Kept apart from both lists above:
+// a red verdict is a statement about nj, a gap is a statement about coverage.
+// `verify` once printed "oracle suite FAILED" and still exited 0 with
+// BEHAVIOUR UNCHANGED, because only the byte diff gated (DECISIONS 90 B2).
+const redVerdicts = [];
 const parts = [];       // { name, calls, detail }
 
 // What the digest covers. Executable test content only: the suites, their
@@ -133,6 +148,16 @@ function testDigest(root) {
   files.sort((a, b) => (a.rel < b.rel ? -1 : a.rel > b.rel ? 1 : 0));
   const lines = files.map((f) => `${R.sha256(fs.readFileSync(f.abs))}  test/${f.rel}\n`);
   return R.sha256(lines.join(''));
+}
+
+// `digest`: what gate.js asks before it runs anything, so that a --frozen tag
+// that does not belong to this baseline is named as such at once, instead of
+// surfacing as exit 6 "stale baseline, re-record" -- the wrong advice there.
+if (mode === 'digest') {
+  let pinned = null;
+  try { pinned = JSON.parse(fs.readFileSync(HEADER, 'utf8')).testDigest || null; } catch {}
+  process.stdout.write(JSON.stringify({ current: testDigest(), pinned }) + '\n');
+  process.exit(0);
 }
 
 function njSha() {
@@ -231,7 +256,70 @@ function oracleSuites() {
 // regression. Pass/fail still counts toward the oracle gate; only the bytes
 // are excluded. Explicit list, like DIRECT_ONLY_SCRIPTS: a new suite like
 // this is not tolerated silently, it has to be entered here deliberately.
-const VERDICT_ONLY_SUITES = new Set(['edge/stdout-epipe.js']);
+//
+// `ac/ac-15-no-dependencies.js` joined when its lone-copy leg began copying
+// the nj under test instead of <project>/dist/nj (3b563e8). Under the harness
+// the nj under test is nj-shim, which cannot run alone (it needs
+// lib/record.js beside it): the suite went red through the shim and green
+// directly, and `record` refused c3 with exit 5. The copy-alone property is
+// the one thing a stand-in cannot have, so the verdict is taken against the
+// real nj, and its few calls leave the corpus.
+// `edge/hardening-v3-1.js` joined for a different reason than ac-15: its F4
+// and D96 legs put the CWD itself out of reach (deleted, or an ancestor made
+// unsearchable) and then assert nj's own one-line io_error prose. `nj-shim`
+// calls process.cwd() at its own top level, before it ever reaches the real
+// nj (to pass an explicit `cwd` to the spawnSync that forwards the call) —
+// and in that same broken CWD, process.cwd() itself throws, uncaught, which
+// prints an 18-line Node internal stack instead of nj's clean one-liner. The
+// real nj is never even reached. Through the shim: red. Direct: green. Same
+// shape as ac-15 — a property the stand-in cannot have (here, "survives a
+// CWD lookup before the real binary runs at all") — so the verdict is taken
+// against the real nj.
+const VERDICT_ONLY_SUITES = new Map([
+  ['edge/stdout-epipe.js', 'timing-dependent'],
+  ['ac/ac-15-no-dependencies.js', 'copies the nj under test alone; the shim cannot run alone'],
+  ['edge/hardening-v3-1.js', "the shim's own process.cwd() call throws in its deleted/unsearchable-CWD legs, before the real nj runs"],
+]);
+
+// Environment-conditional suites (expected-gaps.js). Verdict-only too: their
+// calls must not depend on the recording machine. Their CANNOT RUN is
+// reported by name, not counted as a gap.
+const EXPECTED_GAPS = new Map(require('./expected-gaps.js').map((g) => [g.suite, g.reason]));
+const expectedGapsHit = [];
+
+// The verdict-only set a recording was made with is part of what the corpus
+// means: a suite in the set has no calls in it, a suite outside it has.
+// Verifying with a different set shifts every later call -- found by the
+// Implementer when gate.js ran 90a8347's harness (ac-15 verdict-only)
+// against the c2 corpus (ac-15 recorded): every call from ac-15 onward
+// showed as a label/argv shift. So `record` writes the set into the header,
+// and `verify` uses THE HEADER'S set, not this file's.
+function currentVerdictOnly() {
+  const m = new Map(VERDICT_ONLY_SUITES);
+  for (const [s, why] of EXPECTED_GAPS) m.set(s, 'environment-conditional (expected-gaps.js): ' + why);
+  return m;
+}
+
+// Headers from before the field existed (c2, c3) name the set only in
+// notRecorded, as "<dir>/<suite>.js (<reason>: verdict taken directly, …)".
+// The preload-instrumented suites are not part of it: they go through the
+// shim first and fall back only when it is not engaged, the same in record
+// and verify. Derived that way, c2 gives {stdout-epipe} and c3 gives
+// {ac-15, stdout-epipe}, which is exactly the set each was recorded with.
+function headerVerdictOnly(header) {
+  const now = currentVerdictOnly();
+  if (Array.isArray(header.verdictOnlySuites)) {
+    return new Map(header.verdictOnlySuites.map((s) => [s, now.get(s) || 'verdict-only in the baseline']));
+  }
+  const m = new Map();
+  for (const n of header.notRecorded || []) {
+    const x = /^([a-z]+\/[^ ]+\.js) \(([^:]+):/.exec(n);
+    if (x && x[2] !== 'preload-instrumented') m.set(x[1], x[2]);
+  }
+  return m;
+}
+
+let VERDICT_ONLY_IN_USE = currentVerdictOnly();
 
 function runOracle(recordPath) {
   const root = path.join(PROJECT, 'test');
@@ -246,7 +334,7 @@ function runOracle(recordPath) {
   for (const s of suites) {
     heartbeat(`oracle ${s}`);
 
-    if (VERDICT_ONLY_SUITES.has(s)) {
+    if (VERDICT_ONLY_IN_USE.has(s)) {
       const direct = spawnSync(process.execPath, [path.join(root, s), NJ_ABS], {
         cwd: PROJECT,
         env: Object.assign({}, process.env, { NJ: NJ_ABS }),
@@ -254,7 +342,15 @@ function runOracle(recordPath) {
         timeout: 10 * 60 * 1000,
         maxBuffer: 64 * 1024 * 1024,
       });
-      if (direct.status === 0) { passed++; notRecorded.push(s + ' (timing-dependent: verdict taken directly, calls not in the corpus)'); }
+      // Same classification as below: a CANNOT RUN is a gap, not a verdict.
+      // AC-15 says CANNOT RUN when it finds no runtime.
+      const directFirst = ((direct.stdout || '') + (direct.stderr || '')).split('\n')[0] || '';
+      if (/— CANNOT RUN/.test(directFirst)) {
+        cr++;
+        if (EXPECTED_GAPS.has(s)) expectedGapsHit.push(`${s}: ${EXPECTED_GAPS.get(s)}`);
+        else cannotRun.push('oracle suite could not run: ' + s);
+      }
+      else if (direct.status === 0) { passed++; notRecorded.push(`${s} (${VERDICT_ONLY_IN_USE.get(s)}: verdict taken directly, calls not in the corpus)`); }
       else { failed++; failedNames.push(s); }
       continue;
     }
@@ -294,11 +390,18 @@ function runOracle(recordPath) {
     }
 
     const firstLine = out.split('\n')[0] || '';
-    if (/— CANNOT RUN/.test(firstLine)) { cr++; cannotRun.push('oracle suite could not run: ' + s); }
+    if (/— CANNOT RUN/.test(firstLine)) {
+      cr++;
+      if (EXPECTED_GAPS.has(s)) expectedGapsHit.push(`${s}: ${EXPECTED_GAPS.get(s)}`);
+      else cannotRun.push('oracle suite could not run: ' + s);
+    }
     else if (status === 0) passed++;
     else { failed++; failedNames.push(s); }
   }
-  for (const n of failedNames) process.stderr.write('  oracle suite FAILED: ' + n + '\n');
+  for (const n of failedNames) {
+    process.stderr.write('  oracle suite FAILED: ' + n + '\n');
+    redVerdicts.push('oracle suite failed: ' + n);
+  }
   return {
     name: 'oracle',
     calls: countLines(recordPath) - before,
@@ -320,6 +423,14 @@ function runOracle(recordPath) {
  * deliberately.
  */
 const DIRECT_ONLY_SCRIPTS = new Set(['verify.js']);
+
+// A white-box probe's verdict: its closing summary line (scratch/verify.js
+// prints it last, then exits 1 on any ✗). Status alone cannot tell a ✗ from a
+// crash, since an uncaught throw exits 1 too. Summary present with K > 0 ->
+// red, whatever the status; summary present with K = 0 and status 0 -> green;
+// anything else (no summary, or "0 failed" with a non-zero status) -> the
+// probe did not complete cleanly, which is a coverage gap.
+const VERDICT_LINE = /^(\d+)\/(\d+) checks passed, (\d+) failed$/m;
 
 function runScratchScripts(recordPath) {
   if (!fs.existsSync(SCRIPTS)) {
@@ -345,8 +456,19 @@ function runScratchScripts(recordPath) {
         timeout: 5 * 60 * 1000,
         maxBuffer: 64 * 1024 * 1024,
       });
-      if (direct.status !== 0) cannotRun.push(`scratch ${n}: exited ${direct.status} even when run directly`);
-      else notRecorded.push(`${n} (white-box probe: reads nj's source, verdict taken directly, calls not in the corpus)`);
+      const verdict = VERDICT_LINE.exec(direct.stdout || '');
+      // A ✗ is red whatever the exit status (I1, gate-instrument.md): the
+      // summary line is the contract, the status only backs it up. Status 0
+      // with "1 failed" used to fall through to "ran and passed".
+      if (verdict && Number(verdict[3]) > 0) {
+        const crosses = (direct.stdout || '').split('\n').filter((l) => /^\s*✗ /.test(l)).map((l) => l.trim());
+        process.stderr.write(`  scratch ${n}: ${verdict[3]} of ${verdict[2]} checks failed\n`);
+        for (const c of crosses) redVerdicts.push(`scratch ${n}: ${c}`);
+      } else if (!verdict || direct.status !== 0) {
+        cannotRun.push(`scratch ${n}: exited ${direct.status} ${verdict ? '' : 'without its summary line '}even when run directly`);
+      } else {
+        notRecorded.push(`${n} (white-box probe: reads nj's source, ${verdict[1]}/${verdict[2]} checks, verdict taken directly, calls not in the corpus)`);
+      }
       continue;
     }
 
@@ -387,6 +509,8 @@ function collect(recordPath) {
   parts.length = 0;
   cannotRun.length = 0;
   notRecorded.length = 0;
+  redVerdicts.length = 0;
+  expectedGapsHit.length = 0;
   parts.push(runFixtures(recordPath));
   const o = runOracle(recordPath);
   if (o) parts.push(o);
@@ -527,6 +651,10 @@ function reportParts(total) {
     process.stdout.write('\nran and passed, but NOT byte-recorded:\n');
     for (const c of notRecorded) process.stdout.write('  ' + c + '\n');
   }
+  if (expectedGapsHit.length) {
+    process.stdout.write('\nexpected gaps (expected-gaps.js: could not run here, by design -- NOT a pass, not a stop):\n');
+    for (const g of expectedGapsHit) process.stdout.write('  ' + g + '\n');
+  }
   if (cannotRun.length) {
     process.stdout.write('\ncannot run (coverage gap, NOT a pass):\n');
     for (const c of cannotRun) process.stdout.write('  ' + c + '\n');
@@ -542,6 +670,11 @@ function reportParts(total) {
  * would disguise a real regression as a harmless skip. So the harness treats
  * any cannot-run as a hard stop of its own, separately from any failure.
  */
+function reportRed() {
+  process.stdout.write(`\nRED VERDICTS (${redVerdicts.length}):\n`);
+  for (const r of redVerdicts) process.stdout.write('  ' + r + '\n');
+}
+
 function abortOnCoverageGap() {
   if (cannotRun.length === 0) return;
   process.stdout.write(`\nABORT: ${cannotRun.length} part(s) of the corpus could not run.\n`);
@@ -567,6 +700,10 @@ if (mode === 'record') {
     testDigestScope: DIGEST_SCOPE.map((d) => 'test/' + d + (d.includes('.') ? '' : '/')),
     cannotRun: cannotRun.slice(),
     notRecorded: notRecorded.slice(),
+    // The suites run directly, without the shim: no calls of theirs are in
+    // the corpus, and verify must use exactly this set (see headerVerdictOnly).
+    verdictOnlySuites: oracleSuites().filter((s) => VERDICT_ONLY_IN_USE.has(s)),
+    expectedGaps: expectedGapsHit.slice(),
     note: 'Comparison key excludes per-file raw sha; nsha (normalised content) is normative.',
   };
   // The shim appends plain NDJSON (it must stay append-only and cheap); the
@@ -583,9 +720,9 @@ if (mode === 'record') {
   if (!process.env.HARNESS_KEEP) fs.rmSync(SCRATCH, { recursive: true, force: true });
   reportParts(total);
   process.stdout.write(`\nnj sha256 ${header.njSha256}\nbaseline written: ${path.relative(PROJECT, CORPUS)} (${total} calls)\n`);
-  const oracle = parts.find((p) => p.name === 'oracle');
-  if (oracle && oracle.failed) {
-    process.stdout.write(`\nABORT: the oracle reported ${oracle.failed} failing suite(s) while recording.\n`);
+  if (redVerdicts.length) {
+    reportRed();
+    process.stdout.write(`\nABORT: ${redVerdicts.length} red verdict(s) while recording.\n`);
     process.stdout.write('A baseline is only worth recording from a green revision.\n');
     process.exit(5);
   }
@@ -614,24 +751,14 @@ if (header.corpusSha256) {
   }
 }
 
-const tmp = path.join(os.tmpdir(), `nj-s0-verify-${process.pid}.ndjson`);
-const total = collect(tmp);
-const oldRecs = readRecords(CORPUS);
-const newRecs = readRecords(tmp);
-const diffs = diff(oldRecs, newRecs, 40);
-
-reportParts(total);
-const excluded = markNondeterministic(oldRecs).filter(Boolean).length;
-process.stdout.write(`\nbaseline: ${oldRecs.length} calls, nj sha256 ${header.njSha256}\n`);
-const code = codeSha();
-process.stdout.write(`current : ${newRecs.length} calls, current code sha256 (${code.label}, ${code.files} files) ${code.sha}\n`);
-process.stdout.write(`compared: ${oldRecs.length - excluded} calls (${excluded} excluded as nondeterministic by design — AC-7 concurrency)\n`);
-
 // The oracle part of the corpus is only comparable while test/ holds the same
 // suites. the Oracle extends the oracle in parallel, so a changed suite list is the
 // expected case, not a freak one — and it must be said out loud. Otherwise the
 // extra calls show up as a wall of "extra"/"missing" records and read like an
 // nj regression, which is the worst way to learn that test/ moved.
+//
+// Checked BEFORE the corpus runs, not after: both look at test/ only, and a
+// stale baseline found after a seven-minute replay is seven minutes wasted.
 if (header.testDigest) {
   const now = testDigest();
   if (now !== header.testDigest) {
@@ -658,18 +785,54 @@ if (recordedSuites) {
   }
 }
 
-abortOnCoverageGap();
+VERDICT_ONLY_IN_USE = headerVerdictOnly(header);
+{
+  const now = [...currentVerdictOnly().keys()].filter((s) => oracleSuites().includes(s)).sort().join(', ');
+  const used = [...VERDICT_ONLY_IN_USE.keys()].sort().join(', ');
+  if (now !== used) {
+    process.stdout.write(`\nnote: verdict-only set taken from the baseline: {${used}}; this harness alone would use {${now}}.\n`);
+  }
+}
+
+const tmp = path.join(os.tmpdir(), `nj-s0-verify-${process.pid}.ndjson`);
+const total = collect(tmp);
+const oldRecs = readRecords(CORPUS);
+const newRecs = readRecords(tmp);
+const diffs = diff(oldRecs, newRecs, 40);
+
+reportParts(total);
+const excluded = markNondeterministic(oldRecs).filter(Boolean).length;
+process.stdout.write(`\nbaseline: ${oldRecs.length} calls, nj sha256 ${header.njSha256}\n`);
+const code = codeSha();
+process.stdout.write(`current : ${newRecs.length} calls, current code sha256 (${code.label}, ${code.files} files) ${code.sha}\n`);
+process.stdout.write(`compared: ${oldRecs.length - excluded} calls (${excluded} excluded as nondeterministic by design — AC-7 concurrency)\n`);
 
 if (!process.env.HARNESS_KEEP) {
   fs.rmSync(SCRATCH, { recursive: true, force: true });
   fs.rmSync(tmp, { force: true });
 }
 
-if (diffs.length === 0 && oldRecs.length === newRecs.length) {
-  process.stdout.write('\nBEHAVIOUR UNCHANGED — the recorded surface is identical.\n');
-  process.exit(0);
+// Precedence, all findings printed first: a red verdict (8) wins over a
+// coverage gap (4), and a gap wins over a byte diff (1). A red verdict must
+// never hide behind an expected exit 1: a step with named, intended diffs
+// (DECISIONS 88) is gated on exit 1 plus reading the list, and a failing
+// suite in that same run would otherwise pass unseen. A gap still stops the
+// diff from being shown, as before: diffs from an incomplete run are noise.
+const unchanged = diffs.length === 0 && oldRecs.length === newRecs.length;
+if (redVerdicts.length) reportRed();
+if (cannotRun.length === 0) {
+  if (unchanged) process.stdout.write('\nBEHAVIOUR UNCHANGED — the recorded surface is identical.\n');
+  else {
+    process.stdout.write(`\nBEHAVIOUR CHANGED — ${diffs.length} differing call(s)${diffs.length === 40 ? ' (truncated)' : ''}:\n`);
+    for (const d of diffs) showDiff(d);
+    process.stdout.write('\nA differing call is a stop, not something to adjust the baseline for.\n');
+  }
 }
-process.stdout.write(`\nBEHAVIOUR CHANGED — ${diffs.length} differing call(s)${diffs.length === 40 ? ' (truncated)' : ''}:\n`);
-for (const d of diffs) showDiff(d);
-process.stdout.write('\nA differing call is a stop, not something to adjust the baseline for.\n');
-process.exit(1);
+if (redVerdicts.length) {
+  process.stdout.write(`\nVERDICT RED — ${redVerdicts.length} failing suite(s)/check(s), listed under RED VERDICTS above.\n`);
+  if (cannotRun.length) process.stdout.write(`Also ${cannotRun.length} coverage gap(s), listed under "cannot run".\n`);
+  process.stdout.write('This is a statement about nj, whatever the byte diff says.\n');
+  process.exit(8);
+}
+abortOnCoverageGap();
+process.exit(unchanged ? 0 : 1);

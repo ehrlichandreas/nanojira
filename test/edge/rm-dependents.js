@@ -61,7 +61,7 @@ function fixture(label) {
   T.check('the deletion happened', H.readOrNull(p(d, 'tasks/TSK-001.md')) === null,
     'tasks/TSK-001.md is still there');
   T.check('its tombstone remains (§ 8: the ID stays claimed forever)',
-    H.readOrNull(p(d, '.ids/TSK-001')) !== null, '.ids/TSK-001 is gone');
+    H.readOrNull(p(d, H.IDS_REL + '/TSK-001')) !== null, '.nanojira/ids/TSK-001 is gone');
 
   const dep = H.readOrNull(p(d, 'tasks/TSK-002.md'));
   T.check('the dependent itself survives', dep !== null, 'tasks/TSK-002.md is gone');
@@ -102,7 +102,7 @@ function fixture(label) {
     !!js.json && Array.isArray(js.json.changed),
     JSON.stringify(js.json && js.json.changed));
   T.check('the deletion happened', H.readOrNull(p(d, 'tasks/TSK-001.md')) === null);
-  T.check('its tombstone remains', H.readOrNull(p(d, '.ids/TSK-001')) !== null);
+  T.check('its tombstone remains', H.readOrNull(p(d, H.IDS_REL + '/TSK-001')) !== null);
 
   /* § 9: "`rm` additionally carries `dependents: […]` — the elements whose
    * `depends_on` names the removed one, empty when there are none".

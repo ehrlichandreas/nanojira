@@ -62,20 +62,24 @@ class Ctx {
     return d;
   }
 
-  /** A backlog laid out by hand — no nj call, so `nj init` stays testable too. */
+  /**
+   * A backlog laid out by hand — no nj call, so `nj init` stays testable
+   * too. The v3 layout (§ 4, V3-4): bookkeeping lives in `.nanojira/`, not
+   * at the top level.
+   */
   backlog(d, elements, opts) {
     const o = opts || {};
     const b = path.join(d, 'backlog');
-    for (const sub of ['epics', 'tasks', 'subtasks', 'archive', '.ids']) {
+    for (const sub of ['epics', 'tasks', 'subtasks', 'archive', '.nanojira/ids']) {
       fs.mkdirSync(path.join(b, sub), { recursive: true });
     }
-    if (o.config !== null) fs.writeFileSync(path.join(b, '.nanojira.json'), o.config || mkBacklogConfig());
+    if (o.config !== null) fs.writeFileSync(path.join(b, '.nanojira', 'config.json'), o.config || mkBacklogConfig());
     for (const e of elements || []) {
       const folder = e.folder || (e.type === 'epic' ? 'epics' : e.type === 'task' ? 'tasks' : 'subtasks');
       const name = (e.file || e.id) + '.md';
       fs.writeFileSync(path.join(b, folder, name), e.raw !== undefined ? e.raw : el(e));
       if (o.tombstones !== false) {
-        try { fs.closeSync(fs.openSync(path.join(b, '.ids', e.id), 'wx')); } catch { /* duplicate id */ }
+        try { fs.closeSync(fs.openSync(path.join(b, '.nanojira', 'ids', e.id), 'wx')); } catch { /* duplicate id */ }
       }
     }
     R.pinMtimes(b);
@@ -435,7 +439,7 @@ S('ids-missing', (c) => {
     { id: 'EPIC-001', type: 'epic', title: 'E', status: 'todo', created: TS, updated: TS },
     { id: 'TSK-001', type: 'task', parent: 'EPIC-001', title: 'T', status: 'todo', created: TS, updated: TS },
   ]);
-  fs.rmSync(path.join(b, '.ids'), { recursive: true, force: true });
+  fs.rmSync(path.join(b, '.nanojira', 'ids'), { recursive: true, force: true });
   R.pinMtimes(b);
   c.both('ids_missing-doctor', ['doctor'], { cwd: d });
   c.both('ids_missing-fix', ['doctor', '--fix'], { cwd: d });

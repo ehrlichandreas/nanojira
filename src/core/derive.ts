@@ -80,10 +80,14 @@ function entryJson(el: Element): EntryJson {
   return e as EntryJson;
 }
 
-function countsOf(scope: Element[]) {
+// `backlogErrors` folds in error-severity findings that are not about any
+// one element — an unreadable directory hiding files nj never even saw is
+// exactly the sort of problem a caller must not read past as "0 errors"
+// (DECISIONS 106 F4).
+function countsOf(scope: Element[], backlogErrors = 0) {
   return {
     total: scope.length,
-    errors: scope.filter(hasError).length,
+    errors: scope.filter(hasError).length + backlogErrors,
     incomplete: scope.filter(isIncomplete).length,
   };
 }

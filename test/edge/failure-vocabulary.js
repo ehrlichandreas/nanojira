@@ -124,7 +124,7 @@ function expectFailure(desc, args, opts, expectedCode) {
 }
 
 {
-  // backlog/ exists but .nanojira.json does not — § 4's "says exactly that".
+  // backlog/ exists but .nanojira/config.json does not — § 4's "says exactly that".
   const d = H.freshDir('ac20-noconfig');
   fs.mkdirSync(path.join(d, 'backlog', 'tasks'), { recursive: true });
   const json = expectFailure('backlog without config', ['list', '--json'],
@@ -139,7 +139,7 @@ function expectFailure(desc, args, opts, expectedCode) {
 
 {
   const d = H.mkBacklog({ label: 'ac20-badconfig' });
-  fs.writeFileSync(path.join(d, 'backlog', '.nanojira.json'),
+  fs.writeFileSync(path.join(d, 'backlog', H.CONFIG_REL),
     JSON.stringify({ schema: 1, statuses: ['todo', 'done', 'doing'] }));   // done not last
   expectFailure('invalid configuration', ['list', '--json'], { cwd: d }, 'invalid_config');
 }

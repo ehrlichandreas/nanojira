@@ -2,13 +2,13 @@
 
 // Configuration and backlog discovery.
 
-import type { Config, Flags } from './types.ts';
+import type { Config, Flags, Layout } from './types.ts';
 
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { flagString } from './args.ts';
-import { DEFAULT_CONFIG } from './constants.ts';
+import { DEFAULT_CONFIG, FOLDER_ROLES, GROUPS, V3_DIR_REL, V3_CONFIG_REL, LEGACY_CONFIG_REL } from './constants.ts';
 import { fail } from './output.ts';
 
 // ------------------------------------------------------------ configuration
@@ -37,27 +37,82 @@ function validateConfig(obj: any) {
       }
     }
   }
+  if (obj.layout !== undefined) errs.push(...validateLayout(obj.layout));
   return errs;
 }
 
-function loadConfig(backlog: string) {
-  const file = path.join(backlog, '.nanojira.json');
+// § 5: every part of `layout` is optional, but what is there must be right —
+// an unknown key is a typo, and a typo must not silently fall back to a default.
+function validateLayout(lay: any): string[] {
+  if (lay === null || typeof lay !== 'object' || Array.isArray(lay)) return ['layout must be an object'];
+  const errs = [];
+  for (const k of Object.keys(lay)) {
+    if (!['group', 'folders', 'statusFile'].includes(k)) errs.push(`unknown key 'layout.${k}'`);
+  }
+  if (lay.group !== undefined && !GROUPS.includes(lay.group)) {
+    errs.push(`layout.group must be one of ${GROUPS.join(', ')} (got ${JSON.stringify(lay.group)})`);
+  }
+  if (lay.statusFile !== undefined && typeof lay.statusFile !== 'boolean') errs.push('layout.statusFile must be true or false');
+  const f = lay.folders;
+  if (f === undefined) return errs;
+  if (f === null || typeof f !== 'object' || Array.isArray(f)) return errs.concat(['layout.folders must be an object']);
+  for (const k of Object.keys(f)) {
+    if (!(FOLDER_ROLES as string[]).includes(k)) errs.push(`unknown key 'layout.folders.${k}'`);
+  }
+  // Compared case-insensitively: APFS and NTFS are, by default (DECISIONS 91).
+  const names: string[] = [];
+  for (const role of FOLDER_ROLES) {
+    const name = f[role] === undefined ? DEFAULT_CONFIG.layout.folders[role] : f[role];
+    if (typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name)) {
+      errs.push(`layout.folders.${role} must be a folder name matching [A-Za-z0-9][A-Za-z0-9_-]* (got ${JSON.stringify(name)})`);
+      continue;
+    }
+    // Those are the folder names of group `hierarchy` (§ 4).
+    if (/^(EPIC|TSK|SUB)-\d+$/i.test(name)) errs.push(`layout.folders.${role} '${name}' has the form of an element ID`);
+    // A `backlog/` inside the backlog would capture discovery from within it.
+    if (name.toLowerCase() === 'backlog') errs.push(`layout.folders.${role} must not be named '${name}'`);
+    if (names.includes(name.toLowerCase())) errs.push(`layout.folders: '${name}' is used twice — folder names must be distinct`);
+    names.push(name.toLowerCase());
+  }
+  return errs;
+}
+
+function readLayout(lay: any): Layout {
+  const d = DEFAULT_CONFIG.layout;
+  if (lay === undefined) return { group: d.group, folders: { ...d.folders }, statusFile: d.statusFile };
+  return {
+    group: lay.group === undefined ? d.group : lay.group,
+    folders: { ...d.folders, ...(lay.folders || {}) },
+    statusFile: lay.statusFile === undefined ? d.statusFile : lay.statusFile,
+  };
+}
+
+// `legacy` picks the v2 top-level file instead of the v3 one — `doctor` is
+// the one caller that ever passes `true` (§ 14: "doctor reads the v2
+// places"); step 0 is the only thing that moves a backlog off it.
+function loadConfig(backlog: string, legacy?: boolean) {
+  const rel = legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL;
+  const file = path.join(backlog, rel);
   let raw;
   try {
     raw = fs.readFileSync(file, 'utf8');
   } catch {
-    return { config: DEFAULT_CONFIG, errors: [`.nanojira.json is missing`] };
+    return { config: DEFAULT_CONFIG, errors: [`${rel} is missing`] };
   }
   let obj;
   try {
     obj = JSON.parse(raw);
   } catch (e: any) {
-    return { config: DEFAULT_CONFIG, errors: [`.nanojira.json is not valid JSON: ${e.message}`] };
+    return { config: DEFAULT_CONFIG, errors: [`${rel} is not valid JSON: ${e.message}`] };
   }
   const errors = validateConfig(obj);
   if (errors.length > 0) return { config: DEFAULT_CONFIG, errors };
   return {
-    config: { schema: 1, statuses: obj.statuses.slice(), sections: { description: obj.sections.description.slice(), acceptance: obj.sections.acceptance.slice() } },
+    config: {
+      schema: 1, statuses: obj.statuses.slice(),
+      sections: { description: obj.sections.description.slice(), acceptance: obj.sections.acceptance.slice() },
+      layout: readLayout(obj.layout),
+    },
     errors: [],
   };
 }
@@ -75,15 +130,43 @@ function sourceName(src: Source) {
   return src.kind === 'flag' ? '--backlog' : src.kind === 'env' ? 'NJ_BACKLOG' : src.file;
 }
 
+// "Holds a backlog" (§ 4): the v3 configuration, OR — unmigrated — the v2
+// one; a legacy backlog is found, not refused by location, and refused
+// later as `legacy_layout` instead (AMBIGUITIES 71). `doctor` alone reaches
+// a legacy one with `lenient`, where neither file needs to exist at all.
+function holdsBacklog(dir: string): boolean {
+  return fs.existsSync(path.join(dir, V3_CONFIG_REL)) || fs.existsSync(path.join(dir, LEGACY_CONFIG_REL));
+}
+
 // `lenient` (doctor) accepts any existing directory, so a missing config can
-// be reported instead of refused.
+// be reported instead of refused. `dir` is shown escaped for an `.njrc`
+// source: it can carry bytes straight out of the file's parsed value
+// (TSK-029 T3), and a raw invisible character in the message would hide the
+// very thing that made the value wrong.
 function claim(dir: string, src: Source, lenient: boolean): string {
-  if (!isDir(dir)) fail(SOURCE_CODE[src.kind], `no backlog at ${dir} (from ${sourceName(src)})`);
-  if (!lenient && !fs.existsSync(path.join(dir, '.nanojira.json'))) {
-    fail(SOURCE_CODE[src.kind], `no backlog at ${dir} (from ${sourceName(src)})`,
-      'the directory has no .nanojira.json — check the path, or run `nj init` with the same source to create a backlog there');
+  const shown = src.kind === 'njrc' ? escapeInvisible(dir) : dir;
+  if (!isDir(dir)) fail(SOURCE_CODE[src.kind], `no backlog at ${shown} (from ${sourceName(src)})`);
+  if (lenient || holdsBacklog(dir)) return dir;
+  // "A folder with `.nanojira/` but without `config.json`… is
+  // `backlog_without_config`" (§ 4) — unconditionally, not only when the
+  // search finds it: the directory IS there, only its configuration is
+  // missing, which is a different failure from "nothing at this path" and
+  // must say so regardless of which source named it.
+  if (fs.existsSync(path.join(dir, V3_DIR_REL))) {
+    fail('backlog_without_config', `${shown} exists but has no ${V3_CONFIG_REL}`,
+      'run `nj doctor` — it tolerates the missing file and reports config:invalid');
   }
-  return dir;
+  fail(SOURCE_CODE[src.kind], `no backlog at ${shown} (from ${sourceName(src)})`,
+    `the directory has no ${V3_CONFIG_REL} — check the path, or run \`nj init\` with the same source to create a backlog there`);
+}
+
+// Any character outside printable ASCII (space through ~) becomes a \uXXXX
+// escape — NBSP, a lone \v/\f, U+2028, a BOM mid-value — so a message never
+// shows an invisible character as though it were absent (TSK-029 T3). Applied
+// only to text taken from untrusted input (an `.njrc` key, value or the path
+// derived from one), never to nj's own static prose.
+function escapeInvisible(s: string): string {
+  return s.replace(/[^\x20-\x7E]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
 }
 
 // The sources before the upward search: --backlog, then NJ_BACKLOG. Both
@@ -92,10 +175,10 @@ function explicitLocation(flags: Flags): { dir: string; src: Source } | null {
   const flag = flagString(flags, 'backlog');
   if (flag !== undefined) {
     if (flag === '') fail('missing_value', '--backlog needs a value (use --backlog=…)');
-    return { dir: path.resolve(flag), src: { kind: 'flag' } };
+    return { dir: fromCwd(flag), src: { kind: 'flag' } };
   }
   const env = process.env.NJ_BACKLOG;
-  if (env !== undefined && env !== '') return { dir: path.resolve(env), src: { kind: 'env' } };
+  if (env !== undefined && env !== '') return { dir: fromCwd(env), src: { kind: 'env' } };
   return null;
 }
 
@@ -117,34 +200,103 @@ function njrcLocation(dir: string): { dir: string; src: Source } | null {
 // null when there is no `.njrc` at all. Anything else that is not a readable
 // regular file — a directory, a dangling symlink, a FIFO, no read permission —
 // is a `.njrc` the search reached and could not use: fatal, not "absent" (§ 4).
+//
+// Ownership comes first, before a single byte is read: a `.njrc` planted in a
+// shared ancestor (`/tmp`) must not steer another user's `nj`, so one owned
+// by anybody but the current user or root is refused — for a symlink, the
+// link and its target both (§ 4, DECISIONS 93 F1, 98).
+// Checked and read through ONE file descriptor (TSK-029 T1): `lstat` for the
+// link's own owner, then `open(O_RDONLY|O_NONBLOCK)`, `fstat` on that same fd
+// for the target's owner and `isFile()`, then the read -- also from that fd.
+// Three separate by-path lookups (lstat, stat, readFileSync-by-path) left a
+// window in which the file on disk could be swapped between the ownership
+// check and the read: demonstrated, a decoy that passes the check, then the
+// real payload underneath it. `O_NONBLOCK` also makes a FIFO fail the open
+// outright instead of blocking forever, the same hazard D96 found for a path
+// opened without it.
 function readNjrc(file: string): string | null {
-  try { fs.lstatSync(file); } catch { return null; }
-  const bad = (reason: string): never => fail('invalid_njrc', `invalid .njrc at ${file}: ${reason}`);
-  let st;
-  try { st = fs.statSync(file); } catch { return bad('it is a dangling symlink'); }
-  if (!st.isFile()) return bad(st.isDirectory() ? 'it is a directory, not a file' : 'it is not a regular file');
-  let raw;
-  try { raw = fs.readFileSync(file, 'utf8'); } catch (e: any) { return bad(`cannot read it — ${e.code || e.message}`); }
-  return raw.startsWith('\uFEFF') ? raw.slice(1) : raw;
+  let link;
+  try { link = fs.lstatSync(file); } catch { return null; }
+  const bad = (reason: string, hint?: string): never => fail('invalid_njrc', `invalid .njrc at ${file}: ${reason}`, hint);
+  checkOwner(link.uid, bad);
+  let fd;
+  try {
+    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+  } catch (e: any) {
+    if (e.code === 'ELOOP') return bad('it is a symlink loop (ELOOP)');
+    return bad(e.code === 'ENOENT' ? 'it is a dangling symlink' : `cannot open it -- ${e.code || e.message}`);
+  }
+  try {
+    // `checkOwner`'s own `fail()` must reach the caller unmasked \u2014 it is not
+    // a filesystem error, so it stays outside the try below, which exists
+    // only to turn a REAL fstat/read failure into `invalid_njrc` too.
+    let st;
+    try {
+      st = fs.fstatSync(fd);
+    } catch (e: any) {
+      return bad(`cannot stat it -- ${e.code || e.message}`);
+    }
+    // Unconditional, not only for a symlink (Verifier, v3-2-followup.md T1):
+    // the bytes read always come from THIS fd, so the ownership that matters
+    // is always fstat(fd).uid — for a plain file that is the same uid lstat
+    // already saw, a cheap re-check; for a symlink it is the target's. Gating
+    // this on `isSymbolicLink()` left the by-path `lstat` immediately before
+    // `open()` as the plain file's ONLY check, and a file swapped into that
+    // path between the two syscalls raced straight through it — reproduced
+    // twice independently. `checkOwner(link.uid, bad)` above stays too, as a
+    // cheap early rejection; it must never be the only one.
+    checkOwner(st.uid, bad);
+    if (!st.isFile()) return bad(st.isDirectory() ? 'it is a directory, not a file' : 'it is not a regular file');
+    let raw;
+    try {
+      raw = fs.readFileSync(fd, 'utf8');
+    } catch (e: any) {
+      return bad(`cannot read it -- ${e.code || e.message}`);
+    }
+    // A BOM counts only at the very start; anywhere else it is an ordinary character.
+    return raw.startsWith('\uFEFF') ? raw.slice(1) : raw;
+  } finally {
+    fs.closeSync(fd);
+  }
+}
+
+function checkOwner(uid: number, bad: (reason: string, hint?: string) => never) {
+  // Ownership is POSIX; where there are no uids there is nothing to check.
+  if (typeof process.getuid !== 'function') return;
+  if (uid !== process.getuid() && uid !== 0) {
+    bad(`owned by uid ${uid}, not by you`, 'use --backlog=<path> or NJ_BACKLOG, or change the owner');
+  }
 }
 
 const NJRC_KEYS = ['backlog'];
+
+// Spaces and tabs only: String.prototype.trim would also eat a BOM, which
+// counts as whitespace nowhere but at the very start of the file (§ 4).
+function trimBlank(s: string) {
+  return s.replace(/^[ \t]+|[ \t]+$/g, '');
+}
 
 function parseNjrc(file: string, raw: string): Map<string, string> {
   const values: Map<string, string> = new Map();
   const bad = (n: number, reason: string): never =>
     fail('invalid_njrc', `invalid .njrc at ${file}: line ${n}: ${reason}`,
       `one \`key = value\` per line, a line starting with \`#\` is a comment; known keys: ${NJRC_KEYS.join(', ')}`);
-  raw.split('\n').forEach((line, i) => {
-    const t = line.trim();
+  const lines = raw.split('\n');
+  lines.forEach((full, i) => {
+    // A `\r` counts as line-end whitespace only right before a `\n`; a lone
+    // one would let a classic-Mac file read as a single comment line and
+    // silently set nothing (§ 4, DECISIONS 96, 98).
+    const line = i < lines.length - 1 && full.endsWith('\r') ? full.slice(0, -1) : full;
+    if (line.includes('\r')) bad(i + 1, 'a carriage return (\\r) not followed by a line feed');
+    const t = trimBlank(line);
     if (t === '' || t.startsWith('#')) return;
     const eq = t.indexOf('=');
-    if (eq === -1) bad(i + 1, `no '=' in '${t}'`);
-    const key = t.slice(0, eq).trim();
-    const value = t.slice(eq + 1).trim();
-    if (!NJRC_KEYS.includes(key)) bad(i + 1, `unknown key '${key}'`);
-    if (value === '') bad(i + 1, `empty value for '${key}'`);
-    if (values.has(key)) bad(i + 1, `repeated key '${key}'`);
+    if (eq === -1) bad(i + 1, `no '=' in '${escapeInvisible(t)}'`);
+    const key = trimBlank(t.slice(0, eq));
+    const value = trimBlank(t.slice(eq + 1));
+    if (!NJRC_KEYS.includes(key)) bad(i + 1, `unknown key '${escapeInvisible(key)}'`);
+    if (value === '') bad(i + 1, `empty value for '${escapeInvisible(key)}'`);
+    if (values.has(key)) bad(i + 1, `repeated key '${escapeInvisible(key)}'`);
     values.set(key, value);
   });
   return values;
@@ -156,32 +308,56 @@ function parseNjrc(file: string, raw: string): Map<string, string> {
 function initLocation(flags: Flags): string {
   const explicit = explicitLocation(flags);
   if (explicit !== null) return explicit.dir;
-  for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+  for (let dir = workingDir(); ; dir = path.dirname(dir)) {
     const rc = njrcLocation(dir);
     if (rc !== null) return rc.dir;
     if (path.dirname(dir) === dir) break;
   }
-  return path.resolve(process.cwd(), 'backlog');
+  return path.join(workingDir(), 'backlog');
+}
+
+/**
+ * The working directory, or `io_error` when the OS cannot give it — deleted,
+ * or below an ancestor the user may not search (DECISIONS 93 F4, 96). Every
+ * relative path goes through this, never through Node's own implicit cwd,
+ * whose failure would surface as a stack trace.
+ */
+function workingDir(): string {
+  try {
+    return process.cwd();
+  } catch (e: any) {
+    return fail('io_error', `cannot determine the working directory: ${oneLine(e)}`);
+  }
+}
+
+function fromCwd(p: string) {
+  return path.isAbsolute(p) ? path.resolve(p) : path.resolve(workingDir(), p);
+}
+
+/** An OS error as one line: its code and message, never its stack. */
+function oneLine(e: any): string {
+  const msg = e && e.message ? String(e.message) : String(e);
+  return msg.split('\n')[0];
 }
 
 function findBacklog(flags: Flags, lenient: boolean): string {
   const explicit = explicitLocation(flags);
   if (explicit !== null) return claim(explicit.dir, explicit.src, lenient);
   // Nearest directory wins; within one directory `.njrc` beats `backlog/`.
-  for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+  for (let dir = workingDir(); ; dir = path.dirname(dir)) {
     const rc = njrcLocation(dir);
     if (rc !== null) return claim(rc.dir, rc.src, lenient);
     const candidate = path.join(dir, 'backlog');
     if (isDir(candidate)) {
-      if (lenient || fs.existsSync(path.join(candidate, '.nanojira.json'))) return candidate;
+      if (lenient || holdsBacklog(candidate)) return candidate;
       // A backlog folder without its config is a different failure from "none
       // at all" and must say so rather than send the caller hunting (§ 4).
-      fail('backlog_without_config', `${candidate} exists but has no .nanojira.json`,
+      fail('backlog_without_config', `${candidate} exists but has no ${V3_CONFIG_REL}`,
         'run `nj doctor` — it tolerates the missing file and reports config:invalid');
     }
     if (path.dirname(dir) === dir) break;
   }
-  return fail('no_backlog', 'no backlog found (looked for backlog/.nanojira.json upward from the working directory)',
+  return fail('no_backlog', `no backlog found (looked for backlog/${V3_CONFIG_REL} upward from the working directory)`,
     'run `nj init` to create one, or set NJ_BACKLOG');
 }
 
@@ -189,10 +365,12 @@ function isDir(p: string) {
   try { return fs.statSync(p).isDirectory(); } catch { return false; }
 }
 
-function listMd(dir: string) {
-  let names;
-  try { names = fs.readdirSync(dir); } catch { return []; }
-  return names.filter((n: string) => n.endsWith('.md')).sort().map((n: string) => path.join(dir, n));
+// The legacy signal: the v2 configuration at the backlog's top level. §4:
+// "A folder with the legacy `.nanojira.json` at its top level is
+// `legacy_layout`" — unconditionally, regardless of whether `.nanojira/`
+// also exists (an ambiguous step 0 is still a legacy backlog, DECISIONS 95 B21).
+function isLegacyBacklog(backlog: string): boolean {
+  return fs.existsSync(path.join(backlog, LEGACY_CONFIG_REL));
 }
 
-export { loadConfig, findBacklog, initLocation, listMd };
+export { loadConfig, findBacklog, initLocation, workingDir, oneLine, holdsBacklog, isLegacyBacklog };

@@ -20,8 +20,8 @@ const bins = process.argv.slice(2);
 for (const [name, body] of Object.entries(shapes)) {
   const outs = bins.map(nj => {
     const d = fs.mkdtempSync(SCRATCH_BASE + '/r8-'); const bl = path.join(d, 'backlog');
-    for (const s of ['epics','tasks','subtasks','archive','.ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
-    fs.writeFileSync(path.join(bl, '.nanojira.json'), CFG); fs.writeFileSync(path.join(bl, '.ids', 'TSK-001'), '');
+    for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
+    fs.writeFileSync(path.join(bl, '.nanojira/config.json'), CFG); fs.writeFileSync(path.join(bl, '.nanojira/ids', 'TSK-001'), '');
     fs.writeFileSync(path.join(bl, 'tasks', 'TSK-001.md'), FM + body);
     spawnSync(process.execPath, [nj, 'set', '--id=TSK-001', '--acceptance=- [ ] a'], { cwd: d, env: Object.assign({}, process.env, { NJ_NOW: LATER }), encoding: 'utf8' });
     return fs.readFileSync(path.join(bl, 'tasks', 'TSK-001.md'), 'utf8').split('\n---\n')[1].split('\n').filter(l => l.startsWith('## ')).map(l => l.slice(3)).join(' > ');

@@ -29,7 +29,6 @@ var fs = __toESM(require("fs"), 1);
 // src/core/constants.ts
 var TYPE_PREFIX = { epic: "EPIC", task: "TSK", subtask: "SUB" };
 var PREFIX_TYPE = { EPIC: "epic", TSK: "task", SUB: "subtask" };
-var TYPE_DIR = { epic: "epics", task: "tasks", subtask: "subtasks" };
 var TYPES = ["epic", "task", "subtask"];
 var PARENT_TYPE = { task: "epic", subtask: "task" };
 var PRIORITIES = ["low", "normal", "high", "urgent"];
@@ -53,10 +52,25 @@ var SECTION_ROLES = ["description", "acceptance"];
 var SECTION_FLAGS = ["description", "description-file", "acceptance", "acceptance-file"];
 var SETTABLE_FIELDS = ["title", "status", "priority", "assignee", "tags", "depends_on"].concat(SECTION_FLAGS);
 var NEW_FIELDS = ["type", "parent", "title", "status", "priority", "assignee", "tags", "depends_on"].concat(SECTION_FLAGS);
+var TYPE_FOLDER_ROLE = { epic: "epics", task: "tasks", subtask: "subtasks" };
+var FOLDER_ROLES = ["epics", "tasks", "subtasks", "archive"];
+var GROUPS = ["type", "hierarchy", "flat"];
+var V3_DIR_REL = ".nanojira";
+var V3_CONFIG_REL = ".nanojira/config.json";
+var V3_IDS_REL = ".nanojira/ids";
+var V3_INDEX_REL = ".nanojira/index.json";
+var LEGACY_CONFIG_REL = ".nanojira.json";
+var LEGACY_IDS_REL = ".ids";
+var LEGACY_INDEX_REL = ".nanojira-index.json";
 var DEFAULT_CONFIG = {
   schema: 1,
   statuses: ["todo", "doing", "blocked", "review", "done"],
-  sections: { description: ["Description"], acceptance: ["Acceptance Criteria"] }
+  sections: { description: ["Description"], acceptance: ["Acceptance Criteria"] },
+  layout: {
+    group: "type",
+    folders: { epics: "epics", tasks: "tasks", subtasks: "subtasks", archive: "archive" },
+    statusFile: true
+  }
 };
 var SEVERITY = {
   "frontmatter:unreadable": "error",
@@ -70,6 +84,7 @@ var SEVERITY = {
   "id:mismatch": "error",
   "type:derived": "warning",
   "type:folder": "error",
+  "layout:misplaced": "error",
   "parent:orphaned": "warning",
   "parent:dangling": "error",
   "parent:cycle": "error",
@@ -88,6 +103,7 @@ var SEVERITY = {
   "id:no_tombstone": "warning",
   "backlog:stray_tmp": "warning",
   "backlog:ids_missing": "error",
+  "backlog:unreadable_dir": "error",
   "config:invalid": "error"
 };
 var BLOCKS_READY = /* @__PURE__ */ new Set([
@@ -97,6 +113,7 @@ var BLOCKS_READY = /* @__PURE__ */ new Set([
   "missing:title",
   "id:mismatch",
   "type:folder",
+  "layout:misplaced",
   "parent:dangling",
   "parent:cycle",
   "parent:hierarchy",
@@ -109,7 +126,7 @@ var BLOCKS_READY = /* @__PURE__ */ new Set([
   "incomplete:description",
   "incomplete:acceptance"
 ]);
-var BACKLOG_LEVEL = /* @__PURE__ */ new Set(["backlog:stray_tmp", "backlog:ids_missing", "config:invalid"]);
+var BACKLOG_LEVEL = /* @__PURE__ */ new Set(["backlog:stray_tmp", "backlog:ids_missing", "backlog:unreadable_dir", "config:invalid"]);
 
 // src/core/derive.ts
 function elementProblems(el) {
@@ -169,10 +186,10 @@ function entryJson(el) {
   e._problems = elementProblems(el);
   return e;
 }
-function countsOf(scope) {
+function countsOf(scope, backlogErrors = 0) {
   return {
     total: scope.length,
-    errors: scope.filter(hasError).length,
+    errors: scope.filter(hasError).length + backlogErrors,
     incomplete: scope.filter(isIncomplete).length
   };
 }
@@ -607,12 +624,12 @@ function readSectionFlags(flags) {
 }
 
 // src/commands/cmd-archive.ts
-var fs6 = __toESM(require("fs"), 1);
-var path5 = __toESM(require("path"), 1);
+var fs8 = __toESM(require("fs"), 1);
+var path7 = __toESM(require("path"), 1);
 
 // src/core/context.ts
-var fs5 = __toESM(require("fs"), 1);
-var path4 = __toESM(require("path"), 1);
+var fs6 = __toESM(require("fs"), 1);
+var path5 = __toESM(require("path"), 1);
 
 // src/core/config.ts
 var fs2 = __toESM(require("fs"), 1);
@@ -642,26 +659,72 @@ function validateConfig(obj) {
       }
     }
   }
+  if (obj.layout !== void 0) errs.push(...validateLayout(obj.layout));
   return errs;
 }
-function loadConfig(backlog) {
-  const file = path.join(backlog, ".nanojira.json");
+function validateLayout(lay) {
+  if (lay === null || typeof lay !== "object" || Array.isArray(lay)) return ["layout must be an object"];
+  const errs = [];
+  for (const k of Object.keys(lay)) {
+    if (!["group", "folders", "statusFile"].includes(k)) errs.push(`unknown key 'layout.${k}'`);
+  }
+  if (lay.group !== void 0 && !GROUPS.includes(lay.group)) {
+    errs.push(`layout.group must be one of ${GROUPS.join(", ")} (got ${JSON.stringify(lay.group)})`);
+  }
+  if (lay.statusFile !== void 0 && typeof lay.statusFile !== "boolean") errs.push("layout.statusFile must be true or false");
+  const f = lay.folders;
+  if (f === void 0) return errs;
+  if (f === null || typeof f !== "object" || Array.isArray(f)) return errs.concat(["layout.folders must be an object"]);
+  for (const k of Object.keys(f)) {
+    if (!FOLDER_ROLES.includes(k)) errs.push(`unknown key 'layout.folders.${k}'`);
+  }
+  const names = [];
+  for (const role of FOLDER_ROLES) {
+    const name = f[role] === void 0 ? DEFAULT_CONFIG.layout.folders[role] : f[role];
+    if (typeof name !== "string" || !/^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(name)) {
+      errs.push(`layout.folders.${role} must be a folder name matching [A-Za-z0-9][A-Za-z0-9_-]* (got ${JSON.stringify(name)})`);
+      continue;
+    }
+    if (/^(EPIC|TSK|SUB)-\d+$/i.test(name)) errs.push(`layout.folders.${role} '${name}' has the form of an element ID`);
+    if (name.toLowerCase() === "backlog") errs.push(`layout.folders.${role} must not be named '${name}'`);
+    if (names.includes(name.toLowerCase())) errs.push(`layout.folders: '${name}' is used twice \u2014 folder names must be distinct`);
+    names.push(name.toLowerCase());
+  }
+  return errs;
+}
+function readLayout(lay) {
+  const d = DEFAULT_CONFIG.layout;
+  if (lay === void 0) return { group: d.group, folders: { ...d.folders }, statusFile: d.statusFile };
+  return {
+    group: lay.group === void 0 ? d.group : lay.group,
+    folders: { ...d.folders, ...lay.folders || {} },
+    statusFile: lay.statusFile === void 0 ? d.statusFile : lay.statusFile
+  };
+}
+function loadConfig(backlog, legacy) {
+  const rel = legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL;
+  const file = path.join(backlog, rel);
   let raw;
   try {
     raw = fs2.readFileSync(file, "utf8");
   } catch {
-    return { config: DEFAULT_CONFIG, errors: [`.nanojira.json is missing`] };
+    return { config: DEFAULT_CONFIG, errors: [`${rel} is missing`] };
   }
   let obj;
   try {
     obj = JSON.parse(raw);
   } catch (e) {
-    return { config: DEFAULT_CONFIG, errors: [`.nanojira.json is not valid JSON: ${e.message}`] };
+    return { config: DEFAULT_CONFIG, errors: [`${rel} is not valid JSON: ${e.message}`] };
   }
   const errors = validateConfig(obj);
   if (errors.length > 0) return { config: DEFAULT_CONFIG, errors };
   return {
-    config: { schema: 1, statuses: obj.statuses.slice(), sections: { description: obj.sections.description.slice(), acceptance: obj.sections.acceptance.slice() } },
+    config: {
+      schema: 1,
+      statuses: obj.statuses.slice(),
+      sections: { description: obj.sections.description.slice(), acceptance: obj.sections.acceptance.slice() },
+      layout: readLayout(obj.layout)
+    },
     errors: []
   };
 }
@@ -669,25 +732,37 @@ var SOURCE_CODE = { flag: "invalid_backlog_flag", env: "invalid_backlog_env", nj
 function sourceName(src) {
   return src.kind === "flag" ? "--backlog" : src.kind === "env" ? "NJ_BACKLOG" : src.file;
 }
+function holdsBacklog(dir) {
+  return fs2.existsSync(path.join(dir, V3_CONFIG_REL)) || fs2.existsSync(path.join(dir, LEGACY_CONFIG_REL));
+}
 function claim(dir, src, lenient) {
-  if (!isDir(dir)) fail(SOURCE_CODE[src.kind], `no backlog at ${dir} (from ${sourceName(src)})`);
-  if (!lenient && !fs2.existsSync(path.join(dir, ".nanojira.json"))) {
+  const shown = src.kind === "njrc" ? escapeInvisible(dir) : dir;
+  if (!isDir(dir)) fail(SOURCE_CODE[src.kind], `no backlog at ${shown} (from ${sourceName(src)})`);
+  if (lenient || holdsBacklog(dir)) return dir;
+  if (fs2.existsSync(path.join(dir, V3_DIR_REL))) {
     fail(
-      SOURCE_CODE[src.kind],
-      `no backlog at ${dir} (from ${sourceName(src)})`,
-      "the directory has no .nanojira.json \u2014 check the path, or run `nj init` with the same source to create a backlog there"
+      "backlog_without_config",
+      `${shown} exists but has no ${V3_CONFIG_REL}`,
+      "run `nj doctor` \u2014 it tolerates the missing file and reports config:invalid"
     );
   }
-  return dir;
+  fail(
+    SOURCE_CODE[src.kind],
+    `no backlog at ${shown} (from ${sourceName(src)})`,
+    `the directory has no ${V3_CONFIG_REL} \u2014 check the path, or run \`nj init\` with the same source to create a backlog there`
+  );
+}
+function escapeInvisible(s) {
+  return s.replace(/[^\x20-\x7E]/g, (c) => "\\u" + c.charCodeAt(0).toString(16).padStart(4, "0"));
 }
 function explicitLocation(flags) {
   const flag = flagString(flags, "backlog");
   if (flag !== void 0) {
     if (flag === "") fail("missing_value", "--backlog needs a value (use --backlog=\u2026)");
-    return { dir: path.resolve(flag), src: { kind: "flag" } };
+    return { dir: fromCwd(flag), src: { kind: "flag" } };
   }
   const env = process.env.NJ_BACKLOG;
-  if (env !== void 0 && env !== "") return { dir: path.resolve(env), src: { kind: "env" } };
+  if (env !== void 0 && env !== "") return { dir: fromCwd(env), src: { kind: "env" } };
   return null;
 }
 function njrcLocation(dir) {
@@ -700,28 +775,51 @@ function njrcLocation(dir) {
   return { dir: path.resolve(dir, expanded), src: { kind: "njrc", file } };
 }
 function readNjrc(file) {
+  let link;
   try {
-    fs2.lstatSync(file);
+    link = fs2.lstatSync(file);
   } catch {
     return null;
   }
-  const bad = (reason) => fail("invalid_njrc", `invalid .njrc at ${file}: ${reason}`);
-  let st;
+  const bad = (reason, hint) => fail("invalid_njrc", `invalid .njrc at ${file}: ${reason}`, hint);
+  checkOwner(link.uid, bad);
+  let fd;
   try {
-    st = fs2.statSync(file);
-  } catch {
-    return bad("it is a dangling symlink");
-  }
-  if (!st.isFile()) return bad(st.isDirectory() ? "it is a directory, not a file" : "it is not a regular file");
-  let raw;
-  try {
-    raw = fs2.readFileSync(file, "utf8");
+    fd = fs2.openSync(file, fs2.constants.O_RDONLY | fs2.constants.O_NONBLOCK);
   } catch (e) {
-    return bad(`cannot read it \u2014 ${e.code || e.message}`);
+    if (e.code === "ELOOP") return bad("it is a symlink loop (ELOOP)");
+    return bad(e.code === "ENOENT" ? "it is a dangling symlink" : `cannot open it -- ${e.code || e.message}`);
   }
-  return raw.startsWith("\uFEFF") ? raw.slice(1) : raw;
+  try {
+    let st;
+    try {
+      st = fs2.fstatSync(fd);
+    } catch (e) {
+      return bad(`cannot stat it -- ${e.code || e.message}`);
+    }
+    checkOwner(st.uid, bad);
+    if (!st.isFile()) return bad(st.isDirectory() ? "it is a directory, not a file" : "it is not a regular file");
+    let raw;
+    try {
+      raw = fs2.readFileSync(fd, "utf8");
+    } catch (e) {
+      return bad(`cannot read it -- ${e.code || e.message}`);
+    }
+    return raw.startsWith("\uFEFF") ? raw.slice(1) : raw;
+  } finally {
+    fs2.closeSync(fd);
+  }
+}
+function checkOwner(uid, bad) {
+  if (typeof process.getuid !== "function") return;
+  if (uid !== process.getuid() && uid !== 0) {
+    bad(`owned by uid ${uid}, not by you`, "use --backlog=<path> or NJ_BACKLOG, or change the owner");
+  }
 }
 var NJRC_KEYS = ["backlog"];
+function trimBlank(s) {
+  return s.replace(/^[ \t]+|[ \t]+$/g, "");
+}
 function parseNjrc(file, raw) {
   const values = /* @__PURE__ */ new Map();
   const bad = (n, reason) => fail(
@@ -729,16 +827,19 @@ function parseNjrc(file, raw) {
     `invalid .njrc at ${file}: line ${n}: ${reason}`,
     `one \`key = value\` per line, a line starting with \`#\` is a comment; known keys: ${NJRC_KEYS.join(", ")}`
   );
-  raw.split("\n").forEach((line, i) => {
-    const t = line.trim();
+  const lines = raw.split("\n");
+  lines.forEach((full, i) => {
+    const line = i < lines.length - 1 && full.endsWith("\r") ? full.slice(0, -1) : full;
+    if (line.includes("\r")) bad(i + 1, "a carriage return (\\r) not followed by a line feed");
+    const t = trimBlank(line);
     if (t === "" || t.startsWith("#")) return;
     const eq = t.indexOf("=");
-    if (eq === -1) bad(i + 1, `no '=' in '${t}'`);
-    const key = t.slice(0, eq).trim();
-    const value = t.slice(eq + 1).trim();
-    if (!NJRC_KEYS.includes(key)) bad(i + 1, `unknown key '${key}'`);
-    if (value === "") bad(i + 1, `empty value for '${key}'`);
-    if (values.has(key)) bad(i + 1, `repeated key '${key}'`);
+    if (eq === -1) bad(i + 1, `no '=' in '${escapeInvisible(t)}'`);
+    const key = trimBlank(t.slice(0, eq));
+    const value = trimBlank(t.slice(eq + 1));
+    if (!NJRC_KEYS.includes(key)) bad(i + 1, `unknown key '${escapeInvisible(key)}'`);
+    if (value === "") bad(i + 1, `empty value for '${escapeInvisible(key)}'`);
+    if (values.has(key)) bad(i + 1, `repeated key '${escapeInvisible(key)}'`);
     values.set(key, value);
   });
   return values;
@@ -746,25 +847,39 @@ function parseNjrc(file, raw) {
 function initLocation(flags) {
   const explicit = explicitLocation(flags);
   if (explicit !== null) return explicit.dir;
-  for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+  for (let dir = workingDir(); ; dir = path.dirname(dir)) {
     const rc = njrcLocation(dir);
     if (rc !== null) return rc.dir;
     if (path.dirname(dir) === dir) break;
   }
-  return path.resolve(process.cwd(), "backlog");
+  return path.join(workingDir(), "backlog");
+}
+function workingDir() {
+  try {
+    return process.cwd();
+  } catch (e) {
+    return fail("io_error", `cannot determine the working directory: ${oneLine(e)}`);
+  }
+}
+function fromCwd(p) {
+  return path.isAbsolute(p) ? path.resolve(p) : path.resolve(workingDir(), p);
+}
+function oneLine(e) {
+  const msg = e && e.message ? String(e.message) : String(e);
+  return msg.split("\n")[0];
 }
 function findBacklog(flags, lenient) {
   const explicit = explicitLocation(flags);
   if (explicit !== null) return claim(explicit.dir, explicit.src, lenient);
-  for (let dir = process.cwd(); ; dir = path.dirname(dir)) {
+  for (let dir = workingDir(); ; dir = path.dirname(dir)) {
     const rc = njrcLocation(dir);
     if (rc !== null) return claim(rc.dir, rc.src, lenient);
     const candidate = path.join(dir, "backlog");
     if (isDir(candidate)) {
-      if (lenient || fs2.existsSync(path.join(candidate, ".nanojira.json"))) return candidate;
+      if (lenient || holdsBacklog(candidate)) return candidate;
       fail(
         "backlog_without_config",
-        `${candidate} exists but has no .nanojira.json`,
+        `${candidate} exists but has no ${V3_CONFIG_REL}`,
         "run `nj doctor` \u2014 it tolerates the missing file and reports config:invalid"
       );
     }
@@ -772,7 +887,7 @@ function findBacklog(flags, lenient) {
   }
   return fail(
     "no_backlog",
-    "no backlog found (looked for backlog/.nanojira.json upward from the working directory)",
+    `no backlog found (looked for backlog/${V3_CONFIG_REL} upward from the working directory)`,
     "run `nj init` to create one, or set NJ_BACKLOG"
   );
 }
@@ -783,23 +898,146 @@ function isDir(p) {
     return false;
   }
 }
-function listMd(dir) {
-  let names;
-  try {
-    names = fs2.readdirSync(dir);
-  } catch {
-    return [];
-  }
-  return names.filter((n) => n.endsWith(".md")).sort().map((n) => path.join(dir, n));
+function isLegacyBacklog(backlog) {
+  return fs2.existsSync(path.join(backlog, LEGACY_CONFIG_REL));
 }
 
 // src/core/load.ts
-var fs4 = __toESM(require("fs"), 1);
-var path3 = __toESM(require("path"), 1);
+var fs5 = __toESM(require("fs"), 1);
+var path4 = __toESM(require("path"), 1);
 
-// src/core/store.ts
+// src/core/layout.ts
 var fs3 = __toESM(require("fs"), 1);
 var path2 = __toESM(require("path"), 1);
+var INTERNAL_DIRS = [".ids", ".nanojira"];
+var TOP_LEVEL_DOCS = /* @__PURE__ */ new Set(["README.md", "STATUS.md"]);
+var ID_FOLDER = /^(EPIC|TSK|SUB)-\d+$/;
+function foldEq(a, b) {
+  return a.toLowerCase() === b.toLowerCase();
+}
+function scanBacklog(backlog, layout) {
+  const files = [];
+  const dirs = [backlog];
+  const unreadable = [];
+  const readEntries = (dir) => {
+    let entries;
+    try {
+      entries = fs3.readdirSync(dir, { withFileTypes: true });
+    } catch (e) {
+      if (e.code !== "ENOENT") unreadable.push({ dir, reason: e.code || e.message });
+      return [];
+    }
+    return entries.sort((a, b) => a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+  };
+  const walk = (dir, folder, entries) => {
+    for (const e of entries) {
+      const abs = path2.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (e.name.startsWith(".")) continue;
+        dirs.push(abs);
+        walk(abs, folder === "" ? e.name : folder + "/" + e.name, readEntries(abs));
+      } else if (e.name.endsWith(".md") && !(e.isSymbolicLink() && isDirectory(abs))) {
+        files.push({ file: abs, folder });
+      }
+    }
+  };
+  const roleNames = FOLDER_ROLES.map((r) => layout.folders[r]);
+  const top = readEntries(backlog).filter((e) => !(TOP_LEVEL_DOCS.has(e.name) && !e.isDirectory()));
+  const isRoleName = (name) => roleNames.some((n) => foldEq(n, name));
+  for (const n of roleNames) {
+    const e = top.find((t) => foldEq(t.name, n));
+    if (e === void 0) continue;
+    const abs = path2.join(backlog, e.name);
+    if (e.isSymbolicLink()) {
+      let st;
+      try {
+        st = fs3.statSync(abs);
+      } catch (err) {
+        unreadable.push({ dir: abs, reason: err.code === "ENOENT" ? "dangling symlink" : err.code || err.message });
+        continue;
+      }
+      if (!st.isDirectory()) {
+        unreadable.push({ dir: abs, reason: "not a directory" });
+        continue;
+      }
+    } else if (!e.isDirectory()) {
+      continue;
+    }
+    dirs.push(abs);
+    walk(abs, e.name, readEntries(abs));
+  }
+  walk(backlog, "", top.filter((e) => !isRoleName(e.name)));
+  for (const n of INTERNAL_DIRS) {
+    const abs = path2.join(backlog, n);
+    if (isDirectory(abs)) dirs.push(abs);
+  }
+  return { files, dirs, unreadable };
+}
+function isDirectory(p) {
+  try {
+    return fs3.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+function folderOf(backlog, file) {
+  const rel = path2.relative(backlog, path2.dirname(file));
+  return rel === "" ? "" : rel.split(path2.sep).join("/");
+}
+function inArchive(folder, layout) {
+  const a = layout.folders.archive;
+  if (folder.length === a.length) return foldEq(folder, a);
+  if (folder.length > a.length && folder[a.length] === "/") return foldEq(folder.slice(0, a.length), a);
+  return false;
+}
+function samePlace(want, have, layout) {
+  if (layout.group !== "hierarchy") return foldEq(want, have);
+  const strip = (s) => {
+    const seg = s.split("/")[0];
+    return foldEq(seg, layout.folders.archive) ? { archived: true, rest: s.slice(seg.length + 1) } : { archived: false, rest: s };
+  };
+  const w = strip(want), h = strip(have);
+  return w.archived === h.archived && w.rest === h.rest;
+}
+function hierarchyDir(el, byId) {
+  const chain = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (let cur = el; cur !== void 0; ) {
+    if (seen.has(cur.id)) return null;
+    seen.add(cur.id);
+    chain.unshift(cur);
+    if (cur.parent === null) break;
+    cur = byId.get(cur.parent);
+    if (cur === void 0) return null;
+  }
+  return chain.filter((c) => c.type === "epic" || c.type === "task").map((c) => c.id).join("/");
+}
+function placeOf(el, byId, layout, archived) {
+  if (el.type === null) return null;
+  const inArch = (dir2) => archived ? [layout.folders.archive, dir2].filter((d) => d !== "").join("/") : dir2;
+  if (layout.group === "type") return archived ? layout.folders.archive : layout.folders[TYPE_FOLDER_ROLE[el.type]];
+  if (layout.group === "flat") return inArch("");
+  const dir = hierarchyDir(el, byId);
+  return dir === null ? null : inArch(dir);
+}
+function expectedPlace(el, byId, layout) {
+  return placeOf(el, byId, layout, el.archived);
+}
+function moveTarget(el, byId, layout) {
+  return placeOf(el, byId, layout, el.archived || el.archivedAt !== null);
+}
+function misplacedCode(layout) {
+  return layout.group === "type" ? "type:folder" : "layout:misplaced";
+}
+function ownFolder(el) {
+  if (el.type !== "epic" && el.type !== "task") return null;
+  const dir = path2.dirname(el.file);
+  return path2.basename(dir) === el.id ? dir : null;
+}
+
+// src/core/store.ts
+var fs4 = __toESM(require("fs"), 1);
+var path3 = __toESM(require("path"), 1);
 function nowIso() {
   const pinned = process.env.NJ_NOW;
   if (pinned !== void 0 && pinned !== "") {
@@ -812,7 +1050,7 @@ function nowIso() {
 }
 function mtimeIso(file) {
   try {
-    return new Date(fs3.statSync(file).mtime).toISOString().replace(/\.\d{3}Z$/, "Z");
+    return new Date(fs4.statSync(file).mtime).toISOString().replace(/\.\d{3}Z$/, "Z");
   } catch {
     return "1970-01-01T00:00:00Z";
   }
@@ -820,12 +1058,11 @@ function mtimeIso(file) {
 function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
-function readTombstones(backlog) {
-  const dir = path2.join(backlog, ".ids");
+function readTombstones(dir) {
   const out2 = /* @__PURE__ */ new Set();
   let names;
   try {
-    names = fs3.readdirSync(dir);
+    names = fs4.readdirSync(dir);
   } catch {
     return out2;
   }
@@ -835,10 +1072,9 @@ function readTombstones(backlog) {
   }
   return out2;
 }
-function allocateId(backlog, type, elements) {
+function allocateId(idsDir, type, elements) {
   const prefix = TYPE_PREFIX[type];
-  const dir = path2.join(backlog, ".ids");
-  fs3.mkdirSync(dir, { recursive: true });
+  fs4.mkdirSync(idsDir, { recursive: true });
   let max = 0;
   const consider = (id) => {
     const m = new RegExp("^" + prefix + "-(\\d+)$").exec(id);
@@ -847,13 +1083,13 @@ function allocateId(backlog, type, elements) {
       if (n2 > max) max = n2;
     }
   };
-  for (const t of readTombstones(backlog)) consider(t);
+  for (const t of readTombstones(idsDir)) consider(t);
   for (const el of elements) consider(el.id);
   let n = max + 1;
   for (let i = 0; i < 100; i++) {
     const id = prefix + "-" + String(n).padStart(3, "0");
     try {
-      fs3.closeSync(fs3.openSync(path2.join(dir, id), "wx"));
+      fs4.closeSync(fs4.openSync(path3.join(idsDir, id), "wx"));
       return id;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
@@ -863,33 +1099,52 @@ function allocateId(backlog, type, elements) {
   return hardExit("id_allocation_failed", `nj: id allocation failed after 100 retries (${prefix})`);
 }
 function atomicWrite(target, content) {
-  const dir = path2.dirname(target);
-  const tmp = path2.join(dir, `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
+  const dir = path3.dirname(target);
+  const tmp = path3.join(dir, `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
   const fault = process.env.NJ_FAULT;
-  const fd = fs3.openSync(tmp, "wx");
+  const fd = fs4.openSync(tmp, "wx");
   try {
-    fs3.writeFileSync(fd, content, "utf8");
+    fs4.writeFileSync(fd, content, "utf8");
     if (fault === "after-tmp-write") {
-      fs3.closeSync(fd);
+      fs4.closeSync(fd);
       hardExit("fault:after-tmp-write", "nj: aborted at fault injection point after-tmp-write");
     }
-    fs3.fsyncSync(fd);
+    fs4.fsyncSync(fd);
   } finally {
     try {
-      fs3.closeSync(fd);
+      fs4.closeSync(fd);
     } catch {
     }
   }
   if (fault === "before-rename") {
     hardExit("fault:before-rename", "nj: aborted at fault injection point before-rename");
   }
-  fs3.renameSync(tmp, target);
+  fs4.renameSync(tmp, target);
+}
+function atomicReplace(target, content) {
+  const tmp = path3.join(path3.dirname(target), `.nj-tmp-${process.pid}-${Math.random().toString(36).slice(2, 10)}`);
+  try {
+    const fd = fs4.openSync(tmp, "wx");
+    try {
+      fs4.writeFileSync(fd, content, "utf8");
+      fs4.fsyncSync(fd);
+    } finally {
+      fs4.closeSync(fd);
+    }
+    fs4.renameSync(tmp, target);
+  } catch (e) {
+    try {
+      fs4.unlinkSync(tmp);
+    } catch {
+    }
+    throw e;
+  }
 }
 function compareGuard(el, force, backlog, hint) {
   if (process.env.NJ_FAULT === "before-compare" && backlog) {
-    const marker = path2.join(backlog, ".nj-fault-go");
+    const marker = path3.join(backlog, ".nj-fault-go");
     const deadline = Date.now() + 1e4;
-    while (!fs3.existsSync(marker)) {
+    while (!fs4.existsSync(marker)) {
       if (Date.now() >= deadline) {
         hardExit("fault:before-compare", "nj: before-compare timed out after 10s waiting for .nj-fault-go");
       }
@@ -899,7 +1154,7 @@ function compareGuard(el, force, backlog, hint) {
   if (force) return;
   let current;
   try {
-    current = fs3.readFileSync(el.file, "utf8");
+    current = fs4.readFileSync(el.file, "utf8");
   } catch {
     current = null;
   }
@@ -915,6 +1170,50 @@ function guardedWrite(el, content, force, backlog) {
   compareGuard(el, force, backlog);
   atomicWrite(el.file, content);
 }
+function planMove(src, dst) {
+  const plan = { renames: [], emptied: [], conflicts: [] };
+  const visit = (from, to) => {
+    let target;
+    try {
+      target = fs4.lstatSync(to);
+    } catch (e) {
+      if (e.code === "ENOENT") {
+        plan.renames.push([from, to]);
+        return;
+      }
+      plan.conflicts.push(to);
+      return;
+    }
+    let source;
+    try {
+      source = fs4.lstatSync(from);
+    } catch {
+      plan.conflicts.push(to);
+      return;
+    }
+    if (target.dev === source.dev && target.ino === source.ino) return;
+    if (!target.isDirectory() || !source.isDirectory()) {
+      plan.conflicts.push(to);
+      return;
+    }
+    for (const n of fs4.readdirSync(from).sort()) visit(path3.join(from, n), path3.join(to, n));
+    plan.emptied.push(from);
+  };
+  visit(src, dst);
+  return plan;
+}
+function runMove(plan) {
+  for (const [from, to] of plan.renames) {
+    fs4.mkdirSync(path3.dirname(to), { recursive: true });
+    fs4.renameSync(from, to);
+  }
+  for (const dir of plan.emptied) {
+    try {
+      fs4.rmdirSync(dir);
+    } catch {
+    }
+  }
+}
 function renderElement(el, fieldOverrides, bodyOverride) {
   const fields = new Map(el.fields);
   for (const [k, v] of fieldOverrides) {
@@ -928,9 +1227,10 @@ function renderElement(el, fieldOverrides, bodyOverride) {
 
 // src/core/load.ts
 function unreadableElement(file, folder, cfg, err) {
-  const base = path3.basename(file, ".md");
+  const base = path4.basename(file, ".md");
   const pm = /^(EPIC|TSK|SUB)-/.exec(base);
   const ts = mtimeIso(file);
+  const byFolder = cfg.layout.group === "type" ? Object.keys(TYPE_FOLDER_ROLE).find((t) => foldEq(cfg.layout.folders[TYPE_FOLDER_ROLE[t]], folder)) || null : null;
   return {
     file,
     folder,
@@ -942,9 +1242,9 @@ function unreadableElement(file, folder, cfg, err) {
     readable: false,
     detail: [{ code: "file:unreadable", message: `cannot be read \u2014 ${err.message}` }],
     problems: /* @__PURE__ */ new Set(["file:unreadable"]),
-    archived: folder === "archive",
+    archived: inArchive(folder, cfg.layout),
     id: base,
-    type: pm ? PREFIX_TYPE[pm[1]] : Object.keys(TYPE_DIR).find((t) => TYPE_DIR[t] === folder) || null,
+    type: pm ? PREFIX_TYPE[pm[1]] : byFolder,
     title: "",
     status: cfg.statuses[0],
     parent: null,
@@ -968,7 +1268,7 @@ function deriveId(el, p, base) {
   }
   return { ...el, id };
 }
-function deriveType(el, p, folder) {
+function deriveType(el, p) {
   const pm = /^(EPIC|TSK|SUB)-/.exec(el.id);
   const prefixType = pm ? PREFIX_TYPE[pm[1]] : null;
   let type;
@@ -982,7 +1282,6 @@ function deriveType(el, p, folder) {
     type = null;
   }
   if (type === null) el.problems.add("type:folder");
-  else if (!el.archived && TYPE_DIR[type] !== folder) el.problems.add("type:folder");
   return { ...el, type };
 }
 function deriveTitle(el, p) {
@@ -1065,17 +1364,17 @@ function deriveBody(el, p, cfg) {
   }
   return el;
 }
-function loadElement(file, folder, cfg) {
+function loadElement(file, backlog, cfg, folder = folderOf(backlog, file)) {
   let raw;
   try {
-    raw = fs4.readFileSync(file, "utf8");
+    raw = fs5.readFileSync(file, "utf8");
   } catch (err) {
     return unreadableElement(file, folder, cfg, err);
   }
   const p = parseFile(raw);
   const problems = /* @__PURE__ */ new Set();
   for (const d of p.problems) problems.add(d.code);
-  const base = path3.basename(file, ".md");
+  const base = path4.basename(file, ".md");
   const skeleton = {
     file,
     folder,
@@ -1087,10 +1386,10 @@ function loadElement(file, folder, cfg) {
     readable: true,
     detail: p.problems,
     problems,
-    archived: folder === "archive"
+    archived: inArchive(folder, cfg.layout)
   };
   const withId = deriveId(skeleton, p, base);
-  const withType = deriveType(withId, p, folder);
+  const withType = deriveType(withId, p);
   const withTitle = deriveTitle(withType, p);
   const withStatus = deriveStatus(withTitle, p, cfg);
   const withParent = deriveParent(withStatus, p);
@@ -1100,15 +1399,11 @@ function loadElement(file, folder, cfg) {
   const final = deriveBody(withArchiveState, p, cfg);
   return final;
 }
-function loadBacklog(backlog, cfg) {
-  const elements = [];
-  for (const folder of ["epics", "tasks", "subtasks", "archive"]) {
-    for (const file of listMd(path3.join(backlog, folder))) {
-      elements.push(loadElement(file, folder, cfg));
-    }
-  }
-  deriveGraph(elements, backlog);
-  return elements;
+function loadBacklog(backlog, cfg, idsDir) {
+  const scan = scanBacklog(backlog, cfg.layout);
+  const elements = scan.files.map(({ file, folder }) => loadElement(file, backlog, cfg, folder));
+  deriveGraph(elements, idsDir, cfg.layout);
+  return { elements, scan };
 }
 function indexById(elements) {
   const byId = /* @__PURE__ */ new Map();
@@ -1222,8 +1517,16 @@ function markOpenChildren(elements, children) {
     if (kids.some((k) => !k.archived && k.status !== "done")) el.problems.add("done:open_children");
   }
 }
-function markMissingTombstones(elements, backlog) {
-  const ids = readTombstones(backlog);
+function markPlaces(elements, byId, layout) {
+  const code = misplacedCode(layout);
+  for (const el of elements) {
+    if (!el.readable) continue;
+    const want = expectedPlace(el, byId, layout);
+    if (want !== null && !samePlace(want, el.folder, layout)) el.problems.add(code);
+  }
+}
+function markMissingTombstones(elements, idsDir) {
+  const ids = readTombstones(idsDir);
   for (const el of elements) {
     if (!ids.has(el.id)) el.problems.add("id:no_tombstone");
   }
@@ -1234,7 +1537,7 @@ function attachGraph(elements, byId, children) {
     el.children = children.get(el.id) || [];
   }
 }
-function deriveGraph(elements, backlog) {
+function deriveGraph(elements, idsDir, layout) {
   const { byId, counts } = indexById(elements);
   markDuplicateIds(elements, counts);
   markParentEdges(elements, byId);
@@ -1243,7 +1546,8 @@ function deriveGraph(elements, backlog) {
   markDependsOnCycles(elements, byId);
   const children = childMap(elements);
   markOpenChildren(elements, children);
-  markMissingTombstones(elements, backlog);
+  markPlaces(elements, byId, layout);
+  markMissingTombstones(elements, idsDir);
   attachGraph(elements, byId, children);
   return byId;
 }
@@ -1251,32 +1555,43 @@ function deriveGraph(elements, backlog) {
 // src/core/context.ts
 function context(flags, opts) {
   const backlog = findBacklog(flags, Boolean(opts && opts.lenient));
-  const { config, errors } = loadConfig(backlog);
-  if (errors.length > 0 && !(opts && opts.tolerateConfig)) {
-    fail("invalid_config", `invalid configuration in ${path4.join(backlog, ".nanojira.json")}: ${errors[0]}`, "run `nj doctor` for the full report");
+  const legacy = isLegacyBacklog(backlog);
+  if (legacy && !(opts && opts.lenient)) {
+    fail(
+      "legacy_layout",
+      `${backlog} is a legacy (v2) backlog \u2014 every command but \`doctor\` refuses it`,
+      "run `nj doctor --fix` to migrate it to the v3 layout"
+    );
   }
-  const elements = loadBacklog(backlog, config);
-  return { backlog, cfg: config, configErrors: errors, elements };
+  const { config, errors } = loadConfig(backlog, legacy);
+  if (errors.length > 0 && !(opts && opts.tolerateConfig)) {
+    const configFile = path5.join(backlog, legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
+    fail("invalid_config", `invalid configuration in ${configFile}: ${errors[0]}`, "run `nj doctor` for the full report");
+  }
+  const idsDir = path5.join(backlog, legacy ? LEGACY_IDS_REL : V3_IDS_REL);
+  const loadedAt = Date.now();
+  const { elements, scan } = loadBacklog(backlog, config, idsDir);
+  return { backlog, cfg: config, configErrors: errors, elements, scan, loadedAt, legacy, idsDir };
 }
 function resolveTarget(ctx, flags, forWrite) {
   const file = flagString(flags, "file");
   const id = flagString(flags, "id");
   if (file !== void 0 && id !== void 0) fail("invalid_target", "use either --id or --file, not both");
   if (file !== void 0) {
-    const abs = path4.isAbsolute(file) ? file : path4.resolve(ctx.backlog, file);
+    const abs = path5.isAbsolute(file) ? file : path5.resolve(ctx.backlog, file);
     const real = (p) => {
       try {
-        return fs5.realpathSync.native(p);
+        return fs6.realpathSync.native(p);
       } catch {
       }
-      const dir = path4.dirname(p);
+      const dir = path5.dirname(p);
       let rdir;
       try {
-        rdir = fs5.realpathSync.native(dir);
+        rdir = fs6.realpathSync.native(dir);
       } catch {
-        rdir = path4.resolve(dir);
+        rdir = path5.resolve(dir);
       }
-      return path4.join(rdir, path4.basename(p));
+      return path5.join(rdir, path5.basename(p));
     };
     const want = real(abs);
     const el = ctx.elements.find((e) => real(e.file) === want);
@@ -1327,6 +1642,16 @@ ${names}`,
     "make the files readable (or move them out of the backlog), then run `nj doctor` and retry"
   );
 }
+function requireNoUnreadableDirs(ctx, verb) {
+  if (ctx.scan.unreadable.length === 0) return;
+  const names = ctx.scan.unreadable.map((u) => `  ${path5.relative(ctx.backlog, u.dir)}`).join("\n");
+  fail(
+    "refused:unreadable_dir",
+    `${verb} is refused while the backlog contains an unreadable directory \u2014 files inside it are not seen, so no subtree can be determined:
+${names}`,
+    "make the directory readable, then run `nj doctor` and retry"
+  );
+}
 function requireActive(el, verb) {
   if (el.archived) {
     fail(
@@ -1337,12 +1662,136 @@ function requireActive(el, verb) {
   }
 }
 
+// src/core/status.ts
+var fs7 = __toESM(require("fs"), 1);
+var path6 = __toESM(require("path"), 1);
+function statusPath(backlog) {
+  return path6.join(backlog, "STATUS.md");
+}
+function renderStatus(elements, cfg) {
+  const sections = new Map(cfg.statuses.map((s) => [s, []]));
+  const other = [];
+  for (const el of elements) {
+    if (el.archived) continue;
+    const list = el.readable ? sections.get(el.status) : void 0;
+    (list === void 0 ? other : list).push(el);
+  }
+  const line = (el) => {
+    const link = (el.folder === "" ? "" : el.folder + "/") + path6.basename(el.file);
+    return `- [${el.id}](${link})` + (el.title === "" ? "" : " " + el.title);
+  };
+  const block = (name, els) => [`## ${name} (${els.length})`].concat(els.length > 0 ? ["", ...els.slice().sort(compareElements).map(line)] : []).join("\n");
+  const blocks = ["# Status"].concat(Array.from(sections, ([name, els]) => block(name, els)));
+  if (other.length > 0) blocks.push(block("?", other));
+  return blocks.join("\n\n") + "\n";
+}
+function statusIsFresh(backlog, elements, cfg) {
+  let current;
+  try {
+    current = fs7.readFileSync(statusPath(backlog), "utf8");
+  } catch {
+    return false;
+  }
+  return current === renderStatus(elements, cfg);
+}
+var CTIME_MARGIN_MS = 2e3;
+function refreshStatus(backlog, cfg, ctx) {
+  if (!cfg.layout.statusFile) return false;
+  try {
+    const known = new Map(ctx ? ctx.elements.map((e) => [e.file, e]) : []);
+    const cutoff = ctx ? ctx.loadedAt - CTIME_MARGIN_MS : -Infinity;
+    const elements = scanBacklog(backlog, cfg.layout).files.map(({ file, folder }) => {
+      const had = known.get(file);
+      if (had !== void 0) {
+        let ctime = Infinity;
+        try {
+          ctime = fs7.statSync(file).ctimeMs;
+        } catch {
+        }
+        if (ctime < cutoff) return had;
+      }
+      return loadElement(file, backlog, cfg, folder);
+    });
+    const fresh = renderStatus(elements, cfg);
+    let current = null;
+    try {
+      current = fs7.readFileSync(statusPath(backlog), "utf8");
+    } catch {
+    }
+    if (current === fresh) return false;
+    atomicReplace(statusPath(backlog), fresh);
+    return true;
+  } catch (e) {
+    const reason = e && e.message ? String(e.message).split("\n")[0] : String(e);
+    process.stderr.write(`Warning: STATUS.md not updated (${reason})
+`);
+    return false;
+  }
+}
+
 // src/commands/cmd-archive.ts
+var STABLE_HINT = "retry once the backlog is stable \u2014 archive takes no --force";
+function archiveFlat(ctx, subtree, ts) {
+  const archiveDir = path7.join(ctx.backlog, ctx.cfg.layout.folders.archive);
+  fs8.mkdirSync(archiveDir, { recursive: true });
+  const plan = subtree.map((e) => ({ el: e, target: path7.join(archiveDir, path7.basename(e.file)) }));
+  for (const { target } of plan) {
+    if (fs8.existsSync(target)) {
+      fail(
+        "exists",
+        `${target} already exists \u2014 refusing to overwrite; nothing was moved`,
+        `move or delete the file in ${ctx.cfg.layout.folders.archive}/, then archive again`
+      );
+    }
+  }
+  for (const { el: e } of plan) compareGuard(e, false, ctx.backlog, STABLE_HINT);
+  const moved = [];
+  for (const { el: e, target } of plan) {
+    atomicWrite(target, renderElement(e, /* @__PURE__ */ new Map([["archived", ts], ["updated", ts]]), void 0));
+    fs8.unlinkSync(e.file);
+    moved.push(loadElement(target, ctx.backlog, ctx.cfg));
+  }
+  return moved;
+}
+function archiveHierarchy(ctx, el, subtree, ts) {
+  const refuse = (why) => fail(
+    "refused:misplaced",
+    `${el.id} cannot be archived \u2014 ${why}; nothing was moved`,
+    "run `nj doctor --fix` to move the files into their places, then archive again"
+  );
+  const off = subtree.filter((e) => e.problems.has("layout:misplaced"));
+  if (off.length > 0) refuse(`these files are not where the layout puts them: ${off.map((e) => e.id).join(", ")}`);
+  let src = el.file;
+  if (el.type !== "subtask") {
+    const own = ownFolder(el);
+    if (own === null) return refuse(`${el.file} does not lie in a folder of its own named ${el.id}/`);
+    const inside = (f) => f.startsWith(own + path7.sep);
+    const outside = subtree.filter((e) => !inside(e.file));
+    if (outside.length > 0) refuse(`part of its subtree lies outside ${own}/: ${outside.map((e) => e.id).join(", ")}`);
+    const foreign = ctx.elements.filter((e) => inside(e.file) && !subtree.includes(e));
+    if (foreign.length > 0) refuse(`${own}/ also holds files of other elements: ${foreign.map((e) => e.id).join(", ")}`);
+    src = own;
+  }
+  const dst = path7.join(ctx.backlog, ctx.cfg.layout.folders.archive, path7.relative(ctx.backlog, src));
+  const plan = planMove(src, dst);
+  if (plan.conflicts.length > 0) {
+    fail(
+      "exists",
+      `${plan.conflicts[0]} already exists \u2014 refusing to overwrite; nothing was moved`,
+      `move or delete it in ${ctx.cfg.layout.folders.archive}/, then archive again`
+    );
+  }
+  for (const e of subtree) compareGuard(e, false, ctx.backlog, STABLE_HINT);
+  for (const e of subtree) atomicWrite(e.file, renderElement(e, /* @__PURE__ */ new Map([["archived", ts], ["updated", ts]]), void 0));
+  runMove(plan);
+  return subtree.map((e) => loadElement(path7.join(dst, path7.relative(src, e.file)), ctx.backlog, ctx.cfg));
+}
 function cmdArchive(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "id", "file"]), true);
   const json = flags.has("json");
   const ctx = context(flags);
   requireNoStubs(ctx, "archive");
+  requireNoUnreadableDirs(ctx, "archive");
   const el = resolveTarget(ctx, flags, true);
   requireActive(el, "archive");
   const subtree = [el].concat(descendants(ctx, el)).filter((e) => !e.archived);
@@ -1358,28 +1807,9 @@ ${names}`,
   }
   for (const e of subtree) requireWritable(e);
   const ts = nowIso();
-  const archiveDir = path5.join(ctx.backlog, "archive");
-  fs6.mkdirSync(archiveDir, { recursive: true });
-  const plan = subtree.map((e) => ({ el: e, target: path5.join(archiveDir, path5.basename(e.file)) }));
-  for (const { target } of plan) {
-    if (fs6.existsSync(target)) {
-      fail(
-        "exists",
-        `${target} already exists \u2014 refusing to overwrite; nothing was moved`,
-        "move or delete the file in archive/, then archive again"
-      );
-    }
-  }
-  for (const { el: e } of plan) {
-    compareGuard(e, false, ctx.backlog, "retry once the backlog is stable \u2014 archive takes no --force");
-  }
-  const moved = [];
-  for (const { el: e, target } of plan) {
-    atomicWrite(target, renderElement(e, /* @__PURE__ */ new Map([["archived", ts], ["updated", ts]]), void 0));
-    fs6.unlinkSync(e.file);
-    moved.push(loadElement(target, "archive", ctx.cfg));
-  }
-  deriveGraph(ctx.elements.filter((e) => !subtree.includes(e)).concat(moved), ctx.backlog);
+  const moved = ctx.cfg.layout.group === "hierarchy" ? archiveHierarchy(ctx, el, subtree, ts) : archiveFlat(ctx, subtree, ts);
+  deriveGraph(ctx.elements.filter((e) => !subtree.includes(e)).concat(moved), ctx.idsDir, ctx.cfg.layout);
+  refreshStatus(ctx.backlog, ctx.cfg, ctx);
   if (json) {
     out(JSON.stringify({
       ok: true,
@@ -1395,12 +1825,80 @@ ${names}`,
 }
 
 // src/commands/cmd-doctor.ts
-var fs7 = __toESM(require("fs"), 1);
-var path6 = __toESM(require("path"), 1);
+var fs9 = __toESM(require("fs"), 1);
+var path8 = __toESM(require("path"), 1);
+
+// src/core/readme-texts.ts
+var V2_README = `# Backlog
+
+This folder is a NanoJira backlog. One Markdown file per element, grouped by
+type: epics/, tasks/, subtasks/. Archived work lives in archive/.
+
+Every file has a YAML-ish frontmatter block between \`---\` lines and a free
+Markdown body. The frontmatter is the truth; the body belongs to you, except
+for the \`# H1\` (mirrors \`title\`) and the \`## Notes\` section written by
+\`nj note\`.
+
+An element is *ready to work* when its status is the first configured status,
+all \`depends_on\` targets are done, it carries no error, and it has a
+non-empty \`## Description\` (plus \`## Acceptance Criteria\` for tasks and
+subtasks). A heading with nothing under it counts as absent \u2014 that is
+deliberate.
+
+\`.ids/\` holds one empty tombstone file per allocated ID. It is versioned and
+must be committed: it is what guarantees IDs are never reused. Do not delete
+it.
+
+The only uncommitted artifact is \`.nanojira-index.json\` (a cache).
+
+Useful commands: \`nj\`, \`nj list --ready\`, \`nj show --id=\u2026\`,
+\`nj new --type=task --parent=EPIC-001 --title="\u2026"\`, \`nj doctor\`.
+`;
+var V3_README = `# Backlog
+
+This folder is a NanoJira backlog: one Markdown file per element (epics,
+tasks, subtasks). Where the files lie is set by \`layout\` in
+\`.nanojira/config.json\` \u2014 by default one folder per type (\`epics/\`,
+\`tasks/\`, \`subtasks/\`), with finished work in \`archive/\`.
+
+Every file has a frontmatter block between \`---\` lines and a free Markdown
+body. The frontmatter is the truth; the body belongs to you, except for the
+\`# H1\` (mirrors \`title\`), the \`## Notes\` section written by \`nj note\`, and
+the sections \`nj new\`/\`nj set\` write when asked to.
+
+An element is *ready to work* when its status is the first configured status,
+all \`depends_on\` targets are done, it carries no error, and it has a
+non-empty \`## Description\` (plus \`## Acceptance Criteria\` for tasks and
+subtasks). A heading with nothing under it counts as absent \u2014 that is
+deliberate.
+
+\`STATUS.md\` is a generated overview by status. Do not edit it; \`nj\` rewrites
+it after every change, and \`nj doctor --fix\` repairs it.
+
+\`.nanojira/\` holds what only \`nj\` needs: the configuration and \`ids/\`, one
+empty tombstone file per allocated ID. Both are versioned and must be
+committed \u2014 the tombstones are what guarantee IDs are never reused. Do not
+delete them. Only \`.nanojira/index.json\` (a cache) and temporary files are
+ignored.
+
+Useful commands: \`nj\`, \`nj list --ready\`, \`nj show --id=\u2026\`,
+\`nj new --type=task --parent=EPIC-001 --title="\u2026"\`, \`nj doctor\`.
+`;
+
+// src/commands/cmd-doctor.ts
 function collectFindings(ctx) {
   const findings = [];
+  if (ctx.legacy) {
+    findings.push({
+      code: "backlog:legacy_layout",
+      severity: "error",
+      file: path8.join(ctx.backlog, LEGACY_CONFIG_REL),
+      message: `the backlog is in the v2 (legacy) layout (${LEGACY_CONFIG_REL}, ${LEGACY_IDS_REL}/) \u2014 \`nj doctor --fix\` migrates it to .nanojira/`
+    });
+  }
+  const configFile = path8.join(ctx.backlog, ctx.legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
   for (const e of ctx.configErrors) {
-    findings.push({ code: "config:invalid", severity: "error", file: path6.join(ctx.backlog, ".nanojira.json"), message: e });
+    findings.push({ code: "config:invalid", severity: "error", file: configFile, message: e });
   }
   const elements = ctx.elements.slice().sort(compareElements);
   const dupGroups = /* @__PURE__ */ new Map();
@@ -1412,6 +1910,7 @@ function collectFindings(ctx) {
     for (const code of elementProblems(el)) {
       const sev = SEVERITY[code];
       if (sev === null || sev === void 0) continue;
+      if (ctx.configErrors.length > 0 && (code === "type:folder" || code === "layout:misplaced")) continue;
       if (code === "frontmatter:unreadable" || code === "file:unreadable") {
         for (const d of el.detail) {
           if (d.code !== code) continue;
@@ -1422,28 +1921,37 @@ function collectFindings(ctx) {
       findings.push({ code, severity: sev, element: el.id, file: el.file, message: describeFinding(code, el, dupGroups) });
     }
   }
-  for (const folder of ["", "epics", "tasks", "subtasks", "archive", ".ids"]) {
-    const dir = path6.join(ctx.backlog, folder);
-    let names;
-    try {
-      names = fs7.readdirSync(dir);
-    } catch {
-      continue;
-    }
-    for (const n of names.sort()) {
-      if (n.startsWith(".nj-tmp-")) {
-        findings.push({ code: "backlog:stray_tmp", severity: "warning", file: path6.join(dir, n), message: "stray temp file from an interrupted write" });
-      }
-    }
+  const scan = ctx.scan;
+  for (const file of strayTmpFiles(scan.dirs)) {
+    findings.push({ code: "backlog:stray_tmp", severity: "warning", file, message: "stray temp file from an interrupted write" });
   }
-  const tombs = readTombstones(ctx.backlog);
+  for (const { dir, reason } of scan.unreadable) {
+    findings.push({ code: "backlog:unreadable_dir", severity: "error", file: dir, message: `folder cannot be listed (${reason}) \u2014 element files in it are not seen` });
+  }
+  const tombs = readTombstones(ctx.idsDir);
   if (ctx.elements.length > 0 && tombs.size === 0) {
-    findings.push({ code: "backlog:ids_missing", severity: "error", file: path6.join(ctx.backlog, ".ids"), message: ".ids/ is missing or empty while element files exist \u2014 the never-reuse guarantee is not in force" });
+    findings.push({ code: "backlog:ids_missing", severity: "error", file: ctx.idsDir, message: `${path8.relative(ctx.backlog, ctx.idsDir)}/ is missing or empty while element files exist \u2014 the never-reuse guarantee is not in force` });
+  }
+  if (ctx.configErrors.length === 0 && ctx.cfg.layout.statusFile && !statusIsFresh(ctx.backlog, ctx.elements, ctx.cfg)) {
+    findings.push({ code: "backlog:status_stale", severity: "warning", file: path8.join(ctx.backlog, "STATUS.md"), message: "STATUS.md is missing or differs from a fresh rendering \u2014 `nj doctor --fix` regenerates it" });
   }
   return findings;
 }
+function strayTmpFiles(dirs) {
+  const found = [];
+  for (const dir of dirs) {
+    let names;
+    try {
+      names = fs9.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const n of names.sort()) if (n.startsWith(".nj-tmp-")) found.push(path8.join(dir, n));
+  }
+  return found;
+}
 function backlogLabel(backlog) {
-  const rel = path6.relative(process.cwd(), backlog);
+  const rel = path8.relative(workingDir(), backlog);
   return (rel === "" ? "." : rel) + "/";
 }
 function describeFinding(code, el, dupGroups) {
@@ -1466,6 +1974,8 @@ function describeFinding(code, el, dupGroups) {
       return `type absent \u2014 derived as '${el.type}'`;
     case "type:folder":
       return el.type === null ? "type cannot be determined from id, frontmatter or folder" : `type '${el.type}' does not match folder '${el.folder}/'`;
+    case "layout:misplaced":
+      return `file lies in '${el.folder === "" ? "." : el.folder}/', not where the layout puts it`;
     case "parent:orphaned":
       return "parent is absent";
     case "parent:dangling":
@@ -1493,7 +2003,7 @@ function describeFinding(code, el, dupGroups) {
     case "title:h1_mismatch":
       return "H1 in the body differs from title";
     case "id:no_tombstone":
-      return "no tombstone in .ids/ \u2014 hand-created, or partial tombstone loss";
+      return "no tombstone in the ids folder \u2014 hand-created, or partial tombstone loss";
     default:
       return code;
   }
@@ -1512,7 +2022,7 @@ function cmdDoctor(flags) {
     out(`${backlogLabel(ctx.backlog)}: ${ctx.elements.length} entries, ${errors.length} error${errors.length === 1 ? "" : "s"}, ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`);
     if (findings.length > 0) out("");
     for (const f of findings) {
-      const where = f.element ? f.element : path6.relative(ctx.backlog, f.file);
+      const where = f.element ? f.element : path8.relative(ctx.backlog, f.file);
       const line = f.line ? ` (line ${f.line})` : "";
       out(`${f.severity === "error" ? "ERROR  " : "WARNING"} ${where}: ${f.message}${line}`);
     }
@@ -1521,7 +2031,7 @@ function cmdDoctor(flags) {
 }
 function fixSkip(el, notes) {
   if (el.problems.has("file:unreadable")) {
-    notes.push(`${path6.basename(el.file)}: cannot be read \u2014 not touched by --fix`);
+    notes.push(`${path8.basename(el.file)}: cannot be read \u2014 not touched by --fix`);
     return true;
   }
   if (el.problems.has("frontmatter:unreadable")) {
@@ -1549,23 +2059,91 @@ function makeFixCtx(flags) {
     return Array.isArray(v) ? v.length === 0 : String(v === void 0 || v === null ? "" : v).trim() === "";
   };
   const mtimes = /* @__PURE__ */ new Map();
-  const rename = (from, to) => {
-    fs7.renameSync(from, to);
-    if (mtimes.has(from)) {
-      mtimes.set(to, mtimes.get(from));
-      mtimes.delete(from);
+  const rekey = (from, to) => {
+    for (const [k, v] of Array.from(mtimes)) {
+      if (k === from) {
+        mtimes.delete(k);
+        mtimes.set(to, v);
+      } else if (k.startsWith(from + path8.sep)) {
+        mtimes.delete(k);
+        mtimes.set(to + k.slice(from.length), v);
+      }
     }
   };
-  return { actions, notes, guard, absent, mtimes, rename, reload, stage: 0 };
+  const rename = (from, to) => {
+    fs9.renameSync(from, to);
+    rekey(from, to);
+  };
+  const move = (plan) => {
+    runMove(plan);
+    for (const [from, to] of plan.renames) rekey(from, to);
+  };
+  return { actions, notes, guard, absent, mtimes, rename, move, reload, stage: 0 };
+}
+function fixStep0(ctx, fc) {
+  const backlog = ctx.backlog;
+  const v3Config = path8.join(backlog, V3_CONFIG_REL);
+  const v3Ids = path8.join(backlog, V3_IDS_REL);
+  if (fs9.existsSync(v3Config) || fs9.existsSync(v3Ids)) {
+    fc.notes.push(`both the v2 and the v3 place exist (${LEGACY_CONFIG_REL} / ${LEGACY_IDS_REL} and ${V3_CONFIG_REL} / ${V3_IDS_REL}) \u2014 ambiguous, nothing moved; remove one copy by hand and run \`nj doctor --fix\` again`);
+    return;
+  }
+  fs9.mkdirSync(path8.join(backlog, V3_DIR_REL), { recursive: true });
+  fc.rename(path8.join(backlog, LEGACY_CONFIG_REL), v3Config);
+  fc.rename(path8.join(backlog, LEGACY_IDS_REL), v3Ids);
+  const legacyIndex = path8.join(backlog, LEGACY_INDEX_REL);
+  if (fs9.existsSync(legacyIndex)) fs9.unlinkSync(legacyIndex);
+  fc.actions.push(`migrated the legacy layout: ${LEGACY_CONFIG_REL} \u2192 ${V3_CONFIG_REL}, ${LEGACY_IDS_REL}/ \u2192 ${V3_IDS_REL}/`);
+}
+function fixGitignore(backlog, fc, verbose) {
+  const p = path8.join(backlog, ".gitignore");
+  let content;
+  try {
+    content = fs9.readFileSync(p, "utf8");
+  } catch {
+    if (verbose) fc.notes.push(".gitignore does not exist \u2014 not created");
+    return;
+  }
+  let changed = false;
+  const lines = content.split("\n").map((line) => {
+    const hasCR = line.endsWith("\r");
+    if ((hasCR ? line.slice(0, -1) : line) !== LEGACY_INDEX_REL) return line;
+    changed = true;
+    return V3_INDEX_REL + (hasCR ? "\r" : "");
+  });
+  if (!changed) {
+    if (verbose) fc.notes.push(`.gitignore does not have the '${LEGACY_INDEX_REL}' line verbatim \u2014 left alone`);
+    return;
+  }
+  atomicWrite(p, lines.join("\n"));
+  fc.actions.push(`.gitignore: replaced the '${LEGACY_INDEX_REL}' line with '${V3_INDEX_REL}'`);
+}
+function fixReadme(backlog, fc, verbose) {
+  const p = path8.join(backlog, "README.md");
+  let content;
+  try {
+    content = fs9.readFileSync(p, "utf8");
+  } catch {
+    return;
+  }
+  if (content !== V2_README) {
+    if (verbose) fc.notes.push("README.md is not the v2 init text \u2014 left alone");
+    return;
+  }
+  atomicWrite(p, V3_README);
+  fc.actions.push("README.md: replaced the v2 init text with the v3 text");
 }
 function fixSnapshotMtimes(fc) {
   for (const el of fc.reload().elements) fc.mtimes.set(el.file, mtimeIso(el.file));
   return { ...fc, stage: 1 };
 }
+function idShaped(el) {
+  return ID_FOLDER.test(el.id);
+}
 function fixStep1(fc) {
   const ctx = fc.reload();
   for (const el of ctx.elements) {
-    if (fc.guard(el) || !el.parsed) continue;
+    if (fc.guard(el) || !el.parsed || !idShaped(el)) continue;
     const ov = /* @__PURE__ */ new Map();
     if (el.problems.has("id:derived") && fc.absent(el, "id")) ov.set("id", el.id);
     if (el.problems.has("type:derived") && el.type && fc.absent(el, "type")) ov.set("type", el.type);
@@ -1581,54 +2159,110 @@ function fixStep2(fc) {
   for (const el of ctx.elements) {
     if (fc.guard(el)) continue;
     if (!el.problems.has("id:mismatch")) continue;
-    const target = path6.join(path6.dirname(el.file), el.id + ".md");
-    if (fs7.existsSync(target)) {
-      fc.notes.push(`${el.file}: cannot rename to ${path6.basename(target)} \u2014 target exists`);
+    const target = path8.join(path8.dirname(el.file), el.id + ".md");
+    if (fs9.existsSync(target)) {
+      fc.notes.push(`${el.file}: cannot rename to ${path8.basename(target)} \u2014 target exists`);
       continue;
     }
     fc.rename(el.file, target);
-    fc.actions.push(`renamed ${path6.basename(el.file)} \u2192 ${path6.basename(target)}`);
+    fc.actions.push(`renamed ${path8.basename(el.file)} \u2192 ${path8.basename(target)}`);
   }
   return { ...fc, stage: 3 };
 }
 function fixStep3(fc) {
-  const ctx = fc.reload();
-  for (const el of ctx.elements) {
-    if (fc.guard(el)) continue;
-    if (el.archived || !el.problems.has("type:folder") || el.type === null) continue;
-    const pm = /^(EPIC|TSK|SUB)-/.exec(el.id);
-    if (!pm || PREFIX_TYPE[pm[1]] !== el.type) {
-      fc.notes.push(`${el.id}: id prefix and type disagree \u2014 not moved, resolve by hand`);
-      continue;
+  const layout = fc.reload().cfg.layout;
+  const rounds = layout.group === "hierarchy" ? ["epic", "task", "subtask"] : [null];
+  const left = /* @__PURE__ */ new Set();
+  const noted = /* @__PURE__ */ new Set();
+  for (const round of rounds) {
+    for (let moved = true; moved; ) {
+      moved = false;
+      const ctx = fc.reload();
+      for (const el of ctx.elements) {
+        if (round !== null && el.type !== round) continue;
+        if (noted.has(el.id)) continue;
+        if (fc.guard(el) || el.type === null || !el.problems.has(misplacedCode(layout))) continue;
+        if (layout.group === "type") {
+          const pm = /^(EPIC|TSK|SUB)-/.exec(el.id);
+          if (!pm || PREFIX_TYPE[pm[1]] !== el.type) {
+            fc.notes.push(`${el.id}: id prefix and type disagree \u2014 not moved, resolve by hand`);
+            noted.add(el.id);
+            continue;
+          }
+        }
+        if (layout.group === "hierarchy" && chainProblem(el)) {
+          fc.notes.push(`${el.id}: its parent chain has problems \u2014 not moved, resolve by hand`);
+          noted.add(el.id);
+          continue;
+        }
+        const dir = moveTarget(el, el.byId, layout);
+        const own = layout.group === "hierarchy" ? ownFolder(el) : null;
+        if (own !== null && !folderArchivedAgrees(ctx.elements, own, el.archived || el.archivedAt !== null)) {
+          fc.notes.push(`${el.id}: its folder holds elements that disagree on archived: \u2014 not moved, resolve by hand`);
+          noted.add(el.id);
+          continue;
+        }
+        const src = own === null ? el.file : own;
+        const dst = own === null ? path8.join(ctx.backlog, dir, path8.basename(el.file)) : path8.join(ctx.backlog, dir);
+        const shown = (dir === "" ? "." : dir) + "/";
+        if (layout.group === "type") fs9.mkdirSync(path8.dirname(dst), { recursive: true });
+        const plan = planMove(src, dst);
+        if (plan.conflicts.length > 0) {
+          fc.notes.push(`${el.id}: cannot move into ${shown} \u2014 target exists`);
+          noted.add(el.id);
+          continue;
+        }
+        fc.move(plan);
+        left.add(path8.dirname(src));
+        fc.actions.push(own === null ? `moved ${el.id} \u2192 ${shown}` : `moved ${el.id} with its folder \u2192 ${shown}`);
+        moved = true;
+        break;
+      }
     }
-    const dir = path6.join(ctx.backlog, TYPE_DIR[el.type]);
-    fs7.mkdirSync(dir, { recursive: true });
-    const target = path6.join(dir, path6.basename(el.file));
-    if (fs7.existsSync(target)) {
-      fc.notes.push(`${el.id}: cannot move into ${TYPE_DIR[el.type]}/ \u2014 target exists`);
-      continue;
-    }
-    fc.rename(el.file, target);
-    fc.actions.push(`moved ${el.id} \u2192 ${TYPE_DIR[el.type]}/`);
   }
+  removeEmptiedIdFolders(fc.reload().backlog, left);
   return { ...fc, stage: 4 };
+}
+function folderArchivedAgrees(elements, own, expectArchived) {
+  const prefix = own + path8.sep;
+  return elements.every((e) => !e.file.startsWith(prefix) || (e.archived || e.archivedAt !== null) === expectArchived);
+}
+function chainProblem(el) {
+  const byId = el.byId;
+  const seen = /* @__PURE__ */ new Set();
+  for (let cur = el; cur !== void 0 && !seen.has(cur.id); cur = cur.parent === null ? void 0 : byId.get(cur.parent)) {
+    seen.add(cur.id);
+    if (["parent:dangling", "parent:cycle", "parent:hierarchy"].some((c) => cur.problems.has(c))) return true;
+  }
+  return false;
+}
+function removeEmptiedIdFolders(backlog, dirs) {
+  for (const start of dirs) {
+    for (let d = start; d !== backlog && d.startsWith(backlog + path8.sep) && ID_FOLDER.test(path8.basename(d)); d = path8.dirname(d)) {
+      try {
+        fs9.rmdirSync(d);
+      } catch {
+        break;
+      }
+    }
+  }
 }
 function fixStep4(fc) {
   const ctx = fc.reload();
-  const dir = path6.join(ctx.backlog, ".ids");
-  fs7.mkdirSync(dir, { recursive: true });
-  const tombs = readTombstones(ctx.backlog);
+  const dir = ctx.idsDir;
+  fs9.mkdirSync(dir, { recursive: true });
+  const tombs = readTombstones(dir);
   let created = 0;
   for (const el of ctx.elements) {
-    if (tombs.has(el.id)) continue;
+    if (!idShaped(el) || tombs.has(el.id)) continue;
     try {
-      fs7.closeSync(fs7.openSync(path6.join(dir, el.id), "wx"));
+      fs9.closeSync(fs9.openSync(path8.join(dir, el.id), "wx"));
       created++;
     } catch {
     }
   }
   if (created > 0) {
-    fc.actions.push(`created ${created} missing tombstone${created === 1 ? "" : "s"} in .ids/`);
+    fc.actions.push(`created ${created} missing tombstone${created === 1 ? "" : "s"} in ${path8.relative(ctx.backlog, dir)}/`);
     fc.notes.push("tombstones for already-deleted IDs cannot be recovered \u2014 the never-reuse guarantee is void for those numbers");
   }
   return { ...fc, stage: 5 };
@@ -1636,7 +2270,7 @@ function fixStep4(fc) {
 function fixStep5(fc) {
   const ctx = fc.reload();
   for (const el of ctx.elements) {
-    if (fc.guard(el) || !el.parsed) continue;
+    if (fc.guard(el) || !el.parsed || !idShaped(el)) continue;
     const ov = /* @__PURE__ */ new Map();
     if (el.problems.has("missing:status") && fc.absent(el, "status")) ov.set("status", el.status);
     if (el.problems.has("missing:created") && fc.absent(el, "created")) {
@@ -1661,29 +2295,33 @@ function fixStep6(fc) {
 }
 function fixStep7(fc) {
   const ctx = fc.reload();
-  for (const folder of ["", "epics", "tasks", "subtasks", "archive", ".ids"]) {
-    const d = path6.join(ctx.backlog, folder);
-    let names;
-    try {
-      names = fs7.readdirSync(d);
-    } catch {
-      continue;
-    }
-    for (const n of names.sort()) {
-      if (!n.startsWith(".nj-tmp-")) continue;
-      fs7.unlinkSync(path6.join(d, n));
-      fc.actions.push(`removed stray temp file ${path6.join(folder, n)}`);
-    }
+  for (const file of strayTmpFiles(ctx.scan.dirs)) {
+    fs9.unlinkSync(file);
+    fc.actions.push(`removed stray temp file ${path8.relative(ctx.backlog, file)}`);
   }
   return { ...fc, stage: 8 };
 }
 function fixStep8(fc) {
+  return { ...fc, stage: 9 };
+}
+function fixStep9(fc) {
+  const before = fc.reload();
+  if (refreshStatus(before.backlog, before.cfg, before)) fc.actions.push("regenerated STATUS.md");
   const ctx = fc.reload();
   const findings = collectFindings(ctx);
-  return { ...fc, stage: 9, ctx, findings };
+  return { ...fc, stage: 10, ctx, findings };
 }
 function doctorFix(flags, json) {
   const fc0 = makeFixCtx(flags);
+  let start = fc0.reload();
+  const wasLegacy = start.legacy;
+  if (start.legacy) {
+    fixStep0(start, fc0);
+    start = fc0.reload();
+  }
+  if (start.legacy || start.configErrors.length > 0) return fixReport(json, fc0.actions, fc0.notes, start, collectFindings(start));
+  fixGitignore(start.backlog, fc0, wasLegacy);
+  fixReadme(start.backlog, fc0, wasLegacy);
   const fc1 = fixSnapshotMtimes(fc0);
   const fc2 = fixStep1(fc1);
   const fc3 = fixStep2(fc2);
@@ -1692,7 +2330,11 @@ function doctorFix(flags, json) {
   const fc6 = fixStep5(fc5);
   const fc7 = fixStep6(fc6);
   const fc8 = fixStep7(fc7);
-  const { actions, notes, ctx, findings } = fixStep8(fc8);
+  const fc9 = fixStep8(fc8);
+  const { actions, notes, ctx, findings } = fixStep9(fc9);
+  return fixReport(json, actions, notes, ctx, findings);
+}
+function fixReport(json, actions, notes, ctx, findings) {
   const errors = findings.filter((f) => f.severity === "error");
   if (json) {
     out(JSON.stringify({ backlog: ctx.backlog, ok: errors.length === 0, fixed: actions, notes, problems: findings }, null, 2));
@@ -1704,7 +2346,7 @@ function doctorFix(flags, json) {
     const warnings = findings.filter((f) => f.severity === "warning");
     out(`${backlogLabel(ctx.backlog)}: ${ctx.elements.length} entries, ${errors.length} error${errors.length === 1 ? "" : "s"}, ${warnings.length} warning${warnings.length === 1 ? "" : "s"} remaining`);
     for (const f of findings) {
-      const where = f.element ? f.element : path6.relative(ctx.backlog, f.file);
+      const where = f.element ? f.element : path8.relative(ctx.backlog, f.file);
       out(`${f.severity === "error" ? "ERROR  " : "WARNING"} ${where}: ${f.message}`);
     }
   }
@@ -1712,53 +2354,33 @@ function doctorFix(flags, json) {
 }
 
 // src/commands/cmd-init.ts
-var fs8 = __toESM(require("fs"), 1);
-var path7 = __toESM(require("path"), 1);
+var fs10 = __toESM(require("fs"), 1);
+var path9 = __toESM(require("path"), 1);
 function cmdInit(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json"]), false);
   const json = flags.has("json");
   const backlog = initLocation(flags);
-  if (fs8.existsSync(backlog)) fail("exists", `${backlog} already exists`);
-  fs8.mkdirSync(backlog, { recursive: true });
-  for (const d of ["epics", "tasks", "subtasks", "archive", ".ids"]) {
-    fs8.mkdirSync(path7.join(backlog, d), { recursive: true });
+  if (fs10.existsSync(backlog)) fail("exists", `${backlog} already exists`);
+  try {
+    fs10.mkdirSync(backlog, { recursive: true });
+    for (const d of ["epics", "tasks", "subtasks", "archive", V3_IDS_REL]) {
+      fs10.mkdirSync(path9.join(backlog, d), { recursive: true });
+    }
+    fs10.writeFileSync(path9.join(backlog, ".nanojira", "config.json"), JSON.stringify(DEFAULT_CONFIG, null, 2) + "\n", "utf8");
+    fs10.writeFileSync(path9.join(backlog, ".gitignore"), ".nanojira/index.json\n.nj-tmp-*\n", "utf8");
+    fs10.writeFileSync(path9.join(backlog, "README.md"), V3_README, "utf8");
+  } catch (e) {
+    fail("io_error", `cannot create the backlog at ${backlog}: ${oneLine(e)}`);
   }
-  fs8.writeFileSync(path7.join(backlog, ".nanojira.json"), JSON.stringify(DEFAULT_CONFIG, null, 2) + "\n", "utf8");
-  fs8.writeFileSync(path7.join(backlog, ".gitignore"), ".nanojira-index.json\n.nj-tmp-*\n", "utf8");
-  fs8.writeFileSync(path7.join(backlog, "README.md"), README, "utf8");
+  refreshStatus(backlog, { ...DEFAULT_CONFIG });
   if (json) out(JSON.stringify({ ok: true, backlog, changed: ["created"] }, null, 2));
   else {
     out(`Created backlog at ${backlog}`);
-    out("  epics/ tasks/ subtasks/ archive/ .ids/");
-    out("  .nanojira.json .gitignore README.md");
+    out("  epics/ tasks/ subtasks/ archive/ .nanojira/");
+    out("  .nanojira/config.json .nanojira/ids/ .gitignore README.md STATUS.md");
   }
   return 0;
 }
-var README = `# Backlog
-
-This folder is a NanoJira backlog. One Markdown file per element, grouped by
-type: epics/, tasks/, subtasks/. Archived work lives in archive/.
-
-Every file has a YAML-ish frontmatter block between \`---\` lines and a free
-Markdown body. The frontmatter is the truth; the body belongs to you, except
-for the \`# H1\` (mirrors \`title\`) and the \`## Notes\` section written by
-\`nj note\`.
-
-An element is *ready to work* when its status is the first configured status,
-all \`depends_on\` targets are done, it carries no error, and it has a
-non-empty \`## Description\` (plus \`## Acceptance Criteria\` for tasks and
-subtasks). A heading with nothing under it counts as absent \u2014 that is
-deliberate.
-
-\`.ids/\` holds one empty tombstone file per allocated ID. It is versioned and
-must be committed: it is what guarantees IDs are never reused. Do not delete
-it.
-
-The only uncommitted artifact is \`.nanojira-index.json\` (a cache).
-
-Useful commands: \`nj\`, \`nj list --ready\`, \`nj show --id=\u2026\`,
-\`nj new --type=task --parent=EPIC-001 --title="\u2026"\`, \`nj doctor\`.
-`;
 
 // src/commands/cmd-list.ts
 function applyFilters(elements, flags, cfg) {
@@ -1798,7 +2420,7 @@ function cmdList(flags) {
     const ready = filtered.filter((e) => isReady(e, ctx.cfg));
     const blocked = filtered.filter((e) => !isReady(e, ctx.cfg) && e.status === ctx.cfg.statuses[0] && isIncomplete(e));
     if (flags.has("json")) {
-      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope), entries: ready.map(entryJson) }, null, 2));
+      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map(entryJson) }, null, 2));
       return 0;
     }
     out("Ready to work:");
@@ -1814,7 +2436,7 @@ function cmdList(flags) {
     return 0;
   }
   if (flags.has("json")) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope), entries: filtered.map(entryJson) }, null, 2));
+    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: filtered.map(entryJson) }, null, 2));
     return 0;
   }
   if (filtered.length === 0) {
@@ -1826,8 +2448,18 @@ function cmdList(flags) {
 }
 
 // src/commands/cmd-new.ts
-var fs9 = __toESM(require("fs"), 1);
-var path8 = __toESM(require("path"), 1);
+var fs11 = __toESM(require("fs"), 1);
+var path10 = __toESM(require("path"), 1);
+function collidesCaseInsensitively(dir, name) {
+  let names;
+  try {
+    names = fs11.readdirSync(dir);
+  } catch {
+    return false;
+  }
+  const lower = name.toLowerCase();
+  return names.some((n) => n.toLowerCase() === lower);
+}
 function validateNewFlags(ctx, flags) {
   const type = flagString(flags, "type");
   if (type === void 0) return fail("missing_argument", "--type is required", `Known types: ${TYPES.join(", ")}`);
@@ -1877,12 +2509,29 @@ function validateNewFlags(ctx, flags) {
   const sections = readSectionFlags(flags);
   return { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections };
 }
+function newPlace(ctx, type, id, parent) {
+  const { group, folders } = ctx.cfg.layout;
+  if (group === "type") return folders[TYPE_FOLDER_ROLE[type]];
+  if (group === "flat") return "";
+  const own = type === "subtask" ? [] : [id];
+  if (parent === void 0) return own.join("/");
+  const p = ctx.elements.find((e) => e.id === parent);
+  const at = expectedPlace(p, p.byId, ctx.cfg.layout);
+  return [at === null ? folderOf(ctx.backlog, p.file) : at].concat(own).filter((s) => s !== "").join("/");
+}
 function cmdNew(flags) {
   checkFlags(flags, NEW_FIELDS, /* @__PURE__ */ new Set(["json"]), true);
   const json = flags.has("json");
   const ctx = context(flags);
   const { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections } = validateNewFlags(ctx, flags);
-  const id = allocateId(ctx.backlog, type, ctx.elements);
+  let id, dir, file;
+  for (let attempt = 0; ; attempt++) {
+    id = allocateId(ctx.idsDir, type, ctx.elements);
+    dir = path10.join(ctx.backlog, ...newPlace(ctx, type, id, parent).split("/"));
+    file = path10.join(dir, id + ".md");
+    if (!collidesCaseInsensitively(dir, id + ".md")) break;
+    if (attempt >= 100) return hardExit("id_allocation_failed", `nj: id allocation failed after 100 retries (${id} collides with an existing file)`);
+  }
   const ts = nowIso();
   const fields = /* @__PURE__ */ new Map();
   fields.set("id", id);
@@ -1905,12 +2554,11 @@ function cmdNew(flags) {
 ## ${ctx.cfg.sections.acceptance[0]}
 `;
   if (sections.size > 0) body = applySections(body, sections, ctx.cfg).body;
-  const dir = path8.join(ctx.backlog, TYPE_DIR[type]);
-  fs9.mkdirSync(dir, { recursive: true });
-  const file = path8.join(dir, id + ".md");
+  fs11.mkdirSync(dir, { recursive: true });
   atomicWrite(file, serialize(fields, Array.from(fields.keys()), body));
-  const el = loadElement(file, TYPE_DIR[type], ctx.cfg);
-  deriveGraph(ctx.elements.concat([el]), ctx.backlog);
+  const el = loadElement(file, ctx.backlog, ctx.cfg);
+  deriveGraph(ctx.elements.concat([el]), ctx.idsDir, ctx.cfg.layout);
+  refreshStatus(ctx.backlog, ctx.cfg, ctx);
   const changed = FIELD_ORDER.filter((f) => fields.has(f) && f !== "created" && f !== "updated").concat(SECTION_ROLES.filter((r) => sections.has(r)));
   if (json) emitWriteResult(true, el, changed);
   else writeFeedback(el, ctx.cfg, `${id} created \u2192 ${file}`);
@@ -1959,20 +2607,28 @@ ${line}
   }
   const overrides = /* @__PURE__ */ new Map([["updated", ts]]);
   guardedWrite(el, renderElement(el, overrides, body), flags.has("force"), ctx.backlog);
-  const fresh = loadElement(el.file, el.folder, ctx.cfg);
-  deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.backlog);
+  const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
+  deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg.layout);
+  refreshStatus(ctx.backlog, ctx.cfg, ctx);
   if (json) emitWriteResult(true, fresh, ["body"]);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} note added`);
   return 0;
 }
 
 // src/commands/cmd-rm.ts
-var fs10 = __toESM(require("fs"), 1);
+var fs12 = __toESM(require("fs"), 1);
+function removeIfEmpty(dir) {
+  try {
+    fs12.rmdirSync(dir);
+  } catch {
+  }
+}
 function cmdRm(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "cascade", "id", "file"]), true);
   const json = flags.has("json");
   const ctx = context(flags);
   requireNoStubs(ctx, "rm");
+  requireNoUnreadableDirs(ctx, "rm");
   const el = resolveTarget(ctx, flags, true);
   requireActive(el, "rm");
   const kids = descendants(ctx, el);
@@ -1998,7 +2654,12 @@ ${archivedVictims.map((v) => "  " + v.id).join("\n")}`,
   const victimIds = new Set(victims.map((v) => v.id));
   const dependents = ctx.elements.filter((e) => !victimIds.has(e.id) && e.depends_on.some((d) => victimIds.has(d))).sort(compareElements);
   const entries = victims.map(entryJson);
-  for (const v of victims) fs10.unlinkSync(v.file);
+  for (const v of victims.slice().reverse()) {
+    fs12.unlinkSync(v.file);
+    const own = ctx.cfg.layout.group === "hierarchy" ? ownFolder(v) : null;
+    if (own !== null) removeIfEmpty(own);
+  }
+  refreshStatus(ctx.backlog, ctx.cfg, ctx);
   if (json) {
     if (flags.has("cascade") && kids.length > 0) {
       out(JSON.stringify({ ok: true, ids: victims.map((v) => v.id), changed: ["deleted"], entries, _problems: [], dependents: dependents.map((d) => d.id) }, null, 2));
@@ -2033,8 +2694,9 @@ function cmdSet(flags) {
   }
   overrides.set("updated", nowIso());
   guardedWrite(el, renderElement(el, overrides, newBody), force, ctx.backlog);
-  const fresh = loadElement(el.file, el.folder, ctx.cfg);
-  deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.backlog);
+  const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
+  deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg.layout);
+  refreshStatus(ctx.backlog, ctx.cfg, ctx);
   if (json) emitWriteResult(true, fresh, changed);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} \u2192 ${changed.map((c) => `${c}=${describeField(fresh, c)}`).join(", ")}`);
   return 0;
@@ -2060,6 +2722,7 @@ function collectSetOverrides(ctx, el, flags, allowOpen) {
       fail("invalid_value", `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(", ")}`);
     }
     if (status === "done") {
+      requireNoUnreadableDirs(ctx, "set --status=done");
       const open = el.children.filter((c) => !c.archived && c.status !== "done");
       if (open.length > 0 && !allowOpen) {
         const names = open.map((c) => `  ${c.id}  ${c.status.padEnd(8)} ${c.title}`).join("\n");
@@ -2167,7 +2830,7 @@ function cmdStatus(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json"]), false);
   const ctx = context(flags);
   const scope = ctx.elements.filter((e) => !e.archived);
-  const counts = countsOf(scope);
+  const counts = countsOf(scope, ctx.scan.unreadable.length);
   const ready = scope.filter((e) => isReady(e, ctx.cfg)).sort(compareElements).slice(0, 5);
   const incomplete = scope.filter(isIncomplete).sort(compareElements).slice(0, 5);
   if (flags.has("json")) {

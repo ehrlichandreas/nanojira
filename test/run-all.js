@@ -28,7 +28,11 @@ function collect(dir) {
 
 /* `stress/` is deliberately not collected: ac/ac-07-concurrency.js wraps
  * stress/concurrency.js, so scanning both would run the heaviest test twice —
- * doubling the wall clock and inflating the test count with a duplicate. */
+ * doubling the wall clock and inflating the test count with a duplicate.
+ *
+ * `proposed/` is deliberately not collected either: it holds proposal-v3.1
+ * suites (AC-25/26) written ahead of spec acceptance. They are not gated
+ * until v3.1 is promoted into the spec and moved into ac/. */
 const tests = [].concat(collect('ac'), collect('fault'), collect('edge'));
 
 if (tests.length === 0) {

@@ -82,7 +82,7 @@ async function main() {
     'got ' + ids.slice().sort().slice(0, 5).join(',') + ' …');
 
   // One tombstone per allocated ID — the allocator's authority.
-  const tombs = H.lsOrEmpty(path.join(dir, 'backlog', '.ids')).sort();
+  const tombs = H.lsOrEmpty(path.join(dir, 'backlog', H.IDS_REL)).sort();
   T.check('one tombstone per ID', tombs.length === COUNT + 1,
     'tombstones ' + tombs.length + ' (expected ' + (COUNT + 1) + ' incl. the epic)');
 
@@ -99,8 +99,14 @@ async function main() {
   T.exit('doctor exits 0 on a fresh backlog', doc, 0);
   T.check('doctor --json ok=true', doc.json && doc.json.ok === true,
     JSON.stringify(doc.json && doc.json.ok));
-  T.check('doctor problems[] is empty', doc.json && Array.isArray(doc.json.problems) &&
-    doc.json.problems.length === 0, JSON.stringify(doc.json && doc.json.problems));
+  /* DECISIONS 100: racing writers may leave STATUS.md one write behind
+   * (spec v3 § 4) — backlog:status_stale is the one tolerated warning;
+   * nothing else, and never an error. */
+  T.check('doctor problems[] is empty but for a tolerated backlog:status_stale',
+    doc.json && Array.isArray(doc.json.problems) &&
+    doc.json.problems.length <= 1 &&   /* a backlog-level code appears at most once (Verifier T2) */
+    doc.json.problems.every(p => p.code === 'backlog:status_stale' && p.severity === 'warning'),
+    JSON.stringify(doc.json && doc.json.problems));
 
   /* ---- the "retries exhausted" abort ------------------------------------
    * Reachable only when concurrent creators claim every candidate above the

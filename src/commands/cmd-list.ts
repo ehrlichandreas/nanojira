@@ -50,7 +50,7 @@ function cmdList(flags: Flags) {
     const ready = filtered.filter((e) => isReady(e, ctx.cfg));
     const blocked = filtered.filter((e) => !isReady(e, ctx.cfg) && e.status === ctx.cfg.statuses[0] && isIncomplete(e));
     if (flags.has('json')) {
-      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope), entries: ready.map(entryJson) }, null, 2));
+      out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: ready.map(entryJson) }, null, 2));
       return 0;
     }
     out('Ready to work:');
@@ -67,7 +67,7 @@ function cmdList(flags: Flags) {
   }
 
   if (flags.has('json')) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope), entries: filtered.map(entryJson) }, null, 2));
+    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope, ctx.scan.unreadable.length), entries: filtered.map(entryJson) }, null, 2));
     return 0;
   }
   if (filtered.length === 0) { out('(no matching elements)'); return 0; }

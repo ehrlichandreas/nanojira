@@ -6,10 +6,11 @@ import type { Flags, Element, Context } from '../core/types.ts';
 
 import { checkFlags, flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
 import { PRIORITIES, SETTABLE_FIELDS } from '../core/constants.ts';
-import { context, resolveTarget, requireWritable, requireActive } from '../core/context.ts';
+import { context, resolveTarget, requireWritable, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, writeFeedback, emitWriteResult } from '../core/output.ts';
 import { syncH1, normalizeTitle, applySections } from '../core/parse.ts';
+import { refreshStatus } from '../core/status.ts';
 import { nowIso, guardedWrite, renderElement } from '../core/store.ts';
 
 type SectionRole = 'description' | 'acceptance';
@@ -38,8 +39,9 @@ function cmdSet(flags: Flags) {
   overrides.set('updated', nowIso());
   guardedWrite(el, renderElement(el, overrides, newBody), force, ctx.backlog);
 
-  const fresh = loadElement(el.file, el.folder, ctx.cfg);
-  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.backlog);
+  const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
+  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+  refreshStatus(ctx.backlog, ctx.cfg, ctx);
   if (json) emitWriteResult(true, fresh, changed);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} → ${changed.map((c: SetField) => `${c}=${describeField(fresh, c)}`).join(', ')}`);
   return 0;
@@ -85,6 +87,11 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
       fail('invalid_value', `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(', ')}`);
     }
     if (status === 'done') {
+      // An unreadable directory anywhere hides whatever elements lie inside
+      // it — including, possibly, an open child of `el` — so the open-
+      // children check below cannot be trusted while one exists; a silent
+      // `done` would be worse than refusing (DECISIONS 106 F4).
+      requireNoUnreadableDirs(ctx, 'set --status=done');
       const open = (el.children as Element[]).filter((c) => !c.archived && c.status !== 'done');
       if (open.length > 0 && !allowOpen) {
         const names = open.map((c) => `  ${c.id}  ${c.status.padEnd(8)} ${c.title}`).join('\n');

@@ -8,7 +8,7 @@
  * § 4 "Backlog discovery":
  *   1. If NJ_BACKLOG is set, it points at the backlog folder. Use it.
  *   2. Otherwise walk upward from the working directory to the first directory
- *      that contains backlog/.nanojira.json. Use that backlog.
+ *      that contains backlog/.nanojira/config.json. Use that backlog.
  *   3. If nothing is found: exit 1 with a hard error. Never fall back to a
  *      relative path, never operate on an empty backlog, never auto-create.
  */
@@ -60,13 +60,13 @@ function taskFile(id, title) {
 /* A second, hand-built backlog somewhere else in the tree. */
 function secondBacklog(projectDir, rel, id, title) {
   const bl = path.join(projectDir, rel);
-  for (const sub of ['epics', 'tasks', 'subtasks', 'archive', '.ids']) {
+  for (const sub of ['epics', 'tasks', 'subtasks', 'archive', H.IDS_REL]) {
     fs.mkdirSync(path.join(bl, sub), { recursive: true });
   }
-  fs.writeFileSync(path.join(bl, '.nanojira.json'), H.DEFAULT_CONFIG);
-  fs.writeFileSync(path.join(bl, '.gitignore'), '.nanojira-index.json\n.nj-tmp-*\n');
+  fs.writeFileSync(path.join(bl, H.CONFIG_REL), H.DEFAULT_CONFIG);
+  fs.writeFileSync(path.join(bl, '.gitignore'), H.GITIGNORE);
   fs.writeFileSync(path.join(bl, 'README.md'), '# Backlog\n');
-  fs.writeFileSync(path.join(bl, '.ids', id), '');
+  fs.writeFileSync(path.join(bl, H.IDS_REL, id), '');
   fs.writeFileSync(path.join(bl, 'tasks', id + '.md'), taskFile(id, title));
   return bl;
 }
@@ -163,7 +163,7 @@ fs.mkdirSync(deep, { recursive: true });
   const r = H.runJson(['list'], { cwd: deep });
   T.exit('list from two levels below a nested backlog', r, 0);
   const got = ids(r.json);
-  T.check('the nearest backlog wins (the first directory containing backlog/.nanojira.json)',
+  T.check('the nearest backlog wins (the first directory containing backlog/.nanojira/config.json)',
     got.includes('TSK-002'), 'entries = ' + J(got));
   T.check('the outer backlog is not used', !got.includes('TSK-001'),
     'entries = ' + J(got));

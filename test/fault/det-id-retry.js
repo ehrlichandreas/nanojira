@@ -10,7 +10,7 @@
  * This file reaches it without concurrency and without touching nj: the same
  * file is preloaded into nj's process (`NODE_OPTIONS=--require`) and, when
  * NJ_DET_SHIM=eexist, wraps Node's `fs` so that the first N exclusive creates
- * under `.ids/` fail with EEXIST — exactly what a faster rival would cause.
+ * under `.nanojira/ids/` fail with EEXIST — exactly what a faster rival would cause.
  * nj is still a black box: nothing of it is required or read; only the
  * runtime it runs on is instrumented.
  *
@@ -27,7 +27,7 @@ if (process.env.NJ_DET_SHIM === 'eexist') {
   const budget = Number(process.env.NJ_DET_EEXIST || 0);
   let seen = 0, injected = 0;
 
-  const isTombstone = p => /[\\/]\.ids[\\/][A-Z]+-\d+$/.test(String(p));
+  const isTombstone = p => /[\\/]\.nanojira[\\/]ids[\\/][A-Z]+-\d+$/.test(String(p));
   const isExcl = f => (typeof f === 'string' && f.includes('x')) ||
     (typeof f === 'number' && (f & fs.constants.O_EXCL) !== 0);
   const eexist = p => Object.assign(
@@ -116,7 +116,7 @@ function runInjected(d, n, args) {
  * under its own name, and nothing else is asserted. */
 function engaged(label, r) {
   if (r.shim && r.shim.seen > 0) {
-    return T.check(label + ': shim engaged (≥1 O_EXCL open under .ids/)', true);
+    return T.check(label + ': shim engaged (≥1 O_EXCL open under .nanojira/ids/)', true);
   }
   console.log('FAIL det-id-retry.js — SHIM NOT ENGAGED (' + label + ')');
   console.log('  nj claimed no tombstone through Node fs with an exclusive flag ' +
@@ -138,7 +138,7 @@ function engaged(label, r) {
   let json = null; try { json = JSON.parse(r.stdout); } catch (e) { /* asserted below */ }
   T.eq('3 collisions: the new id is start+4', json && json.id, 'EPIC-005');
   T.eq('3 collisions: exactly one new tombstone, the claimed one',
-    H.listFiles(d, '.ids'), ['EPIC-001', 'EPIC-005']);
+    H.listFiles(d, H.IDS_REL), ['EPIC-001', 'EPIC-005']);
   T.eq('3 collisions: exactly one new element file',
     H.listFiles(d, 'epics'), ['EPIC-001.md', 'EPIC-005.md']);
 }
@@ -151,7 +151,7 @@ function engaged(label, r) {
   engaged('100 collisions', r);
   T.eq('100 collisions: the defined stderr line, exactly', r.stderr.trim(), ABORT_LINE('EPIC'));
   T.eq('100 collisions: the allocator stops after 100 probes', r.shim && r.shim.seen, 100);
-  T.eq('100 collisions: no tombstone claimed', H.listFiles(d, '.ids'), ['EPIC-001']);
+  T.eq('100 collisions: no tombstone claimed', H.listFiles(d, H.IDS_REL), ['EPIC-001']);
   T.eq('100 collisions: no element file written', H.listFiles(d, 'epics'), ['EPIC-001.md']);
   T.eq('100 collisions: no stray temp file',
     H.listFiles(d, 'epics').filter(f => f.startsWith('.nj-tmp-')), []);
@@ -169,7 +169,7 @@ function engaged(label, r) {
   T.eq('99 collisions: 100 probes in total', r.shim && r.shim.seen, 100);
   let json = null; try { json = JSON.parse(r.stdout); } catch (e) { /* asserted below */ }
   T.eq('99 collisions: the new id is start+100', json && json.id, 'EPIC-101');
-  T.eq('99 collisions: tombstone claimed', H.listFiles(d, '.ids'), ['EPIC-001', 'EPIC-101']);
+  T.eq('99 collisions: tombstone claimed', H.listFiles(d, H.IDS_REL), ['EPIC-001', 'EPIC-101']);
 }
 
 /* ---- --json on the abort: every exit path writes JSON (§ 9) ------------- */

@@ -7,21 +7,36 @@ import type { Element, Context, Flags } from './types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { flagString } from './args.ts';
-import { loadConfig, findBacklog } from './config.ts';
+import { loadConfig, findBacklog, isLegacyBacklog } from './config.ts';
+import { V3_CONFIG_REL, V3_IDS_REL, LEGACY_CONFIG_REL, LEGACY_IDS_REL } from './constants.ts';
 import { compareElements } from './derive.ts';
 import { loadBacklog } from './load.ts';
 import { fail } from './output.ts';
 
 // ------------------------------------------------------------------ context
 
+// `lenient` is `doctor`'s own flag: only it may open a legacy backlog (it
+// reads the v2 places and reports `backlog:legacy_layout`, § 14); every
+// other command refuses with `legacy_layout` before anything is loaded —
+// unconditionally, even an ambiguous one (DECISIONS 95 B21, AMBIGUITIES 71).
 function context(flags: Flags, opts?: { lenient?: boolean; tolerateConfig?: boolean }): Context {
   const backlog = findBacklog(flags, Boolean(opts && opts.lenient));
-  const { config, errors } = loadConfig(backlog);
-  if (errors.length > 0 && !(opts && opts.tolerateConfig)) {
-    fail('invalid_config', `invalid configuration in ${path.join(backlog, '.nanojira.json')}: ${errors[0]}`, 'run `nj doctor` for the full report');
+  const legacy = isLegacyBacklog(backlog);
+  if (legacy && !(opts && opts.lenient)) {
+    fail('legacy_layout', `${backlog} is a legacy (v2) backlog — every command but \`doctor\` refuses it`,
+      'run `nj doctor --fix` to migrate it to the v3 layout');
   }
-  const elements = loadBacklog(backlog, config);
-  return { backlog, cfg: config, configErrors: errors, elements };
+  const { config, errors } = loadConfig(backlog, legacy);
+  if (errors.length > 0 && !(opts && opts.tolerateConfig)) {
+    const configFile = path.join(backlog, legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
+    fail('invalid_config', `invalid configuration in ${configFile}: ${errors[0]}`, 'run `nj doctor` for the full report');
+  }
+  const idsDir = path.join(backlog, legacy ? LEGACY_IDS_REL : V3_IDS_REL);
+  // Taken before the first file is read: STATUS.md's refresh trusts the
+  // elements loaded here only for files whose ctime predates it (DECISIONS 103).
+  const loadedAt = Date.now();
+  const { elements, scan } = loadBacklog(backlog, config, idsDir);
+  return { backlog, cfg: config, configErrors: errors, elements, scan, loadedAt, legacy, idsDir };
 }
 
 function resolveTarget(ctx: Context, flags: Flags, forWrite?: boolean): Element {
@@ -86,6 +101,21 @@ function requireNoStubs(ctx: Context, verb: string) {
     'make the files readable (or move them out of the backlog), then run `nj doctor` and retry');
 }
 
+// An unreadable directory (`backlog:unreadable_dir`, § 7) hides whatever
+// element files lie inside it from every scan — not a stub, not even
+// visible, so `descendants()` and the open-children check cannot see what
+// they are missing. `archive`, `rm` and a `done` transition all rely on
+// having seen the whole subtree; refusing while ANY such directory exists
+// anywhere in the backlog is the same rule `requireNoStubs` already applies
+// to unreadable files, for the same reason: the guard is a property of the
+// backlog, not of the addressed element (DECISIONS 106 F4).
+function requireNoUnreadableDirs(ctx: Context, verb: string) {
+  if (ctx.scan.unreadable.length === 0) return;
+  const names = ctx.scan.unreadable.map((u) => `  ${path.relative(ctx.backlog, u.dir)}`).join('\n');
+  fail('refused:unreadable_dir', `${verb} is refused while the backlog contains an unreadable directory — files inside it are not seen, so no subtree can be determined:\n${names}`,
+    'make the directory readable, then run `nj doctor` and retry');
+}
+
 // Round one has no `nj unarchive`, so the archive is read-only (§ 9).
 function requireActive(el: Element, verb: string) {
   if (el.archived) {
@@ -94,4 +124,4 @@ function requireActive(el: Element, verb: string) {
   }
 }
 
-export { context, resolveTarget, requireWritable, requireNoStubs, requireActive };
+export { context, resolveTarget, requireWritable, requireNoStubs, requireNoUnreadableDirs, requireActive };

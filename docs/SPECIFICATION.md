@@ -198,8 +198,17 @@ is readable without `nj` — in an editor or a forge's web view.
   regenerates it — which also resolves a merge conflict in it.
 - **A failed overview never fails the write.** The element write is the
   operation; if `STATUS.md` cannot be written afterwards, the command keeps
-  its exit code and prints `nj: warning: STATUS.md not updated (<reason>)` on
-  stderr.
+  its exit code and prints `Warning: STATUS.md not updated (<reason>)` on
+  stderr. Under `--json` the result object is unchanged — the warning is on
+  stderr only; `doctor --fix` keeps the exit code its findings give, and the
+  next `doctor` reports `backlog:status_stale`.
+- **Problem elements** (DECISIONS 95): an element is listed under the status
+  `list` shows for it — a `missing:status` element under the derived
+  `statuses[0]`; a `file:unreadable` stub, having no status, under `?`. With
+  no title the line is `- [<ID>](<path>)` with no trailing space. Both files
+  of a `duplicate_id` are listed, ordered by path after the `list` order.
+  The title needs no escaping: the link text is the ID, and IDs and folder
+  names cannot contain `]`, `(` or `)`.
 - `layout.statusFile: false` (§ 5) switches it off: nothing is written and
   `doctor` does not check it. An existing file is then left alone.
 - **Cost:** one full scan per write — ≈200 ms at 10 000 elements (§ 13). The
@@ -269,8 +278,11 @@ backlog = ../shared/backlog
   ignored; empty lines and lines whose first non-blank character is `#` are
   ignored. The value is literal — no quotes, no variables — except that a
   leading `~/` expands to the user's home directory.
-- Lexing, exactly: an optional UTF-8 BOM at the start is dropped; a trailing
-  `\r` counts as line-end whitespace (CRLF files work); a line splits at its
+- Lexing, exactly: an optional UTF-8 BOM at the very start of the file is
+  dropped (a BOM anywhere else is an ordinary character); a trailing `\r`
+  counts as line-end whitespace (CRLF files work), but a `\r` not followed by
+  `\n` is `invalid_njrc` (a classic-Mac file would otherwise read as one
+  comment line and silently set nothing); a line splits at its
   **first** `=`, so the value may contain `=`; keys are case-sensitive
   (`Backlog` is unknown); a `#` after the first non-blank character is part
   of the value — only whole-line comments exist.
@@ -283,7 +295,9 @@ backlog = ../shared/backlog
 - **Ownership.** A `.njrc` the search reaches must be owned by the current
   user or by root; otherwise the command exits 1 with `invalid_njrc` and
   `nj: invalid .njrc at <abs path>: owned by uid <n>, not by you` — never
-  silently skipped, never obeyed. A file planted in a shared ancestor
+  silently skipped, never obeyed. For a symlinked `.njrc` both the link and
+  its target must pass. Ownership is checked before the file is read, so it
+  is reported ahead of every other `.njrc` fault. A file planted in a shared ancestor
   (`/tmp`) must not steer another user's `nj` (the precedent is git's
   `safe.directory`). `--backlog` and `NJ_BACKLOG` stop the search first and
   so bypass the check (DECISIONS 93).
@@ -338,12 +352,15 @@ Rules:
   headings (`["Akzeptanzkriterien", "Acceptance Criteria"]`) without breaking
   the completeness check.
 - `layout.group`: `type`, `hierarchy` or `flat` (§ 4).
-- `layout.folders`: exactly the four keys `epics`, `tasks`, `subtasks`,
-  `archive`, each a folder name matching `[A-Za-z0-9][A-Za-z0-9_-]*`, pairwise
+- `layout.folders`: only the four keys `epics`, `tasks`, `subtasks`,
+  `archive` (any subset; a missing one is its default), each a folder name matching `[A-Za-z0-9][A-Za-z0-9_-]*`, pairwise
   distinct, none of the form `EPIC-<n>`, `TSK-<n>` or `SUB-<n>` (those are
   folder names under `hierarchy`). Under `hierarchy` and `flat` only
   `archive` is used; the other three are still validated.
 - `layout.statusFile`: `true` or `false` (§ 4, `STATUS.md`).
+- While the configuration is invalid (`config:invalid`), no placement is
+  judged: `type:folder` and `layout:misplaced` are not reported, because the
+  layout they would be judged against is unknown (DECISIONS 102).
 - An unknown key inside `layout` or `layout.folders` is invalid — a typo must
   not silently fall back to a default.
 - Changing `layout` is always allowed; it never invalidates the configuration.
@@ -565,12 +582,12 @@ their original order. Empty optional fields are omitted. The serializer is
 Per type, sequential, zero-padded to three digits: `EPIC-001`, `TSK-001`,
 `SUB-001`. Past 999 the number naturally grows.
 
-**IDs are never reused — provided `.nanojira/ids/` is preserved** (`.ids/`
-below, for short). Allocation is
+**IDs are never reused — provided `.nanojira/ids/` is preserved** (`ids/`
+below, for short; `.ids/` always means the legacy top-level folder). Allocation is
 decoupled from the element files: the true allocator is an empty **tombstone
 file** `<backlog>/.nanojira/ids/TSK-007`, created with `O_CREAT|O_EXCL`. `O_CREAT|O_EXCL`
 is the **sole** claiming authority: the allocator computes only a **start
-value** — the highest number found across `.ids/` *and* all element files
+value** — the highest number found across `ids/` *and* all element files
 (active and archive) — and probes upward from there with `O_CREAT|O_EXCL`
 (bounded at 100 retries, then exit 1 with the stderr line
 `nj: id allocation failed after 100 retries (<TYPE>)`). `nj archive` and
@@ -583,12 +600,12 @@ design.
 An element file without a tombstone is a **WARNING** (`id:no_tombstone`): the
 same observable state can also be produced by partial tombstone loss, so it
 must surface — but a hand-drafted element is legitimate work and stays
-eligible for `--ready`. A missing or empty `.ids/` while element files exist
+eligible for `--ready`. A missing or empty `ids/` while element files exist
 is `backlog:ids_missing`, an ERROR. `doctor --fix` creates tombstones for
 every ID found in element files (active and archive) — unambiguous
 restoration. Tombstones for already-deleted IDs cannot be recovered; `--fix`
 reports that the never-reuse guarantee is void for those numbers. Residual
-risk, disclosed: a lost `.ids/` can still recycle the numbers of elements
+risk, disclosed: a lost `ids/` can still recycle the numbers of elements
 deleted with `nj rm`, if their tombstones were lost with it — live and
 archived elements are always protected by the file-scan start value. A
 tombstone without an element is normal (deleted or archived).
@@ -949,11 +966,13 @@ the archive folder (`layout.folders.archive`, default `archive/`):
   folder moves as a whole, with **one** `rename`, to the same relative place
   below the archive folder (`archive/EPIC-001/TSK-003/`); missing ancestor
   folders there are created first and hold no element file of their own.
-  When the target folder already exists as such an ancestor — left by an
-  earlier archive of a descendant — it is not "occupied": the subtree's
-  entries move into it, one `rename` per entry, and the emptied source
-  folder is removed. A target is occupied only where an element file or a
-  folder holding one would be overwritten (DECISIONS 90).
+  When the target folder already exists — left by an earlier archive of a
+  descendant — it is merged into, recursively: one `rename` per entry,
+  descending wherever an entry's target is itself an existing folder;
+  emptied source folders are removed with `rmdir`. A target is occupied
+  only where a **file** already exists at a file's target path, or a file
+  meets a folder; then `exists`, and nothing moves (DECISIONS 90, 94).
+  `doctor --fix` step 3 plans its moves the same way.
 
 - **Precondition:** the element and every descendant are `done`. Otherwise the
   command refuses and lists the open elements. There is no `--force`: finish
@@ -1019,8 +1038,8 @@ governs, a bulk move must never silently overwrite a parallel edit, and
 got its own flag (`--allow-open-children`). A parallel change during `archive`
 aborts the run; the caller retries once the backlog is stable.
 
-**Fault injection (verification hook, not a feature).** `NJ_FAULT` accepts two
-distinct injection points, both exiting with code 1 and leaving the target
+**Fault injection (verification hook, not a feature).** `NJ_FAULT` accepts three
+distinct injection points, each exiting with code 1 and leaving the target
 file untouched:
 
 - `after-tmp-write` — abort immediately after the temp file has been written,
@@ -1086,6 +1105,28 @@ is now in line with the scan path, not a separate case: `npm run perf`
 the comfort bar above. The 12 000–15 000 trigger below now applies to `tree`
 as well.
 
+**Writes, with `STATUS.md` (V3-3, DECISIONS 103).** Every successful write
+regenerates the overview from a full scan: every folder is listed and every
+element file stat'ed, and only files whose `ctime` is newer than the
+command's load start minus 2 s are re-read — the rest reuse what the command
+already loaded. A literal re-read of every file was measured first and cost
+one read-scan per write (+70 %: `new` 441 → 712 ms); the `ctime` scan costs
+about a sixth of that. Measured with `tools/perf.js --ab` (10 000 elements,
+15 interleaved rounds, paired), against the pre-`STATUS.md` build `9fa11d9`,
+on a machine in Low Power Mode with other agents running (10 of 30 rounds
+started under foreign CPU load; absolute numbers are therefore not comfort-bar
+numbers, the paired deltas are):
+
+| write | before (median/max) | with `STATUS.md` (median/max) | paired delta |
+|---|---|---|---|
+| `new` | 460 / 799 ms | 519 / 881 ms | +14.1 % |
+| `set --title` | 445 / 811 ms | 502 / 2841 ms | +12.7 % |
+| `note` | 442 / 611 ms | 498 / 866 ms | +12.6 % |
+
+Reads are unchanged (paired −1.0 … +3.6 %). A write therefore costs about one
+extra `stat` scan (≈ 55 ms here at 10 000 elements). With `layout.statusFile:
+false` there is none.
+
 The index is therefore still deferred, with a measured trigger: implement it
 when backlogs approach ~12 000–15 000 elements, or ~9 000 if `list --json` is
 routinely on the agent's hot path. Round one ships without it; the design is
@@ -1125,7 +1166,7 @@ from their v2 places); configuration validity (§ 5); every condition whose
 Doctor column is not `—` (table in § 7); unreadable frontmatter lines;
 duplicate IDs; files outside their layout place (`type:folder`,
 `layout:misplaced`);
-a missing or empty `.ids/` while elements exist (`backlog:ids_missing`);
+a missing or empty `ids/` while elements exist (`backlog:ids_missing`);
 element files without tombstones (`id:no_tombstone`); stray `.nj-tmp-*` files
 (`backlog:stray_tmp`); archive rules (§ 11); `STATUS.md` against a fresh
 rendering (`backlog:status_stale`, only with `statusFile: true`). The summary
@@ -1151,7 +1192,9 @@ unprotected:
    index file `.nanojira-index.json` if present, and replace the pattern
    `.nanojira-index.json` in `.gitignore` by `.nanojira/index.json` — only
    when that line is present verbatim; otherwise `.gitignore` is left alone
-   and a note says so. If both the v2 and the v3 location of the
+   and a note says so. `README.md` is replaced by the v3 text only when it
+   is byte-identical to the text a v2 `nj init` wrote; otherwise it is left
+   alone and a note says so. If both the v2 and the v3 location of the
    configuration or of the tombstones exist, nothing is moved — ambiguous,
    reported, never merged
 1. write the `id` from the file name, and the `type` from the ID prefix, when
@@ -1163,7 +1206,8 @@ unprotected:
    folder precedence; the folder loses); under `hierarchy` only when the
    whole `parent` chain resolves without `parent:*` problems, and a subtree
    moves with its top folder in one `rename`, top-down; every target must be
-   free, otherwise that element is reported and stays
+   free, otherwise that element is reported and stays; missing target
+   folders are created. A file lying where it belongs is never touched
 4. create missing tombstones for every ID found in element files
    (`id:no_tombstone`, `backlog:ids_missing`; tombstones for deleted IDs are
    unrecoverable and reported as such)

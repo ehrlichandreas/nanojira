@@ -50,6 +50,7 @@ export type NonEmptyString = string & { readonly __nonEmpty: unique symbol };
 /** Set directly in loadElement, before any deriver runs. */
 export interface Skeleton {
   file: string;
+  /** The file's directory relative to the backlog, `/`-separated; `''` at the top. */
   folder: string;
   raw: string | null;
   body: string;
@@ -91,10 +92,34 @@ export interface ParsedFile {
   parsed: boolean;
 }
 
+/** § 4: where element files lie. */
+export type Group = 'type' | 'hierarchy' | 'flat';
+
+/** § 5 `layout.folders`, keyed by role; every name already validated. */
+export interface Folders { epics: string; tasks: string; subtasks: string; archive: string }
+
+export interface Layout {
+  group: Group;
+  folders: Folders;
+  /** Validated now, acted on from V3-3 (STATUS.md). */
+  statusFile: boolean;
+}
+
 export interface Config {
   schema: number;
   statuses: string[];
   sections: { description: string[]; acceptance: string[] };
+  layout: Layout;
+}
+
+/** One walk over the backlog (layout.ts `scanBacklog`). */
+export interface Scan {
+  /** Every element file in scan order, with its folder relative to the backlog (`/`-separated, `''` at the top). */
+  files: { file: string; folder: string }[];
+  /** Every directory that can hold element or temp files, bookkeeping last. */
+  dirs: string[];
+  /** Folders that exist but cannot be listed, with the OS reason — never skipped silently. */
+  unreadable: { dir: string; reason: string }[];
 }
 
 export interface Context {
@@ -102,6 +127,14 @@ export interface Context {
   cfg: Config;
   configErrors: string[];
   elements: Element[];
+  /** The walk the elements were loaded from; `doctor` reads its folders too. */
+  scan: Scan;
+  /** `Date.now()` just before the first element file was read (DECISIONS 103). */
+  loadedAt: number;
+  /** A v2 (pre-V3-4) backlog: bookkeeping read from the top-level legacy places. */
+  legacy: boolean;
+  /** The absolute tombstone folder in use — `.nanojira/ids` or, under `legacy`, `.ids` (§ 8, DECISIONS 95 B22). */
+  idsDir: string;
   /** memoised by descendants() -- see load.ts, DECISIONS 81 */
   kids?: Map<string, Element[]>;
 }
