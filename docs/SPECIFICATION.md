@@ -280,6 +280,13 @@ backlog = ../shared/backlog
   `.njrc` resolves a relative value against the directory where the link
   lies, not its target's. `~/.njrc` has no special role: it is read only
   when the home directory is on the search path, like any ancestor.
+- **Ownership.** A `.njrc` the search reaches must be owned by the current
+  user or by root; otherwise the command exits 1 with `invalid_njrc` and
+  `nj: invalid .njrc at <abs path>: owned by uid <n>, not by you` — never
+  silently skipped, never obeyed. A file planted in a shared ancestor
+  (`/tmp`) must not steer another user's `nj` (the precedent is git's
+  `safe.directory`). `--backlog` and `NJ_BACKLOG` stop the search first and
+  so bypass the check (DECISIONS 93).
 - Known keys: `backlog`. A `.njrc` without `backlog` (e.g. only comments) does
   not set a location; the search continues upward.
 - An unknown key, a line without `=`, an empty value or a repeated key: exit
@@ -525,6 +532,7 @@ condition that produces it:
 | `backlog:ids_missing` | `.nanojira/ids/` absent or empty while element files exist, backlog-level | error | — |
 | `config:invalid` | `.nanojira/config.json` violates § 5 (backlog-level) | error | — |
 | `backlog:legacy_layout` | v2 layout (`.nanojira.json`, `.ids/` at the top level), backlog-level | error | — |
+| `backlog:unreadable_dir` | a directory below the backlog cannot be listed (permissions), backlog-level | error | — |
 | `backlog:status_stale` | `STATUS.md` differs from a fresh rendering or is missing (§ 4), backlog-level | warning | — |
 
 The two axes are independent: **Doctor** says whether a code is a doctor
@@ -819,6 +827,7 @@ problem codes: those describe element state, these describe command outcomes.
 
 ```
 no_backlog            backlog_without_config   invalid_config
+io_error
 invalid_env           invalid_backlog_env      unknown_field
 invalid_backlog_flag  invalid_backlog_njrc     invalid_njrc
 legacy_layout
@@ -861,6 +870,7 @@ its code. These mappings are normative:
 | a `--description-file` / `--acceptance-file` path cannot be read | `not_found` | § 9 |
 | two files carry the same `id` | `duplicate_id` | § 9 |
 | `init` target already exists (even an empty directory) | `exists` | § 4 |
+| a filesystem call on a named target fails (`init` into a read-only or non-directory parent; a deleted working directory) | `io_error` | § 9 |
 | an `archive` target path is occupied | `exists` | § 11 |
 | the file changed between read and write | `changed_in_parallel` | § 12 |
 | an archived element is written or removed | `refused:archived` | § 9 |
@@ -1126,7 +1136,11 @@ exit 0.
 
 ### `--fix`
 
-Repairs **unambiguous** cases only. Steps run **in this order** — the
+Repairs **unambiguous** cases only. **While `config:invalid` (or
+`backlog:legacy_layout` with an ambiguous step 0) holds, `--fix` writes
+nothing** except step 0 itself: a directory that is not a valid backlog —
+reached by a mistyped `--backlog` or `NJ_BACKLOG` — must not receive
+tombstones, moves or rewrites (DECISIONS 93). Steps run **in this order** — the
 tombstone backfill claims the **frontmatter** `id`, so it must run after the
 rename, or it would claim the wrong number while the right one stays
 unprotected:

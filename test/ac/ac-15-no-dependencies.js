@@ -41,7 +41,7 @@
  * "Without network" is not observable from a spawned process without a
  * sandbox; what is observable is that no module outside the Node distribution
  * can be loaded, which is what NODE_PATH below pins, and which the lone-copy
- * check below pins for `dist/nj` specifically.
+ * check below pins for the nj under test specifically.
  */
 const path = require('path');
 const PLATFORM = process.platform === 'darwin' ? 'darwin-arm64' : 'linux-x64';
@@ -103,12 +103,16 @@ function J(x) { return JSON.stringify(x === undefined ? null : x); }
   }
 }
 
-/* ---- dist/nj runs alone, without any node_modules beside it (§ 3) ------- */
+/* ---- the nj under test runs alone, without anything beside it (§ 3) ----- */
 
+/* The lone copy is of the nj this run verifies (argv[2] / NJ), not of
+ * <project>/dist/nj: a run against a candidate bundle must check THAT
+ * bundle's self-containment, and a run against an older bundle (a v2
+ * baseline copy) must not silently check the working tree's instead. */
 {
-  const distNj = path.join(PROJECT, 'dist', 'nj');
-  const distExists = fs.existsSync(distNj);
-  T.check('dist/nj exists (§ 3: what ships)', distExists, distNj);
+  const distNj = H.NJ;
+  const distExists = !!distNj && fs.existsSync(distNj);
+  T.check('the nj under test exists (§ 3: what ships is one file)', distExists, distNj);
 
   if (distExists) {
     /* A bare directory: nothing else in it, not `lib/`, not `node_modules`,
@@ -120,7 +124,7 @@ function J(x) { return JSON.stringify(x === undefined ? null : x); }
     const lonelyNj = path.join(scratch, 'nj');
     fs.copyFileSync(distNj, lonelyNj);
     fs.chmodSync(lonelyNj, 0o755);
-    T.eq('nothing was copied alongside dist/nj — it runs on its own or not at all',
+    T.eq('nothing was copied alongside the nj under test — it runs on its own or not at all',
       JSON.stringify(fs.readdirSync(scratch)), JSON.stringify(['nj']));
 
     const runLonely = (args, opts) => {
