@@ -204,6 +204,17 @@ function oracleSuites() {
   return out;
 }
 
+// Suites whose output is inherently timing-dependent, not just hard to route
+// through the shim. `edge/stdout-epipe.js` (TSK-018) races a `| head -1`
+// reader's close against nj's later writes on purpose — how much output
+// lands before the pipe breaks varies run to run, so byte-recording it once
+// would freeze a race outcome as if it were the canonical behaviour, and a
+// later verify could go red for a timing difference that is not a
+// regression. Pass/fail still counts toward the oracle gate; only the bytes
+// are excluded. Explicit list, like DIRECT_ONLY_SCRIPTS: a new suite like
+// this is not tolerated silently, it has to be entered here deliberately.
+const VERDICT_ONLY_SUITES = new Set(['edge/stdout-epipe.js']);
+
 function runOracle(recordPath) {
   const root = path.join(PROJECT, 'test');
   const suites = oracleSuites();
@@ -216,6 +227,20 @@ function runOracle(recordPath) {
   const failedNames = [];
   for (const s of suites) {
     heartbeat(`oracle ${s}`);
+
+    if (VERDICT_ONLY_SUITES.has(s)) {
+      const direct = spawnSync(process.execPath, [path.join(root, s), NJ_ABS], {
+        cwd: PROJECT,
+        env: Object.assign({}, process.env, { NJ: NJ_ABS }),
+        encoding: 'utf8',
+        timeout: 10 * 60 * 1000,
+        maxBuffer: 64 * 1024 * 1024,
+      });
+      if (direct.status === 0) { passed++; notRecorded.push(s + ' (timing-dependent: verdict taken directly, calls not in the corpus)'); }
+      else { failed++; failedNames.push(s); }
+      continue;
+    }
+
     const r = spawnSync(process.execPath, [path.join(root, s), SHIM], {
       cwd: PROJECT,
       env: Object.assign({}, process.env, {

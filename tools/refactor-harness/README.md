@@ -24,6 +24,10 @@ Der nj-Pfad ist **immer** explizit. Kein Default, kein PATH-Lookup, keine
 Ableitung aus dem cwd. Eine Baseline gegen das falsche Binary ist schlimmer als
 gar keine.
 
+Das Beispiel oben zeigt die erste Aufzeichnung, gegen `c1-baseline`. Das ist
+nicht mehr die einzige gültige Quelle — siehe „Aufzeichnungsquelle" unten,
+**bevor** hier erneut aufgezeichnet wird.
+
 ## Exit-Codes
 
 | Code | Bedeutung |
@@ -158,6 +162,41 @@ Deshalb zusätzlich, vor **jedem** Schritt-Commit:
 ```sh
 git diff --cached --name-only    # gegen die erwartete Dateiliste prüfen
 ```
+
+## Aufzeichnungsquelle: nicht mehr immer `c1-baseline`
+
+Bis TSK-018 war `c1-baseline` (die Revision vor dem Refactor) die einzig
+sinnvolle Aufzeichnungsquelle, weil jeder Schritt bis dahin *verhaltenserhaltend*
+sein sollte — jede Abweichung von `c1-baseline` wäre ein Fehler gewesen.
+TSK-018 ist die erste **gewollte** Verhaltensänderung (EPIPE beim früh
+geschlossenen Leser ist jetzt still statt eines Absturzes, DECISIONS 85): eine
+Aufzeichnung gegen `c1-baseline` würde jetzt strukturell an `stdout-epipe.js`
+scheitern, weil dessen Ergebnis gegen `c1-baseline` korrekt rot ist — `record`
+bricht dann mit Exit 5 ab, obwohl nichts falsch lief.
+
+Deshalb: **neue Aufzeichnungen laufen gegen `c2-baseline`** (der TSK-018-Fix-
+Commit), und zwar gegen dessen **`dist/nj`**, nicht dessen `nj`. Seit dem
+Modul-Split identifiziert der bloße Einstiegspunkt `nj` den Code nicht mehr
+allein — er lädt zur Laufzeit `lib/*.ts` nach, `dist/nj` ist die eine Datei,
+die den vollständigen gebündelten Stand trägt.
+
+```sh
+git show c2-baseline:dist/nj > /tmp/c2-dist-nj   # Kopie, NICHT den Arbeitsbaum umschalten
+$NODE tools/refactor-harness/baseline.js record --nj=/tmp/c2-dist-nj
+```
+
+Der Arbeitsbaum bleibt dabei unangetastet — anders als beim `c1-baseline`-
+Verfahren oben (`git show c1-baseline:nj > nj`, danach zurückschalten). Ein
+Wechsel des Arbeitsbaums war dort nötig, weil `record --nj=` einen einzelnen
+Dateipfad nimmt, `nj` aber `lib/` relativ zu sich selbst nachlädt; `dist/nj`
+hat dieses Problem nicht, es ist bereits vollständig gebündelt, also reicht
+eine Kopie an beliebigem Pfad.
+
+`stdout-epipe.js` selbst ist als **verdict-only** in `baseline.js` eingetragen
+(`VERDICT_ONLY_SUITES`, analog zu den preload-instrumentierten Suiten): wie
+viel Ausgabe vor dem Schließen des Lesers ankommt, hängt vom Timing und lässt
+sich nicht byte-genau aufzeichnen. Das Urteil (bestanden/durchgefallen) zählt
+trotzdem zum Orakel-Gate.
 
 ## Parallele Läufe
 

@@ -764,6 +764,36 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     describing something that was not in the commit. Caught by checking the
     commit's contents instead of its message.
 
+85. **The corpus reference moves after the first intended behaviour change —
+    to the last accepted revision, never to the tree under test.** Until DECISIONS
+    84 the corpus answered one question: does the refactored `nj` behave exactly
+    like `c1-baseline`? TSK-018 is the first change that is *supposed* to differ:
+    `nj list | head -1` no longer crashes with a stack trace. Its suite
+    `stdout-epipe.js` deliberately proves `c1-baseline` wrong, so recording
+    against `c1-baseline` now aborts — the harness refuses to record from a red
+    revision, correctly.
+
+    Two ways out were rejected. Leaving the suite out of the recording would make
+    a red run look green, the one thing the instrument exists to prevent.
+    Recording against the working tree would make the corpus prove only that `nj`
+    equals itself.
+
+    **Rule:** after a behaviour change has passed its own gate and an independent
+    round, that revision becomes the new recording source, under its own tag.
+    `c2-baseline` = `5ea3701` (EPIPE fix, verified by Verifier II). `c1-baseline`
+    stays as the historical reference: DECISIONS 84 proves the refactor
+    equivalent to it, and that proof does not move.
+
+    **The source is `dist/nj`, not `nj`.** Since the split, the entry `nj` is 64
+    lines that load `lib/`; its hash does not identify the code. `dist/nj` is one
+    file that contains everything and is what ships, so its hash in the header
+    names exactly what was recorded. Record with `--nj=` pointing at a copy of
+    `c2-baseline:dist/nj` — the working tree is never swapped.
+
+    **`stdout-epipe.js` is verdict-only**, like the preload-instrumented suites:
+    how much output reaches the pipe before the reader closes depends on timing,
+    so its calls cannot be byte-recorded. Its verdict still gates.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now
