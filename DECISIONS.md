@@ -732,6 +732,38 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     would accept or print differently. That is a behaviour change, not a
     simplification.
 
+84. **Endgate passed — the refactor is complete, measured against where it
+    started.** Independent run by the verifier on HEAD `2ca5c9f`, reference
+    point `oracle-frozen-5` (corpus 3452 calls recorded against baseline
+    `c866d2b2`, test digest `28d4dbdb`).
+
+        behaviour  replay 0 diffs / 2941 compared, against nj AND dist/nj;
+                   exit codes are a compared field, so all 2941 match c1-baseline
+                   oracle 62/62, 2544 checks, against both
+        artefact   build:check byte-identical; dist/nj alone in an empty
+                   directory, no node_modules, network blocked: exit 0, stderr 0
+        types      tsc strict 0 errors; four counter-probes are compile errors:
+                   cross-module call (TS2554), parent = '' (TS2322),
+                   deriver order (TS2345), doctorFix step order (TS2345)
+        perf § 13  dist/nj, quiet machine, 10k: list 206/208, list --json
+                   206/208, tree 216/222, doctor 215/216 ms (median/max)
+
+    From one 2094-line file to a 64-line entry, 22 TypeScript modules and one
+    shipped `dist/nj`; `loadElement` 110 → 31 lines, `doctorFix` 152 → 31, with
+    the order of both enforced by the compiler instead of by comments.
+
+    Not proven, stated so: **linux-x64 never ran** (SUB-001, no way to execute
+    that binary on darwin-arm64); "without network" is shown only indirectly;
+    the blindness matrix has a true regression comparison for 3 of its
+    mutants — for the other 17 the endgate run is the first full baseline,
+    kept as `scoping/artifacts/matrix-28d4dbdb-6bcd1056.json` so the next
+    change has something to compare against.
+
+    Recorded one commit late: `78930cf` carries this entry's title but was
+    committed while the edit adding it had been blocked — a commit message
+    describing something that was not in the commit. Caught by checking the
+    commit's contents instead of its message.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

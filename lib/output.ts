@@ -31,6 +31,24 @@ function hardExit(code: string, message: string): never {
 
 // ----------------------------------------------------------------- printing
 
+// TSK-018: a reader that closes early (`nj list | head`) makes the next
+// stdout write fail with EPIPE. Node's write() call itself does not throw --
+// the failure surfaces asynchronously as an 'error' event on the stream --
+// so an unhandled EPIPE crashes the process with a full stack trace despite
+// the command having done everything it was asked. The spec is silent here;
+// decided behaviour (not derived, see AMBIGUITIES.md): the command already
+// succeeded and only the reader stopped listening, so EPIPE on stdout is
+// silent and exits 0 -- no stack trace, nothing on stderr. Any OTHER stdout
+// write error is a real fault and must still crash visibly, exactly as an
+// unhandled error normally would; re-throwing here (rather than swallowing)
+// is what keeps that true, since registering this listener at all suppresses
+// Node's own default "uncaught error event" crash for every error on this
+// stream, not just EPIPE.
+process.stdout.on('error', (err: NodeJS.ErrnoException) => {
+  if (err.code === 'EPIPE') process.exit(0);
+  throw err;
+});
+
 function out(s: string) { process.stdout.write(s + '\n'); }
 
 function problemSuffix(el: Element) {
