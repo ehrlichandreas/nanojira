@@ -36,13 +36,13 @@ function cmdFind(flags: Flags, positional: string[]) {
   // the rule note's own text sources follow.
   const textFlag = flagString(flags, 'text');
   if (textFlag !== undefined && positional.length > 0) {
-    fail('invalid_value', 'the search text was given both as an argument and with --text', 'pass it one way: nanojira find "<text>" or nanojira find --text=<text>');
+    fail('invalid_value', 'the search text was given both as an argument and with --text', 'pass it one way: nanojira find "<text>" or nanojira find --text=<text>', 'text');
   }
-  if (textFlag === undefined && positional.length === 0) fail('missing_argument', 'nanojira find needs the search text as an argument', 'nanojira find "<text>" (or --text=<text>)');
+  if (textFlag === undefined && positional.length === 0) fail('missing_argument', 'nanojira find needs the search text as an argument', 'nanojira find "<text>" (or --text=<text>)', 'text');
   const text = textFlag !== undefined ? textFlag : positional.join(' ');
   // The literal empty string is a caller's mistake, not "find nothing" (the
   // same reading --as= and check --text= already get, DECISIONS 119/129).
-  if (text === '') fail('invalid_value', '<text> must not be empty');
+  if (text === '') fail('invalid_value', '<text> must not be empty', undefined, 'text');
 
   const ctx = context(flags);
   const scope = ctx.elements.filter((e: Element) => flags.has('all') || !e.archived);

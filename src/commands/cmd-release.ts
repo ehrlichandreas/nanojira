@@ -113,7 +113,7 @@ function cmdRelease(flags: Flags) {
 
   const status = flagString(flags, 'status');
   if (status !== undefined && !ctx.cfg.statuses.includes(status)) {
-    fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses));
+    fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses), 'status');
   }
   const allowOpen = flags.has('allow-open-children');
 

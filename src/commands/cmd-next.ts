@@ -37,7 +37,7 @@ function cmdNext(flags: Flags) {
   const ctx = context(flags);
   const status = flagString(flags, 'status');
   if (status !== undefined && !ctx.cfg.statuses.includes(status)) {
-    fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses));
+    fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses), 'status');
   }
 
   // `--status` is next's own write target (as on `claim`), not a filter —

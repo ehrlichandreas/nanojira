@@ -40,7 +40,7 @@ function prepareCheck(el: Element, text: string | undefined, item: string | unde
     // a box that does not exist (TSK-038). Surrounding whitespace is
     // dropped first: `--item=$(wc -l <f)` pads on BSD. Digits only after
     // that, so 1.0, +1, 1e0 and 0x1 are refused.
-    if (!/^\d+$/.test(item.trim())) fail('invalid_value', `--item=${item} is not a whole number`, 'count the acceptance items from 1');
+    if (!/^\d+$/.test(item.trim())) fail('invalid_value', `--item=${item} is not a whole number`, 'count the acceptance items from 1', 'item');
     const n = Number(item.trim());
     if (n < 1 || n > boxes.length) fail('not_found', `--item=${item} is out of range (1..${boxes.length})`);
     target = boxes[n - 1];
@@ -72,7 +72,7 @@ function cmdCheck(flags: Flags) {
   if (text === undefined && item === undefined) fail('missing_argument', 'nanojira check needs --text=<substring> or --item=<n>');
   // The empty string is rejected, not trimmed (DECISIONS 129): a
   // whitespace-only --text is still a substring to match against.
-  if (text === '') fail('invalid_value', '--text must not be empty');
+  if (text === '') fail('invalid_value', '--text must not be empty', undefined, 'text');
 
   // Neither --on nor --off ticks — "check" names the common case (DECISIONS 128).
   if (flags.has('on') && flags.has('off')) fail('invalid_value', 'use either --on or --off, not both');

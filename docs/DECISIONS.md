@@ -6088,6 +6088,196 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      - This task records the reason and pins today's read/write behaviour;
        it does not change `sectionHeadingIndex`/`sectionEnd` themselves.
 
+235. **`--status=<a,b,...>` on `list`/`find`; the MCP schema loses its
+     `enum` there** (2026-10-24, TSK-055; feedback/fernuni-hagen).
+     - The report: `list --status=todo,doing` failed with `unknown status
+       'todo,doing'`, so checking for any open work took one call per
+       status. `--exclude-tag` already takes a comma list on every read
+       that has it; `--status` should too.
+     - Settled: `applyFilters` (shared by `list`/`find`) splits `--status`
+       on `,` and keeps an element whose own status matches ANY of them —
+       the same shape `--exclude-tag` already has.
+       One value is one of these lists with one item, so the single-value
+       case (including its exact error message, naming that one value) is
+       unchanged. Each item is validated the same way the single value
+       always was; an unknown one (an empty item, from a leading/
+       trailing/doubled comma, included) fails the whole call, naming that
+       one item and the allowed values — never a partial result, matching
+       `--exclude-tag`'s own "nothing listed on a bad filter" rule.
+       `next`, `claim`, `release`, `new` and `set` keep `--status` as a
+       single value (`cmd-next.ts`/`cmd-claim.ts`/`cmd-release.ts`/
+       `cmd-new.ts`/`cmd-set.ts` each read it directly, not through
+       `applyFilters`): each names or moves ONE element to ONE status,
+       the list form would mean nothing there.
+     - The MCP schema question (left open for me to decide and record):
+       JSON Schema's `enum` can express one allowed value, never several
+       joined by a comma — a strict client validating against
+       `enum: ["todo", ...]` would reject `"todo,doing"` before ever
+       sending the call. Decided: `list`/`find`'s `status` field schema
+       drops `enum` entirely (`STATUS_LIST_TOOLS` in `nanojira-mcp.ts`) and
+       names the allowed values in the field's own `description` text
+       instead (`"...; allowed: todo, doing, ..."`) — a client still learns
+       them, just not as a machine-checked constraint, the same tradeoff
+       `--exclude-tag`'s schema already makes for its own comma list (no
+       closed vocabulary to lose there, but no `enum` either). Every other
+       tool's `status` field (`next`, `claim`, `release`, `new`, `set`)
+       keeps its `enum` exactly as before — only `list`/`find` change. The
+       `tools/call` pre-check (before any child spawns) now splits
+       `list`/`find`'s `status` argument on `,` too, and reports the first
+       unknown one in the same `invalid_value` shape as any other bad enum
+       value, so a bad call is still refused before spawning
+       `dist/nanojira.mjs`, not just on the CLI's own validation.
+     - `--help`: `list`/`find`'s own `--status` line documents the list
+       form (`--status=<a,b,...>`); `next`'s (and every write's) stays
+       `--status=<value>` — `FILTER.status`'s doc is overridden by
+       `COMMAND_DOCS.next`'s own entry, the same way it already was before
+       this change, so nothing there needed touching.
+     - Tests: `test/ac/ac-74-status-list.ts` (36 checks) — the single-value
+       case unchanged, the list form on `list`/`find` (CLI and MCP), the
+       bad-item refusals (unknown, empty, doubled comma), `--help`'s list
+       form on `list`/`find` vs. the unchanged single-value form on `next`,
+       and the MCP schema shape (`enum` gone on `list`/`find`, kept
+       everywhere else). Red on 13 of 36 checks against d29efa23 (v4.6.0).
+     - **Amended 2026-10-24 (Reviewer MUST, rel470 integration): never
+       trim an item.** The first cut trimmed each comma-split item before
+       checking it, matching `--exclude-tag`'s own behaviour — but
+       `list --status=" todo"` then silently matched `todo` instead of
+       refusing it, where v4.6.0's single-value form had refused
+       `" todo"` outright (`unknown status ' todo'`, with its
+       did-you-mean). That is a real regression, not a generalisation of
+       the old rule: a status name never legitimately carries whitespace
+       (unlike a tag, which a person may genuinely pad by hand copying it
+       in), so there is no case where trimming a status item is doing
+       anything but hiding a typo a single-value call would have caught.
+       Fixed by dropping the trim entirely, in both `applyFilters`
+       (`cmd-list.ts`) and the MCP `tools/call` pre-check
+       (`nanojira-mcp.ts`) — every item, single or listed, is now checked
+       byte-for-byte as given, so a single value's behaviour (message and
+       hint both) is truly unchanged from v4.6.0, not merely unchanged for
+       items that happen to have no leading/trailing whitespace.
+       `test/ac/ac-74-status-list.ts` gained `" todo"`/`" bogus"` as
+       single values (byte-identical message+hint to v4.6.0) and
+       `"todo, doing"` as a list with a padded item (refused, naming
+       `" doing"` as given), CLI and MCP both; red-proved against
+       the un-amended TSK-055 commit in a second worktree.
+
+236. **`claim:mismatch` is surfaced by `entryJson`, not only `doctor`**
+     (2026-10-24, TSK-059; scans' knowledge4ai).
+     - The finding (knowledge4ai, four agents sharing one backlog): a
+       reviewer handoff (`set --status=review --assignee=<reviewer>`)
+       deliberately leaves the claim with the original author — documented
+       behaviour, § 12a — but the write's own `--json` result never said
+       so; only the next `doctor` run reported `claim:mismatch` (§ 7). The
+       author forgot to release more than once, each time only finding out
+       long after the handoff that there was anything left to release.
+     - Lead settled: `claim:mismatch` is computed in `entryJson`
+       (`core/derive.ts`) itself, the same place `claim:stale` and
+       `claim:symlink` were already computed fresh — reusing the
+       element-scoped `readClaim` helper and the same comparison `doctor`'s
+       own `collectClaimFindings` makes against `allClaimDirs`/
+       `highestEntry`, not a second copy of that scan. Every caller of
+       `entryJson` inherits it for free: every read (`show`/`list --json`
+       entries) and, since `buildWriteResult` (`core/output.ts`) builds its
+       top-level `_problems` as a mirror of `entry._problems`, every write
+       result too — `set`, `claim`, `release`, `new`, all alike. `--quiet`
+       needed no change: its existing rule (keep `_problems` only when
+       non-empty) already covers a code it has never heard of by name.
+       `problems.ignore` (§ 5/§ 7) applies the same way it already did —
+       `claim:mismatch` was already in the closed, warning-severity,
+       ignorable vocabulary (§ 7), just never actually produced outside
+       `doctor` until now.
+     - Non-blocking, exit 0, nothing else about the write changes — the
+       whole point is visibility, not refusal: the author chose the
+       handoff on purpose, and `set` has no way to know whether "leave the
+       claim" or "release it too" is what they meant.
+     - No new `--release` flag on `set` to collapse the recipe into one
+       call (considered, rejected): the claim and `assignee` change for
+       different reasons at different times, and a write that both hands
+       off and silently released the claim in the same call would hide the
+       one thing this decision exists to surface. The recipe stays two
+       calls — `set --assignee=<reviewer>`, then later `release
+       --as=<original author>` — now named in GUIDE § 13, § 12a's own
+       handoff prose, and `docs/AGENT-INSTRUCTIONS.md`.
+
+237. **A single-field CLI failure names that field in `--json`** (2026-10-24,
+     TSK-058; feedback/knowledge4ai).
+     - The report: a `missing_argument`/`invalid_value`/`missing_value`
+       failure caused by exactly one flag or `--input` key only named it in
+       stderr prose/hint text, forcing an agent to parse prose instead of
+       branching on structured JSON.
+     - Settled: `fail()` (`core/kernel.ts`) gains an optional 4th argument,
+       `field`, threaded through `Fail`/`emitFailure` to the failure JSON as
+       `field: "<name>"` — a strict superset of the existing
+       `{ok: false, error, hint?}` shape (§ 9); every other key is
+       unchanged, and a failure whose cause is not one single field carries
+       no `field` at all. `field` is added only where the throwing code
+       already knows, for certain, which one flag or plan key is at fault —
+       never guessed from the message text. Three other places needed their
+       own update to carry it through: `nanojira.ts`'s top-level catch,
+       which now passes `e.field` into `emitFailure` alongside `e.code`/
+       `e.message`/`e.hint` (it calls `emitFailure` rather than building its
+       own shape, but the field has to be threaded there explicitly); and
+       two places that build a failure result entirely on their own, never
+       calling `emitFailure` at all — `cmd-new.ts`'s `emitPlanFailure` (an
+       `--input` plan's `failed_at` failure) and `core/batch.ts`'s
+       `asFailure` (a batch write's per-id failure). All three were updated
+       the same way, so a plan-node validation failure and a batch member's
+       failure both gain `field` too.
+     - Naming: the flag's own internal spelling, as `core/flag-table.ts`
+       gives it — the hyphenated CLI spelling (`exclude-tag`,
+       `min-priority`, `add-tags`) except `depends_on`, which keeps its
+       underscore internally though the CLI also accepts `--depends-on`.
+       An `--input` plan key uses that same key name, exactly as the plan
+       spells it. This matches the field names MCP tool-call refusals
+       already carry in their own `problems[]` entries (§ 17) — no new
+       naming convention introduced.
+     - Deliberately skipped: a failure about a **combination** of two or
+       more flags or keys — a mutual-exclusion pair naming two different
+       fields (`--text`/`--item` on `check`, `--on`/`--off`), "neither was
+       given" with two possible sources, `--input` combined with field
+       flags or `--quiet`/`--fields`. Where several flags all write the
+       *same* logical field (`nanojira note`'s text given positionally, via
+       `--text`, or via `--text-file`; `nanojira find`'s text argument vs.
+       `--text`; `set --tags` vs. `--add-tags`/`--remove-tags`; a section's
+       `--<role>` vs. `--<role>-file`), the one logical field is still named,
+       since the code there genuinely knows which field the call was about,
+       even though more than one flag could have supplied it.
+     - Tests: `test/edge/failure-vocabulary.ts` — the existing
+       `expectFailure` helper (which already pins the generic `{ok, error,
+       hint?}` envelope for a wide sample of failure paths) gained an
+       optional 5th argument checked against the new `field` key (a string
+       to assert it equals that value, `false` to assert it is absent);
+       five existing/new calls there now pin `field` on a representative
+       single-flag CLI failure, a batch `--id=A,B,C` duplicate, an
+       `--input` plan key, and its deliberate absence on a genuine
+       two-field combination. Mutant-proved: with `field` dropped from
+       `emitFailure`, exactly the new single-field assertions through that
+       path fail (4 of 162 checks); the `--input`-plan assertion is
+       unaffected, since it goes through `emitPlanFailure`'s own, separately
+       updated code instead — confirming the two paths are independently
+       covered.
+     - Addendum (Scout SHOULD, same day): the shared `readStdin()`
+       (`core/kernel.ts`) — the "cannot read stdin" failure a bad fd (a
+       directory, a closed descriptor) raises for `--<role>-file=-` and
+       `--text-file=-` — carried no `field` at all, even though both of its
+       two callers already know which flag is responsible (`core/args.ts`'s
+       own `readStdin` wrapper for `--<role>-file=-`, `cmd-note.ts` for
+       `--text-file=-`); the `--input=-` stdin read (`core/input.ts`) and
+       the `--input` plan's own per-node `<role>-file=-` stdin read
+       (`cmd-new.ts`) already carried `field: 'input'`/`field: role +
+       '-file'` respectively, so the same failure class was tagged in two
+       of its four occurrences and untagged in the other two. Fixed by
+       giving `readStdin`/`kernelReadStdin` an optional `field` parameter,
+       mirroring the `hint` parameter it already takes, threaded through
+       both callers: `role + '-file'` for a section role (matching
+       `cmd-new.ts`'s own plan-node convention for the same `-file`
+       failure), `'text-file'` for `nanojira note`. Tests:
+       `expectStdinReadFailure` in `test/edge/failure-vocabulary.ts` opens a
+       directory fd for the child's stdin (the one way to make the read
+       itself fail, not just find empty input) and pins `field` for both
+       `note --text-file=-` and `set --description-file=-`; red (2 of 170
+       checks) against a worktree at this entry's own pre-fix commit.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

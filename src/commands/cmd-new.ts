@@ -71,10 +71,10 @@ function article(word: string): string {
  */
 function checkExplicitParent(ctx: Context, type: string, parent: string | undefined, verb: 'create' | 'move' = 'create'): string | undefined {
   if (type === 'epic') {
-    if (parent !== undefined) fail('invalid_value', 'epics must not have a --parent');
+    if (parent !== undefined) fail('invalid_value', 'epics must not have a --parent', undefined, 'parent');
     return undefined;
   }
-  if (parent === undefined) return fail('missing_argument', `--parent is required for ${type} (must be ${article(PARENT_TYPE[type])} ${PARENT_TYPE[type]})`);
+  if (parent === undefined) return fail('missing_argument', `--parent is required for ${type} (must be ${article(PARENT_TYPE[type])} ${PARENT_TYPE[type]})`, undefined, 'parent');
   const p = ctx.elements.find((e: Element) => e.id === parent);
   if (!p) return fail('not_found', `parent '${parent}' does not exist`);
   // An unreadable stub is refused for the same reason as an archived parent:
@@ -112,14 +112,14 @@ function checkExplicitParent(ctx: Context, type: string, parent: string | undefi
  */
 function validateNewFlags(ctx: Context, flags: Flags): NewFlags {
   const type = flagString(flags, 'type');
-  if (type === undefined) return fail('missing_argument', '--type is required', `Known types: ${TYPES.join(', ')}`);
-  if (!TYPES.includes(type)) return fail('invalid_value', `unknown type '${type}'`, valueHint('type', type, TYPES));
+  if (type === undefined) return fail('missing_argument', '--type is required', `Known types: ${TYPES.join(', ')}`, 'type');
+  if (!TYPES.includes(type)) return fail('invalid_value', `unknown type '${type}'`, valueHint('type', type, TYPES), 'type');
 
   const title = flagString(flags, 'title');
   // Absent is missing_argument; given but empty is invalid_value, as for
   // every flag (TSK-038, DECISIONS 230).
-  if (title === undefined) return fail('missing_argument', '--title is required');
-  if (normalizeTitle(title) === '') return fail('invalid_value', '--title must not be empty');
+  if (title === undefined) return fail('missing_argument', '--title is required', undefined, 'title');
+  if (normalizeTitle(title) === '') return fail('invalid_value', '--title must not be empty', undefined, 'title');
   const cleanTitle = normalizeTitle(title);
 
   const parent = flagString(flags, 'parent');
@@ -127,11 +127,11 @@ function validateNewFlags(ctx: Context, flags: Flags): NewFlags {
 
   const status = flagString(flags, 'status');
   if (status !== undefined && !ctx.cfg.statuses.includes(status)) {
-    fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses));
+    fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses), 'status');
   }
   const priority = flagString(flags, 'priority');
   if (priority !== undefined && !PRIORITIES.includes(priority)) {
-    fail('invalid_value', `unknown priority '${priority}'`, valueHint('priority', priority, PRIORITIES));
+    fail('invalid_value', `unknown priority '${priority}'`, valueHint('priority', priority, PRIORITIES), 'priority');
   }
   const assignee = flagString(flags, 'assignee');
   const tags = parseListFlag(flags, 'tags');
@@ -353,26 +353,26 @@ function collectNodeSections(raw: Record<string, unknown>, nodePath: string, std
     const inline = raw[role];
     const filePath = raw[role + '-file'];
     if (inline !== undefined && filePath !== undefined) {
-      fail('invalid_value', `'${role}' and '${role}-file' at ${nodePath} are mutually exclusive`);
+      fail('invalid_value', `'${role}' and '${role}-file' at ${nodePath} are mutually exclusive`, undefined, role);
     }
     if (inline !== undefined) {
       if (role === 'acceptance' && Array.isArray(inline)) {
-        for (const line of inline) if (typeof line !== 'string') fail('invalid_value', `'acceptance' array items at ${nodePath} must be strings`);
+        for (const line of inline) if (typeof line !== 'string') fail('invalid_value', `'acceptance' array items at ${nodePath} must be strings`, undefined, role);
         wanted.set(role, normalizeSectionContent((inline as string[]).map((s) => `- [ ] ${s}`).join('\n')));
         continue;
       }
-      if (typeof inline !== 'string') fail('invalid_value', `'${role}' at ${nodePath} must be a string${role === 'acceptance' ? ' or an array of strings' : ''}`);
+      if (typeof inline !== 'string') fail('invalid_value', `'${role}' at ${nodePath} must be a string${role === 'acceptance' ? ' or an array of strings' : ''}`, undefined, role);
       wanted.set(role, normalizeSectionContent(inline));
       continue;
     }
     if (filePath !== undefined) {
-      if (typeof filePath !== 'string') fail('invalid_value', `'${role}-file' at ${nodePath} must be a string`);
+      if (typeof filePath !== 'string') fail('invalid_value', `'${role}-file' at ${nodePath} must be a string`, undefined, role + '-file');
       if (filePath === '-') {
-        if (stdinState.consumed) fail('invalid_value', `${nodePath}: '${role}-file'='-' cannot read stdin — already consumed`);
+        if (stdinState.consumed) fail('invalid_value', `${nodePath}: '${role}-file'='-' cannot read stdin — already consumed`, undefined, role + '-file');
         stdinState.consumed = true;
         let stdinText: string;
         try { stdinText = fs.readFileSync(0, 'utf8'); } catch (e: any) {
-          return fail('invalid_value', `cannot read stdin — ${e.message}`);
+          return fail('invalid_value', `cannot read stdin — ${e.message}`, undefined, role + '-file');
         }
         wanted.set(role, normalizeSectionContent(stdinText));
         continue;
@@ -399,12 +399,12 @@ function validatePlanNode(ctx: Context, node: FlatNode, flat: FlatNode[], seenRe
   }
 
   const type = raw.type;
-  if (type === undefined) fail('missing_argument', `--type is required (${node.path})`, `Known types: ${TYPES.join(', ')}`);
-  if (typeof type !== 'string' || !TYPES.includes(type)) fail('invalid_value', `unknown type '${String(type)}' (${node.path})`, valueHint('type', String(type), TYPES));
+  if (type === undefined) fail('missing_argument', `--type is required (${node.path})`, `Known types: ${TYPES.join(', ')}`, 'type');
+  if (typeof type !== 'string' || !TYPES.includes(type)) fail('invalid_value', `unknown type '${String(type)}' (${node.path})`, valueHint('type', String(type), TYPES), 'type');
 
   const titleRaw = raw.title;
-  if (titleRaw === undefined) fail('missing_argument', `--title is required (${node.path})`);
-  if (typeof titleRaw !== 'string' || normalizeTitle(titleRaw) === '') fail('invalid_value', `--title must not be empty (${node.path})`);
+  if (titleRaw === undefined) fail('missing_argument', `--title is required (${node.path})`, undefined, 'title');
+  if (typeof titleRaw !== 'string' || normalizeTitle(titleRaw) === '') fail('invalid_value', `--title must not be empty (${node.path})`, undefined, 'title');
   const cleanTitle = normalizeTitle(titleRaw as string);
 
   if ((type as string) === 'subtask' && node.hadChildren) {
@@ -420,21 +420,21 @@ function validatePlanNode(ctx: Context, node: FlatNode, flat: FlatNode[], seenRe
     if (hasOwnParent) {
       parentMode = 'explicit';
       const p = raw.parent;
-      if (typeof p !== 'string') fail('invalid_value', `'parent' at ${node.path} must be a string`);
+      if (typeof p !== 'string') fail('invalid_value', `'parent' at ${node.path} must be a string`, undefined, 'parent');
       // `parent` is never ref-aware (DECISIONS 173): a real id only, never a
       // lookup against this plan's own `ref`s. An element parented under
       // another new element in the same plan is expressed by nesting it
       // under that element's `children` instead.
       if ((p as string).startsWith('@')) {
-        fail('invalid_value', `'parent' at ${node.path} is never ref-aware — '@...' is invalid; nest this element under 'children' instead of naming a ref as its parent`);
+        fail('invalid_value', `'parent' at ${node.path} is never ref-aware — '@...' is invalid; nest this element under 'children' instead of naming a ref as its parent`, undefined, 'parent');
       }
       explicitParentId = checkExplicitParent(ctx, type as string, p as string);
     } else {
-      if (type !== 'epic') fail('missing_argument', `'parent' is required for ${type} at ${node.path} (must be ${article(PARENT_TYPE[type as string])} ${PARENT_TYPE[type as string]})`);
+      if (type !== 'epic') fail('missing_argument', `'parent' is required for ${type} at ${node.path} (must be ${article(PARENT_TYPE[type as string])} ${PARENT_TYPE[type as string]})`, undefined, 'parent');
       parentMode = 'top';
     }
   } else {
-    if (hasOwnParent) fail('invalid_value', `${node.path}: a children entry must not also give 'parent' — its parent is implied by nesting`);
+    if (hasOwnParent) fail('invalid_value', `${node.path}: a children entry must not also give 'parent' — its parent is implied by nesting`, undefined, 'parent');
     parentMode = 'implied';
     parentIndex = node.parentIndex;
     const parentType = flat[parentIndex].raw.type as string;
@@ -445,37 +445,40 @@ function validatePlanNode(ctx: Context, node: FlatNode, flat: FlatNode[], seenRe
 
   const status = raw.status;
   if (status !== undefined) {
-    if (typeof status !== 'string' || !ctx.cfg.statuses.includes(status)) fail('invalid_value', `unknown status '${String(status)}' (${node.path})`, valueHint('status', String(status), ctx.cfg.statuses));
+    if (typeof status !== 'string' || !ctx.cfg.statuses.includes(status)) fail('invalid_value', `unknown status '${String(status)}' (${node.path})`, valueHint('status', String(status), ctx.cfg.statuses), 'status');
   }
   const priority = raw.priority;
   if (priority !== undefined) {
-    if (typeof priority !== 'string' || !PRIORITIES.includes(priority)) fail('invalid_value', `unknown priority '${String(priority)}' (${node.path})`, valueHint('priority', String(priority), PRIORITIES));
+    if (typeof priority !== 'string' || !PRIORITIES.includes(priority)) fail('invalid_value', `unknown priority '${String(priority)}' (${node.path})`, valueHint('priority', String(priority), PRIORITIES), 'priority');
   }
   const assignee = raw.assignee;
-  if (assignee !== undefined && typeof assignee !== 'string') fail('invalid_value', `'assignee' at ${node.path} must be a string`);
+  if (assignee !== undefined && typeof assignee !== 'string') fail('invalid_value', `'assignee' at ${node.path} must be a string`, undefined, 'assignee');
 
   const tagsRaw = raw.tags;
   if (tagsRaw !== undefined && (!Array.isArray(tagsRaw) || tagsRaw.some((t: unknown) => typeof t !== 'string'))) {
-    fail('invalid_value', `'tags' at ${node.path} must be an array of strings`);
+    fail('invalid_value', `'tags' at ${node.path} must be an array of strings`, undefined, 'tags');
   }
   const tags = tagsRaw as string[] | undefined;
 
   const ref = raw.ref;
   if (ref !== undefined) {
-    if (typeof ref !== 'string' || !ref.startsWith('@')) fail('invalid_value', `'ref' at ${node.path} must start with '@'`);
-    if (REAL_ID_SHAPE.test(ref.slice(1))) fail('invalid_value', `'ref' at ${node.path} looks like a real id ('${ref}') — a decorated real id is never a valid ref name`);
-    if (seenRefs.has(ref)) fail('invalid_value', `'${ref}' is declared on more than one object in this plan`);
+    if (typeof ref !== 'string' || !ref.startsWith('@')) {
+      fail('invalid_value', `'ref' at ${node.path} must start with '@'`,
+        typeof ref === 'string' && ref !== '' ? `use "@${ref}"` : undefined, 'ref');
+    }
+    if (REAL_ID_SHAPE.test(ref.slice(1))) fail('invalid_value', `'ref' at ${node.path} looks like a real id ('${ref}') — a decorated real id is never a valid ref name`, undefined, 'ref');
+    if (seenRefs.has(ref)) fail('invalid_value', `'${ref}' is declared on more than one object in this plan`, undefined, 'ref');
     seenRefs.add(ref);
   }
 
   const depsRaw = raw.depends_on;
   let deps: string[] | undefined;
   if (depsRaw !== undefined) {
-    if (!Array.isArray(depsRaw) || depsRaw.some((d: unknown) => typeof d !== 'string')) fail('invalid_value', `'depends_on' at ${node.path} must be an array of strings`);
+    if (!Array.isArray(depsRaw) || depsRaw.some((d: unknown) => typeof d !== 'string')) fail('invalid_value', `'depends_on' at ${node.path} must be an array of strings`, undefined, 'depends_on');
     deps = depsRaw as string[];
     for (const d of deps) {
       if (d.startsWith('@')) {
-        if (REAL_ID_SHAPE.test(d.slice(1))) fail('invalid_value', `depends_on entry '${d}' at ${node.path} looks like a real id, not a ref`);
+        if (REAL_ID_SHAPE.test(d.slice(1))) fail('invalid_value', `depends_on entry '${d}' at ${node.path} looks like a real id, not a ref`, undefined, 'depends_on');
         if (!anyRefIndex.has(d)) fail('not_found', `depends_on target '${d}' does not resolve to any ref declared in this plan`);
         // A ref must be declared EARLIER in the plan's write order
         // (DECISIONS 173): a forward reference — `d` exists somewhere in the
@@ -486,7 +489,7 @@ function validatePlanNode(ctx: Context, node: FlatNode, flat: FlatNode[], seenRe
         // while this node's own depends_on is being checked.
         if (!declaredSoFar.has(d)) {
           fail('invalid_value', `depends_on target '${d}' at ${node.path} is not declared earlier in the plan (a ref may only be used after the object declaring it)`,
-            'move the object that declares this ref earlier in the plan, before this one');
+            'move the object that declares this ref earlier in the plan, before this one', 'depends_on');
         }
       } else if (!ctx.elements.some((e: Element) => e.id === d)) {
         fail('not_found', `depends_on target '${d}' does not exist`);
@@ -514,6 +517,7 @@ function emitPlanFailure(e: Fail, failedAt: string, extra?: { created: string[];
   if (e.hint) process.stderr.write(`${e.hint}\n`);
   const res: Record<string, unknown> = { ok: false, error: e.code };
   if (e.hint) res.hint = e.hint;
+  if (e.field !== undefined) res.field = e.field;
   if (extra) { res.created = extra.created; res.refs = extra.refs; }
   res.failed_at = failedAt;
   // What the plan wrote before it stopped (DECISIONS 222): a pathspec commit of the part that landed.
@@ -529,10 +533,10 @@ function emitPlanFailure(e: Fail, failedAt: string, extra?: { created: string[];
 function cmdNewInput(ctx: Context, inputValue: string) {
   const rawText = readInputText(inputValue);
   const parsed = parseInputJson(rawText);
-  if (parsed === null || typeof parsed !== 'object') fail('invalid_value', '--input must be a JSON object or an array of objects');
+  if (parsed === null || typeof parsed !== 'object') fail('invalid_value', '--input must be a JSON object or an array of objects', undefined, 'input');
   const isSingular = !Array.isArray(parsed);
   const topArray = (isSingular ? [parsed] : parsed) as unknown[];
-  if (topArray.length === 0) fail('invalid_value', '--input array must not be empty');
+  if (topArray.length === 0) fail('invalid_value', '--input array must not be empty', undefined, 'input');
 
   const flat: FlatNode[] = [];
   try {

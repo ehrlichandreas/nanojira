@@ -31,7 +31,7 @@ function resolveActingName(flags: Flags, required: boolean): string | null {
   const asRaw = flagString(flags, 'as');
   if (asRaw !== undefined) {
     const name = validActorName(asRaw);
-    if (name === null) fail('invalid_value', `invalid --as '${asRaw}' (must be non-empty after trimming spaces/tabs, a single line, and contain no ':')`);
+    if (name === null) fail('invalid_value', `invalid --as '${asRaw}' (must be non-empty after trimming spaces/tabs, a single line, and contain no ':')`, undefined, 'as');
     return name;
   }
   const envRaw = process.env.NJ_AUTHOR;
@@ -43,7 +43,7 @@ function resolveActingName(flags: Flags, required: boolean): string | null {
     }
     return name;
   }
-  if (required) fail('missing_argument', 'an acting name is required: pass --as=<name> or set NJ_AUTHOR');
+  if (required) fail('missing_argument', 'an acting name is required: pass --as=<name> or set NJ_AUTHOR', undefined, 'as');
   return null;
 }
 

@@ -662,14 +662,19 @@ import * as fs4 from "node:fs";
 var Fail = class extends Error {
   hint;
   code;
-  constructor(message, hint, code) {
+  /** The one field this failure is about, when the throwing code knows it
+   * for sure (never guessed from `message`) — the flag's internal name as
+   * the project's own flag table spells it. */
+  field;
+  constructor(message, hint, code, field) {
     super(message);
     this.hint = hint;
     this.code = code || "failed";
+    this.field = field;
   }
 };
-function fail(code, message, hint) {
-  throw new Fail(message, hint, code);
+function fail(code, message, hint, field) {
+  throw new Fail(message, hint, code, field);
 }
 var output = { json: false };
 var decorateFailure = (res) => res;
@@ -688,7 +693,7 @@ process.stdout.on("error", (err) => {
 function out(s) {
   process.stdout.write(s + "\n");
 }
-function emitFailure(code, message, hint) {
+function emitFailure(code, message, hint, field) {
   process.stderr.write(`Error: ${message}
 `);
   if (hint) process.stderr.write(`${hint}
@@ -696,6 +701,7 @@ function emitFailure(code, message, hint) {
   if (output.json) {
     const res = { ok: false, error: code };
     if (hint) res.hint = hint;
+    if (field !== void 0) res.field = field;
     out(JSON.stringify(decorateFailure(res), null, 2));
   }
   process.exitCode = 1;
@@ -746,14 +752,14 @@ function checkFlags(flags, allowedFields, allowedControls, isWrite, displayName 
 function flagString(flags, name) {
   const v = flags.get(name);
   if (v === void 0) return void 0;
-  if (v === true) return fail("missing_value", `--${name} needs a value (use --${name}=\u2026 or --${name} <value>)`);
+  if (v === true) return fail("missing_value", `--${name} needs a value (use --${name}=\u2026 or --${name} <value>)`, void 0, name);
   return v;
 }
-function readStdin(hint = "pipe the text in") {
+function readStdin(hint = "pipe the text in", field) {
   try {
     return fs4.readFileSync(0, "utf8");
   } catch (e) {
-    return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, hint);
+    return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, hint, field);
   }
 }
 function osaDistance(a, b) {
@@ -822,14 +828,14 @@ function parseOutputOpts(flags, json, allowedFields, label = "fields") {
       "use --fields=<list> to choose fields, or --quiet for {ok, id}"
     );
   }
-  if (quiet && !json) fail("invalid_value", "--quiet requires --json");
-  if (fieldsRaw !== void 0 && !json) fail("invalid_value", "--fields requires --json");
+  if (quiet && !json) fail("invalid_value", "--quiet requires --json", void 0, "quiet");
+  if (fieldsRaw !== void 0 && !json) fail("invalid_value", "--fields requires --json", void 0, "fields");
   if (fieldsRaw === void 0) return { quiet };
   const names = fieldsRaw.split(",").map((s) => s.trim()).filter((s) => s !== "");
-  if (names.length === 0) fail("invalid_value", "--fields must not be empty");
+  if (names.length === 0) fail("invalid_value", "--fields must not be empty", void 0, "fields");
   for (const n of names) {
     if (!allowedFields.includes(n)) {
-      fail("invalid_value", `unknown field '${n}' in --fields`, listHint(label, n, allowedFields));
+      fail("invalid_value", `unknown field '${n}' in --fields`, listHint(label, n, allowedFields), "fields");
     }
   }
   return { quiet, fields: names };
@@ -1891,6 +1897,7 @@ function entryJson(el, backlog, cfg) {
   const probs = elementProblems(el, cfg.problems.ignore);
   const fresh = [];
   if (claim2 && isClaimStale(claim2.since, cfg.claims.staleAfterHours, nowMs())) fresh.push("claim:stale");
+  if (claim2 && claim2.by !== el.assignee) fresh.push("claim:mismatch");
   if (elementClaimLink(backlog, el.id) !== null) fresh.push("claim:symlink");
   for (const c of fresh) if (!cfg.problems.ignore.includes(c)) probs.push(c);
   e._problems = probs.sort();
@@ -2352,7 +2359,7 @@ function parseArgs2(argv, kinds) {
 }
 function refuseRepeated(repeated) {
   if (repeated.length === 0) return;
-  fail("invalid_value", `--${repeated[0].typed} is given more than once with different values`, "give each flag once");
+  fail("invalid_value", `--${repeated[0].typed} is given more than once with different values`, "give each flag once", repeated[0].name);
 }
 var GLOBAL_CONTROLS = ["backlog"];
 function allowedControlSet2(commandControls, isWrite) {
@@ -2362,7 +2369,7 @@ function checkFlags2(flags, allowedFields, commandControls, isWrite) {
   checkFlags(flags, allowedFields, allowedControlSet2(commandControls, isWrite), isWrite, displayFlagName);
   if (flags.has("dry-run")) {
     armDryRun();
-    if (flags.get("dry-run") !== true) fail("invalid_value", "--dry-run takes no value", "pass --dry-run on its own");
+    if (flags.get("dry-run") !== true) fail("invalid_value", "--dry-run takes no value", "pass --dry-run on its own", "dry-run");
   }
 }
 function parseListFlag(flags, name) {
@@ -2371,12 +2378,12 @@ function parseListFlag(flags, name) {
   if (v === "") return [];
   const items = v.split(",").map((s) => s.trim()).filter((s) => s !== "");
   for (const it of items) {
-    if (it.includes("]")) fail("invalid_value", `--${name.replace("_", "-")} item '${it}' contains ']', which is not accepted on the command line`);
+    if (it.includes("]")) fail("invalid_value", `--${name.replace("_", "-")} item '${it}' contains ']', which is not accepted on the command line`, void 0, name);
   }
   return items;
 }
-function readStdin2() {
-  return readStdin("pipe the text in, or pass a path with --<role>-file=<path>");
+function readStdin2(field) {
+  return readStdin("pipe the text in, or pass a path with --<role>-file=<path>", field);
 }
 function readSectionFlags(flags) {
   const src = /* @__PURE__ */ new Map();
@@ -2387,7 +2394,8 @@ function readSectionFlags(flags) {
       fail(
         "invalid_value",
         `--${role} and --${role}-file are mutually exclusive. Nothing written.`,
-        `pass the text with --${role}=\u2026 or the path with --${role}-file=\u2026`
+        `pass the text with --${role}=\u2026 or the path with --${role}-file=\u2026`,
+        role
       );
     }
     if (inline !== void 0) src.set(role, { inline });
@@ -2410,7 +2418,7 @@ function readSectionFlags(flags) {
       continue;
     }
     if (s.file === "-") {
-      wanted.set(role, normalizeSectionContent(readStdin2()));
+      wanted.set(role, normalizeSectionContent(readStdin2(role + "-file")));
       continue;
     }
     let raw;
@@ -2531,10 +2539,10 @@ function checkCommandFlags(flags, command) {
   checkFlags2(flags, s.fields, new Set(s.controls), s.write);
   for (const [name, value] of flags) {
     if (value !== true && isBooleanFlag(command, name)) {
-      fail("invalid_value", `--${name} takes no value`, `pass --${name} on its own`);
+      fail("invalid_value", `--${name} takes no value`, `pass --${name} on its own`, name);
     }
     if (value === "" && NON_EMPTY.has(name)) {
-      fail("invalid_value", `--${displayFlagName(name)} must not be empty`, `give a value, or leave --${displayFlagName(name)} out`);
+      fail("invalid_value", `--${displayFlagName(name)} must not be empty`, `give a value, or leave --${displayFlagName(name)} out`, name);
     }
   }
 }
@@ -2570,7 +2578,11 @@ function acceptedFlagNames(command) {
 }
 var doc = (text, value) => value === void 0 ? { text } : { value, text };
 var FILTER = {
-  status: doc("only elements with this status", "<value>"),
+  // `next`'s own `status` doc (COMMAND_DOCS.next, below) overrides this one
+  // after the `...FILTER` spread — only `list`/`find` keep the list form
+  // (TSK-055): their own `--status` takes one value or several,
+  // comma-separated, matching ANY of them.
+  status: doc("only elements with any of these statuses", "<a,b,...>"),
   type: doc("only elements of this type", "<value>"),
   tag: doc("only elements carrying this tag", "<tag>"),
   parent: doc("only direct children of this element", "<id>"),
@@ -2613,7 +2625,7 @@ var FLAG_DOCS = {
 var READ_FIELDS = doc("with --json: keep only these fields of every entry, in this order", "<a,b,...>");
 var COMMAND_DOCS = {
   init: { backlog: doc("create the backlog at this path", "<path>") },
-  new: { input: doc("read the element, or a whole plan, as JSON from a file, - for stdin", "<path|->") },
+  new: { input: doc('read the element, or a whole plan, as JSON from a file, - for stdin; a plan ref is declared and referenced with a leading @ (e.g. "@impl") on both sides', "<path|->") },
   set: { id: BATCH_ID, parent: doc("move the element under this parent", "<id>") },
   note: {
     id: BATCH_ID,
@@ -2679,7 +2691,7 @@ import * as os2 from "node:os";
 import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.6.0";
+var VERSION = "4.7.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -2920,7 +2932,7 @@ function escapeInvisible(s) {
 function explicitLocation(flags) {
   const flag = flagString(flags, "backlog");
   if (flag !== void 0) {
-    if (flag === "") fail("invalid_value", "--backlog must not be empty", "give a value, or leave --backlog out");
+    if (flag === "") fail("invalid_value", "--backlog must not be empty", "give a value, or leave --backlog out", "backlog");
     return { dir: fromCwd(flag), src: { kind: "flag" } };
   }
   const env = process.env.NJ_BACKLOG;
@@ -3608,7 +3620,7 @@ function requireTargetFlagSyntax(flags) {
   const file = flagString(flags, "file");
   const id = flagString(flags, "id");
   if (file !== void 0 && id !== void 0) fail("invalid_target", "use either --id or --file, not both");
-  if (file === void 0 && id === void 0) fail("missing_argument", "--id is required");
+  if (file === void 0 && id === void 0) fail("missing_argument", "--id is required", void 0, "id");
 }
 function resolveTarget(ctx, flags, forWrite) {
   const file = flagString(flags, "file");
@@ -3635,7 +3647,7 @@ function resolveTarget(ctx, flags, forWrite) {
     if (!el) return fail("not_found", `no element file at '${abs}'`);
     return el;
   }
-  if (id === void 0) return fail("missing_argument", "--id is required");
+  if (id === void 0) return fail("missing_argument", "--id is required", void 0, "id");
   return resolveById(ctx, id, forWrite);
 }
 function resolveById(ctx, id, forWrite) {
@@ -4145,13 +4157,17 @@ function parseBatchIds(flags) {
   const ids = raw.split(",").map((s) => s.trim());
   const seen = /* @__PURE__ */ new Set();
   for (const id of ids) {
-    if (seen.has(id)) fail("invalid_value", `'${id}' is named twice in --id=${raw} (after trimming whitespace)`);
+    if (seen.has(id)) fail("invalid_value", `'${id}' is named twice in --id=${raw} (after trimming whitespace)`, void 0, "id");
     seen.add(id);
   }
   return ids;
 }
 function asFailure(id, e) {
-  if (e instanceof Fail) return { id, ok: false, error: e.code, hint: e.hint };
+  if (e instanceof Fail) {
+    const r = { id, ok: false, error: e.code, hint: e.hint };
+    if (e.field !== void 0) r.field = e.field;
+    return r;
+  }
   return { id, ok: false, error: "internal_error", hint: e instanceof Error ? e.stack : String(e) };
 }
 function runBatch(ids, preflight, write) {
@@ -4222,7 +4238,7 @@ function prepareCheck(el, text, item, wantOn) {
   const { lines, boxes } = scanCheckboxes(el.body);
   let target;
   if (item !== void 0) {
-    if (!/^\d+$/.test(item.trim())) fail("invalid_value", `--item=${item} is not a whole number`, "count the acceptance items from 1");
+    if (!/^\d+$/.test(item.trim())) fail("invalid_value", `--item=${item} is not a whole number`, "count the acceptance items from 1", "item");
     const n = Number(item.trim());
     if (n < 1 || n > boxes.length) fail("not_found", `--item=${item} is out of range (1..${boxes.length})`);
     target = boxes[n - 1];
@@ -4250,7 +4266,7 @@ function cmdCheck(flags) {
   const item = flagString(flags, "item");
   if (text !== void 0 && item !== void 0) fail("invalid_value", "use either --text or --item, not both");
   if (text === void 0 && item === void 0) fail("missing_argument", "nanojira check needs --text=<substring> or --item=<n>");
-  if (text === "") fail("invalid_value", "--text must not be empty");
+  if (text === "") fail("invalid_value", "--text must not be empty", void 0, "text");
   if (flags.has("on") && flags.has("off")) fail("invalid_value", "use either --on or --off, not both");
   const wantOn = !flags.has("off");
   const batchIds = parseBatchIds(flags);
@@ -4322,7 +4338,7 @@ function resolveActingName(flags, required) {
   const asRaw = flagString(flags, "as");
   if (asRaw !== void 0) {
     const name = validActorName(asRaw);
-    if (name === null) fail("invalid_value", `invalid --as '${asRaw}' (must be non-empty after trimming spaces/tabs, a single line, and contain no ':')`);
+    if (name === null) fail("invalid_value", `invalid --as '${asRaw}' (must be non-empty after trimming spaces/tabs, a single line, and contain no ':')`, void 0, "as");
     return name;
   }
   const envRaw = process.env.NJ_AUTHOR;
@@ -4337,7 +4353,7 @@ function resolveActingName(flags, required) {
     }
     return name;
   }
-  if (required) fail("missing_argument", "an acting name is required: pass --as=<name> or set NJ_AUTHOR");
+  if (required) fail("missing_argument", "an acting name is required: pass --as=<name> or set NJ_AUTHOR", void 0, "as");
   return null;
 }
 function actingNameForRead() {
@@ -4356,7 +4372,7 @@ function readInputText(value) {
     try {
       return fs15.readFileSync(0, "utf8");
     } catch (e) {
-      return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, "pipe the JSON in, or pass a path with --input=<path>");
+      return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, "pipe the JSON in, or pass a path with --input=<path>", "input");
     }
   }
   try {
@@ -4369,7 +4385,7 @@ function parseInputJson(raw) {
   try {
     return JSON.parse(raw);
   } catch (e) {
-    return fail("invalid_value", `--input is not valid JSON \u2014 ${e.message}`);
+    return fail("invalid_value", `--input is not valid JSON \u2014 ${e.message}`, void 0, "input");
   }
 }
 
@@ -4391,10 +4407,10 @@ function article(word) {
 }
 function checkExplicitParent(ctx, type, parent, verb = "create") {
   if (type === "epic") {
-    if (parent !== void 0) fail("invalid_value", "epics must not have a --parent");
+    if (parent !== void 0) fail("invalid_value", "epics must not have a --parent", void 0, "parent");
     return void 0;
   }
-  if (parent === void 0) return fail("missing_argument", `--parent is required for ${type} (must be ${article(PARENT_TYPE[type])} ${PARENT_TYPE[type]})`);
+  if (parent === void 0) return fail("missing_argument", `--parent is required for ${type} (must be ${article(PARENT_TYPE[type])} ${PARENT_TYPE[type]})`, void 0, "parent");
   const p = ctx.elements.find((e) => e.id === parent);
   if (!p) return fail("not_found", `parent '${parent}' does not exist`);
   if (p.problems.has("file:unreadable") || p.problems.has("frontmatter:unreadable")) {
@@ -4419,21 +4435,21 @@ function checkExplicitParent(ctx, type, parent, verb = "create") {
 }
 function validateNewFlags(ctx, flags) {
   const type = flagString(flags, "type");
-  if (type === void 0) return fail("missing_argument", "--type is required", `Known types: ${TYPES.join(", ")}`);
-  if (!TYPES.includes(type)) return fail("invalid_value", `unknown type '${type}'`, valueHint("type", type, TYPES));
+  if (type === void 0) return fail("missing_argument", "--type is required", `Known types: ${TYPES.join(", ")}`, "type");
+  if (!TYPES.includes(type)) return fail("invalid_value", `unknown type '${type}'`, valueHint("type", type, TYPES), "type");
   const title = flagString(flags, "title");
-  if (title === void 0) return fail("missing_argument", "--title is required");
-  if (normalizeTitle(title) === "") return fail("invalid_value", "--title must not be empty");
+  if (title === void 0) return fail("missing_argument", "--title is required", void 0, "title");
+  if (normalizeTitle(title) === "") return fail("invalid_value", "--title must not be empty", void 0, "title");
   const cleanTitle = normalizeTitle(title);
   const parent = flagString(flags, "parent");
   checkExplicitParent(ctx, type, parent);
   const status = flagString(flags, "status");
   if (status !== void 0 && !ctx.cfg.statuses.includes(status)) {
-    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses));
+    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses), "status");
   }
   const priority = flagString(flags, "priority");
   if (priority !== void 0 && !PRIORITIES.includes(priority)) {
-    fail("invalid_value", `unknown priority '${priority}'`, valueHint("priority", priority, PRIORITIES));
+    fail("invalid_value", `unknown priority '${priority}'`, valueHint("priority", priority, PRIORITIES), "priority");
   }
   const assignee = flagString(flags, "assignee");
   const tags = parseListFlag(flags, "tags");
@@ -4559,28 +4575,28 @@ function collectNodeSections(raw, nodePath, stdinState) {
     const inline = raw[role];
     const filePath = raw[role + "-file"];
     if (inline !== void 0 && filePath !== void 0) {
-      fail("invalid_value", `'${role}' and '${role}-file' at ${nodePath} are mutually exclusive`);
+      fail("invalid_value", `'${role}' and '${role}-file' at ${nodePath} are mutually exclusive`, void 0, role);
     }
     if (inline !== void 0) {
       if (role === "acceptance" && Array.isArray(inline)) {
-        for (const line of inline) if (typeof line !== "string") fail("invalid_value", `'acceptance' array items at ${nodePath} must be strings`);
+        for (const line of inline) if (typeof line !== "string") fail("invalid_value", `'acceptance' array items at ${nodePath} must be strings`, void 0, role);
         wanted.set(role, normalizeSectionContent(inline.map((s) => `- [ ] ${s}`).join("\n")));
         continue;
       }
-      if (typeof inline !== "string") fail("invalid_value", `'${role}' at ${nodePath} must be a string${role === "acceptance" ? " or an array of strings" : ""}`);
+      if (typeof inline !== "string") fail("invalid_value", `'${role}' at ${nodePath} must be a string${role === "acceptance" ? " or an array of strings" : ""}`, void 0, role);
       wanted.set(role, normalizeSectionContent(inline));
       continue;
     }
     if (filePath !== void 0) {
-      if (typeof filePath !== "string") fail("invalid_value", `'${role}-file' at ${nodePath} must be a string`);
+      if (typeof filePath !== "string") fail("invalid_value", `'${role}-file' at ${nodePath} must be a string`, void 0, role + "-file");
       if (filePath === "-") {
-        if (stdinState.consumed) fail("invalid_value", `${nodePath}: '${role}-file'='-' cannot read stdin \u2014 already consumed`);
+        if (stdinState.consumed) fail("invalid_value", `${nodePath}: '${role}-file'='-' cannot read stdin \u2014 already consumed`, void 0, role + "-file");
         stdinState.consumed = true;
         let stdinText;
         try {
           stdinText = fs16.readFileSync(0, "utf8");
         } catch (e) {
-          return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`);
+          return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, void 0, role + "-file");
         }
         wanted.set(role, normalizeSectionContent(stdinText));
         continue;
@@ -4604,11 +4620,11 @@ function validatePlanNode(ctx, node, flat, seenRefs, anyRefIndex, declaredSoFar,
     }
   }
   const type = raw.type;
-  if (type === void 0) fail("missing_argument", `--type is required (${node.path})`, `Known types: ${TYPES.join(", ")}`);
-  if (typeof type !== "string" || !TYPES.includes(type)) fail("invalid_value", `unknown type '${String(type)}' (${node.path})`, valueHint("type", String(type), TYPES));
+  if (type === void 0) fail("missing_argument", `--type is required (${node.path})`, `Known types: ${TYPES.join(", ")}`, "type");
+  if (typeof type !== "string" || !TYPES.includes(type)) fail("invalid_value", `unknown type '${String(type)}' (${node.path})`, valueHint("type", String(type), TYPES), "type");
   const titleRaw = raw.title;
-  if (titleRaw === void 0) fail("missing_argument", `--title is required (${node.path})`);
-  if (typeof titleRaw !== "string" || normalizeTitle(titleRaw) === "") fail("invalid_value", `--title must not be empty (${node.path})`);
+  if (titleRaw === void 0) fail("missing_argument", `--title is required (${node.path})`, void 0, "title");
+  if (typeof titleRaw !== "string" || normalizeTitle(titleRaw) === "") fail("invalid_value", `--title must not be empty (${node.path})`, void 0, "title");
   const cleanTitle = normalizeTitle(titleRaw);
   if (type === "subtask" && node.hadChildren) {
     fail("invalid_target", `${node.path}: a subtask may not have children`);
@@ -4621,17 +4637,17 @@ function validatePlanNode(ctx, node, flat, seenRefs, anyRefIndex, declaredSoFar,
     if (hasOwnParent) {
       parentMode = "explicit";
       const p = raw.parent;
-      if (typeof p !== "string") fail("invalid_value", `'parent' at ${node.path} must be a string`);
+      if (typeof p !== "string") fail("invalid_value", `'parent' at ${node.path} must be a string`, void 0, "parent");
       if (p.startsWith("@")) {
-        fail("invalid_value", `'parent' at ${node.path} is never ref-aware \u2014 '@...' is invalid; nest this element under 'children' instead of naming a ref as its parent`);
+        fail("invalid_value", `'parent' at ${node.path} is never ref-aware \u2014 '@...' is invalid; nest this element under 'children' instead of naming a ref as its parent`, void 0, "parent");
       }
       explicitParentId = checkExplicitParent(ctx, type, p);
     } else {
-      if (type !== "epic") fail("missing_argument", `'parent' is required for ${type} at ${node.path} (must be ${article(PARENT_TYPE[type])} ${PARENT_TYPE[type]})`);
+      if (type !== "epic") fail("missing_argument", `'parent' is required for ${type} at ${node.path} (must be ${article(PARENT_TYPE[type])} ${PARENT_TYPE[type]})`, void 0, "parent");
       parentMode = "top";
     }
   } else {
-    if (hasOwnParent) fail("invalid_value", `${node.path}: a children entry must not also give 'parent' \u2014 its parent is implied by nesting`);
+    if (hasOwnParent) fail("invalid_value", `${node.path}: a children entry must not also give 'parent' \u2014 its parent is implied by nesting`, void 0, "parent");
     parentMode = "implied";
     parentIndex = node.parentIndex;
     const parentType = flat[parentIndex].raw.type;
@@ -4641,40 +4657,48 @@ function validatePlanNode(ctx, node, flat, seenRefs, anyRefIndex, declaredSoFar,
   }
   const status = raw.status;
   if (status !== void 0) {
-    if (typeof status !== "string" || !ctx.cfg.statuses.includes(status)) fail("invalid_value", `unknown status '${String(status)}' (${node.path})`, valueHint("status", String(status), ctx.cfg.statuses));
+    if (typeof status !== "string" || !ctx.cfg.statuses.includes(status)) fail("invalid_value", `unknown status '${String(status)}' (${node.path})`, valueHint("status", String(status), ctx.cfg.statuses), "status");
   }
   const priority = raw.priority;
   if (priority !== void 0) {
-    if (typeof priority !== "string" || !PRIORITIES.includes(priority)) fail("invalid_value", `unknown priority '${String(priority)}' (${node.path})`, valueHint("priority", String(priority), PRIORITIES));
+    if (typeof priority !== "string" || !PRIORITIES.includes(priority)) fail("invalid_value", `unknown priority '${String(priority)}' (${node.path})`, valueHint("priority", String(priority), PRIORITIES), "priority");
   }
   const assignee = raw.assignee;
-  if (assignee !== void 0 && typeof assignee !== "string") fail("invalid_value", `'assignee' at ${node.path} must be a string`);
+  if (assignee !== void 0 && typeof assignee !== "string") fail("invalid_value", `'assignee' at ${node.path} must be a string`, void 0, "assignee");
   const tagsRaw = raw.tags;
   if (tagsRaw !== void 0 && (!Array.isArray(tagsRaw) || tagsRaw.some((t) => typeof t !== "string"))) {
-    fail("invalid_value", `'tags' at ${node.path} must be an array of strings`);
+    fail("invalid_value", `'tags' at ${node.path} must be an array of strings`, void 0, "tags");
   }
   const tags = tagsRaw;
   const ref = raw.ref;
   if (ref !== void 0) {
-    if (typeof ref !== "string" || !ref.startsWith("@")) fail("invalid_value", `'ref' at ${node.path} must start with '@'`);
-    if (REAL_ID_SHAPE.test(ref.slice(1))) fail("invalid_value", `'ref' at ${node.path} looks like a real id ('${ref}') \u2014 a decorated real id is never a valid ref name`);
-    if (seenRefs.has(ref)) fail("invalid_value", `'${ref}' is declared on more than one object in this plan`);
+    if (typeof ref !== "string" || !ref.startsWith("@")) {
+      fail(
+        "invalid_value",
+        `'ref' at ${node.path} must start with '@'`,
+        typeof ref === "string" && ref !== "" ? `use "@${ref}"` : void 0,
+        "ref"
+      );
+    }
+    if (REAL_ID_SHAPE.test(ref.slice(1))) fail("invalid_value", `'ref' at ${node.path} looks like a real id ('${ref}') \u2014 a decorated real id is never a valid ref name`, void 0, "ref");
+    if (seenRefs.has(ref)) fail("invalid_value", `'${ref}' is declared on more than one object in this plan`, void 0, "ref");
     seenRefs.add(ref);
   }
   const depsRaw = raw.depends_on;
   let deps;
   if (depsRaw !== void 0) {
-    if (!Array.isArray(depsRaw) || depsRaw.some((d) => typeof d !== "string")) fail("invalid_value", `'depends_on' at ${node.path} must be an array of strings`);
+    if (!Array.isArray(depsRaw) || depsRaw.some((d) => typeof d !== "string")) fail("invalid_value", `'depends_on' at ${node.path} must be an array of strings`, void 0, "depends_on");
     deps = depsRaw;
     for (const d of deps) {
       if (d.startsWith("@")) {
-        if (REAL_ID_SHAPE.test(d.slice(1))) fail("invalid_value", `depends_on entry '${d}' at ${node.path} looks like a real id, not a ref`);
+        if (REAL_ID_SHAPE.test(d.slice(1))) fail("invalid_value", `depends_on entry '${d}' at ${node.path} looks like a real id, not a ref`, void 0, "depends_on");
         if (!anyRefIndex.has(d)) fail("not_found", `depends_on target '${d}' does not resolve to any ref declared in this plan`);
         if (!declaredSoFar.has(d)) {
           fail(
             "invalid_value",
             `depends_on target '${d}' at ${node.path} is not declared earlier in the plan (a ref may only be used after the object declaring it)`,
-            "move the object that declares this ref earlier in the plan, before this one"
+            "move the object that declares this ref earlier in the plan, before this one",
+            "depends_on"
           );
         }
       } else if (!ctx.elements.some((e) => e.id === d)) {
@@ -4707,6 +4731,7 @@ function emitPlanFailure(e, failedAt, extra, backlog) {
 `);
   const res = { ok: false, error: e.code };
   if (e.hint) res.hint = e.hint;
+  if (e.field !== void 0) res.field = e.field;
   if (extra) {
     res.created = extra.created;
     res.refs = extra.refs;
@@ -4721,10 +4746,10 @@ function emitPlanFailure(e, failedAt, extra, backlog) {
 function cmdNewInput(ctx, inputValue) {
   const rawText = readInputText(inputValue);
   const parsed = parseInputJson(rawText);
-  if (parsed === null || typeof parsed !== "object") fail("invalid_value", "--input must be a JSON object or an array of objects");
+  if (parsed === null || typeof parsed !== "object") fail("invalid_value", "--input must be a JSON object or an array of objects", void 0, "input");
   const isSingular = !Array.isArray(parsed);
   const topArray = isSingular ? [parsed] : parsed;
-  if (topArray.length === 0) fail("invalid_value", "--input array must not be empty");
+  if (topArray.length === 0) fail("invalid_value", "--input array must not be empty", void 0, "input");
   const flat = [];
   try {
     flattenPlan(topArray, "", null, flat);
@@ -4838,28 +4863,28 @@ function cmdNewInput(ctx, inputValue) {
 function buildSetInputFlags(inputValue) {
   const raw = readInputText(inputValue);
   const parsed = parseInputJson(raw);
-  if (Array.isArray(parsed)) fail("invalid_value", "set --input= takes exactly one object, not an array \u2014 set has no plan form");
-  if (parsed === null || typeof parsed !== "object") fail("invalid_value", "--input must be a JSON object");
+  if (Array.isArray(parsed)) fail("invalid_value", "set --input= takes exactly one object, not an array \u2014 set has no plan form", void 0, "input");
+  if (parsed === null || typeof parsed !== "object") fail("invalid_value", "--input must be a JSON object", void 0, "input");
   const allowed = cliFieldNames("set").filter((f) => f !== "id" && f !== "file");
   const synFlags = /* @__PURE__ */ new Map();
   for (const [key, value] of Object.entries(parsed)) {
     if (!allowed.includes(key)) {
       fail("unknown_field", `unknown field '${key}' in --input. Nothing written.`, `Known fields: ${allowed.join(", ")}`);
     }
-    if (key === "add-acceptance" && typeof value !== "string") fail("invalid_value", `--input: 'add-acceptance' must be a string, one line`);
+    if (key === "add-acceptance" && typeof value !== "string") fail("invalid_value", `--input: 'add-acceptance' must be a string, one line`, void 0, "add-acceptance");
     if (key === "acceptance" && Array.isArray(value)) {
-      for (const line of value) if (typeof line !== "string") fail("invalid_value", `--input: 'acceptance' array items must be strings`);
+      for (const line of value) if (typeof line !== "string") fail("invalid_value", `--input: 'acceptance' array items must be strings`, void 0, "acceptance");
       synFlags.set(key, value.map((s) => `- [ ] ${s}`).join("\n"));
       continue;
     }
     if (Array.isArray(value)) {
-      for (const item of value) if (typeof item !== "string") fail("invalid_value", `--input: '${key}' array items must be strings`);
+      for (const item of value) if (typeof item !== "string") fail("invalid_value", `--input: '${key}' array items must be strings`, void 0, key);
       synFlags.set(key, value.join(","));
       continue;
     }
-    if (typeof value !== "string") fail("invalid_value", `--input: '${key}' must be a string${key === "acceptance" ? " or an array of strings" : ""}`);
+    if (typeof value !== "string") fail("invalid_value", `--input: '${key}' must be a string${key === "acceptance" ? " or an array of strings" : ""}`, void 0, key);
     if (inputValue === "-" && key.endsWith("-file") && value === "-") {
-      fail("invalid_value", `--input: '${key}'='-' cannot read stdin \u2014 already consumed`);
+      fail("invalid_value", `--input: '${key}'='-' cannot read stdin \u2014 already consumed`, void 0, key);
     }
     synFlags.set(key, value);
   }
@@ -5039,22 +5064,23 @@ function validateAddAcceptance(flags) {
     fail(
       "invalid_value",
       "--add-acceptance cannot be combined with --acceptance or --acceptance-file",
-      "use --acceptance=<text> to replace the whole section, or --add-acceptance=<text> to append one line"
+      "use --acceptance=<text> to replace the whole section, or --add-acceptance=<text> to append one line",
+      "acceptance"
     );
   }
-  if (add.trim() === "") fail("invalid_value", "--add-acceptance must not be empty");
-  if (/[\r\n]/.test(add)) fail("invalid_value", "--add-acceptance takes one line", "append one line per call, or replace the section with --acceptance");
+  if (add.trim() === "") fail("invalid_value", "--add-acceptance must not be empty", void 0, "add-acceptance");
+  if (/[\r\n]/.test(add)) fail("invalid_value", "--add-acceptance takes one line", "append one line per call, or replace the section with --acceptance", "add-acceptance");
 }
 function validateFieldValues(ctx, flags) {
   const title = flagString(flags, "title");
-  if (title !== void 0 && normalizeTitle(title) === "") fail("invalid_value", "--title must not be empty");
+  if (title !== void 0 && normalizeTitle(title) === "") fail("invalid_value", "--title must not be empty", void 0, "title");
   const status = flagString(flags, "status");
   if (status !== void 0 && !ctx.cfg.statuses.includes(status)) {
-    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses));
+    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses), "status");
   }
   const priority = flagString(flags, "priority");
   if (priority !== void 0 && !PRIORITIES.includes(priority)) {
-    fail("invalid_value", `unknown priority '${priority}'`, valueHint("priority", priority, PRIORITIES));
+    fail("invalid_value", `unknown priority '${priority}'`, valueHint("priority", priority, PRIORITIES), "priority");
   }
   validateTagsCombination(flags);
   validateAddAcceptance(flags);
@@ -5066,7 +5092,8 @@ function validateTagsCombination(flags) {
     fail(
       "invalid_value",
       "--tags cannot be combined with --add-tags or --remove-tags",
-      "use --tags=<list> to replace the whole list, or --add-tags/--remove-tags to change it incrementally"
+      "use --tags=<list> to replace the whole list, or --add-tags/--remove-tags to change it incrementally",
+      "tags"
     );
   }
 }
@@ -5086,7 +5113,7 @@ function collectSetOverrides(ctx, el, flags, allowOpen, checkAll = false) {
   let newBody;
   if (title !== void 0) {
     const clean = normalizeTitle(title);
-    if (clean === "") fail("invalid_value", "--title must not be empty");
+    if (clean === "") fail("invalid_value", "--title must not be empty", void 0, "title");
     if (clean !== el.title) {
       overrides.set("title", clean);
       changed.push("title");
@@ -5119,7 +5146,7 @@ function collectSetOverrides(ctx, el, flags, allowOpen, checkAll = false) {
   const status = flagString(flags, "status");
   if (status !== void 0) {
     if (!ctx.cfg.statuses.includes(status)) {
-      fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses));
+      fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses), "status");
     }
     if (status === "done") requireChildrenDone(ctx, el, allowOpen, "set");
     if (status !== el.status) {
@@ -5129,7 +5156,7 @@ function collectSetOverrides(ctx, el, flags, allowOpen, checkAll = false) {
   }
   const priority = flagString(flags, "priority");
   if (priority !== void 0) {
-    if (!PRIORITIES.includes(priority)) fail("invalid_value", `unknown priority '${priority}'`, valueHint("priority", priority, PRIORITIES));
+    if (!PRIORITIES.includes(priority)) fail("invalid_value", `unknown priority '${priority}'`, valueHint("priority", priority, PRIORITIES), "priority");
     if (priority !== el.priority) {
       overrides.set("priority", priority);
       changed.push("priority");
@@ -5273,7 +5300,7 @@ function cmdClaim(flags) {
   const name = resolveActingName(flags, true);
   const status = flagString(flags, "status");
   if (status !== void 0 && !ctx.cfg.statuses.includes(status)) {
-    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses));
+    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses), "status");
   }
   const steal = flagString(flags, "steal");
   const allowOpen = flags.has("allow-open-children");
@@ -5341,14 +5368,16 @@ function applyFilters(elements, flags, cfg) {
   let list = elements.filter((e) => all || !e.archived);
   const status = flagString(flags, "status");
   if (status !== void 0) {
-    if (!cfg.statuses.includes(status)) {
-      fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, cfg.statuses));
+    const statuses = status.split(",");
+    for (const s of statuses) {
+      if (!cfg.statuses.includes(s)) fail("invalid_value", `unknown status '${s}'`, valueHint("status", s, cfg.statuses), "status");
     }
-    list = list.filter((e) => e.status === status);
+    const wanted = new Set(statuses);
+    list = list.filter((e) => wanted.has(e.status));
   }
   const type = flagString(flags, "type");
   if (type !== void 0) {
-    if (!TYPES.includes(type)) fail("invalid_value", `unknown type '${type}'`, valueHint("type", type, TYPES));
+    if (!TYPES.includes(type)) fail("invalid_value", `unknown type '${type}'`, valueHint("type", type, TYPES), "type");
     list = list.filter((e) => e.type === type);
   }
   const tag = flagString(flags, "tag");
@@ -5364,13 +5393,13 @@ function applyFilters(elements, flags, cfg) {
   if (assignee !== void 0) list = list.filter((e) => e.assignee === assignee);
   const exclude = parseListFlag(flags, "exclude-tag");
   if (exclude !== void 0) {
-    if (exclude.length === 0) fail("invalid_value", "--exclude-tag needs at least one tag", "give the tags to leave out, comma-separated");
+    if (exclude.length === 0) fail("invalid_value", "--exclude-tag needs at least one tag", "give the tags to leave out, comma-separated", "exclude-tag");
     list = list.filter((e) => !e.tags.some((t) => exclude.includes(t)));
   }
   const minPriority = flagString(flags, "min-priority");
   if (minPriority !== void 0) {
     if (!PRIORITIES.includes(minPriority)) {
-      fail("invalid_value", `unknown priority '${minPriority}'`, valueHint("priority", minPriority, PRIORITIES));
+      fail("invalid_value", `unknown priority '${minPriority}'`, valueHint("priority", minPriority, PRIORITIES), "min-priority");
     }
     list = list.filter((e) => priorityWeight(e.priority) >= PRIORITY_WEIGHT[minPriority]);
   }
@@ -5431,11 +5460,11 @@ function cmdFind(flags, positional) {
   const { fields } = parseOutputOpts2(flags, flags.has("json"), LIST_JSON_FIELDS);
   const textFlag = flagString(flags, "text");
   if (textFlag !== void 0 && positional.length > 0) {
-    fail("invalid_value", "the search text was given both as an argument and with --text", 'pass it one way: nanojira find "<text>" or nanojira find --text=<text>');
+    fail("invalid_value", "the search text was given both as an argument and with --text", 'pass it one way: nanojira find "<text>" or nanojira find --text=<text>', "text");
   }
-  if (textFlag === void 0 && positional.length === 0) fail("missing_argument", "nanojira find needs the search text as an argument", 'nanojira find "<text>" (or --text=<text>)');
+  if (textFlag === void 0 && positional.length === 0) fail("missing_argument", "nanojira find needs the search text as an argument", 'nanojira find "<text>" (or --text=<text>)', "text");
   const text = textFlag !== void 0 ? textFlag : positional.join(" ");
-  if (text === "") fail("invalid_value", "<text> must not be empty");
+  if (text === "") fail("invalid_value", "<text> must not be empty", void 0, "text");
   const ctx = context(flags);
   const scope = ctx.elements.filter((e) => flags.has("all") || !e.archived);
   const filtered = applyFilters(ctx.elements, flags, ctx.cfg);
@@ -5767,7 +5796,7 @@ function cmdDoctor(flags) {
   checkCommandFlags(flags, "doctor");
   const json = flags.has("json");
   if (flags.has("fix")) return doctorFix(flags, json);
-  if (flags.has("dry-run")) fail("invalid_value", "--dry-run requires --fix", "plain `nanojira doctor` never writes; add --fix to preview its repairs");
+  if (flags.has("dry-run")) fail("invalid_value", "--dry-run requires --fix", "plain `nanojira doctor` never writes; add --fix to preview its repairs", "dry-run");
   const ctx = context(flags, { lenient: true, tolerateConfig: true });
   const findings = collectFindings(ctx);
   const errors = findings.filter((f) => f.severity === "error");
@@ -6440,7 +6469,7 @@ function parseLastFlag(flags) {
   if (raw === void 0) return void 0;
   const n = /^-?\d+$/.test(raw) ? Number(raw) : NaN;
   if (Number.isInteger(n) && n >= 1) return n;
-  fail("invalid_value", `--last=${raw} must be a positive integer`);
+  fail("invalid_value", `--last=${raw} must be a positive integer`, void 0, "last");
 }
 function cmdLog(flags) {
   checkCommandFlags(flags, "log");
@@ -6474,7 +6503,7 @@ function cmdNext(flags) {
   const ctx = context(flags);
   const status = flagString(flags, "status");
   if (status !== void 0 && !ctx.cfg.statuses.includes(status)) {
-    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses));
+    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses), "status");
   }
   const filterFlags = new Map(flags);
   filterFlags.delete("status");
@@ -6554,12 +6583,13 @@ function resolveNoteText(flags, positional) {
     fail(
       "invalid_value",
       "the note text was given more than one way (positional, --text, --text-file). Nothing written.",
-      "pass it as a positional argument, with --text=\u2026, or with --text-file=<path|->, not more than one"
+      "pass it as a positional argument, with --text=\u2026, or with --text-file=<path|->, not more than one",
+      "text"
     );
   }
   let raw;
   if (textFile !== void 0) {
-    raw = textFile === "-" ? readStdin2() : readTextFile(textFile);
+    raw = textFile === "-" ? readStdin2("text-file") : readTextFile(textFile);
   } else if (textFlag !== void 0) {
     raw = textFlag;
   } else {
@@ -6570,10 +6600,11 @@ function resolveNoteText(flags, positional) {
     fail(
       "missing_argument",
       "nanojira note needs the note text as an argument",
-      'nanojira note --id=TSK-007 "\u2026" (or --text=\u2026, --text-file=<path|->)'
+      'nanojira note --id=TSK-007 "\u2026" (or --text=\u2026, --text-file=<path|->)',
+      "text"
     );
   }
-  if (text === "") fail("invalid_value", "the note text must not be empty", 'nanojira note --id=TSK-007 "\u2026"');
+  if (text === "") fail("invalid_value", "the note text must not be empty", 'nanojira note --id=TSK-007 "\u2026"', "text");
   return text;
 }
 function readTextFile(filePath) {
@@ -6721,7 +6752,7 @@ function cmdRelease(flags) {
   const name = resolveActingName(flags, true);
   const status = flagString(flags, "status");
   if (status !== void 0 && !ctx.cfg.statuses.includes(status)) {
-    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses));
+    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses), "status");
   }
   const allowOpen = flags.has("allow-open-children");
   const batchIds = parseBatchIds(flags);
@@ -6851,9 +6882,9 @@ function parseNotesFlag(flags) {
   if (m !== null) {
     const n = Number(m[1]);
     if (n >= 1) return { kind: "last", n };
-    fail("invalid_value", `--notes=last:${m[1]} \u2014 N must be a positive integer, not ${m[1]}`);
+    fail("invalid_value", `--notes=last:${m[1]} \u2014 N must be a positive integer, not ${m[1]}`, void 0, "notes");
   }
-  fail("invalid_value", `unknown --notes value '${raw}'`, listHint("--notes values", raw, ["none", "all", "last:N"]));
+  fail("invalid_value", `unknown --notes value '${raw}'`, listHint("--notes values", raw, ["none", "all", "last:N"]), "notes");
 }
 function visibleNotes(all, mode) {
   if (mode.kind === "all") return all;
@@ -7301,7 +7332,7 @@ function main(argv) {
     if (onlyVersionAndJson && pre.positional.length === 0) {
       refuseRepeated(pre.repeated);
       for (const k of ["version", "json"]) {
-        if (pre.flags.has(k) && pre.flags.get(k) !== true) fail("invalid_value", `--${k} takes no value`, `pass --${k} on its own`);
+        if (pre.flags.has(k) && pre.flags.get(k) !== true) fail("invalid_value", `--${k} takes no value`, `pass --${k} on its own`, k);
       }
       process.stdout.write(output.json ? JSON.stringify({ version: VERSION }) + "\n" : `nanojira ${VERSION}
 `);
@@ -7375,7 +7406,7 @@ try {
   returned = true;
 } catch (e) {
   if (e instanceof Fail) {
-    emitFailure(e.code, e.message, e.hint);
+    emitFailure(e.code, e.message, e.hint, e.field);
   } else {
     emitFailure("internal_error", e && e.stack ? e.stack : String(e));
   }

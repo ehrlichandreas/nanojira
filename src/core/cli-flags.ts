@@ -80,10 +80,10 @@ function checkCommandFlags(flags: Flags, command: string): void {
   // test only whether it is present, so `--cascade=false` would cascade.
   for (const [name, value] of flags) {
     if (value !== true && isBooleanFlag(command, name)) {
-      fail('invalid_value', `--${name} takes no value`, `pass --${name} on its own`);
+      fail('invalid_value', `--${name} takes no value`, `pass --${name} on its own`, name);
     }
     if (value === '' && NON_EMPTY.has(name)) {
-      fail('invalid_value', `--${displayFlagName(name)} must not be empty`, `give a value, or leave --${displayFlagName(name)} out`);
+      fail('invalid_value', `--${displayFlagName(name)} must not be empty`, `give a value, or leave --${displayFlagName(name)} out`, name);
     }
   }
 }
@@ -159,7 +159,11 @@ interface FlagDoc {
 const doc = (text: string, value?: string): FlagDoc => (value === undefined ? { text } : { value, text });
 
 const FILTER: Record<string, FlagDoc> = {
-  status: doc('only elements with this status', '<value>'),
+  // `next`'s own `status` doc (COMMAND_DOCS.next, below) overrides this one
+  // after the `...FILTER` spread — only `list`/`find` keep the list form
+  // (TSK-055): their own `--status` takes one value or several,
+  // comma-separated, matching ANY of them.
+  status: doc('only elements with any of these statuses', '<a,b,...>'),
   type: doc('only elements of this type', '<value>'),
   tag: doc('only elements carrying this tag', '<tag>'),
   parent: doc('only direct children of this element', '<id>'),
@@ -208,7 +212,7 @@ const READ_FIELDS = doc('with --json: keep only these fields of every entry, in 
 // Where a command gives a flag its own meaning.
 const COMMAND_DOCS: Record<string, Record<string, FlagDoc>> = {
   init: { backlog: doc('create the backlog at this path', '<path>') },
-  new: { input: doc('read the element, or a whole plan, as JSON from a file, - for stdin', '<path|->') },
+  new: { input: doc('read the element, or a whole plan, as JSON from a file, - for stdin; a plan ref is declared and referenced with a leading @ (e.g. "@impl") on both sides', '<path|->') },
   set: { id: BATCH_ID, parent: doc('move the element under this parent', '<id>') },
   note: {
     id: BATCH_ID,

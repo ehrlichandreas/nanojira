@@ -756,6 +756,43 @@ changed hands, not to whom it previously belonged.
   Claims on anything not yet in the final status are left alone, stale or
   not — see § 10 for the rest of `--fix`.
 
+- **Handing off while keeping your own claim.** `assignee` (who an element
+  is addressed to) and the claim (who is working on it, read from
+  `entry._claim`, shape `{by, since}` or `null`) are two different things.
+  Pointing an element at a reviewer with `set --assignee=<reviewer>` never
+  touches your claim — on purpose, so you can hand something off for review
+  without losing your place in it. The moment that leaves the claim holder
+  different from `assignee`, the write that caused it already says so, via
+  `claim:mismatch` in that write's own `_problems` (both on `entry` and at
+  the top level) — not only on a later `doctor` run. It is a warning, exit
+  0; nothing else about the write changes.
+
+  The recipe stays two calls:
+
+  ```sh
+  $ nanojira claim --id=TSK-001 --as=alice --status=doing
+  TSK-001 claimed by alice (status: doing)
+  $ nanojira set --id=TSK-001 --status=review --assignee=bob --json
+  { "ok": true, "id": "TSK-001", "changed": ["status", "assignee"],
+    "entry": { "...": "...", "assignee": "bob",
+               "_claim": {"by": "alice", "since": "..."},
+               "_problems": ["claim:mismatch"] },
+    "_problems": ["claim:mismatch"] }
+  ```
+
+  Once the review lands, release alice's claim explicitly — `set` never
+  does this for you:
+
+  ```sh
+  $ nanojira release --id=TSK-001 --as=alice
+  TSK-001 released by alice
+  ```
+
+  There is no `--release` flag on `set` to fold this into one call: the
+  claim and the addressee change at different times, for different
+  reasons, and `claim:mismatch` in between is the whole point — it is the
+  signal that tells the original holder to come back and release.
+
 ## 14. `nanojira next`
 
 `list --ready` then `claim` by hand leaves a gap: two callers can read the
@@ -1666,3 +1703,62 @@ The value is run by `sh` exactly as given, so treat it like anything else
 in your environment (`PATH`, aliases): whoever can set it can run
 commands as you. The exact rules are in the specification, § 9
 "`NJ_ON_CHANGE`".
+
+## 31. Pulling the CLI kernel into another project
+
+`src/core/kernel.ts` (DECISIONS 231) is project-neutral by design: failure
+output, flag parsing, did-you-mean, the `NJ_NOW` clock and
+`--fields`/`--quiet` validation, importing only Node built-ins. Another
+CLI can use it unchanged instead of porting the same logic by hand. Today
+`git tag -v vX.Y.Z && git show vX.Y.Z:src/core/kernel.ts` already gets the
+file out of a signed release; `tools/export-kernel.mts` makes that one
+checked step, with a provenance line a consumer can re-verify later
+without touching git at all (TSK-057):
+
+```sh
+node tools/export-kernel.mts vX.Y.Z <dest-file>
+```
+
+Refuses — nothing written — a tag that is not signed by this project's
+pinned release key (the same check `tools/export-skill.mts` uses, never a
+weaker one: an unsigned, unknown, lightweight, or another-key-signed tag,
+or one whose pinned key has expired or been revoked), and a `<dest-file>`
+that exists and is a symlink or anything other than a regular file. On
+success `<dest-file>` is one header comment line —
+
+```
+// nanojira kernel vX.Y.Z commit <full sha> sha256 <hex of kernel.ts>
+```
+
+— followed by that tag's `src/core/kernel.ts`, byte for byte, nothing
+added or stripped. The header is inline, not a side file, so the file a
+consuming project imports or bundles is still just one `.ts` file, and the
+provenance travels with it if it's copied elsewhere.
+
+To tell a local edit from a real update later, without needing git or the
+original tag at all:
+
+```sh
+node tools/export-kernel.mts --check <dest-file>
+```
+
+Re-reads the header, recomputes the sha256 of everything after it, and
+reports a match (exit 0) or a one-line reason it no longer matches (exit
+1) — the file was hand-edited, or truncated, or the header itself is
+missing or malformed.
+
+Two things worth knowing before relying on either mode:
+
+- **A missing parent directory for `<dest-file>` is created** (`mkdir -p`,
+  the same as `cp` would — a symlinked parent directory along the way is
+  followed, not refused: only `<dest-file>` itself is checked, since the
+  destination is a path the caller chose, not one the tool is guarding
+  against them).
+- **`--check` proves consistency, not provenance.** A match only says the
+  file's body still agrees with its own header — someone could still have
+  hand-written a header and a body that agree with each other but were
+  never actually exported from a signed tag. The only real proof of
+  provenance is redoing the export from the tag itself (`node
+  tools/export-kernel.mts <tag> <dest-file>`, which re-verifies the tag's
+  signature every time) or `git tag -v <tag>` directly — not re-running
+  `--check` on a file you were just handed.

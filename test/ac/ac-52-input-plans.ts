@@ -213,6 +213,20 @@ function taskCount(dir: string) {
   T.exit('B1 ref without @: exit 1', r, 1);
   T.eq('B1 invalid_value', r.json && r.json.error, 'invalid_value');
   T.eq('B1 nothing written (subtasks dir still empty)', subtaskCount(dir), 0);
+  T.eq('B1 hint names the corrected value', r.json && r.json.hint, 'use "@impl"');
+}
+
+/* ===================================================================== */
+/* B1b — a non-string ref (e.g. a number) gets a generic hint, not a      */
+/* "@<value>" built from something that was never a name to begin with    */
+/* ===================================================================== */
+{
+  const dir = fixture('ac52-b1b');
+  const plan = { type: 'subtask', parent: 'TSK-001', ref: 7, title: 'Implement', description: 'D.', acceptance: '- [ ] x' };
+  const r = runStdin(['new', '--input=-'], dir, JSON.stringify(plan));
+  T.exit('B1b non-string ref: exit 1', r, 1);
+  T.eq('B1b invalid_value', r.json && r.json.error, 'invalid_value');
+  T.check('B1b no "@7"-shaped hint', !(r.json && r.json.hint && r.json.hint.indexOf('@7') !== -1), J(r.json));
 }
 
 /* ===================================================================== */

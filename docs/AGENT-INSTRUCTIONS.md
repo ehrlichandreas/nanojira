@@ -28,7 +28,17 @@ and subtasks, one Markdown file per element, committed alongside the code.
   never hands out an element already assigned to someone else — assign a
   review to the reviewer (`nanojira set --id=<id> --assignee=<reviewer-name>`),
   never to the author of the thing being reviewed, so `next` keeps it out
-  of the author's own hands automatically.
+  of the author's own hands automatically. That handoff is two separate
+  calls, not one: `nanojira set --id=<id> --status=review
+  --assignee=<reviewer-name>` first, which leaves *your own* claim in
+  place on purpose (read from `entry._claim` — `{by, since}` or `null`) —
+  and, only once the review lands, `nanojira release --id=<id>
+  --as=<your-name>` to give it up for real. Between those two calls the
+  claim holder and `assignee` differ on purpose; the handoff write already
+  says so in its own `--json` result (`claim:mismatch` in `_problems`,
+  warning, exit 0, nothing else about the write changes) — not only on a
+  later `doctor` run — so the one left holding the claim knows to come
+  back and release it.
 - Read before you write: `nanojira show --id=<id> --json` to see the current
   state (resolving exactly one id? read `.entry` off the result directly
   — identical to `entries[0]`, absent only for a `duplicate_id` target),

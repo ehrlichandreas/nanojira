@@ -65,7 +65,7 @@ function requireTargetFlagSyntax(flags: Flags) {
   const file = flagString(flags, 'file');
   const id = flagString(flags, 'id');
   if (file !== undefined && id !== undefined) fail('invalid_target', 'use either --id or --file, not both');
-  if (file === undefined && id === undefined) fail('missing_argument', '--id is required');
+  if (file === undefined && id === undefined) fail('missing_argument', '--id is required', undefined, 'id');
 }
 
 function resolveTarget(ctx: Context, flags: Flags, forWrite?: boolean): Element {
@@ -91,7 +91,7 @@ function resolveTarget(ctx: Context, flags: Flags, forWrite?: boolean): Element 
     if (!el) return fail('not_found', `no element file at '${abs}'`);
     return el;
   }
-  if (id === undefined) return fail('missing_argument', '--id is required');
+  if (id === undefined) return fail('missing_argument', '--id is required', undefined, 'id');
   return resolveById(ctx, id, forWrite);
 }
 

@@ -48,16 +48,30 @@ function applyFilters(elements: Element[], flags: Flags, cfg: Config) {
   const all = flags.has('all');
   let list = elements.filter((e) => all || !e.archived);
   // A typo'd filter must be an error, never a silently empty result (§ 9).
+  // `--status` takes a comma-separated list (TSK-055, fernuni-hagen): an
+  // element matching ANY listed status is kept. A single value is one of
+  // these lists with one item, so its behaviour (and its error message,
+  // naming that exact value) is byte-identical to before. Each item is
+  // validated the same way the single value always was -- an unknown one
+  // (including an empty item, from a leading/trailing/doubled comma) fails
+  // the whole call, nothing listed, naming that one item and the allowed
+  // values, not the whole list. Unlike `--exclude-tag`, never trimmed
+  // (Reviewer MUST, TSK-055 fixup): a status name never legitimately
+  // carries whitespace, so `" todo"` is simply not a known status, same
+  // as any other typo -- naming it exactly as given keeps a single value's
+  // behaviour byte-identical to before this flag took a list at all.
   const status = flagString(flags, 'status');
   if (status !== undefined) {
-    if (!cfg.statuses.includes(status)) {
-      fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, cfg.statuses));
+    const statuses = status.split(',');
+    for (const s of statuses) {
+      if (!cfg.statuses.includes(s)) fail('invalid_value', `unknown status '${s}'`, valueHint('status', s, cfg.statuses), 'status');
     }
-    list = list.filter((e) => e.status === status);
+    const wanted = new Set(statuses);
+    list = list.filter((e) => wanted.has(e.status));
   }
   const type = flagString(flags, 'type');
   if (type !== undefined) {
-    if (!TYPES.includes(type)) fail('invalid_value', `unknown type '${type}'`, valueHint('type', type, TYPES));
+    if (!TYPES.includes(type)) fail('invalid_value', `unknown type '${type}'`, valueHint('type', type, TYPES), 'type');
     list = list.filter((e) => e.type === type);
   }
   const tag = flagString(flags, 'tag');
@@ -76,13 +90,13 @@ function applyFilters(elements: Element[], flags: Flags, cfg: Config) {
   // exactly as the sort order weighs it (an unknown priority as `normal`).
   const exclude = parseListFlag(flags, 'exclude-tag');
   if (exclude !== undefined) {
-    if (exclude.length === 0) fail('invalid_value', '--exclude-tag needs at least one tag', 'give the tags to leave out, comma-separated');
+    if (exclude.length === 0) fail('invalid_value', '--exclude-tag needs at least one tag', 'give the tags to leave out, comma-separated', 'exclude-tag');
     list = list.filter((e) => !e.tags.some((t) => exclude.includes(t)));
   }
   const minPriority = flagString(flags, 'min-priority');
   if (minPriority !== undefined) {
     if (!PRIORITIES.includes(minPriority)) {
-      fail('invalid_value', `unknown priority '${minPriority}'`, valueHint('priority', minPriority, PRIORITIES));
+      fail('invalid_value', `unknown priority '${minPriority}'`, valueHint('priority', minPriority, PRIORITIES), 'min-priority');
     }
     list = list.filter((e) => priorityWeight(e.priority) >= PRIORITY_WEIGHT[minPriority]);
   }

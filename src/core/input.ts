@@ -12,7 +12,7 @@ import { fail } from './output.ts';
 function readInputText(value: string): string {
   if (value === '-') {
     try { return fs.readFileSync(0, 'utf8'); } catch (e: any) {
-      return fail('invalid_value', `cannot read stdin — ${e.message}`, 'pipe the JSON in, or pass a path with --input=<path>');
+      return fail('invalid_value', `cannot read stdin — ${e.message}`, 'pipe the JSON in, or pass a path with --input=<path>', 'input');
     }
   }
   try { return fs.readFileSync(value, 'utf8'); } catch (e: any) {
@@ -23,7 +23,7 @@ function readInputText(value: string): string {
 /** Text that does not parse as JSON is `invalid_value` (§ 9). */
 function parseInputJson(raw: string): unknown {
   try { return JSON.parse(raw); } catch (e: any) {
-    return fail('invalid_value', `--input is not valid JSON — ${e.message}`);
+    return fail('invalid_value', `--input is not valid JSON — ${e.message}`, undefined, 'input');
   }
 }
 

@@ -37,10 +37,35 @@
  */
 import fs from 'fs';
 import path from 'path';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import * as H from '../lib/harness.ts';
 import type { RunOpts, RunResult } from '../lib/harness.ts';
 const T = H.T;
+
+/* TSK-058 SHOULD (Scout): a directory on stdin makes the read itself fail
+ * (EISDIR), not just find it empty/missing — the one way to reach
+ * `readStdin()`'s own failure rather than the empty-input case every other
+ * `--<role>-file=-` test already covers. */
+function expectStdinReadFailure(desc: string, args: string[], cwd: string, expectedField: string) {
+  const njPath = H.NJ;
+  if (!njPath) throw new Error('no nanojira path given (pass it as argv[2] or set NJ)');
+  const inv = H.njCommand(njPath, args);
+  const dirFd = fs.openSync(cwd, 'r');
+  let r;
+  try {
+    r = spawnSync(inv.cmd, inv.args, {
+      cwd, stdio: [dirFd, 'pipe', 'pipe'], encoding: 'utf8',
+      env: Object.assign({}, process.env, { NJ_NOW: H.FIXED_NOW }),
+    });
+  } finally { fs.closeSync(dirFd); }
+  T.check(desc + ' — exits 1', r.status === 1, JSON.stringify(r.status));
+  let json: any = null;
+  try { json = JSON.parse(String(r.stdout)); } catch (e) { /* reported below */ }
+  if (!T.check(desc + ' — stdout is pure JSON', json !== null, JSON.stringify(String(r.stdout).slice(0, 200)))) return;
+  T.eq(desc + ' — code is invalid_value', json.error, 'invalid_value');
+  T.eq(desc + ' — field names the one flag whose stdin read failed', json.field, expectedField);
+  if (typeof json.error === 'string') SEEN.add(json.error);
+}
 
 /* § 9's table, transcribed. */
 const PLAIN = [
@@ -87,7 +112,7 @@ function healthy(label: string) {
  * Run a command that must fail, and check the whole envelope.
  * `args` must already include `--json`.
  */
-function expectFailure(desc: string, args: string[], opts: RunOpts | undefined, expectedCode?: string) {
+function expectFailure(desc: string, args: string[], opts: RunOpts | undefined, expectedCode?: string, expectedField?: string | false) {
   const r = H.runNj(args, opts || {});
   T.exit(desc + ' — exits 1', r, 1);
 
@@ -113,6 +138,13 @@ function expectFailure(desc: string, args: string[], opts: RunOpts | undefined, 
    * needed, it has to be argued for here, not switched on quietly. */
   if (expectedCode) {
     T.eq(desc + ' — code is ' + expectedCode, json.error, expectedCode);
+  }
+  /* TSK-058: a single-field failure carries `field`; a failure about a
+   * combination of flags carries no `field` at all (strict superset — § 9). */
+  if (expectedField === false) {
+    T.check(desc + ' — carries no field (not a single-field cause)', json.field === undefined, JSON.stringify(json.field));
+  } else if (typeof expectedField === 'string') {
+    T.eq(desc + ' — field names the one flag at fault', json.field, expectedField);
   }
   return json;
 }
@@ -158,11 +190,19 @@ function expectFailure(desc: string, args: string[], opts: RunOpts | undefined, 
   expectFailure('a positional on a command that takes none', ['set', '--id=TSK-001', '--json', 'status=done'],
     { cwd: d }, 'unexpected_argument');
   expectFailure('missing required argument', ['set', '--status=doing', '--json'],
-    { cwd: d }, 'missing_argument');
+    { cwd: d }, 'missing_argument', 'id');
   expectFailure('flag without a value', ['set', '--json', '--id=TSK-001', '--title'],
-    { cwd: d }, 'missing_value');
+    { cwd: d }, 'missing_value', 'title');
   expectFailure('value outside the permitted set', ['set', '--id=TSK-001', '--priority=nonsense', '--json'],
-    { cwd: d }, 'invalid_value');
+    { cwd: d }, 'invalid_value', 'priority');
+  expectFailure('a batch id named twice carries the id field',
+    ['set', '--id=TSK-001,TSK-001', '--status=doing', '--json'], { cwd: d }, 'invalid_value', 'id');
+  expectFailure('an --input plan key with a bad value carries the key as field',
+    ['new', '--input=-', '--json'],
+    { cwd: d, input: JSON.stringify({ type: 'task', parent: 'TSK-001', title: 123 }) },
+    'invalid_value', 'title');
+  expectFailure('a two-different-field combination failure carries no field',
+    ['check', '--id=TSK-001', '--text=x', '--item=1', '--json'], { cwd: d }, 'invalid_value', false);
   /* A reference that resolves to nothing is `not_found`; `invalid_target` is
    * the case § 9 describes as "must exist with the correct type" failing on
    * the *type* — a parent that exists but is the wrong kind of element. Both
@@ -186,6 +226,11 @@ function expectFailure(desc: string, args: string[], opts: RunOpts | undefined, 
 
   /* § 4: "nj init ... Refuses if a `backlog/` already exists." */
   expectFailure('init over an existing backlog', ['init', '--json'], { cwd: d }, 'exists');
+
+  expectStdinReadFailure('note --text-file=- against an unreadable stdin names text-file',
+    ['note', '--id=TSK-001', '--text-file=-', '--json'], d, 'text-file');
+  expectStdinReadFailure('set --description-file=- against an unreadable stdin names description-file',
+    ['set', '--id=TSK-001', '--description-file=-', '--json'], d, 'description-file');
 
   /* § 12's hooks report themselves through the `fault:<hook>` shape. */
   expectFailure('an injected fault names its hook',

@@ -287,7 +287,7 @@ function cmdDoctor(flags: Flags) {
   if (flags.has('fix')) return doctorFix(flags, json);
   // Plain `doctor` writes nothing, so a dry run of it would be a silent
   // no-op (§ 9 "`--dry-run`").
-  if (flags.has('dry-run')) fail('invalid_value', '--dry-run requires --fix', 'plain `nanojira doctor` never writes; add --fix to preview its repairs');
+  if (flags.has('dry-run')) fail('invalid_value', '--dry-run requires --fix', 'plain `nanojira doctor` never writes; add --fix to preview its repairs', 'dry-run');
 
   const ctx = context(flags, { lenient: true, tolerateConfig: true });
   const findings = collectFindings(ctx);

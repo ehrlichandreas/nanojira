@@ -73,11 +73,11 @@ function resolveNoteText(flags: Flags, positional: string[]): string {
   const given = [positional.length > 0, textFlag !== undefined, textFile !== undefined].filter(Boolean).length;
   if (given > 1) {
     fail('invalid_value', 'the note text was given more than one way (positional, --text, --text-file). Nothing written.',
-      'pass it as a positional argument, with --text=…, or with --text-file=<path|->, not more than one');
+      'pass it as a positional argument, with --text=…, or with --text-file=<path|->, not more than one', 'text');
   }
   let raw: string;
   if (textFile !== undefined) {
-    raw = textFile === '-' ? readStdin() : readTextFile(textFile);
+    raw = textFile === '-' ? readStdin('text-file') : readTextFile(textFile);
   } else if (textFlag !== undefined) {
     raw = textFlag;
   } else {
@@ -86,11 +86,11 @@ function resolveNoteText(flags: Flags, positional: string[]): string {
   const text = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
   if (given === 0) {
     fail('missing_argument', 'nanojira note needs the note text as an argument',
-      'nanojira note --id=TSK-007 "…" (or --text=…, --text-file=<path|->)');
+      'nanojira note --id=TSK-007 "…" (or --text=…, --text-file=<path|->)', 'text');
   }
   // Given but empty (or only whitespace): invalid_value, as for every
   // flag (TSK-038, DECISIONS 230).
-  if (text === '') fail('invalid_value', 'the note text must not be empty', 'nanojira note --id=TSK-007 "…"');
+  if (text === '') fail('invalid_value', 'the note text must not be empty', 'nanojira note --id=TSK-007 "…"', 'text');
   return text;
 }
 

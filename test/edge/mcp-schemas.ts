@@ -37,6 +37,15 @@
  * S9 the 4.3.0 flags reach the schemas through the flag table: release
  *    status, exclude-tag and min-priority, add-acceptance; check-all
  *    (a control flag, DECISIONS 225) does not.
+ *
+ * S1b/S3b (TSK-055): `list`/`find`'s own `status` is the one property-wide
+ * exception to S1/S3 above -- it takes a comma-separated list, which no
+ * `enum` could ever check, so it carries no `enum` at all, and its
+ * description keeps the CLI help line's own "; allowed: ..." clause
+ * (every other property's description has that clause stripped, since the
+ * allowed values live in `enum` instead). Every other tool's own `status`
+ * (`next`, `claim`, `release`, `new`, `set`) is untouched by this and
+ * still covered by the general S1/S3 checks above.
  */
 import fs from 'fs';
 import path from 'path';
@@ -123,6 +132,9 @@ for (const t of tools) {
     typeof t.description === 'string' && t.description.length > 0 && !t.description.includes('\n'), J(t.description));
   const docs = helpDocs(t.name, x.dir);
   for (const [name, p] of Object.entries<any>(props(t))) {
+    // list/find's own `status` is S1b's job, below: its description keeps
+    // the "; allowed: ..." clause `helpDocs` strips for everyone else.
+    if (name === 'status' && (t.name === 'list' || t.name === 'find')) continue;
     const want = MCP_TEXT[`${t.name}.${name}`] ?? docs.get(name.replace(/_/g, '-'));
     T.check(`S1 ${t.name}.${name}: has a description`, typeof p.description === 'string' && p.description.length > 0, J(p));
     T.eq(`S1 ${t.name}.${name}: the description is the CLI --help line`, p.description, want === undefined ? '(no --help line)' : want);
@@ -134,6 +146,16 @@ T.check('S1 show.notes names its values', /none\|all\|last:N/.test(String(props(
 T.check('S1 set.tags says how the list is written', /<a,b,\.\.\.>/.test(String(props(byName.get('set')).tags && props(byName.get('set')).tags.description)), J(props(byName.get('set')).tags));
 T.check('S1 set.depends_on says how the list is written', /<ID,\.\.\.>/.test(String(props(byName.get('set')).depends_on && props(byName.get('set')).depends_on.description)), J(props(byName.get('set')).depends_on));
 T.check('S1 quiet says files stays', /files/.test(String(props(byName.get('set')).quiet && props(byName.get('set')).quiet.description)), J(props(byName.get('set')).quiet));
+
+/* S1b. list/find's own `status` keeps the "allowed" clause (TSK-055): no   */
+/*      `enum` to carry it (a comma-list value could never satisfy one),   */
+/*      so its description is the CLI --help line UNSTRIPPED.             */
+for (const name of ['list', 'find']) {
+  const base = helpDocs(name, x.dir).get('status');
+  const want = `${base}; allowed: ${STATUSES.join(', ')}`;
+  T.eq(`S1b ${name}.status: description is the full CLI --help line, "allowed" clause kept`,
+    props(byName.get(name)).status && props(byName.get(name)).status.description, want);
+}
 
 /* S2. required ----------------------------------------------------------- */
 const REQUIRED: Record<string, string[]> = { new: ['title', 'type'], find: ['text'], note: ['text'] };
@@ -150,11 +172,20 @@ let enumSeen = 0;
 for (const t of tools) {
   for (const [name, values] of Object.entries(ENUMS)) {
     if (!(name in props(t))) continue;
+    // list/find's own `status` is S3b's job, below: no `enum` there at all.
+    if (name === 'status' && (t.name === 'list' || t.name === 'find')) continue;
     enumSeen++;
     T.eq(`S3 ${t.name}.${name}: enum`, props(t)[name].enum, values);
   }
 }
 T.check('S3 status/type/priority appear on at least 8 tool properties', enumSeen >= 8, String(enumSeen));
+
+/* S3b. list/find's own `status` has no enum (TSK-055, list form): a      */
+/*      comma-separated value could never satisfy one.                    */
+for (const name of ['list', 'find']) {
+  T.check(`S3b ${name}.status: no enum`, props(byName.get(name)).status && props(byName.get(name)).status.enum === undefined,
+    J(props(byName.get(name)).status));
+}
 
 /* S4. quiet / fields / dry-run ------------------------------------------- */
 for (const t of tools) {

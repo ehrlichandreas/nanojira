@@ -82,7 +82,7 @@ function main(argv: string[]) {
     if (onlyVersionAndJson && pre.positional.length === 0) {
       refuseRepeated(pre.repeated);
       for (const k of ['version', 'json']) {
-        if (pre.flags.has(k) && pre.flags.get(k) !== true) fail('invalid_value', `--${k} takes no value`, `pass --${k} on its own`);
+        if (pre.flags.has(k) && pre.flags.get(k) !== true) fail('invalid_value', `--${k} takes no value`, `pass --${k} on its own`, k);
       }
       process.stdout.write(output.json ? JSON.stringify({ version: VERSION }) + '\n' : `nanojira ${VERSION}\n`);
       return 0;
@@ -155,7 +155,7 @@ try {
   returned = true;
 } catch (e: any) {
   if (e instanceof Fail) {
-    emitFailure(e.code, e.message, e.hint);
+    emitFailure(e.code, e.message, e.hint, e.field);
   } else {
     // `io_error` is reported only where a command already knows what named
     // target it was acting on — `init`'s own target, `workingDir()` — and

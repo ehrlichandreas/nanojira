@@ -25,16 +25,20 @@ function parseBatchIds(flags: Flags): string[] | null {
   const ids = raw.split(',').map((s) => s.trim());
   const seen = new Set<string>();
   for (const id of ids) {
-    if (seen.has(id)) fail('invalid_value', `'${id}' is named twice in --id=${raw} (after trimming whitespace)`);
+    if (seen.has(id)) fail('invalid_value', `'${id}' is named twice in --id=${raw} (after trimming whitespace)`, undefined, 'id');
     seen.add(id);
   }
   return ids;
 }
 
-interface FailureResult { id: string; ok: false; error: string; hint?: string }
+interface FailureResult { id: string; ok: false; error: string; hint?: string; field?: string }
 
 function asFailure(id: string, e: unknown): FailureResult {
-  if (e instanceof Fail) return { id, ok: false, error: e.code, hint: e.hint };
+  if (e instanceof Fail) {
+    const r: FailureResult = { id, ok: false, error: e.code, hint: e.hint };
+    if (e.field !== undefined) r.field = e.field;
+    return r;
+  }
   return { id, ok: false, error: 'internal_error', hint: e instanceof Error ? e.stack : String(e) };
 }
 

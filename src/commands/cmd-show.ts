@@ -43,9 +43,9 @@ function parseNotesFlag(flags: Flags): NotesMode | undefined {
   if (m !== null) {
     const n = Number(m[1]);
     if (n >= 1) return { kind: 'last', n };
-    fail('invalid_value', `--notes=last:${m[1]} — N must be a positive integer, not ${m[1]}`);
+    fail('invalid_value', `--notes=last:${m[1]} — N must be a positive integer, not ${m[1]}`, undefined, 'notes');
   }
-  fail('invalid_value', `unknown --notes value '${raw}'`, listHint('--notes values', raw, ['none', 'all', 'last:N']));
+  fail('invalid_value', `unknown --notes value '${raw}'`, listHint('--notes values', raw, ['none', 'all', 'last:N']), 'notes');
 }
 
 /** The notes `mode` actually keeps, oldest-first — the same relative order `parseNotes` already returns them in. */

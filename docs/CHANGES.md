@@ -5,6 +5,66 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nanojira --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 4.7.0
+
+`list`/`find` take a comma-separated `--status` list instead of one call
+per status; a CLI failure caused by a single field now names that field
+in its own `--json` output, not only in the hint text; a reviewer
+handoff's write result reports `claim:mismatch` the moment it happens,
+not only on the next `doctor` run; the CLI kernel can be pulled into
+another project straight from a signed release tag; and a plan `ref`
+that forgot its `@` gets told the fix, not just the rule it broke. A
+caller may notice: `_problems` can now carry `claim:mismatch` on a read
+or write result (`doctor` already reported it); `list`/`find`'s MCP
+`status` property has no `enum` any more, the allowed values named in
+its description instead; a CLI failure JSON may carry a new `field` key
+(additive); and `kernel.ts`'s `readStdin` takes an optional `field`
+argument (a project that copies the kernel gets it with its next
+export).
+
+- New: `--status=<a,b,...>` on `list` and `find` takes a comma-separated
+  list, matching an element with any of the listed statuses — the same
+  shape `--exclude-tag` already has. One value keeps working exactly as
+  before. An unknown or empty item is `invalid_value`, naming that one
+  item and the allowed statuses; nothing is listed. `next`/`claim`/
+  `release`/`new`/`set` are unaffected: their own `--status` still names
+  or sets one status on one element. The MCP `list`/`find` tool schemas'
+  `status` field drops its `enum` (one value couldn't check a comma-list
+  against it) in favour of naming the allowed values in the field's
+  description; every other tool's `status` field is unchanged. (DECISIONS
+  235, TSK-055, feedback/fernuni-hagen)
+- Fix: `new --input=`'s refusal for a plan `ref` not starting with `@`
+  now hints the corrected value (e.g. `use "@impl"`) when the given value
+  is a non-empty string; the rule itself is unchanged — a `ref` always
+  starts with `@`, on both the declaration and the `depends_on` reference
+  to it, never normalized. `new --help` now says so in words too (GUIDE
+  § 21 and SPECIFICATION already did). (TSK-056, feedback from the
+  fernuni-hagen team)
+- New: `tools/export-kernel.mts <tag> <dest-file>` exports
+  `src/core/kernel.ts` from a signed release tag, refusing one not signed
+  by the pinned release key (the same check `export-skill.mts` uses) and
+  a destination that is a symlink or not a regular file. The exported
+  file is one provenance header line (tag, commit, sha256 of the body)
+  followed by the tag's `kernel.ts` byte for byte, so a consumer importing
+  it directly sees nothing but the real file plus one comment line.
+  `tools/export-kernel.mts --check <dest-file>` re-verifies an exported
+  file against its own header, offline, telling a local edit from an
+  update. GUIDE § 31. (TSK-057, feedback from the nanoadr team)
+- Fix: a reviewer handoff (`set --status=review --assignee=<reviewer>`)
+  deliberately keeps the original claim, but that was only visible on the
+  next `doctor` run. The write itself now reports `claim:mismatch` in its
+  own result (`_problems`, warning, exit 0, nothing else changed) the
+  moment it happens — same as every `show`/`list --json` entry. The
+  recipe is unchanged and still two calls: `set --assignee=<reviewer>`,
+  then `release --as=<original author>` once review lands (GUIDE § 13,
+  AGENT-INSTRUCTIONS). (TSK-059, scans from the knowledge4ai team)
+- New: a CLI failure caused by exactly one flag or `--input` key now names
+  it in `--json` output as `field: "<name>"`, so an agent can branch on the
+  JSON instead of parsing stderr prose — a missing `--parent`, a bad
+  `--priority`, and the like. Every other key is unchanged, and a failure
+  about a combination of flags still carries no `field`. (DECISIONS 237,
+  TSK-058, feedback/knowledge4ai)
+
 ## 4.6.0
 
 `show`/`list --json` carry a task's Description and Acceptance Criteria

@@ -135,14 +135,19 @@ import * as fs4 from "node:fs";
 var Fail = class extends Error {
   hint;
   code;
-  constructor(message, hint, code) {
+  /** The one field this failure is about, when the throwing code knows it
+   * for sure (never guessed from `message`) — the flag's internal name as
+   * the project's own flag table spells it. */
+  field;
+  constructor(message, hint, code, field) {
     super(message);
     this.hint = hint;
     this.code = code || "failed";
+    this.field = field;
   }
 };
-function fail(code, message, hint) {
-  throw new Fail(message, hint, code);
+function fail(code, message, hint, field) {
+  throw new Fail(message, hint, code, field);
 }
 var decorateFailure = (res) => res;
 function setFailureDecorator(fn) {
@@ -186,7 +191,7 @@ function parseArgs(argv, kinds, opts) {
 function flagString(flags, name) {
   const v = flags.get(name);
   if (v === void 0) return void 0;
-  if (v === true) return fail("missing_value", `--${name} needs a value (use --${name}=\u2026 or --${name} <value>)`);
+  if (v === true) return fail("missing_value", `--${name} needs a value (use --${name}=\u2026 or --${name} <value>)`, void 0, name);
   return v;
 }
 function osaDistance(a, b) {
@@ -369,7 +374,11 @@ var CLI_SPEC = {
 };
 var doc = (text, value) => value === void 0 ? { text } : { value, text };
 var FILTER = {
-  status: doc("only elements with this status", "<value>"),
+  // `next`'s own `status` doc (COMMAND_DOCS.next, below) overrides this one
+  // after the `...FILTER` spread — only `list`/`find` keep the list form
+  // (TSK-055): their own `--status` takes one value or several,
+  // comma-separated, matching ANY of them.
+  status: doc("only elements with any of these statuses", "<a,b,...>"),
   type: doc("only elements of this type", "<value>"),
   tag: doc("only elements carrying this tag", "<tag>"),
   parent: doc("only direct children of this element", "<id>"),
@@ -412,7 +421,7 @@ var FLAG_DOCS = {
 var READ_FIELDS = doc("with --json: keep only these fields of every entry, in this order", "<a,b,...>");
 var COMMAND_DOCS = {
   init: { backlog: doc("create the backlog at this path", "<path>") },
-  new: { input: doc("read the element, or a whole plan, as JSON from a file, - for stdin", "<path|->") },
+  new: { input: doc('read the element, or a whole plan, as JSON from a file, - for stdin; a plan ref is declared and referenced with a leading @ (e.g. "@impl") on both sides', "<path|->") },
   set: { id: BATCH_ID, parent: doc("move the element under this parent", "<id>") },
   note: {
     id: BATCH_ID,
@@ -474,7 +483,7 @@ import * as os2 from "node:os";
 import * as path7 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.6.0";
+var VERSION = "4.7.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -715,7 +724,7 @@ function escapeInvisible(s) {
 function explicitLocation(flags) {
   const flag = flagString(flags, "backlog");
   if (flag !== void 0) {
-    if (flag === "") fail("invalid_value", "--backlog must not be empty", "give a value, or leave --backlog out");
+    if (flag === "") fail("invalid_value", "--backlog must not be empty", "give a value, or leave --backlog out", "backlog");
     return { dir: fromCwd(flag), src: { kind: "flag" } };
   }
   const env = process.env.NJ_BACKLOG;
@@ -941,6 +950,7 @@ var REQUIRED = { new: ["type", "title"], find: ["text"], note: ["text"] };
 var SHRINKABLE = ["new", "set", "note", "check", "claim", "release", "next"];
 var WRITES = [...SHRINKABLE, "archive", "unarchive"];
 var READS_WITH_FIELDS = ["list", "find", "show"];
+var STATUS_LIST_TOOLS = ["list", "find"];
 function toolFields(name, allowDestructive) {
   if (name === "doctor") return allowDestructive ? [...commandFields(name), { name: "dry-run", kind: "boolean" }] : [];
   const fields = commandFields(name).filter((f) => !f.name.endsWith("-file"));
@@ -994,7 +1004,13 @@ function inputSchema(name, fields, statuses) {
       description: propertyDescription(name, f.name)
     };
     const values = allowedValues(f.name, statuses);
-    if (values) p.enum = values.slice();
+    if (values) {
+      if (f.name === "status" && STATUS_LIST_TOOLS.includes(name)) {
+        p.description = `${p.description}; allowed: ${values.join(", ")}`;
+      } else {
+        p.enum = values.slice();
+      }
+    }
     properties[f.name] = p;
   }
   const required = REQUIRED[name] ? { required: REQUIRED[name].slice() } : {};
@@ -1084,13 +1100,16 @@ function main() {
     const statuses = configuredStatuses(backlog);
     for (const f of fields) {
       const values = f.name in args ? allowedValues(f.name, statuses) : null;
-      if (values && !values.includes(args[f.name])) {
+      if (!values) continue;
+      const items = f.name === "status" && STATUS_LIST_TOOLS.includes(name) ? String(args[f.name]).split(",") : [args[f.name]];
+      const bad = items.find((v) => !values.includes(v));
+      if (bad !== void 0) {
         problems.push({
           field: f.name,
           error: "invalid_value",
           allowed: values.slice(),
-          message: `'${f.name}' must be one of: ${values.join(", ")} (got ${JSON.stringify(args[f.name])})`,
-          hint: valueHint(f.name === "min-priority" ? "priority" : f.name, String(args[f.name]), values)
+          message: `'${f.name}' must be one of: ${values.join(", ")} (got ${JSON.stringify(bad)})`,
+          hint: valueHint(f.name === "min-priority" ? "priority" : f.name, String(bad), values)
         });
       }
     }

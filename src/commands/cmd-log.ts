@@ -89,7 +89,7 @@ function parseLastFlag(flags: Flags): number | undefined {
   if (raw === undefined) return undefined;
   const n = /^-?\d+$/.test(raw) ? Number(raw) : NaN;
   if (Number.isInteger(n) && n >= 1) return n;
-  fail('invalid_value', `--last=${raw} must be a positive integer`);
+  fail('invalid_value', `--last=${raw} must be a positive integer`, undefined, 'last');
 }
 
 function cmdLog(flags: Flags) {

@@ -38,33 +38,33 @@ import { checkExplicitParent } from './cmd-new.ts';
 function buildSetInputFlags(inputValue: string): Flags {
   const raw = readInputText(inputValue);
   const parsed = parseInputJson(raw);
-  if (Array.isArray(parsed)) fail('invalid_value', 'set --input= takes exactly one object, not an array — set has no plan form');
-  if (parsed === null || typeof parsed !== 'object') fail('invalid_value', '--input must be a JSON object');
+  if (Array.isArray(parsed)) fail('invalid_value', 'set --input= takes exactly one object, not an array — set has no plan form', undefined, 'input');
+  if (parsed === null || typeof parsed !== 'object') fail('invalid_value', '--input must be a JSON object', undefined, 'input');
   const allowed = cliFieldNames('set').filter((f) => f !== 'id' && f !== 'file');
   const synFlags: Flags = new Map();
   for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
     if (!allowed.includes(key)) {
       fail('unknown_field', `unknown field '${key}' in --input. Nothing written.`, `Known fields: ${allowed.join(', ')}`);
     }
-    if (key === 'add-acceptance' && typeof value !== 'string') fail('invalid_value', `--input: 'add-acceptance' must be a string, one line`);
+    if (key === 'add-acceptance' && typeof value !== 'string') fail('invalid_value', `--input: 'add-acceptance' must be a string, one line`, undefined, 'add-acceptance');
     if (key === 'acceptance' && Array.isArray(value)) {
       // Each string becomes one `- [ ] …` checkbox line, in order (DECISIONS
       // 172 item 6) — formatted here, then carried through readSectionFlags
       // exactly like any other inline acceptance text.
-      for (const line of value) if (typeof line !== 'string') fail('invalid_value', `--input: 'acceptance' array items must be strings`);
+      for (const line of value) if (typeof line !== 'string') fail('invalid_value', `--input: 'acceptance' array items must be strings`, undefined, 'acceptance');
       synFlags.set(key, (value as string[]).map((s) => `- [ ] ${s}`).join('\n'));
       continue;
     }
     if (Array.isArray(value)) {
-      for (const item of value) if (typeof item !== 'string') fail('invalid_value', `--input: '${key}' array items must be strings`);
+      for (const item of value) if (typeof item !== 'string') fail('invalid_value', `--input: '${key}' array items must be strings`, undefined, key);
       synFlags.set(key, (value as string[]).join(','));
       continue;
     }
-    if (typeof value !== 'string') fail('invalid_value', `--input: '${key}' must be a string${key === 'acceptance' ? ' or an array of strings' : ''}`);
+    if (typeof value !== 'string') fail('invalid_value', `--input: '${key}' must be a string${key === 'acceptance' ? ' or an array of strings' : ''}`, undefined, key);
     // `--input=-` already read stdin for the JSON itself; a second read gets
     // nothing and would write an empty section — refused like `new` does.
     if (inputValue === '-' && key.endsWith('-file') && value === '-') {
-      fail('invalid_value', `--input: '${key}'='-' cannot read stdin — already consumed`);
+      fail('invalid_value', `--input: '${key}'='-' cannot read stdin — already consumed`, undefined, key);
     }
     synFlags.set(key, value);
   }
@@ -331,22 +331,22 @@ function validateAddAcceptance(flags: Flags) {
   if (add === undefined) return;
   if (flagString(flags, 'acceptance') !== undefined || flagString(flags, 'acceptance-file') !== undefined) {
     fail('invalid_value', '--add-acceptance cannot be combined with --acceptance or --acceptance-file',
-      'use --acceptance=<text> to replace the whole section, or --add-acceptance=<text> to append one line');
+      'use --acceptance=<text> to replace the whole section, or --add-acceptance=<text> to append one line', 'acceptance');
   }
-  if (add.trim() === '') fail('invalid_value', '--add-acceptance must not be empty');
-  if (/[\r\n]/.test(add)) fail('invalid_value', '--add-acceptance takes one line', 'append one line per call, or replace the section with --acceptance');
+  if (add.trim() === '') fail('invalid_value', '--add-acceptance must not be empty', undefined, 'add-acceptance');
+  if (/[\r\n]/.test(add)) fail('invalid_value', '--add-acceptance takes one line', 'append one line per call, or replace the section with --acceptance', 'add-acceptance');
 }
 
 function validateFieldValues(ctx: Context, flags: Flags) {
   const title = flagString(flags, 'title');
-  if (title !== undefined && normalizeTitle(title) === '') fail('invalid_value', '--title must not be empty');
+  if (title !== undefined && normalizeTitle(title) === '') fail('invalid_value', '--title must not be empty', undefined, 'title');
   const status = flagString(flags, 'status');
   if (status !== undefined && !ctx.cfg.statuses.includes(status)) {
-    fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses));
+    fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses), 'status');
   }
   const priority = flagString(flags, 'priority');
   if (priority !== undefined && !PRIORITIES.includes(priority)) {
-    fail('invalid_value', `unknown priority '${priority}'`, valueHint('priority', priority, PRIORITIES));
+    fail('invalid_value', `unknown priority '${priority}'`, valueHint('priority', priority, PRIORITIES), 'priority');
   }
   validateTagsCombination(flags);
   validateAddAcceptance(flags);
@@ -361,7 +361,7 @@ function validateTagsCombination(flags: Flags) {
   if (direct === undefined) return;
   if (flagString(flags, 'add-tags') !== undefined || flagString(flags, 'remove-tags') !== undefined) {
     fail('invalid_value', '--tags cannot be combined with --add-tags or --remove-tags',
-      'use --tags=<list> to replace the whole list, or --add-tags/--remove-tags to change it incrementally');
+      'use --tags=<list> to replace the whole list, or --add-tags/--remove-tags to change it incrementally', 'tags');
   }
 }
 
@@ -390,7 +390,7 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
   let newBody;
   if (title !== undefined) {
     const clean = normalizeTitle(title);
-    if (clean === '') fail('invalid_value', '--title must not be empty');
+    if (clean === '') fail('invalid_value', '--title must not be empty', undefined, 'title');
     if (clean !== el.title) {
       overrides.set('title', clean);
       changed.push('title');
@@ -429,7 +429,7 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
   const status = flagString(flags, 'status');
   if (status !== undefined) {
     if (!ctx.cfg.statuses.includes(status)) {
-      fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses));
+      fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses), 'status');
     }
     if (status === 'done') requireChildrenDone(ctx, el, allowOpen, 'set');
     if (status !== el.status) { overrides.set('status', status); changed.push('status'); }
@@ -437,7 +437,7 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
 
   const priority = flagString(flags, 'priority');
   if (priority !== undefined) {
-    if (!PRIORITIES.includes(priority)) fail('invalid_value', `unknown priority '${priority}'`, valueHint('priority', priority, PRIORITIES));
+    if (!PRIORITIES.includes(priority)) fail('invalid_value', `unknown priority '${priority}'`, valueHint('priority', priority, PRIORITIES), 'priority');
     if (priority !== el.priority) { overrides.set('priority', priority); changed.push('priority'); }
   }
 

@@ -20,10 +20,14 @@ import * as fs from 'node:fs';
 class Fail extends Error {
   hint?: string;
   code: string;
-  constructor(message: string, hint?: string, code?: string) { super(message); this.hint = hint; this.code = code || 'failed'; }
+  /** The one field this failure is about, when the throwing code knows it
+   * for sure (never guessed from `message`) — the flag's internal name as
+   * the project's own flag table spells it. */
+  field?: string;
+  constructor(message: string, hint?: string, code?: string, field?: string) { super(message); this.hint = hint; this.code = code || 'failed'; this.field = field; }
 }
 
-function fail(code: string, message: string, hint?: string): never { throw new Fail(message, hint, code); }
+function fail(code: string, message: string, hint?: string, field?: string): never { throw new Fail(message, hint, code, field); }
 
 // Set as soon as argv is parsed, so the top-level catch can honour --json.
 const output = { json: false };
@@ -68,12 +72,13 @@ process.stdout.on('error', (err: NodeJS.ErrnoException) => {
 function out(s: string) { process.stdout.write(s + '\n'); }
 
 /** With --json every exit path emits JSON on stdout; the prose stays on stderr. */
-function emitFailure(code: string, message: string, hint?: string) {
+function emitFailure(code: string, message: string, hint?: string, field?: string) {
   process.stderr.write(`Error: ${message}\n`);
   if (hint) process.stderr.write(`${hint}\n`);
   if (output.json) {
-    const res: { ok: boolean; error: string; hint?: string } = { ok: false, error: code };
+    const res: { ok: boolean; error: string; hint?: string; field?: string } = { ok: false, error: code };
     if (hint) res.hint = hint;
+    if (field !== undefined) res.field = field;
     out(JSON.stringify(decorateFailure(res), null, 2));
   }
   process.exitCode = 1;
@@ -161,13 +166,13 @@ function checkFlags(flags: Flags, allowedFields: string[], allowedControls: Set<
 function flagString(flags: Flags, name: string): string | undefined {
   const v = flags.get(name);
   if (v === undefined) return undefined;
-  if (v === true) return fail('missing_value', `--${name} needs a value (use --${name}=… or --${name} <value>)`);
+  if (v === true) return fail('missing_value', `--${name} needs a value (use --${name}=… or --${name} <value>)`, undefined, name);
   return v;
 }
 
-function readStdin(hint = 'pipe the text in'): string {
+function readStdin(hint = 'pipe the text in', field?: string): string {
   try { return fs.readFileSync(0, 'utf8'); } catch (e: any) {
-    return fail('invalid_value', `cannot read stdin — ${e.message}`, hint);
+    return fail('invalid_value', `cannot read stdin — ${e.message}`, hint, field);
   }
 }
 
@@ -275,14 +280,14 @@ function parseOutputOpts(flags: Flags, json: boolean, allowedFields: string[], l
     fail('invalid_value', '--quiet cannot be combined with --fields',
       'use --fields=<list> to choose fields, or --quiet for {ok, id}');
   }
-  if (quiet && !json) fail('invalid_value', '--quiet requires --json');
-  if (fieldsRaw !== undefined && !json) fail('invalid_value', '--fields requires --json');
+  if (quiet && !json) fail('invalid_value', '--quiet requires --json', undefined, 'quiet');
+  if (fieldsRaw !== undefined && !json) fail('invalid_value', '--fields requires --json', undefined, 'fields');
   if (fieldsRaw === undefined) return { quiet };
   const names = fieldsRaw.split(',').map((s) => s.trim()).filter((s) => s !== '');
-  if (names.length === 0) fail('invalid_value', '--fields must not be empty');
+  if (names.length === 0) fail('invalid_value', '--fields must not be empty', undefined, 'fields');
   for (const n of names) {
     if (!allowedFields.includes(n)) {
-      fail('invalid_value', `unknown field '${n}' in --fields`, listHint(label, n, allowedFields));
+      fail('invalid_value', `unknown field '${n}' in --fields`, listHint(label, n, allowedFields), 'fields');
     }
   }
   return { quiet, fields: names };

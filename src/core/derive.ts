@@ -107,6 +107,14 @@ function entryJson(el: Element, backlog: string, cfg: Config): EntryJson {
   const probs = elementProblems(el, cfg.problems.ignore);
   const fresh: string[] = [];
   if (claim && isClaimStale(claim.since, cfg.claims.staleAfterHours, nowMs())) fresh.push('claim:stale');
+  // claim:mismatch (§ 7, § 12a, same comparison `doctor`'s collectClaimFindings
+  // makes against `allClaimDirs`/`highestEntry` — reused via the same
+  // element-scoped `readClaim`, not a second copy of the check): a handoff
+  // (`set --assignee=<reviewer>`) that leaves the claim with the OLD
+  // assignee is otherwise invisible until the next `doctor` run; surfacing
+  // it here means every write result and every `show`/`list --json` entry
+  // already carries it (TSK-059, scans knowledge4ai).
+  if (claim && claim.by !== el.assignee) fresh.push('claim:mismatch');
   // claim:symlink (§ 7, DECISIONS 215), element-level: computed fresh the same way.
   if (elementClaimLink(backlog, el.id) !== null) fresh.push('claim:symlink');
   // problems.ignore applies to these too: suppressed everywhere, not only

@@ -459,6 +459,46 @@ for (const bad of ['', ' ', '\t', 'a\nb', 'a:b']) {
   T.check('C4 landed steal: doctor reports claim:mismatch', (H.doctorSet(d) || []).includes('claim:mismatch:warning'), J(d.json && d.json.problems));
 }
 
+/* C4a — a handoff (`set --assignee=<reviewer>`) that leaves the claim with  */
+/* the OLD assignee reports claim:mismatch in the write's OWN result, exit  */
+/* 0, nothing else changed (TSK-059, scans knowledge4ai): previously only   */
+/* a later `doctor` run (or show/list) surfaced this, never the write that   */
+/* caused it.                                                                */
+{
+  const x = modelClaimedByAlice('ac27-c4a-handoff');
+  const r = runJ(['set', '--id=TSK-001', '--status=review', '--assignee=bob'], { cwd: x.dir, env: later() });
+  T.exit('C4a handoff leaving alice\'s claim: exit 0', r, 0);
+  T.eq('C4a handoff: assignee is now bob', r.json && r.json.entry && r.json.entry.assignee, 'bob');
+  T.eq('C4a handoff: the claim itself is untouched (still alice)',
+    r.json && r.json.entry && r.json.entry._claim && r.json.entry._claim.by, 'alice');
+  T.check('C4a handoff: claim:mismatch in entry._problems',
+    Array.isArray(r.json && r.json.entry && r.json.entry._problems) && r.json.entry._problems.includes('claim:mismatch'), J(r.json));
+  T.check('C4a handoff: claim:mismatch in the top-level _problems mirror',
+    Array.isArray(r.json && r.json._problems) && r.json._problems.includes('claim:mismatch'), J(r.json));
+  const d = runJ(['doctor'], { cwd: x.dir });
+  T.check('C4a handoff: doctor independently reports the same finding',
+    (H.doctorSet(d) || []).includes('claim:mismatch:warning'), J(d.json && d.json.problems));
+}
+{
+  // --quiet keeps _problems only when non-empty (same rule every other
+  // code already follows) -- claim:mismatch is no exception.
+  const x = modelClaimedByAlice('ac27-c4a-quiet');
+  const r = runJ(['set', '--id=TSK-001', '--assignee=bob', '--quiet'], { cwd: x.dir, env: later() });
+  T.exit('C4a --quiet handoff: exit 0', r, 0);
+  T.eq('C4a --quiet handoff: exactly {ok, id, files, _problems}', Object.keys(r.json || {}).sort(), ['_problems', 'files', 'id', 'ok']);
+  T.check('C4a --quiet handoff: claim:mismatch present', (r.json && r.json._problems || []).includes('claim:mismatch'), J(r.json));
+}
+{
+  // The handoff recipe's second half: release --as=<old holder> afterward
+  // clears it, back to a clean, unclaimed element.
+  const x = modelClaimedByAlice('ac27-c4a-release');
+  runJ(['set', '--id=TSK-001', '--assignee=bob'], { cwd: x.dir, env: later() });
+  const r = release(x, 'TSK-001', { NJ_AUTHOR: 'alice' });
+  T.exit('C4a release --as=alice after the handoff: exit 0', r, 0);
+  T.check('C4a release: claim:mismatch gone', !((r.json && r.json.entry && r.json.entry._problems) || []).includes('claim:mismatch'), J(r.json));
+  T.eq('C4a release: unclaimed', r.json && r.json.entry && r.json.entry._claim, null);
+}
+
 /* C4 continued (D138, 47dc2d9, § 12a): the SAME rollback, but triggered by
  * NJ_FAULT=before-compare's TIMEOUT path (no marker ever created) rather
  * than before-rename's immediate abort — the mirror write's guard is the

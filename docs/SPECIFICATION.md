@@ -755,7 +755,7 @@ condition that produces it:
 | `done:open_children` | `done` set while children are not `done` | warning | yes |
 | `archive:not_done` | archived element is not `done` | error | yes |
 | `archive:split` | part of a subtree in archive, part outside | error | yes |
-| `claim:mismatch` | the element is `claimed N` but its `assignee` is not N — a crash between the append and the mirror write, a hand edit, or a claim's own rollback losing a race to a concurrent `archive`/`unarchive` (§ 12 "Claims") | warning | no |
+| `claim:mismatch` | the element is `claimed N` but its `assignee` is not N — a crash between the append and the mirror write, a hand edit, a claim's own rollback losing a race to a concurrent `archive`/`unarchive` (§ 12 "Claims"), or a handoff (`set --assignee=<other>`) that intentionally changes `assignee` away from N without releasing N's claim (§ 12a) — like every other code in this table, surfaced from `entryJson` (§ 9), so the write that causes it already carries it, not only a later `doctor`/`show`/`list` | warning | no |
 | `claim:orphaned` | a claim directory for an element that is archived or does not exist (backlog-level when it does not exist) — not merely `done`: a done-but-still-live element can still legitimately be claimed | warning | — |
 | `claim:stale` | the element is claimed and `now − _claim.since` exceeds `claims.staleAfterHours` (§ 5, § 12 "Claims") | warning | no |
 | `claim:symlink` | a claim directory, a claim entry, `.nanojira/claims/` or `.nanojira/` itself is a symlink — never followed, and `claim`, `release`, `archive`, `rm` and `unarchive` refuse it (`refused:symlink`, § 8, § 12 "Claims"); on the element the claim directory names — then also in its `_problems`, keeping it out of `--ready` so `next` passes it by — backlog-level otherwise, where `next` itself is refused (DECISIONS 215) | error | yes |
@@ -1748,6 +1748,30 @@ model `assignee` has (§ 6).
 - `list` filters are validated: `--status` against the configured statuses,
   `--parent` against existence — a typo'd filter is an error (exit 1), never a
   silently empty result.
+- **`--status=<a,b,...>` on `list` and `find`** (TSK-055, feedback/fernuni-hagen):
+  a comma-separated list, matching an element with ANY of the listed
+  statuses — the same "one filter, any-of-several" shape `--exclude-tag`
+  already has, but **never trimmed** (Reviewer MUST, TSK-055 fixup): each
+  item is checked exactly as given, whitespace and all. `--exclude-tag`
+  trims each tag because a tag is free text a person may have padded by
+  hand; a status name never legitimately carries whitespace, so `"
+  todo"` is simply not a configured status — the same kind of typo as
+  `"todoo"` — and trimming it into a silent match would hide that typo
+  instead of catching it. One value is one of these lists with one item,
+  so it keeps working exactly as before, byte-identical error message and
+  hint included. Each item (including an empty one, from a leading/
+  trailing/doubled comma, or one with stray whitespace) is checked against
+  the configured statuses the same way the single value always was; an
+  unknown one fails the whole call, naming that one item exactly as given
+  and the allowed values — never a partial result. `next`, `claim`,
+  `release`, `new` and `set` keep `--status` as a single value: they each
+  name or move ONE element to ONE status, not list several. `nanojira-mcp`'s
+  `list`/`find` tool schemas drop the `status` field's `enum` (a strict
+  client would reject the list form against a schema that only allows one
+  of a fixed set of exact strings) in favour of naming the allowed values
+  in the field's description text; every other tool's `status` field keeps
+  its `enum` unchanged. The MCP pre-check splits the same way, item for
+  item, also never trimmed.
 - **`--exclude-tag=<a,b>` and `--min-priority=<value>`** (DECISIONS 224) are
   two more filters, on `list` (with or without `--ready`), `find` and
   `next` alike, combined with the others as an AND. `--exclude-tag` leaves
@@ -2877,6 +2901,24 @@ on failure, `{ok: false, error: "<code>", hint: "…"}` (hint optional) with
 exit 1. The prose error text **additionally** goes to stderr — that clause
 constrains the JSON stream, not the stderr stream, so a non-JSON caller sees
 exactly what it saw before.
+
+A `missing_argument`, `missing_value` or `invalid_value` failure whose cause
+is exactly one field additionally carries `field: "<name>"` (TSK-058) — a
+strict superset of the shape above, so every other key is unchanged. The
+name is the flag's internal spelling as the flag table gives it (the
+hyphenated CLI spelling, e.g. `exclude-tag`, except `depends_on`, which the
+CLI itself also accepts as `--depends-on` but which the flag table and this
+field both spell with an underscore); for a failure about an `--input` plan
+key the name is that key, exactly as written in the plan. `field` is present
+only where the throwing code names one field for certain — never inferred
+from the message text — so a failure about a combination of two or more
+flags (a mutual-exclusion pair, "neither was given" with two possible
+sources) carries no `field` at all. This applies the same way to a batch
+write's per-id failure (above) and to an `--input` plan's `failed_at` failure
+(§ 9 "`--input` plans" below): both already carry `error`/`hint` per-failure,
+and gain `field` under the same rule. MCP tool-call refusals already name the
+field this way, in each of their own `problems[]` entries' `field` (§ 17);
+this key uses the same names.
 
 ### Failure codes — closed vocabulary
 
@@ -4157,6 +4199,25 @@ the same, while the element is still archived (§ 11a).
 
 **Output.** `claim` and `release` return the shape of § 9's JSON-shapes
 table.
+
+**The handoff recipe** (TSK-059, scans knowledge4ai). Handing an element to a
+reviewer while keeping the claim recorded under the original author —
+`nanojira set --id=<id> --status=review --assignee=<reviewer>` — is two
+separate facts: the claim (who is working on it, read from `_claim`, § 9) and
+`assignee` (who it is addressed to right now) are tracked independently, and
+`set` only ever touches the second. The author's claim survives the handoff
+untouched; `_claim.by` keeps naming them, not the reviewer. That is
+`claim:mismatch` (§ 7) by definition — `assignee` no longer names the claim
+holder — and `set`'s own write result reports it immediately, in the same
+call that caused it, not only on the next `doctor`/`show`/`list`. It is a
+warning, never blocking: exit 0, nothing else about the write changes. The
+recipe is always two calls, never one: the handoff (`set
+--assignee=<reviewer>`) first, and — once the reviewer is done, separately —
+`nanojira release --id=<id> --as=<original author>` to give the claim up for
+real. There is no `--release` flag on `set` to collapse this into one call;
+the claim and the addressee change at different times, for different
+reasons, and merging them would hide exactly the signal this section exists
+to surface.
 
 ### Limits, disclosed
 

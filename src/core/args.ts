@@ -59,7 +59,7 @@ function parseArgs(argv: string[], kinds?: FlagKinds) {
 
 function refuseRepeated(repeated: Repeat[]): void {
   if (repeated.length === 0) return;
-  fail('invalid_value', `--${repeated[0].typed} is given more than once with different values`, 'give each flag once');
+  fail('invalid_value', `--${repeated[0].typed} is given more than once with different values`, 'give each flag once', repeated[0].name);
 }
 
 // Controls every command takes, so no call site can forget one (§ 9).
@@ -81,7 +81,7 @@ function checkFlags(flags: Flags, allowedFields: string[], commandControls: Set<
   kernelCheckFlags(flags, allowedFields, allowedControlSet(commandControls, isWrite), isWrite, displayFlagName);
   if (flags.has('dry-run')) {
     armDryRun();
-    if (flags.get('dry-run') !== true) fail('invalid_value', '--dry-run takes no value', 'pass --dry-run on its own');
+    if (flags.get('dry-run') !== true) fail('invalid_value', '--dry-run takes no value', 'pass --dry-run on its own', 'dry-run');
   }
 }
 
@@ -91,13 +91,13 @@ function parseListFlag(flags: Flags, name: string) {
   if (v === '') return [];
   const items = v.split(',').map((s) => s.trim()).filter((s) => s !== '');
   for (const it of items) {
-    if (it.includes(']')) fail('invalid_value', `--${name.replace('_', '-')} item '${it}' contains ']', which is not accepted on the command line`);
+    if (it.includes(']')) fail('invalid_value', `--${name.replace('_', '-')} item '${it}' contains ']', which is not accepted on the command line`, undefined, name);
   }
   return items;
 }
 
-function readStdin(): string {
-  return kernelReadStdin('pipe the text in, or pass a path with --<role>-file=<path>');
+function readStdin(field?: string): string {
+  return kernelReadStdin('pipe the text in, or pass a path with --<role>-file=<path>', field);
 }
 
 // Value sources per role are mutually exclusive, and only one role may read
@@ -110,7 +110,7 @@ function readSectionFlags(flags: Flags) {
     const file = flagString(flags, role + '-file');
     if (inline !== undefined && file !== undefined) {
       fail('invalid_value', `--${role} and --${role}-file are mutually exclusive. Nothing written.`,
-        `pass the text with --${role}=… or the path with --${role}-file=…`);
+        `pass the text with --${role}=… or the path with --${role}-file=…`, role);
     }
     if (inline !== undefined) src.set(role, { inline });
     else if (file !== undefined) src.set(role, { file });
@@ -126,7 +126,7 @@ function readSectionFlags(flags: Flags) {
     if (!src.has(role)) continue;
     const s = src.get(role) as { inline?: string; file?: string };
     if (s.inline !== undefined) { wanted.set(role, normalizeSectionContent(s.inline)); continue; }
-    if (s.file === '-') { wanted.set(role, normalizeSectionContent(readStdin())); continue; }
+    if (s.file === '-') { wanted.set(role, normalizeSectionContent(readStdin(role + '-file'))); continue; }
     let raw;
     try { raw = fs.readFileSync(s.file as string, 'utf8'); } catch (e: any) {
       fail('not_found', `--${role}-file: cannot read '${s.file}' — ${e.message}. Nothing written.`,

@@ -78,6 +78,11 @@ const SHRINKABLE = ['new', 'set', 'note', 'check', 'claim', 'release', 'next'];
 const WRITES = [...SHRINKABLE, 'archive', 'unarchive'];
 // `--fields` without `--quiet` (DECISIONS 229).
 const READS_WITH_FIELDS = ['list', 'find', 'show'];
+// `list`/`find`'s own `status` takes a comma-separated list (TSK-055): the
+// only two tools where this field means "any of these", not "exactly this
+// one" (`claim`/`release`/`next`/`new`/`set` keep the single-value field
+// their own commands have always had).
+const STATUS_LIST_TOOLS = ['list', 'find'];
 
 /** `doctor`'s `fix` field exists in its schema only when the server was
  * launched with `--allow-destructive` (§ 17): the gate is schema-level,
@@ -181,7 +186,19 @@ function inputSchema(name: string, fields: FieldSpec[], statuses: string[] | nul
       description: propertyDescription(name, f.name),
     };
     const values = allowedValues(f.name, statuses);
-    if (values) p.enum = values.slice();
+    if (values) {
+      // `enum` can express one allowed value, never several joined by a
+      // comma -- a strict client would reject the list form before ever
+      // sending it. `list`/`find`'s `status` loses the schema-level `enum`
+      // for this reason; the allowed values go in the description text
+      // instead, same as it would for any other list-form field without a
+      // closed vocabulary (TSK-055, DECISIONS addendum).
+      if (f.name === 'status' && STATUS_LIST_TOOLS.includes(name)) {
+        p.description = `${p.description}; allowed: ${values.join(', ')}`;
+      } else {
+        p.enum = values.slice();
+      }
+    }
     properties[f.name] = p;
   }
   const required = REQUIRED[name] ? { required: REQUIRED[name].slice() } : {};
@@ -313,11 +330,23 @@ function main() {
     const statuses = configuredStatuses(backlog);
     for (const f of fields) {
       const values = f.name in args ? allowedValues(f.name, statuses) : null;
-      if (values && !values.includes(args[f.name])) {
+      if (!values) continue;
+      // `list`/`find`'s `status`: every comma-separated item must be
+      // allowed, same rule and same message shape as a single value,
+      // checked against the first bad item (the CLI's own `applyFilters`
+      // stops at the first one too, TSK-055) -- never trimmed (Reviewer
+      // MUST, TSK-055 fixup): a status name never legitimately carries
+      // whitespace, so `" todo"` is simply an unknown item, same as any
+      // other typo.
+      const items = f.name === 'status' && STATUS_LIST_TOOLS.includes(name)
+        ? String(args[f.name]).split(',')
+        : [args[f.name]];
+      const bad = items.find((v) => !values.includes(v));
+      if (bad !== undefined) {
         problems.push({
           field: f.name, error: 'invalid_value', allowed: values.slice(),
-          message: `'${f.name}' must be one of: ${values.join(', ')} (got ${JSON.stringify(args[f.name])})`,
-          hint: valueHint(f.name === 'min-priority' ? 'priority' : f.name as 'status' | 'type' | 'priority', String(args[f.name]), values),
+          message: `'${f.name}' must be one of: ${values.join(', ')} (got ${JSON.stringify(bad)})`,
+          hint: valueHint(f.name === 'min-priority' ? 'priority' : f.name as 'status' | 'type' | 'priority', String(bad), values),
         });
       }
     }
