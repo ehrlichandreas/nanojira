@@ -274,6 +274,37 @@ function sectionHasCheckbox(body: string, names: string[]): boolean {
   return false;
 }
 
+/**
+ * `done:open_acceptance` (§ 7, DECISIONS 176 B): counts every countable
+ * checkbox in the role's own section span, same span and fence-skipping as
+ * `sectionHasCheckbox` above, so the two can never disagree about what's in
+ * the section. `null` when the section has no heading at all (nothing to
+ * count) -- distinct from `{total: 0, ...}`, which can't actually happen
+ * here since a section with zero checkboxes is `acceptance:no_checkbox`'s
+ * job, not this one's.
+ */
+function sectionCheckboxCounts(body: string, names: string[]): { total: number; unticked: number } | null {
+  const lines = body.split('\n');
+  const idx = sectionHeadingIndex(lines, names);
+  if (idx === -1) return null;
+  const end = sectionEnd(lines, idx);
+  let fence: { ch: string; len: number } | null = null;
+  let total = 0;
+  let unticked = 0;
+  for (let i = idx + 1; i < end; i++) {
+    const line = lines[i];
+    const fm = /^[ \t]*(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (fm && fm[1][0] === fence.ch && fm[1].length >= fence.len) fence = null;
+      continue;
+    }
+    if (fm) { fence = { ch: fm[1][0], len: fm[1].length }; continue; }
+    const m = CHECKBOX_RE.exec(line);
+    if (m) { total++; if (m[3] === ' ') unticked++; }
+  }
+  return { total, unticked };
+}
+
 function normalizeSectionContent(raw: string) {
   let t = String(raw);
   if (t.charCodeAt(0) === 0xfeff) t = t.slice(1);
@@ -390,5 +421,5 @@ function parseNotes(body: string): NoteLine[] {
   return notes;
 }
 
-export { parseFile, serialize, h1Of, syncH1, sectionPresent, sectionHasCheckbox, CHECKBOX_RE, normalizeTitle, normalizeSectionContent, applySections, parseNotes };
+export { parseFile, serialize, h1Of, syncH1, sectionPresent, sectionHasCheckbox, sectionCheckboxCounts, CHECKBOX_RE, normalizeTitle, normalizeSectionContent, applySections, parseNotes };
 export type { NoteLine };

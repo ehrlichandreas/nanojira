@@ -5,6 +5,7 @@
 import type { Element, Config } from './types.ts';
 
 import { elementProblems, entryJson } from './derive.ts';
+import { sectionCheckboxCounts } from './parse.ts';
 
 // ------------------------------------------------------------------- errors
 
@@ -68,6 +69,10 @@ function writeFeedback(el: Element, cfg: Config, headline: string) {
     else if (code === 'incomplete:description') out(`⚠ ${el.id} has no description. Add one before starting.`);
     else if (code === 'acceptance:no_checkbox') out(`⚠ ${el.id} has acceptance criteria with no checkbox items — nothing for check to tick.`);
     else if (code === 'done:no_acceptance') out(`⚠ ${el.id} is done with no acceptance criteria.`);
+    else if (code === 'done:open_acceptance') {
+      const counts = sectionCheckboxCounts(el.body, cfg.sections.acceptance);
+      out(`⚠ ${el.id} is done with ${counts ? counts.unticked : '?'} of ${counts ? counts.total : '?'} acceptance boxes still unticked.`);
+    }
     else out(`⚠ ${el.id}: ${code}`);
   }
 }

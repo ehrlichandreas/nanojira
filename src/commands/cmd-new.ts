@@ -49,12 +49,25 @@ interface NewFlags {
  * exactly like `--parent` does today; only a `children` entry's IMPLIED
  * parent is new, and that has no equivalent here to reuse).
  */
-function checkExplicitParent(ctx: Context, type: string, parent: string | undefined): string | undefined {
+// `a`/`an` for a PARENT_TYPE value (§ 9): only ever "task" or "epic", but
+// spelled out instead of hard-coded so a third parent type never silently
+// regresses this.
+function article(word: string): string {
+  return /^[aeiou]/i.test(word) ? 'an' : 'a';
+}
+
+/**
+ * `verb` (DECISIONS 178): the archived-parent refusal's own wording —
+ * `new` is about to CREATE a child under the given parent, `set --parent`
+ * is about to MOVE an existing one there; same code, same every other
+ * word, just the one verb that actually differs between the two callers.
+ */
+function checkExplicitParent(ctx: Context, type: string, parent: string | undefined, verb: 'create' | 'move' = 'create'): string | undefined {
   if (type === 'epic') {
     if (parent !== undefined) fail('invalid_value', 'epics must not have a --parent');
     return undefined;
   }
-  if (parent === undefined) return fail('missing_argument', `--parent is required for ${type} (must be a ${PARENT_TYPE[type]})`);
+  if (parent === undefined) return fail('missing_argument', `--parent is required for ${type} (must be ${article(PARENT_TYPE[type])} ${PARENT_TYPE[type]})`);
   const p = ctx.elements.find((e: Element) => e.id === parent);
   if (!p) return fail('not_found', `parent '${parent}' does not exist`);
   // An unreadable stub is refused for the same reason as an archived parent:
@@ -65,9 +78,11 @@ function checkExplicitParent(ctx: Context, type: string, parent: string | undefi
   }
   // A wrong-type parent is a bad *target*, not a bad value: the flag names an
   // element that exists and is spelled correctly (§ 9 code table).
-  if (p.type !== PARENT_TYPE[type]) fail('invalid_target', `parent '${parent}' is a ${p.type}, but a ${type} needs a ${PARENT_TYPE[type]}`);
+  if (p.type !== PARENT_TYPE[type]) {
+    fail('invalid_target', `parent '${parent}' is ${article(p.type as string)} ${p.type}, but ${article(type)} ${type} needs ${article(PARENT_TYPE[type])} ${PARENT_TYPE[type]}`);
+  }
   if (p.archived) {
-    fail('refused:parent_archived', `parent '${parent}' is archived — refusing to create a child under it`,
+    fail('refused:parent_archived', `parent '${parent}' is archived — refusing to ${verb} a child under it`,
       'a fresh child of an archived parent would immediately carry archive:split');
   }
   return p.id;
@@ -369,7 +384,7 @@ function validatePlanNode(ctx: Context, node: FlatNode, flat: FlatNode[], seenRe
       }
       explicitParentId = checkExplicitParent(ctx, type as string, p as string);
     } else {
-      if (type !== 'epic') fail('missing_argument', `'parent' is required for ${type} at ${node.path} (must be a ${PARENT_TYPE[type as string]})`);
+      if (type !== 'epic') fail('missing_argument', `'parent' is required for ${type} at ${node.path} (must be ${article(PARENT_TYPE[type as string])} ${PARENT_TYPE[type as string]})`);
       parentMode = 'top';
     }
   } else {
@@ -658,4 +673,4 @@ function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
   return 0;
 }
 
-export { cmdNew };
+export { cmdNew, checkExplicitParent, article };

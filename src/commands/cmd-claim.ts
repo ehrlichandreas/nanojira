@@ -11,7 +11,7 @@ import type { Entry } from '../core/claims.ts';
 import { rollback, transition, releaseUnconditional, undoRelease, highestEntry, claimsDir } from '../core/claims.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireActive } from '../core/context.ts';
-import { entryJson } from '../core/derive.ts';
+import { entryJson, openAcceptanceExtra } from '../core/derive.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, out } from '../core/output.ts';
 import { refreshStatus } from '../core/status.ts';
@@ -87,6 +87,7 @@ function claimOne(ctx: Context, el: Element, name: string, status: string | unde
     stolenFrom !== undefined ? { stolen_from: stolenFrom } : {},
     previousAssignee !== undefined ? { previous_assignee: previousAssignee } : {},
     released !== undefined ? { released: released.holder } : {},
+    openAcceptanceExtra(fresh, ctx.cfg, isFinalStatus),
   );
 }
 

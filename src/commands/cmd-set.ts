@@ -2,22 +2,25 @@
 
 // `nj set`.
 
-import type { Flags, Element, Context } from '../core/types.ts';
+import type { Flags, Element, Context, NonEmptyString } from '../core/types.ts';
 
+import * as path from 'path';
 import { checkFlags, flagString, parseListFlag, readSectionFlags } from '../core/args.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { PRIORITIES } from '../core/constants.ts';
 import { cliFieldNames } from '../core/flag-table.ts';
 import { readInputText, parseInputJson } from '../core/input.ts';
 import { context, resolveTarget, resolveById, requireWritable, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
-import { entryJson } from '../core/derive.ts';
+import { entryJson, openAcceptanceExtra } from '../core/derive.ts';
+import { ownFolder, expectedPlace } from '../core/layout.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, out, writeFeedback, emitWriteResult } from '../core/output.ts';
 import { syncH1, normalizeTitle, applySections } from '../core/parse.ts';
 import { refreshStatus } from '../core/status.ts';
 import { valueHint } from '../core/suggest.ts';
-import { nowIso, guardedWrite, guardedWriteCatchable, renderElement } from '../core/store.ts';
+import { nowIso, guardedWrite, guardedWriteCatchable, renderElement, planMove, runMove } from '../core/store.ts';
 import { releaseUnconditional, undoRelease } from '../core/claims.ts';
+import { checkExplicitParent } from './cmd-new.ts';
 
 /**
  * `set --input=` (§ 9, DECISIONS 171 A, 172): exactly one JSON object, keys
@@ -61,7 +64,30 @@ type SectionRole = 'description' | 'acceptance';
 // the section roles that live in the body rather than the frontmatter.
 type SetField = keyof Element | SectionRole;
 
-interface SetItem { el: Element; overrides: Map<string, string | string[] | undefined>; changed: SetField[]; newBody: string | undefined }
+interface SetItem {
+  el: Element; overrides: Map<string, string | string[] | undefined>; changed: SetField[]; newBody: string | undefined;
+  movePlan: ReturnType<typeof planMove> | null; moveDst: string | null;
+}
+
+/**
+ * Under `hierarchy`, reparenting relocates the file (subtask) or whole
+ * folder (task, children included) to sit under the new parent — the same
+ * move `archive`/`doctor --fix` already do for a misplaced element (§ 4,
+ * § 12), computed against a shadow copy of `el` with its `parent` already
+ * swapped so `expectedPlace` answers for the NEW parent without disturbing
+ * the real graph (DECISIONS 176 A, 177). `null` under `type`/`flat`, where
+ * reparenting only ever touches the frontmatter.
+ */
+function reparentMove(ctx: Context, el: Element, newParentId: string): { src: string; dst: string } | null {
+  if (ctx.cfg.layout.group !== 'hierarchy') return null;
+  const byId = new Map(el.byId as Map<string, Element>);
+  const shadow: Element = { ...el, parent: newParentId as NonEmptyString };
+  byId.set(el.id, shadow);
+  const dir = expectedPlace(shadow, byId, ctx.cfg.layout) as string;
+  if (el.type === 'subtask') return { src: el.file, dst: path.join(ctx.backlog, dir, path.basename(el.file)) };
+  const own = ownFolder(el) as string;
+  return { src: own, dst: path.join(ctx.backlog, dir) };
+}
 
 /** This write sets `status` to the last configured status (§ 12a, DECISIONS 171 B) -- the trigger for releasing an existing claim. */
 function setsFinalStatus(ctx: Context, overrides: Map<string, string | string[] | undefined>): boolean {
@@ -109,8 +135,8 @@ function cmdSet(flags: Flags) {
         const el = resolveById(ctx, id, true);
         requireWritable(el);
         requireActive(el, 'set');
-        const { overrides, changed, newBody } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
-        return { el, overrides, changed, newBody };
+        const { overrides, changed, newBody, movePlan, moveDst } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
+        return { el, overrides, changed, newBody, movePlan, moveDst };
       },
       (item) => {
         if (item.changed.length === 0) {
@@ -129,12 +155,16 @@ function cmdSet(flags: Flags) {
           if (released !== undefined) undoRelease(ctx.backlog, item.el.id, released.holder, ts);
           throw e;
         }
-        const fresh = loadElement(item.el.file, ctx.backlog, ctx.cfg);
+        // The physical relocation (§ 4, DECISIONS 176 A) runs only once the
+        // frontmatter write it depends on has actually landed.
+        if (item.movePlan !== null) runMove(item.movePlan);
+        const fresh = loadElement(item.moveDst ?? item.el.file, ctx.backlog, ctx.cfg);
         deriveGraph(ctx.elements.map((e: Element) => (e.file === item.el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
         const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
         return Object.assign(
           { ok: true, changed: item.changed, entry, _problems: entry._problems },
           released !== undefined ? { released: released.holder } : {},
+          openAcceptanceExtra(fresh, ctx.cfg, isFinal),
         );
       },
     );
@@ -149,7 +179,7 @@ function cmdSet(flags: Flags) {
   requireWritable(el);
   requireActive(el, 'set');
 
-  const { overrides, changed, newBody } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
+  const { overrides, changed, newBody, movePlan, moveDst } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
 
   if (changed.length === 0) {
     if (json) emitWriteResult(true, el, [], ctx.backlog, ctx.cfg);
@@ -177,10 +207,16 @@ function cmdSet(flags: Flags) {
     guardedWrite(el, renderElement(el, overrides, newBody), force, ctx.backlog);
   }
 
-  const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
+  // The physical relocation (§ 4, DECISIONS 176 A) runs only once the
+  // frontmatter write it depends on has actually landed.
+  if (movePlan !== null) runMove(movePlan);
+  const fresh = loadElement(moveDst ?? el.file, ctx.backlog, ctx.cfg);
   deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-  if (json) emitWriteResult(true, fresh, changed, ctx.backlog, ctx.cfg, released !== undefined ? { released: released.holder } : undefined);
+  if (json) {
+    const extra = Object.assign({}, released !== undefined ? { released: released.holder } : {}, openAcceptanceExtra(fresh, ctx.cfg, isFinal));
+    emitWriteResult(true, fresh, changed, ctx.backlog, ctx.cfg, extra);
+  }
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} → ${changed.map((c: SetField) => `${c}=${describeField(fresh, c)}`).join(', ')}`);
   return 0;
 }
@@ -191,9 +227,9 @@ function cmdSet(flags: Flags) {
  * Three orderings in here are load-bearing and must not be tidied:
  *  - the section flags are read FIRST, so a rejected value source fails before
  *    any other validation reports a different code;
- *  - `changed` follows the flag processing order (title, status, priority,
- *    assignee, tags, depends_on, then the section roles) — it is observable in
- *    the JSON result, so the sequence is part of the contract;
+ *  - `changed` follows the flag processing order (title, parent, status,
+ *    priority, assignee, tags, depends_on, then the section roles) — it is
+ *    observable in the JSON result, so the sequence is part of the contract;
  *  - the children_open check runs BEFORE `status !== el.status`, which is why
  *    `--status=done` on an already-done parent with open children refuses
  *    instead of being a no-op. That looks like an oversight and is not.
@@ -270,6 +306,34 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
     }
   }
 
+  // `--parent` (§ 9, DECISIONS 176 A, 177): the error codes mirror `new`'s
+  // own --parent validation exactly (checkExplicitParent, reused unchanged).
+  // A no-op (the named parent is already this element's parent) changes
+  // nothing and plans no move. The move itself is only PLANNED here —
+  // read-only `lstat` calls, same preflight discipline as every other
+  // check in this function — and run by the caller only after the
+  // frontmatter write actually succeeds.
+  const parent = flagString(flags, 'parent');
+  let movePlan: ReturnType<typeof planMove> | null = null;
+  let moveDst: string | null = null;
+  if (parent !== undefined) {
+    const newParentId = checkExplicitParent(ctx, el.type as string, parent, 'move') as string;
+    if (newParentId !== el.parent) {
+      overrides.set('parent', newParentId);
+      changed.push('parent');
+      const move = reparentMove(ctx, el, newParentId);
+      if (move !== null) {
+        const plan = planMove(move.src, move.dst);
+        if (plan.conflicts.length > 0) {
+          fail('exists', `${plan.conflicts[0]} already exists — refusing to overwrite; nothing was moved`,
+            'move or delete it, then set --parent again');
+        }
+        movePlan = plan;
+        moveDst = el.type === 'subtask' ? move.dst : path.join(move.dst, path.basename(el.file));
+      }
+    }
+  }
+
   const status = flagString(flags, 'status');
   if (status !== undefined) {
     if (!ctx.cfg.statuses.includes(status)) {
@@ -343,7 +407,7 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
     changed.push(...(applied.changed as SectionRole[]));
   }
 
-  return { overrides, changed, newBody };
+  return { overrides, changed, newBody, movePlan, moveDst };
 }
 
 function isSectionRole(field: SetField): field is SectionRole {

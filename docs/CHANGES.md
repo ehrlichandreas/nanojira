@@ -5,6 +5,116 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nj --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 3.9.0
+
+Reorganising a backlog without losing an element's history, and a warning
+for a `done` item whose acceptance boxes were never finished ticking —
+both found live by outside teams.
+
+- **`nj set --parent=<id>` reparents a task or subtask.** The id, the body
+  (description, acceptance, any unknown sections) and the claim log all
+  stay exactly as they were — a claim is keyed by the element's id, never
+  by its file path, so moving it never disturbs one. The type never
+  changes: a task moves under a different epic, a subtask under a
+  different task; converting a subtask to a task (or back) is out of
+  scope, and still needs a hand edit. A real run, moving a task to a
+  sibling epic:
+
+  ```sh
+  $ nj set --id=TSK-001 --parent=EPIC-002 --json
+  { "ok": true, "id": "TSK-001", "changed": ["parent"],
+    "entry": { "id": "TSK-001", "parent": "EPIC-002", "...": "..." },
+    "_problems": [] }
+  ```
+
+  Under `layout.group: hierarchy`, the move takes the file with it — the
+  subtask's own file, or the whole folder (children included) for a task
+  — in the same write that changes `parent`; under `type` or `flat` only
+  the frontmatter changes, since placement there never depended on
+  `parent` to begin with. `--input set` accepts `parent` as one more
+  settable field.
+
+  The new parent must exist, be live (not archived) and be the right
+  type — the error codes mirror `new`'s own `--parent` validation
+  exactly, not a new vocabulary: a missing parent is `not_found`, a
+  wrong-type parent is `invalid_target`, an archived parent is
+  `refused:parent_archived`, and `--parent` given to an epic at all
+  (which never has one) is `invalid_value`. Nothing is written in any of
+  these cases:
+
+  ```sh
+  $ nj set --id=TSK-001 --parent=TSK-002       # a task given a task, not an epic
+  Error: parent 'TSK-002' is a task, but a task needs an epic
+  $ nj set --id=TSK-001 --parent=EPIC-999      # does not exist
+  Error: parent 'EPIC-999' does not exist
+  $ nj set --id=TSK-001 --parent=EPIC-003      # archived
+  Error: parent 'EPIC-003' is archived — refusing to move a child under it
+  $ nj set --id=EPIC-001 --parent=EPIC-002     # an epic has no parent at all
+  Error: epics must not have a --parent
+  ```
+
+  There is no separate `nj undo` to restore a mistaken move — `nj set
+  --parent=<old>` is an ordinary reparent like any other, and restores
+  the previous state exactly: same file location, same frontmatter apart
+  from `updated`. (team-b-tests TSK-014)
+
+- **Warning `done:open_acceptance`** for a live task/subtask that reaches
+  the final status with at least one unticked `- [ ]` line still under
+  its Acceptance Criteria section — a gap none of the existing acceptance
+  warnings caught, since `acceptance:no_checkbox` only fires on *zero*
+  checkboxes and `done:no_acceptance` only on an absent/empty section. It
+  never blocks, never rejects a write, never changes `--ready`/`list`/any
+  count — the same non-blocking contract as those two. Shown by `doctor`
+  and by `set`'s (and `claim`'s) own text feedback, naming the count:
+
+  ```sh
+  $ nj set --id=TSK-001 --status=done
+  TSK-001 → status=done
+  ⚠ TSK-001 is done with 2 of 3 acceptance boxes still unticked.
+  $ nj doctor
+  ./: 2 entries, 0 errors, 1 warning
+
+  WARNING TSK-001: done with 2 of 3 acceptance boxes still unticked
+  ```
+
+  `set`'s (and `claim`'s) own `--json` result additionally carries the
+  count directly, alongside the bare code in `_problems`:
+
+  ```json
+  { "ok": true, "id": "TSK-002", "changed": ["status"], "...": "...",
+    "_problems": ["done:open_acceptance"],
+    "open_acceptance": { "unticked": 1, "total": 1 } }
+  ```
+
+  An archived element never carries it, same as the other two acceptance
+  warnings — nobody can act on a warning about history. (team-c
+  TSK-001)
+
+  **Upgrading may surface a flood of this new warning on old `done`
+  elements** whose boxes were simply never ticked back when nothing
+  checked for it. Three ways to quiet it, same as the existing two
+  acceptance warnings: tick the boxes (`nj check`), archive the finished
+  epics so their descendants become archived too (`nj archive`), or list
+  the code once to stop seeing it everywhere: `"problems": {"ignore":
+  ["done:open_acceptance"]}`. None of these change `--ready`, `list`'s
+  counts, or anything else — only the reporting. Our own backlog hit 18
+  warnings on old `done` tasks the first time we ran `doctor` after this
+  landed; we archived EPIC-001 through EPIC-005 (all long finished) and
+  were back to zero.
+
+- **Packaging:** from this release, the shared workspace install
+  (`tools/release-local.sh`) ships the bundles as `nj.cjs`/`nj-mcp.cjs`
+  (CommonJS — an extensionless file otherwise takes its module type from
+  the nearest `package.json`, which breaks with `require is not defined
+  in ES module scope` under a `"type": "module"` scope), plus plain `sh`
+  wrappers `nj`/`nj-mcp` and `.cmd` wrappers for Windows that `exec`/call
+  into the matching `.cjs` file. `current/` is a real directory of the
+  same four wrapper names, each calling into the release it points at, so
+  `current/nj` keeps its path and working teams change nothing. Anyone
+  copying the binary directly into an ESM project (rather than running it
+  from the shared install) should copy `nj.cjs` itself — Team B
+  already does this.
+
 ## 3.8.0
 
 JSON input for building a whole plan in one call, two gaps closed in

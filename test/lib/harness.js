@@ -354,6 +354,14 @@ function completeBody(title) {
     '## Acceptance Criteria\n- [ ] It works\n';
 }
 
+/** Like completeBody, but ticked -- for a live `done` fixture where the
+ * unticked box is not the point and would otherwise draw an unrelated
+ * done:open_acceptance warning (DECISIONS 176 B). */
+function doneBody(title) {
+  return '# ' + title + '\n\n## Description\nSomething.\n\n' +
+    '## Acceptance Criteria\n- [x] It works\n';
+}
+
 function sha256(s) {
   return crypto.createHash('sha256').update(s).digest('hex');
 }
@@ -630,7 +638,7 @@ module.exports = {
   renderStatus, statusFor, writeStatus, configValidForStatus,
   freshDir, mkBacklog, writeRaw, readInBacklog, existsInBacklog, listFiles, lsOrEmpty, readOrNull,
   requireNj, requireNjMcp,
-  element, mkElement, completeBody,
+  element, mkElement, completeBody, doneBody,
   doctorSet, summaryLine,
   sha256, golden, goldenPath,
   runNj, runJson,

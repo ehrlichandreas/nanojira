@@ -35,14 +35,14 @@ function task(id, title, status, parent) {
   return H.element({
     id: id, type: 'task', parent: parent || 'EPIC-001', title: title, status: status,
     created: NOW, updated: NOW,
-  }, H.completeBody(title));
+  }, status === 'done' ? H.doneBody(title) : H.completeBody(title));
 }
 
 function subtask(id, title, status) {
   return H.element({
     id: id, type: 'subtask', parent: 'TSK-001', title: title, status: status,
     created: NOW, updated: NOW,
-  }, H.completeBody(title));
+  }, status === 'done' ? H.doneBody(title) : H.completeBody(title));
 }
 
 function archivedEpic(id, title) {

@@ -954,3 +954,96 @@ elements exist now — re-running the same plan unmodified would create
 duplicates, not pick up where it left off), and re-run with what remains,
 using `refs` to recover which real id each already-written `ref` resolved
 to if a dropped element is still depended on by one that's left.
+
+## 22. Reparenting: `nj set --parent`
+
+`nj set --id=<id> --parent=<new-parent-id>` moves a task under a different
+epic, or a subtask under a different task — the id, the body (description,
+acceptance, notes) and the claim log all come along unchanged; a claim is
+keyed by id, never by file path. The type never changes: there's no flag
+that turns a task into a subtask or back.
+
+```sh
+$ nj set --id=TSK-001 --parent=EPIC-002 --json
+{ "ok": true, "id": "TSK-001", "changed": ["parent"],
+  "entry": { "id": "TSK-001", "parent": "EPIC-002", "...": "..." },
+  "_problems": [] }
+```
+
+Under `layout.group: hierarchy` (§ 7) the file moves with it — the
+subtask's own file, or the whole folder including every descendant file,
+for a task — in the same write that changes `parent`; under `type` or
+`flat` only the frontmatter changes, exactly as any other `set` does.
+There's no separate step and no window where the old and new locations
+could disagree.
+
+The new parent must exist, be live and be the right type (an epic for a
+task, a task for a subtask) — not a new vocabulary, the same codes `new
+--parent` already uses:
+
+```sh
+$ nj set --id=TSK-001 --parent=TSK-002       # wrong type: a task needs an epic
+Error: parent 'TSK-002' is a task, but a task needs an epic          # invalid_target
+$ nj set --id=TSK-001 --parent=EPIC-999      # does not exist
+Error: parent 'EPIC-999' does not exist                              # not_found
+$ nj set --id=TSK-001 --parent=EPIC-003      # archived
+Error: parent 'EPIC-003' is archived — refusing to move a child under it  # refused:parent_archived
+a fresh child of an archived parent would immediately carry archive:split
+$ nj set --id=EPIC-001 --parent=EPIC-002     # an epic never has a parent
+Error: epics must not have a --parent                                # invalid_value
+```
+
+Nothing is written in any of the four cases above. To undo a reparent,
+there's no separate command — `nj set --parent=<old>` moves it right back
+and restores the previous state exactly (same file location, same
+frontmatter apart from `updated`), same as moving it anywhere else.
+`--input set` accepts `parent` as one more field in its JSON object (§ 21).
+
+## 23. Acceptance-quality warnings
+
+Three warnings watch a task/subtask's Acceptance Criteria section, shown
+by `doctor` and in `new`/`set`/`note`/`check`'s own text feedback — never
+blocking, never rejecting a write, never changing `--ready`/`list`/any
+count, and never shown for an archived element (nobody can act on a
+warning about history):
+
+- `acceptance:no_checkbox` — the section has text but no `- [ ]` line, so
+  `nj check` has nothing to tick.
+- `done:no_acceptance` — a `done` element's section is absent or empty.
+- `done:open_acceptance` — a `done` element's section has at least one
+  checkbox still unticked:
+
+  ```sh
+  $ nj set --id=TSK-001 --status=done
+  TSK-001 → status=done
+  ⚠ TSK-001 is done with 2 of 3 acceptance boxes still unticked.
+  $ nj doctor
+  ./: 2 entries, 0 errors, 1 warning
+
+  WARNING TSK-001: done with 2 of 3 acceptance boxes still unticked
+  ```
+
+  `set`'s (and `claim`'s) own `--json` result carries the same count
+  directly, for whichever call left the element in the final status:
+
+  ```json
+  { "ok": true, "id": "TSK-002", "changed": ["status"], "...": "...",
+    "_problems": ["done:open_acceptance"],
+    "open_acceptance": { "unticked": 1, "total": 1 } }
+  ```
+
+These three can never fire on the same element at once: each needs a
+different checkbox count to be true (zero, none-at-all, or at-least-one-
+unticked).
+
+**If upgrading surfaces a flood of these on old `done` elements** that
+simply predate the check — tick the boxes, archive the finished epics
+(their descendants archive with them, § 9), or silence a code everywhere
+it would otherwise appear:
+
+```json
+"problems": {"ignore": ["done:open_acceptance"]}
+```
+
+Any warning-severity code from `docs/SPECIFICATION.md` § 7 can be listed
+this way (§ 10 above); an error code or an `incomplete:*` code cannot.

@@ -9,7 +9,7 @@ for a project's `AGENTS.md` in `docs/AGENT-INSTRUCTIONS.md`.
 Upgrading from an earlier nj release: `docs/CHANGES.md`.
 
 `dist/nj` (the CLI) and `dist/nj-mcp` (an MCP server exposing the same
-commands as tools over stdio, § 17) implement spec v3 through **v3.8**
+commands as tools over stdio, § 17) implement spec v3 through **v3.9**
 (`docs/SPECIFICATION.md`): backlog location via `--backlog`, `NJ_BACKLOG` or
 `.njrc`, accepted before the command word as well as after; configurable
 layout (`type`, `hierarchy`, `flat`, folder names); a generated `STATUS.md`
@@ -21,7 +21,7 @@ next` (claim the top `--ready` leaf in one call, respecting an existing
 set --add-tags`/`--remove-tags` (incremental tag edits, batch-aware). `nj
 <command> --help` (including `nj rm --help`) shows that command's own
 flags and allowed values, and an invalid `--type`/`--status`/`--priority`
-names the nearest valid one ("did you mean?") when there is one. Two new,
+names the nearest valid one ("did you mean?") when there is one. Three new,
 never-blocking `doctor` warnings flag acceptance-criteria quality, each
 switchable off per backlog via `"problems": {"ignore": [...]}`; an
 unrecognised config key is a warning too, not a hard failure, and an
@@ -34,11 +34,19 @@ resolved before any write, `--dry-run` to preview one, `acceptance` as a
 JSON array of checkbox lines; a write that reaches the last configured
 status now releases the element's existing claim in the same call
 (`released: "<holder>"`); `nj show --json` on a single element carries an
-additive `entry` identical to `entries[0]`. See `docs/GUIDE.md` § on
-"Creating a whole plan with `--input`" and `docs/CHANGES.md` 3.8.0 for the
+additive `entry` identical to `entries[0]`. **v3.9**: `nj set
+--parent=<id>` reparents a task or subtask in place — id, body, notes and
+claim log unchanged, the same validation `new --parent` already uses
+(missing/wrong-type/archived/epic), the file (or whole folder, under
+`hierarchy`) moving with it in the same write; and a third
+acceptance-quality warning, `done:open_acceptance`, for a `done` element
+with at least one acceptance box still unticked, naming the count
+wherever the other two already appear. See `docs/GUIDE.md` §§ on
+"Creating a whole plan with `--input`", "Reparenting" and
+"Acceptance-quality warnings", and `docs/CHANGES.md` 3.8.0/3.9.0 for the
 how-to and the full write-up. A v2 backlog is migrated once with `nj
 doctor --fix` (`docs/MIGRATION-v3.md`). Decisions behind it:
-`docs/DECISIONS.md` 86–173; independent verification reports:
+`docs/DECISIONS.md` 86–177; independent verification reports:
 `docs/verification/`.
 
 ## Layout

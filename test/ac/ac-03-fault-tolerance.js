@@ -164,7 +164,10 @@ const CASES = [
     bad: badTask({ status: 'waiting' }) },
 
   { code: 'done:open_children', doctor: 0, blocks: true, total: 3,
-    bad: badTask({ status: 'done' }),
+    // Ticked body: a `done` fixture with the default unticked box would also
+    // carry done:open_acceptance (D176 B), which this row does not pin.
+    bad: badTask({ status: 'done' }, [], '# Login route\n\n## Description\nDo the thing.\n\n' +
+      '## Acceptance Criteria\n- [x] It works\n'),
     extra: file('subtasks/SUB-001.md', {
       id: 'SUB-001', type: 'subtask', parent: 'TSK-001', title: 'Login route details',
       status: 'todo', created: C, updated: C,

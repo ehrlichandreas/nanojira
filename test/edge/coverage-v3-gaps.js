@@ -107,9 +107,6 @@ function sorted(o) { return Object.fromEntries(Object.entries(o || {}).sort(([a]
 /* Move a file or folder by hand. Never throws: against an nj that put the
  * element somewhere else (a layout it does not implement yet) the source is
  * looked up by id, and a fixture that cannot be built fails as a check. */
-/* The file of element `id`, wherever nj put it (a placeholder path when it
- * is missing, so reads come back null instead of throwing). */
-function fileOf(bl, id) { const at = places(bl)[id]; return path.join(bl, at || ('<no ' + id + '>')); }
 function move(bl, from, to) {
   let src = path.join(bl, from);
   if (!fs.existsSync(src)) {
@@ -194,19 +191,12 @@ for (const [how, misplace] of Object.entries(MISPLACE)) {
   T.eq(tag + ': no element file is left', places(x.bl), {});
 }
 
-/* ===================================================================== */
-/* L11 — `nj set` has no --parent (§ 4)                                    */
-/* ===================================================================== */
-{
-  const x = initBacklog('gaps-parent');
-  epic(x); epic(x, 'Other'); task(x, 'EPIC-001');
-  const f = fileOf(x.bl, 'TSK-001');
-  const before = read(f);
-  const r = runJ(['set', '--id=TSK-001', '--parent=EPIC-002'], { cwd: x.dir });
-  T.exit('L11 set --parent: exit 1', r, 1);
-  T.eq('L11 set --parent: unknown_field', r.json && r.json.error, 'unknown_field');
-  T.eq('L11 set --parent: the file is unchanged', read(f), before);
-}
+/* L11 — "`nj set` has no --parent" (§ 4) is obsolete since TSK-056/D176/
+ * D177: `set --parent=<id>` reparents a task or subtask. Dropped rather
+ * than updated in place — the full behaviour (same-type reparent, the
+ * error codes mirroring `new`'s own, the hierarchy move, the restore
+ * round trip) is owned by ac/ac-53-set-parent.js, which would otherwise
+ * duplicate it. */
 
 /* ===================================================================== */
 /* C07 / C09 — § 5 folder names                                            */

@@ -50,7 +50,7 @@ var FIELD_ORDER = [
 var LIST_FIELDS = /* @__PURE__ */ new Set(["tags", "depends_on"]);
 var SECTION_ROLES = ["description", "acceptance"];
 var SECTION_FLAGS = ["description", "description-file", "acceptance", "acceptance-file"];
-var SETTABLE_FIELDS = ["title", "status", "priority", "assignee", "tags", "depends_on"].concat(SECTION_FLAGS);
+var SETTABLE_FIELDS = ["title", "parent", "status", "priority", "assignee", "tags", "depends_on"].concat(SECTION_FLAGS);
 var NEW_FIELDS = ["type", "parent", "title", "status", "priority", "assignee", "tags", "depends_on"].concat(SECTION_FLAGS);
 var TYPE_FOLDER_ROLE = { epic: "epics", task: "tasks", subtask: "subtasks" };
 var FOLDER_ROLES = ["epics", "tasks", "subtasks", "archive"];
@@ -113,6 +113,7 @@ var SEVERITY = {
   "backlog:claims_unignored": "warning",
   "acceptance:no_checkbox": "warning",
   "done:no_acceptance": "warning",
+  "done:open_acceptance": "warning",
   "config:unknown_key": "warning",
   "config:unknown_code": "warning"
 };
@@ -309,10 +310,6 @@ function undoRelease(backlog, id, holder, time) {
   const h = highestEntry(dir);
   rollback(backlog, id, h ? h.gen : 0, "claimed", holder, time);
 }
-
-// src/core/store.ts
-var fs2 = __toESM(require("fs"), 1);
-var path2 = __toESM(require("path"), 1);
 
 // src/core/parse.ts
 function readQuoted(raw, i) {
@@ -556,6 +553,33 @@ function sectionHasCheckbox(body, names) {
   }
   return false;
 }
+function sectionCheckboxCounts(body, names) {
+  const lines = body.split("\n");
+  const idx = sectionHeadingIndex(lines, names);
+  if (idx === -1) return null;
+  const end = sectionEnd(lines, idx);
+  let fence = null;
+  let total = 0;
+  let unticked = 0;
+  for (let i = idx + 1; i < end; i++) {
+    const line = lines[i];
+    const fm = /^[ \t]*(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (fm && fm[1][0] === fence.ch && fm[1].length >= fence.len) fence = null;
+      continue;
+    }
+    if (fm) {
+      fence = { ch: fm[1][0], len: fm[1].length };
+      continue;
+    }
+    const m = CHECKBOX_RE.exec(line);
+    if (m) {
+      total++;
+      if (m[3] === " ") unticked++;
+    }
+  }
+  return { total, unticked };
+}
 function normalizeSectionContent(raw) {
   let t = String(raw);
   if (t.charCodeAt(0) === 65279) t = t.slice(1);
@@ -644,6 +668,8 @@ function parseNotes(body) {
 }
 
 // src/core/store.ts
+var fs2 = __toESM(require("fs"), 1);
+var path2 = __toESM(require("path"), 1);
 function nowIso() {
   const pinned = process.env.NJ_NOW;
   if (pinned !== void 0 && pinned !== "") {
@@ -935,6 +961,12 @@ function countsOf(scope, backlogErrors = 0) {
     incomplete: scope.filter(isIncomplete).length
   };
 }
+function openAcceptanceExtra(el, cfg, isFinal) {
+  if (!isFinal) return {};
+  if (!elementProblems(el, cfg.problems.ignore).includes("done:open_acceptance")) return {};
+  const counts = sectionCheckboxCounts(el.body, cfg.sections.acceptance);
+  return counts ? { open_acceptance: counts } : {};
+}
 
 // src/core/output.ts
 var Fail = class extends Error {
@@ -977,7 +1009,10 @@ function writeFeedback(el, cfg, headline) {
     else if (code === "incomplete:description") out(`\u26A0 ${el.id} has no description. Add one before starting.`);
     else if (code === "acceptance:no_checkbox") out(`\u26A0 ${el.id} has acceptance criteria with no checkbox items \u2014 nothing for check to tick.`);
     else if (code === "done:no_acceptance") out(`\u26A0 ${el.id} is done with no acceptance criteria.`);
-    else out(`\u26A0 ${el.id}: ${code}`);
+    else if (code === "done:open_acceptance") {
+      const counts = sectionCheckboxCounts(el.body, cfg.sections.acceptance);
+      out(`\u26A0 ${el.id} is done with ${counts ? counts.unticked : "?"} of ${counts ? counts.total : "?"} acceptance boxes still unticked.`);
+    } else out(`\u26A0 ${el.id}: ${code}`);
   }
 }
 function emitWriteResult(json, el, changed, backlog, cfg, extra) {
@@ -1167,7 +1202,7 @@ var os = __toESM(require("os"), 1);
 var path3 = __toESM(require("path"), 1);
 
 // src/core/version.ts
-var VERSION = "3.8.0";
+var VERSION = "3.9.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -1825,8 +1860,11 @@ function deriveBody(el, p, cfg) {
       if (!acceptanceOk) {
         el.problems.add("incomplete:acceptance");
         if (el.status === "done" && !el.archived) el.problems.add("done:no_acceptance");
-      } else if (!sectionHasCheckbox(p.body, cfg.sections.acceptance) && !el.archived) {
-        el.problems.add("acceptance:no_checkbox");
+      } else if (!sectionHasCheckbox(p.body, cfg.sections.acceptance)) {
+        if (!el.archived) el.problems.add("acceptance:no_checkbox");
+      } else if (el.status === "done" && !el.archived) {
+        const counts = sectionCheckboxCounts(p.body, cfg.sections.acceptance);
+        if (counts && counts.unticked > 0) el.problems.add("done:open_acceptance");
       }
     }
   }
@@ -2586,7 +2624,8 @@ function claimOne(ctx, el, name, status, steal, ts) {
     { ok: true, changed, entry, _problems: entry._problems, claim: claim2 },
     stolenFrom !== void 0 ? { stolen_from: stolenFrom } : {},
     previousAssignee !== void 0 ? { previous_assignee: previousAssignee } : {},
-    released !== void 0 ? { released: released.holder } : {}
+    released !== void 0 ? { released: released.holder } : {},
+    openAcceptanceExtra(fresh, ctx.cfg, isFinalStatus)
   );
 }
 function cmdClaim(flags) {
@@ -2744,738 +2783,25 @@ function cmdFind(flags, positional) {
 }
 
 // src/commands/cmd-doctor.ts
-var fs10 = __toESM(require("fs"), 1);
-var path9 = __toESM(require("path"), 1);
-
-// src/core/readme-texts.ts
-var V2_README = `# Backlog
-
-This folder is a NanoJira backlog. One Markdown file per element, grouped by
-type: epics/, tasks/, subtasks/. Archived work lives in archive/.
-
-Every file has a YAML-ish frontmatter block between \`---\` lines and a free
-Markdown body. The frontmatter is the truth; the body belongs to you, except
-for the \`# H1\` (mirrors \`title\`) and the \`## Notes\` section written by
-\`nj note\`.
-
-An element is *ready to work* when its status is the first configured status,
-all \`depends_on\` targets are done, it carries no error, and it has a
-non-empty \`## Description\` (plus \`## Acceptance Criteria\` for tasks and
-subtasks). A heading with nothing under it counts as absent \u2014 that is
-deliberate.
-
-\`.ids/\` holds one empty tombstone file per allocated ID. It is versioned and
-must be committed: it is what guarantees IDs are never reused. Do not delete
-it.
-
-The only uncommitted artifact is \`.nanojira-index.json\` (a cache).
-
-Useful commands: \`nj\`, \`nj list --ready\`, \`nj show --id=\u2026\`,
-\`nj new --type=task --parent=EPIC-001 --title="\u2026"\`, \`nj doctor\`.
-`;
-var V3_README = `# Backlog
-
-This folder is a NanoJira backlog: one Markdown file per element (epics,
-tasks, subtasks). Where the files lie is set by \`layout\` in
-\`.nanojira/config.json\` \u2014 by default one folder per type (\`epics/\`,
-\`tasks/\`, \`subtasks/\`), with finished work in \`archive/\`.
-
-Every file has a frontmatter block between \`---\` lines and a free Markdown
-body. The frontmatter is the truth; the body belongs to you, except for the
-\`# H1\` (mirrors \`title\`), the \`## Notes\` section written by \`nj note\`, and
-the sections \`nj new\`/\`nj set\` write when asked to.
-
-An element is *ready to work* when its status is the first configured status,
-all \`depends_on\` targets are done, it carries no error, and it has a
-non-empty \`## Description\` (plus \`## Acceptance Criteria\` for tasks and
-subtasks). A heading with nothing under it counts as absent \u2014 that is
-deliberate.
-
-\`STATUS.md\` is a generated overview by status. Do not edit it; \`nj\` rewrites
-it after every change, and \`nj doctor --fix\` repairs it.
-
-\`.nanojira/\` holds what only \`nj\` needs: the configuration and \`ids/\`, one
-empty tombstone file per allocated ID. Both are versioned and must be
-committed \u2014 the tombstones are what guarantee IDs are never reused. Do not
-delete them. Only \`.nanojira/index.json\` (a cache) and temporary files are
-ignored.
-
-Useful commands: \`nj\`, \`nj list --ready\`, \`nj show --id=\u2026\`,
-\`nj new --type=task --parent=EPIC-001 --title="\u2026"\`, \`nj doctor\`.
-`;
-
-// src/commands/cmd-doctor.ts
-function collectFindings(ctx) {
-  const findings = [];
-  if (ctx.legacy) {
-    findings.push({
-      code: "backlog:legacy_layout",
-      severity: "error",
-      file: path9.join(ctx.backlog, LEGACY_CONFIG_REL),
-      message: `the backlog is in the v2 (legacy) layout (${LEGACY_CONFIG_REL}, ${LEGACY_IDS_REL}/) \u2014 \`nj doctor --fix\` migrates it to .nanojira/`
-    });
-  }
-  const configFile = path9.join(ctx.backlog, ctx.legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
-  for (const e of ctx.configErrors) {
-    findings.push({ code: "config:invalid", severity: "error", file: configFile, message: e });
-  }
-  for (const w of ctx.configWarnings) {
-    findings.push({ code: w.code, severity: "warning", file: configFile, message: w.message });
-  }
-  const elements = ctx.elements.slice().sort(compareElements);
-  const dupGroups = /* @__PURE__ */ new Map();
-  for (const el of elements) {
-    if (!dupGroups.has(el.id)) dupGroups.set(el.id, []);
-    dupGroups.get(el.id).push(el);
-  }
-  for (const el of elements) {
-    for (const code of elementProblems(el)) {
-      const sev = SEVERITY[code];
-      if (sev === null || sev === void 0) continue;
-      if (ctx.configErrors.length > 0 && (code === "type:folder" || code === "layout:misplaced")) continue;
-      if (code === "frontmatter:unreadable" || code === "file:unreadable") {
-        for (const d of el.detail) {
-          if (d.code !== code) continue;
-          findings.push({ code, severity: sev, element: el.id, file: el.file, line: d.line, message: d.message });
-        }
-        continue;
-      }
-      findings.push({ code, severity: sev, element: el.id, file: el.file, message: describeFinding(code, el, dupGroups) });
-    }
-  }
-  const scan = ctx.scan;
-  for (const file of strayTmpFiles(scan.dirs.concat(claimsScanDirs(ctx.backlog)))) {
-    findings.push({ code: "backlog:stray_tmp", severity: "warning", file, message: "stray temp file from an interrupted write" });
-  }
-  findings.push(...collectClaimFindings(ctx));
-  if (claimsNeedGitignoreLine(ctx.backlog)) {
-    findings.push({
-      code: "backlog:claims_unignored",
-      severity: "warning",
-      file: path9.join(ctx.backlog, ".gitignore"),
-      message: ".nanojira/claims/ exists but .gitignore has no line that is exactly '.nanojira/claims/'"
-    });
-  }
-  for (const { dir, reason } of scan.unreadable) {
-    findings.push({ code: "backlog:unreadable_dir", severity: "error", file: dir, message: `folder cannot be listed (${reason}) \u2014 element files in it are not seen` });
-  }
-  const tombs = readTombstones(ctx.idsDir);
-  if (ctx.elements.length > 0 && tombs.size === 0) {
-    findings.push({ code: "backlog:ids_missing", severity: "error", file: ctx.idsDir, message: `${path9.relative(ctx.backlog, ctx.idsDir)}/ is missing or empty while element files exist \u2014 the never-reuse guarantee is not in force` });
-  }
-  if (ctx.configErrors.length === 0 && ctx.cfg.layout.statusFile && !statusIsFresh(ctx.backlog, ctx.elements, ctx.cfg)) {
-    findings.push({ code: "backlog:status_stale", severity: "warning", file: path9.join(ctx.backlog, "STATUS.md"), message: "STATUS.md is missing or differs from a fresh rendering \u2014 `nj doctor --fix` regenerates it" });
-  }
-  if (ctx.cfg.problems.ignore.length === 0) return findings;
-  const ignore = new Set(ctx.cfg.problems.ignore);
-  return findings.filter((f) => !ignore.has(f.code));
-}
-function strayTmpFiles(dirs) {
-  const found = [];
-  for (const dir of dirs) {
-    let names;
-    try {
-      names = fs10.readdirSync(dir);
-    } catch {
-      continue;
-    }
-    for (const n of names.sort()) if (n.startsWith(".nj-tmp-")) found.push(path9.join(dir, n));
-  }
-  return found;
-}
-function claimsScanDirs(backlog) {
-  return [claimsRootDir(backlog), ...allClaimDirs(backlog).map((c) => c.dir)];
-}
-function collectClaimFindings(ctx) {
-  const findings = [];
-  for (const { id, dir } of allClaimDirs(ctx.backlog)) {
-    const el = ctx.elements.find((e) => e.id === id);
-    const h = highestEntry(dir);
-    if (!el) {
-      findings.push({ code: "claim:orphaned", severity: "warning", file: dir, message: `claim directory for '${id}', which does not exist` });
-      continue;
-    }
-    if (el.archived) {
-      findings.push({ code: "claim:orphaned", severity: "warning", element: el.id, file: dir, message: `${el.id} is archived but still carries a claim directory` });
-    }
-    if (h && h.kind === "claimed" && h.name !== el.assignee) {
-      findings.push({
-        code: "claim:mismatch",
-        severity: "warning",
-        element: el.id,
-        file: el.file,
-        message: `claimed by '${h.name}' but assignee is '${el.assignee || "(empty)"}'`
-      });
-    }
-    if (h && h.kind === "claimed" && isClaimStale(h.time, ctx.cfg.claims.staleAfterHours, nowMs())) {
-      findings.push({
-        code: "claim:stale",
-        severity: "warning",
-        element: el.id,
-        file: el.file,
-        message: `claimed by '${h.name}' since ${h.time}, past the ${ctx.cfg.claims.staleAfterHours}h staleness threshold`
-      });
-    }
-  }
-  return findings;
-}
-var CLAIMS_GITIGNORE_LINE = ".nanojira/claims/";
-function gitignoreHasClaimsLine(backlog) {
-  let content;
-  try {
-    content = fs10.readFileSync(path9.join(backlog, ".gitignore"), "utf8");
-  } catch {
-    return false;
-  }
-  return content.split("\n").some((l) => l.replace(/\r$/, "") === CLAIMS_GITIGNORE_LINE);
-}
-function claimsNeedGitignoreLine(backlog) {
-  return fs10.existsSync(claimsRootDir(backlog)) && !gitignoreHasClaimsLine(backlog);
-}
-function appendGitignoreLine(content, line) {
-  if (content === "") return line + "\n";
-  if (content.endsWith("\r\n")) return content + line + "\r\n";
-  if (content.endsWith("\n")) return content + line + "\n";
-  return content + "\n" + line + "\n";
-}
-function backlogLabel(backlog) {
-  const rel = path9.relative(workingDir(), backlog);
-  return (rel === "" ? "." : rel) + "/";
-}
-function describeFinding(code, el, dupGroups) {
-  switch (code) {
-    case "duplicate_id":
-      return `duplicate id, also in: ${dupGroups.get(el.id).filter((o) => o !== el).map((o) => o.file).join(", ")}`;
-    case "missing:title":
-      return "title is absent or empty";
-    case "missing:status":
-      return `status absent \u2014 defaulted`;
-    case "missing:created":
-      return "created absent \u2014 taken from file mtime";
-    case "missing:updated":
-      return "updated absent \u2014 taken from file mtime";
-    case "id:derived":
-      return "id absent \u2014 derived from the file name";
-    case "id:mismatch":
-      return `frontmatter id '${el.id}' does not match the file name`;
-    case "type:derived":
-      return `type absent \u2014 derived as '${el.type}'`;
-    case "type:folder":
-      return el.type === null ? "type cannot be determined from id, frontmatter or folder" : `type '${el.type}' does not match folder '${el.folder}/'`;
-    case "layout:misplaced":
-      return `file lies in '${el.folder === "" ? "." : el.folder}/', not where the layout puts it`;
-    case "parent:orphaned":
-      return "parent is absent";
-    case "parent:dangling":
-      return `parent '${el.parent}' points at nothing`;
-    case "parent:cycle":
-      return "parent chain contains a cycle";
-    case "parent:hierarchy":
-      return el.type === "epic" ? "an epic must not have a parent" : `a ${el.type} needs a ${PARENT_TYPE[el.type]} as parent`;
-    case "depends_on:dangling":
-      return `depends_on points at a missing element (${el.depends_on.join(", ")})`;
-    case "depends_on:cycle":
-      return "depends_on graph contains a cycle";
-    case "unknown:status":
-      return `unknown status '${el.status}'`;
-    case "unknown:priority":
-      return `unknown priority '${el.priority}' \u2014 sorted as normal, value left untouched`;
-    case "file:unreadable":
-      return "file cannot be read";
-    case "done:open_children":
-      return "done while children are not done";
-    case "archive:not_done":
-      return `archived but status is '${el.status}'`;
-    case "archive:split":
-      return `parent '${el.parent}' is archived while this element is not`;
-    case "title:h1_mismatch":
-      return "H1 in the body differs from title";
-    case "id:no_tombstone":
-      return "no tombstone in the ids folder \u2014 hand-created, or partial tombstone loss";
-    case "acceptance:no_checkbox":
-      return "acceptance criteria has content but no checkbox items \u2014 nothing for check to tick";
-    case "done:no_acceptance":
-      return "done with no acceptance criteria";
-    default:
-      return code;
-  }
-}
-function cmdDoctor(flags) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("doctor")]), false);
-  const json = flags.has("json");
-  if (flags.has("fix")) return doctorFix(flags, json);
-  const ctx = context(flags, { lenient: true, tolerateConfig: true });
-  const findings = collectFindings(ctx);
-  const errors = findings.filter((f) => f.severity === "error");
-  const warnings = findings.filter((f) => f.severity === "warning");
-  if (json) {
-    out(JSON.stringify({ backlog: ctx.backlog, ok: errors.length === 0, problems: findings }, null, 2));
-  } else {
-    out(`${backlogLabel(ctx.backlog)}: ${ctx.elements.length} entries, ${errors.length} error${errors.length === 1 ? "" : "s"}, ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`);
-    if (findings.length > 0) out("");
-    for (const f of findings) {
-      const where = f.element ? f.element : path9.relative(ctx.backlog, f.file);
-      const line = f.line ? ` (line ${f.line})` : "";
-      out(`${f.severity === "error" ? "ERROR  " : "WARNING"} ${where}: ${f.message}${line}`);
-    }
-  }
-  return errors.length > 0 ? 2 : 0;
-}
-function fixSkip(el, notes) {
-  if (el.problems.has("file:unreadable")) {
-    notes.push(`${path9.basename(el.file)}: cannot be read \u2014 not touched by --fix`);
-    return true;
-  }
-  if (el.problems.has("frontmatter:unreadable")) {
-    notes.push(`${el.id}: has unparsable frontmatter lines \u2014 not touched by --fix, repair it by hand`);
-    return true;
-  }
-  return false;
-}
-function makeFixCtx(flags) {
-  const actions = [];
-  const notes = [];
-  const reload = () => context(flags, { lenient: true, tolerateConfig: true });
-  const skipped = /* @__PURE__ */ new Set();
-  const guard = (el) => {
-    if (!el.problems.has("file:unreadable") && !el.problems.has("frontmatter:unreadable")) return false;
-    if (!skipped.has(el.id)) {
-      skipped.add(el.id);
-      fixSkip(el, notes);
-    }
-    return true;
-  };
-  const absent = (el, k) => {
-    if (!el.fields.has(k)) return true;
-    const v = el.fields.get(k);
-    return Array.isArray(v) ? v.length === 0 : String(v === void 0 || v === null ? "" : v).trim() === "";
-  };
-  const mtimes = /* @__PURE__ */ new Map();
-  const rekey = (from, to) => {
-    for (const [k, v] of Array.from(mtimes)) {
-      if (k === from) {
-        mtimes.delete(k);
-        mtimes.set(to, v);
-      } else if (k.startsWith(from + path9.sep)) {
-        mtimes.delete(k);
-        mtimes.set(to + k.slice(from.length), v);
-      }
-    }
-  };
-  const rename = (from, to) => {
-    fs10.renameSync(from, to);
-    rekey(from, to);
-  };
-  const move = (plan) => {
-    runMove(plan);
-    for (const [from, to] of plan.renames) rekey(from, to);
-  };
-  return { actions, notes, guard, absent, mtimes, rename, move, reload, stage: 0 };
-}
-function fixStep0(ctx, fc) {
-  const backlog = ctx.backlog;
-  const v3Config = path9.join(backlog, V3_CONFIG_REL);
-  const v3Ids = path9.join(backlog, V3_IDS_REL);
-  if (fs10.existsSync(v3Config) || fs10.existsSync(v3Ids)) {
-    fc.notes.push(`both the v2 and the v3 place exist (${LEGACY_CONFIG_REL} / ${LEGACY_IDS_REL} and ${V3_CONFIG_REL} / ${V3_IDS_REL}) \u2014 ambiguous, nothing moved; remove one copy by hand and run \`nj doctor --fix\` again`);
-    return;
-  }
-  fs10.mkdirSync(path9.join(backlog, V3_DIR_REL), { recursive: true });
-  fc.rename(path9.join(backlog, LEGACY_CONFIG_REL), v3Config);
-  fc.rename(path9.join(backlog, LEGACY_IDS_REL), v3Ids);
-  const legacyIndex = path9.join(backlog, LEGACY_INDEX_REL);
-  if (fs10.existsSync(legacyIndex)) fs10.unlinkSync(legacyIndex);
-  fc.actions.push(`migrated the legacy layout: ${LEGACY_CONFIG_REL} \u2192 ${V3_CONFIG_REL}, ${LEGACY_IDS_REL}/ \u2192 ${V3_IDS_REL}/`);
-}
-function fixStrayIds(ctx, fc) {
-  const backlog = ctx.backlog;
-  const strayDir = path9.join(backlog, LEGACY_IDS_REL);
-  if (!fs10.existsSync(strayDir)) return;
-  const stray = readTombstones(strayDir);
-  const real = readTombstones(path9.join(backlog, V3_IDS_REL));
-  for (const id of stray) if (!real.has(id)) return;
-  fs10.rmSync(strayDir, { recursive: true, force: true });
-  fc.notes.push(`removed the stray top-level ${LEGACY_IDS_REL}/ (every tombstone in it was already in ${V3_IDS_REL}/, \xA7 14 step 0)`);
-}
-function fixGitignore(backlog, fc, verbose) {
-  const p = path9.join(backlog, ".gitignore");
-  let content;
-  try {
-    content = fs10.readFileSync(p, "utf8");
-  } catch {
-    if (verbose) fc.notes.push(".gitignore does not exist \u2014 not created");
-    return;
-  }
-  let changed = false;
-  const lines = content.split("\n").map((line) => {
-    const hasCR = line.endsWith("\r");
-    if ((hasCR ? line.slice(0, -1) : line) !== LEGACY_INDEX_REL) return line;
-    changed = true;
-    return V3_INDEX_REL + (hasCR ? "\r" : "");
-  });
-  if (!changed) {
-    if (verbose) fc.notes.push(`.gitignore does not have the '${LEGACY_INDEX_REL}' line verbatim \u2014 left alone`);
-    return;
-  }
-  atomicWrite(p, lines.join("\n"));
-  fc.actions.push(`.gitignore: replaced the '${LEGACY_INDEX_REL}' line with '${V3_INDEX_REL}'`);
-}
-function fixReadme(backlog, fc, verbose) {
-  const p = path9.join(backlog, "README.md");
-  let content;
-  try {
-    content = fs10.readFileSync(p, "utf8");
-  } catch {
-    return;
-  }
-  if (content !== V2_README) {
-    if (verbose) fc.notes.push("README.md is not the v2 init text \u2014 left alone");
-    return;
-  }
-  atomicWrite(p, V3_README);
-  fc.actions.push("README.md: replaced the v2 init text with the v3 text");
-}
-function fixSnapshotMtimes(fc) {
-  for (const el of fc.reload().elements) fc.mtimes.set(el.file, mtimeIso(el.file));
-  return { ...fc, stage: 1 };
-}
-function idShaped(el) {
-  return ID_FOLDER.test(el.id);
-}
-function fixStep1(fc) {
-  const ctx = fc.reload();
-  for (const el of ctx.elements) {
-    if (fc.guard(el) || !el.parsed || !idShaped(el)) continue;
-    const ov = /* @__PURE__ */ new Map();
-    if (el.problems.has("id:derived") && fc.absent(el, "id")) ov.set("id", el.id);
-    if (el.problems.has("type:derived") && el.type && fc.absent(el, "type")) ov.set("type", el.type);
-    if (ov.size === 0) continue;
-    ov.set("updated", nowIso());
-    atomicWrite(el.file, renderElement(el, ov, void 0));
-    fc.actions.push(`${el.id}: wrote ${Array.from(ov.keys()).filter((k) => k !== "updated").join(", ")} into the frontmatter`);
-  }
-  return { ...fc, stage: 2 };
-}
-function fixStep2(fc) {
-  const ctx = fc.reload();
-  for (const el of ctx.elements) {
-    if (fc.guard(el)) continue;
-    if (!el.problems.has("id:mismatch")) continue;
-    const target = path9.join(path9.dirname(el.file), el.id + ".md");
-    if (fs10.existsSync(target)) {
-      fc.notes.push(`${el.file}: cannot rename to ${path9.basename(target)} \u2014 target exists`);
-      continue;
-    }
-    fc.rename(el.file, target);
-    fc.actions.push(`renamed ${path9.basename(el.file)} \u2192 ${path9.basename(target)}`);
-  }
-  return { ...fc, stage: 3 };
-}
-function fixStep3(fc) {
-  const layout = fc.reload().cfg.layout;
-  const rounds = layout.group === "hierarchy" ? ["epic", "task", "subtask"] : [null];
-  const left = /* @__PURE__ */ new Set();
-  const noted = /* @__PURE__ */ new Set();
-  for (const round of rounds) {
-    for (let moved = true; moved; ) {
-      moved = false;
-      const ctx = fc.reload();
-      for (const el of ctx.elements) {
-        if (round !== null && el.type !== round) continue;
-        if (noted.has(el.id)) continue;
-        if (fc.guard(el) || el.type === null || !el.problems.has(misplacedCode(layout))) continue;
-        if (layout.group === "type") {
-          const pm = /^(EPIC|TSK|SUB)-/.exec(el.id);
-          if (!pm || PREFIX_TYPE[pm[1]] !== el.type) {
-            fc.notes.push(`${el.id}: id prefix and type disagree \u2014 not moved, resolve by hand`);
-            noted.add(el.id);
-            continue;
-          }
-        }
-        if (layout.group === "hierarchy" && chainProblem(el)) {
-          fc.notes.push(`${el.id}: its parent chain has problems \u2014 not moved, resolve by hand`);
-          noted.add(el.id);
-          continue;
-        }
-        const dir = moveTarget(el, el.byId, layout);
-        const own = layout.group === "hierarchy" ? ownFolder(el) : null;
-        if (own !== null && !folderArchivedAgrees(ctx.elements, own, el.archived || el.archivedAt !== null)) {
-          fc.notes.push(`${el.id}: its folder holds elements that disagree on archived: \u2014 not moved, resolve by hand`);
-          noted.add(el.id);
-          continue;
-        }
-        const src = own === null ? el.file : own;
-        const dst = own === null ? path9.join(ctx.backlog, dir, path9.basename(el.file)) : path9.join(ctx.backlog, dir);
-        const shown = (dir === "" ? "." : dir) + "/";
-        if (layout.group === "type") fs10.mkdirSync(path9.dirname(dst), { recursive: true });
-        const plan = planMove(src, dst);
-        if (plan.conflicts.length > 0) {
-          fc.notes.push(`${el.id}: cannot move into ${shown} \u2014 target exists`);
-          noted.add(el.id);
-          continue;
-        }
-        fc.move(plan);
-        left.add(path9.dirname(src));
-        fc.actions.push(own === null ? `moved ${el.id} \u2192 ${shown}` : `moved ${el.id} with its folder \u2192 ${shown}`);
-        moved = true;
-        break;
-      }
-    }
-  }
-  removeEmptiedIdFolders(fc.reload().backlog, left);
-  return { ...fc, stage: 4 };
-}
-function folderArchivedAgrees(elements, own, expectArchived) {
-  const prefix = own + path9.sep;
-  return elements.every((e) => !e.file.startsWith(prefix) || (e.archived || e.archivedAt !== null) === expectArchived);
-}
-function chainProblem(el) {
-  const byId = el.byId;
-  const seen = /* @__PURE__ */ new Set();
-  for (let cur = el; cur !== void 0 && !seen.has(cur.id); cur = cur.parent === null ? void 0 : byId.get(cur.parent)) {
-    seen.add(cur.id);
-    if (["parent:dangling", "parent:cycle", "parent:hierarchy"].some((c) => cur.problems.has(c))) return true;
-  }
-  return false;
-}
-function fixStep4(fc) {
-  const ctx = fc.reload();
-  const dir = ctx.idsDir;
-  fs10.mkdirSync(dir, { recursive: true });
-  const tombs = readTombstones(dir);
-  let created = 0;
-  for (const el of ctx.elements) {
-    if (!idShaped(el) || tombs.has(el.id)) continue;
-    try {
-      fs10.closeSync(fs10.openSync(path9.join(dir, el.id), "wx"));
-      created++;
-    } catch {
-    }
-  }
-  if (created > 0) {
-    fc.actions.push(`created ${created} missing tombstone${created === 1 ? "" : "s"} in ${path9.relative(ctx.backlog, dir)}/`);
-    fc.notes.push("tombstones for already-deleted IDs cannot be recovered \u2014 the never-reuse guarantee is void for those numbers");
-  }
-  return { ...fc, stage: 5 };
-}
-function fixStep5(fc) {
-  const ctx = fc.reload();
-  for (const el of ctx.elements) {
-    if (fc.guard(el) || !el.parsed || !idShaped(el)) continue;
-    const ov = /* @__PURE__ */ new Map();
-    if (el.problems.has("missing:status") && fc.absent(el, "status")) ov.set("status", el.status);
-    if (el.problems.has("missing:created") && fc.absent(el, "created")) {
-      ov.set("created", fc.mtimes.get(el.file) || el.created);
-    }
-    if (ov.size === 0 && !el.problems.has("missing:updated")) continue;
-    const wrote = Array.from(ov.keys());
-    ov.set("updated", nowIso());
-    atomicWrite(el.file, renderElement(el, ov, void 0));
-    fc.actions.push(`${el.id}: wrote ${wrote.concat(["updated"]).join(", ")}`);
-  }
-  return { ...fc, stage: 6 };
-}
-function fixStep6(fc) {
-  const ctx = fc.reload();
-  for (const el of ctx.elements) {
-    if (fc.guard(el) || !el.parsed || !el.problems.has("title:h1_mismatch")) continue;
-    atomicWrite(el.file, renderElement(el, /* @__PURE__ */ new Map([["updated", nowIso()]]), syncH1(el.body, el.title)));
-    fc.actions.push(`${el.id}: synchronised the H1 with title`);
-  }
-  return { ...fc, stage: 7 };
-}
-function fixStep7(fc) {
-  const ctx = fc.reload();
-  for (const file of strayTmpFiles(ctx.scan.dirs.concat(claimsScanDirs(ctx.backlog)))) {
-    fs10.unlinkSync(file);
-    fc.actions.push(`removed stray temp file ${path9.relative(ctx.backlog, file)}`);
-  }
-  return { ...fc, stage: 8 };
-}
-function fixStep7a(fc) {
-  const ctx = fc.reload();
-  for (const { id, dir } of allClaimDirs(ctx.backlog)) {
-    const el = ctx.elements.find((e) => e.id === id);
-    if (el && !el.archived) continue;
-    removeClaimDirWholesale(ctx.backlog, id);
-    if (!fs10.existsSync(dir)) fc.actions.push(`removed the orphaned claim directory for ${id}`);
-  }
-  if (claimsNeedGitignoreLine(ctx.backlog)) {
-    const p = path9.join(ctx.backlog, ".gitignore");
-    let content;
-    try {
-      content = fs10.readFileSync(p, "utf8");
-    } catch {
-      fc.notes.push(".gitignore does not exist \u2014 not created (the claims/ line was not added)");
-      return { ...fc, stage: 8 };
-    }
-    atomicWrite(p, appendGitignoreLine(content, CLAIMS_GITIGNORE_LINE));
-    fc.actions.push(`.gitignore: appended '${CLAIMS_GITIGNORE_LINE}'`);
-  }
-  return { ...fc, stage: 8 };
-}
-function fixStep8(fc) {
-  return { ...fc, stage: 9 };
-}
-function fixStep9(fc) {
-  const before = fc.reload();
-  if (refreshStatus(before.backlog, before.cfg, before)) fc.actions.push("regenerated STATUS.md");
-  const ctx = fc.reload();
-  const findings = collectFindings(ctx);
-  return { ...fc, stage: 10, ctx, findings };
-}
-function doctorFix(flags, json) {
-  const fc0 = makeFixCtx(flags);
-  let start = fc0.reload();
-  const wasLegacy = start.legacy;
-  if (start.legacy) {
-    fixStep0(start, fc0);
-    start = fc0.reload();
-  } else {
-    fixStrayIds(start, fc0);
-    start = fc0.reload();
-  }
-  if (start.legacy || start.configErrors.length > 0) return fixReport(json, fc0.actions, fc0.notes, start, collectFindings(start));
-  fixGitignore(start.backlog, fc0, wasLegacy);
-  fixReadme(start.backlog, fc0, wasLegacy);
-  const fc1 = fixSnapshotMtimes(fc0);
-  const fc2 = fixStep1(fc1);
-  const fc3 = fixStep2(fc2);
-  const fc4 = fixStep3(fc3);
-  const fc5 = fixStep4(fc4);
-  const fc6 = fixStep5(fc5);
-  const fc7 = fixStep6(fc6);
-  const fc8 = fixStep7(fc7);
-  const fc8a = fixStep7a(fc8);
-  const fc9 = fixStep8(fc8a);
-  const { actions, notes, ctx, findings } = fixStep9(fc9);
-  return fixReport(json, actions, notes, ctx, findings);
-}
-function fixReport(json, actions, notes, ctx, findings) {
-  const errors = findings.filter((f) => f.severity === "error");
-  if (json) {
-    out(JSON.stringify({ backlog: ctx.backlog, ok: errors.length === 0, fixed: actions, notes, problems: findings }, null, 2));
-  } else {
-    for (const a of actions) out(`FIXED   ${a}`);
-    for (const n of notes) out(`NOTE    ${n}`);
-    if (actions.length === 0) out("Nothing to fix.");
-    out("");
-    const warnings = findings.filter((f) => f.severity === "warning");
-    out(`${backlogLabel(ctx.backlog)}: ${ctx.elements.length} entries, ${errors.length} error${errors.length === 1 ? "" : "s"}, ${warnings.length} warning${warnings.length === 1 ? "" : "s"} remaining`);
-    for (const f of findings) {
-      const where = f.element ? f.element : path9.relative(ctx.backlog, f.file);
-      out(`${f.severity === "error" ? "ERROR  " : "WARNING"} ${where}: ${f.message}`);
-    }
-  }
-  return errors.length > 0 ? 2 : 0;
-}
-
-// src/commands/cmd-init.ts
-var fs11 = __toESM(require("fs"), 1);
+var fs12 = __toESM(require("fs"), 1);
 var path10 = __toESM(require("path"), 1);
-function cmdInit(flags) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json"]), false);
-  const json = flags.has("json");
-  const backlog = initLocation(flags);
-  if (fs11.existsSync(backlog)) fail("exists", `${backlog} already exists`);
-  try {
-    fs11.mkdirSync(backlog, { recursive: true });
-    for (const d of ["epics", "tasks", "subtasks", "archive", V3_IDS_REL]) {
-      fs11.mkdirSync(path10.join(backlog, d), { recursive: true });
-    }
-    const { claims, problems, ...written } = DEFAULT_CONFIG;
-    void claims;
-    void problems;
-    fs11.writeFileSync(path10.join(backlog, ".nanojira", "config.json"), JSON.stringify(written, null, 2) + "\n", "utf8");
-    fs11.writeFileSync(path10.join(backlog, ".gitignore"), ".nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n", "utf8");
-    fs11.writeFileSync(path10.join(backlog, "README.md"), V3_README, "utf8");
-  } catch (e) {
-    fail("io_error", `cannot create the backlog at ${backlog}: ${oneLine(e)}`);
-  }
-  refreshStatus(backlog, { ...DEFAULT_CONFIG });
-  if (json) out(JSON.stringify({ ok: true, backlog, changed: ["created"] }, null, 2));
-  else {
-    out(`Created backlog at ${backlog}`);
-    out("  epics/ tasks/ subtasks/ archive/ .nanojira/");
-    out("  .nanojira/config.json .nanojira/ids/ .gitignore README.md STATUS.md");
-  }
-  return 0;
-}
-
-// src/commands/cmd-log.ts
-var SOURCE_CREATED = 0;
-var SOURCE_CLAIM = 1;
-var SOURCE_NOTE = 2;
-function requireReadableForLog(el) {
-  if (el.problems.has("file:unreadable")) {
-    fail(
-      "refused:unreadable",
-      `${el.id} (${el.file}) cannot be read \u2014 refusing to log`,
-      "check the file and its permissions, then run `nj doctor`"
-    );
-  }
-  if (el.problems.has("frontmatter:unreadable")) {
-    fail(
-      "refused:unreadable",
-      `${el.id} (${el.file}) has unreadable frontmatter \u2014 refusing to log`,
-      "repair the file by hand, then run `nj doctor`"
-    );
-  }
-}
-function claimEvents(backlog, id) {
-  const events = [];
-  let prev = null;
-  for (const e of allEntriesAscending(backlog, id)) {
-    const kind = e.kind === "released" ? "released" : prev === null || prev.kind === "released" ? "claimed" : prev.name === e.name ? "reasserted" : "stolen";
-    events.push({ at: e.time, kind, actor: e.name, _source: SOURCE_CLAIM });
-    prev = { kind: e.kind, name: e.name };
-  }
-  return events;
-}
-function formatEvent(e) {
-  if (e.kind === "created") return `${e.at} created`;
-  if (e.kind === "note") {
-    const [first, ...rest] = (e.text || "").split("\n");
-    return [`${e.at} ${e.actor}: ${first}`, ...rest.map((l) => l === "" ? "  " : `  ${l}`)].join("\n");
-  }
-  const verb = e.kind === "reasserted" ? "re-asserted" : e.kind;
-  return `${e.at} ${verb} by ${e.actor}`;
-}
-function cmdLog(flags) {
-  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("log")]), false);
-  const json = flags.has("json");
-  const ctx = context(flags);
-  const el = resolveTarget(ctx, flags, true);
-  requireReadableForLog(el);
-  const events = [{ at: el.created, kind: "created", _source: SOURCE_CREATED }];
-  events.push(...claimEvents(ctx.backlog, el.id));
-  for (const n of parseNotes(el.body)) events.push({ at: n.at, kind: "note", actor: n.actor, text: n.text, _source: SOURCE_NOTE });
-  events.sort((a, b) => a.at !== b.at ? a.at < b.at ? -1 : 1 : a._source - b._source);
-  const merged = events.map(({ _source, ...rest }) => rest);
-  if (json) {
-    out(JSON.stringify({ ok: true, id: el.id, events: merged }, null, 2));
-    return 0;
-  }
-  for (const e of merged) out(formatEvent(e));
-  return 0;
-}
 
 // src/commands/cmd-new.ts
-var fs13 = __toESM(require("fs"), 1);
-var path11 = __toESM(require("path"), 1);
+var fs11 = __toESM(require("fs"), 1);
+var path9 = __toESM(require("path"), 1);
 
 // src/core/input.ts
-var fs12 = __toESM(require("fs"), 1);
+var fs10 = __toESM(require("fs"), 1);
 function readInputText(value) {
   if (value === "-") {
     try {
-      return fs12.readFileSync(0, "utf8");
+      return fs10.readFileSync(0, "utf8");
     } catch (e) {
       return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, "pipe the JSON in, or pass a path with --input=<path>");
     }
   }
   try {
-    return fs12.readFileSync(value, "utf8");
+    return fs10.readFileSync(value, "utf8");
   } catch (e) {
     return fail("not_found", `--input: cannot read '${value}' \u2014 ${e.message}`);
   }
@@ -3492,19 +2818,22 @@ function parseInputJson(raw) {
 function collidesCaseInsensitively(dir, name) {
   let names;
   try {
-    names = fs13.readdirSync(dir);
+    names = fs11.readdirSync(dir);
   } catch {
     return false;
   }
   const lower = name.toLowerCase();
   return names.some((n) => n.toLowerCase() === lower);
 }
-function checkExplicitParent(ctx, type, parent) {
+function article(word) {
+  return /^[aeiou]/i.test(word) ? "an" : "a";
+}
+function checkExplicitParent(ctx, type, parent, verb = "create") {
   if (type === "epic") {
     if (parent !== void 0) fail("invalid_value", "epics must not have a --parent");
     return void 0;
   }
-  if (parent === void 0) return fail("missing_argument", `--parent is required for ${type} (must be a ${PARENT_TYPE[type]})`);
+  if (parent === void 0) return fail("missing_argument", `--parent is required for ${type} (must be ${article(PARENT_TYPE[type])} ${PARENT_TYPE[type]})`);
   const p = ctx.elements.find((e) => e.id === parent);
   if (!p) return fail("not_found", `parent '${parent}' does not exist`);
   if (p.problems.has("file:unreadable") || p.problems.has("frontmatter:unreadable")) {
@@ -3514,11 +2843,13 @@ function checkExplicitParent(ctx, type, parent) {
       "its type cannot be verified; repair the file, then run `nj doctor`"
     );
   }
-  if (p.type !== PARENT_TYPE[type]) fail("invalid_target", `parent '${parent}' is a ${p.type}, but a ${type} needs a ${PARENT_TYPE[type]}`);
+  if (p.type !== PARENT_TYPE[type]) {
+    fail("invalid_target", `parent '${parent}' is ${article(p.type)} ${p.type}, but ${article(type)} ${type} needs ${article(PARENT_TYPE[type])} ${PARENT_TYPE[type]}`);
+  }
   if (p.archived) {
     fail(
       "refused:parent_archived",
-      `parent '${parent}' is archived \u2014 refusing to create a child under it`,
+      `parent '${parent}' is archived \u2014 refusing to ${verb} a child under it`,
       "a fresh child of an archived parent would immediately carry archive:split"
     );
   }
@@ -3591,8 +2922,8 @@ function cmdNew(flags) {
   let id, dir, file;
   for (let attempt = 0; ; attempt++) {
     id = allocateId(ctx.idsDir, type, ctx.elements);
-    dir = path11.join(ctx.backlog, ...newPlace(ctx, type, id, parent).split("/"));
-    file = path11.join(dir, id + ".md");
+    dir = path9.join(ctx.backlog, ...newPlace(ctx, type, id, parent).split("/"));
+    file = path9.join(dir, id + ".md");
     if (!collidesCaseInsensitively(dir, id + ".md")) break;
     if (attempt >= 100) return hardExit("id_allocation_failed", `nj: id allocation failed after 100 retries (${id} collides with an existing file)`);
   }
@@ -3610,7 +2941,7 @@ function cmdNew(flags) {
   fields.set("created", ts);
   fields.set("updated", ts);
   const body = buildBody(ctx, type, cleanTitle, sections);
-  fs13.mkdirSync(dir, { recursive: true });
+  fs11.mkdirSync(dir, { recursive: true });
   atomicWrite(file, serialize(fields, Array.from(fields.keys()), body));
   const el = loadElement(file, ctx.backlog, ctx.cfg);
   deriveGraph(ctx.elements.concat([el]), ctx.idsDir, ctx.cfg.layout);
@@ -3622,9 +2953,9 @@ function cmdNew(flags) {
 }
 var REAL_ID_SHAPE = new RegExp("^(" + Object.values(TYPE_PREFIX).join("|") + ")-\\d+$");
 var PLAN_ALLOWED_KEYS = /* @__PURE__ */ new Set([...NEW_FIELDS, "ref"]);
-function failAtPath(code, message, path13) {
+function failAtPath(code, message, path14) {
   const e = new Fail(message, void 0, code);
-  e.failedAt = path13;
+  e.failedAt = path14;
   throw e;
 }
 function flattenPlan(nodes, basePath, parentIndex, out2) {
@@ -3670,7 +3001,7 @@ function collectNodeSections(raw, nodePath, stdinState) {
         stdinState.consumed = true;
         let stdinText;
         try {
-          stdinText = fs13.readFileSync(0, "utf8");
+          stdinText = fs11.readFileSync(0, "utf8");
         } catch (e) {
           return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`);
         }
@@ -3679,7 +3010,7 @@ function collectNodeSections(raw, nodePath, stdinState) {
       }
       let text;
       try {
-        text = fs13.readFileSync(filePath, "utf8");
+        text = fs11.readFileSync(filePath, "utf8");
       } catch (e) {
         return fail("not_found", `'${role}-file': cannot read '${filePath}' \u2014 ${e.message}`);
       }
@@ -3720,7 +3051,7 @@ function validatePlanNode(ctx, node, flat, seenRefs, anyRefIndex, declaredSoFar,
       }
       explicitParentId = checkExplicitParent(ctx, type, p);
     } else {
-      if (type !== "epic") fail("missing_argument", `'parent' is required for ${type} at ${node.path} (must be a ${PARENT_TYPE[type]})`);
+      if (type !== "epic") fail("missing_argument", `'parent' is required for ${type} at ${node.path} (must be ${article(PARENT_TYPE[type])} ${PARENT_TYPE[type]})`);
       parentMode = "top";
     }
   } else {
@@ -3886,8 +3217,8 @@ function cmdNewInput(ctx, inputValue, dryRun) {
       let id = "", dir = "", file = "";
       for (let attempt = 0; ; attempt++) {
         id = allocateId(liveCtx.idsDir, v.type, liveCtx.elements);
-        dir = path11.join(liveCtx.backlog, ...newPlace(liveCtx, v.type, id, parentId).split("/"));
-        file = path11.join(dir, id + ".md");
+        dir = path9.join(liveCtx.backlog, ...newPlace(liveCtx, v.type, id, parentId).split("/"));
+        file = path9.join(dir, id + ".md");
         if (!collidesCaseInsensitively(dir, id + ".md")) break;
         if (attempt >= 100) return hardExit("id_allocation_failed", `nj: id allocation failed after 100 retries (${id} collides with an existing file)`);
       }
@@ -3914,7 +3245,7 @@ function cmdNewInput(ctx, inputValue, dryRun) {
       lastFields = fields;
       lastSections = v.sections;
       const body = buildBody(ctx, v.type, v.cleanTitle, v.sections);
-      fs13.mkdirSync(dir, { recursive: true });
+      fs11.mkdirSync(dir, { recursive: true });
       atomicWrite(file, serialize(fields, Array.from(fields.keys()), body));
       created.push(id);
       if (typeof node.raw.ref === "string") refRealId.set(node.raw.ref, id);
@@ -3948,6 +3279,723 @@ function cmdNewInput(ctx, inputValue, dryRun) {
   } else {
     out(`created: ${created.join(", ")}`);
   }
+  return 0;
+}
+
+// src/core/readme-texts.ts
+var V2_README = `# Backlog
+
+This folder is a NanoJira backlog. One Markdown file per element, grouped by
+type: epics/, tasks/, subtasks/. Archived work lives in archive/.
+
+Every file has a YAML-ish frontmatter block between \`---\` lines and a free
+Markdown body. The frontmatter is the truth; the body belongs to you, except
+for the \`# H1\` (mirrors \`title\`) and the \`## Notes\` section written by
+\`nj note\`.
+
+An element is *ready to work* when its status is the first configured status,
+all \`depends_on\` targets are done, it carries no error, and it has a
+non-empty \`## Description\` (plus \`## Acceptance Criteria\` for tasks and
+subtasks). A heading with nothing under it counts as absent \u2014 that is
+deliberate.
+
+\`.ids/\` holds one empty tombstone file per allocated ID. It is versioned and
+must be committed: it is what guarantees IDs are never reused. Do not delete
+it.
+
+The only uncommitted artifact is \`.nanojira-index.json\` (a cache).
+
+Useful commands: \`nj\`, \`nj list --ready\`, \`nj show --id=\u2026\`,
+\`nj new --type=task --parent=EPIC-001 --title="\u2026"\`, \`nj doctor\`.
+`;
+var V3_README = `# Backlog
+
+This folder is a NanoJira backlog: one Markdown file per element (epics,
+tasks, subtasks). Where the files lie is set by \`layout\` in
+\`.nanojira/config.json\` \u2014 by default one folder per type (\`epics/\`,
+\`tasks/\`, \`subtasks/\`), with finished work in \`archive/\`.
+
+Every file has a frontmatter block between \`---\` lines and a free Markdown
+body. The frontmatter is the truth; the body belongs to you, except for the
+\`# H1\` (mirrors \`title\`), the \`## Notes\` section written by \`nj note\`, and
+the sections \`nj new\`/\`nj set\` write when asked to.
+
+An element is *ready to work* when its status is the first configured status,
+all \`depends_on\` targets are done, it carries no error, and it has a
+non-empty \`## Description\` (plus \`## Acceptance Criteria\` for tasks and
+subtasks). A heading with nothing under it counts as absent \u2014 that is
+deliberate.
+
+\`STATUS.md\` is a generated overview by status. Do not edit it; \`nj\` rewrites
+it after every change, and \`nj doctor --fix\` repairs it.
+
+\`.nanojira/\` holds what only \`nj\` needs: the configuration and \`ids/\`, one
+empty tombstone file per allocated ID. Both are versioned and must be
+committed \u2014 the tombstones are what guarantee IDs are never reused. Do not
+delete them. Only \`.nanojira/index.json\` (a cache) and temporary files are
+ignored.
+
+Useful commands: \`nj\`, \`nj list --ready\`, \`nj show --id=\u2026\`,
+\`nj new --type=task --parent=EPIC-001 --title="\u2026"\`, \`nj doctor\`.
+`;
+
+// src/commands/cmd-doctor.ts
+function collectFindings(ctx) {
+  const findings = [];
+  if (ctx.legacy) {
+    findings.push({
+      code: "backlog:legacy_layout",
+      severity: "error",
+      file: path10.join(ctx.backlog, LEGACY_CONFIG_REL),
+      message: `the backlog is in the v2 (legacy) layout (${LEGACY_CONFIG_REL}, ${LEGACY_IDS_REL}/) \u2014 \`nj doctor --fix\` migrates it to .nanojira/`
+    });
+  }
+  const configFile = path10.join(ctx.backlog, ctx.legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
+  for (const e of ctx.configErrors) {
+    findings.push({ code: "config:invalid", severity: "error", file: configFile, message: e });
+  }
+  for (const w of ctx.configWarnings) {
+    findings.push({ code: w.code, severity: "warning", file: configFile, message: w.message });
+  }
+  const elements = ctx.elements.slice().sort(compareElements);
+  const dupGroups = /* @__PURE__ */ new Map();
+  for (const el of elements) {
+    if (!dupGroups.has(el.id)) dupGroups.set(el.id, []);
+    dupGroups.get(el.id).push(el);
+  }
+  for (const el of elements) {
+    for (const code of elementProblems(el)) {
+      const sev = SEVERITY[code];
+      if (sev === null || sev === void 0) continue;
+      if (ctx.configErrors.length > 0 && (code === "type:folder" || code === "layout:misplaced")) continue;
+      if (code === "frontmatter:unreadable" || code === "file:unreadable") {
+        for (const d of el.detail) {
+          if (d.code !== code) continue;
+          findings.push({ code, severity: sev, element: el.id, file: el.file, line: d.line, message: d.message });
+        }
+        continue;
+      }
+      findings.push({ code, severity: sev, element: el.id, file: el.file, message: describeFinding(code, el, dupGroups, ctx.cfg) });
+    }
+  }
+  const scan = ctx.scan;
+  for (const file of strayTmpFiles(scan.dirs.concat(claimsScanDirs(ctx.backlog)))) {
+    findings.push({ code: "backlog:stray_tmp", severity: "warning", file, message: "stray temp file from an interrupted write" });
+  }
+  findings.push(...collectClaimFindings(ctx));
+  if (claimsNeedGitignoreLine(ctx.backlog)) {
+    findings.push({
+      code: "backlog:claims_unignored",
+      severity: "warning",
+      file: path10.join(ctx.backlog, ".gitignore"),
+      message: ".nanojira/claims/ exists but .gitignore has no line that is exactly '.nanojira/claims/'"
+    });
+  }
+  for (const { dir, reason } of scan.unreadable) {
+    findings.push({ code: "backlog:unreadable_dir", severity: "error", file: dir, message: `folder cannot be listed (${reason}) \u2014 element files in it are not seen` });
+  }
+  const tombs = readTombstones(ctx.idsDir);
+  if (ctx.elements.length > 0 && tombs.size === 0) {
+    findings.push({ code: "backlog:ids_missing", severity: "error", file: ctx.idsDir, message: `${path10.relative(ctx.backlog, ctx.idsDir)}/ is missing or empty while element files exist \u2014 the never-reuse guarantee is not in force` });
+  }
+  if (ctx.configErrors.length === 0 && ctx.cfg.layout.statusFile && !statusIsFresh(ctx.backlog, ctx.elements, ctx.cfg)) {
+    findings.push({ code: "backlog:status_stale", severity: "warning", file: path10.join(ctx.backlog, "STATUS.md"), message: "STATUS.md is missing or differs from a fresh rendering \u2014 `nj doctor --fix` regenerates it" });
+  }
+  if (ctx.cfg.problems.ignore.length === 0) return findings;
+  const ignore = new Set(ctx.cfg.problems.ignore);
+  return findings.filter((f) => !ignore.has(f.code));
+}
+function strayTmpFiles(dirs) {
+  const found = [];
+  for (const dir of dirs) {
+    let names;
+    try {
+      names = fs12.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const n of names.sort()) if (n.startsWith(".nj-tmp-")) found.push(path10.join(dir, n));
+  }
+  return found;
+}
+function claimsScanDirs(backlog) {
+  return [claimsRootDir(backlog), ...allClaimDirs(backlog).map((c) => c.dir)];
+}
+function collectClaimFindings(ctx) {
+  const findings = [];
+  for (const { id, dir } of allClaimDirs(ctx.backlog)) {
+    const el = ctx.elements.find((e) => e.id === id);
+    const h = highestEntry(dir);
+    if (!el) {
+      findings.push({ code: "claim:orphaned", severity: "warning", file: dir, message: `claim directory for '${id}', which does not exist` });
+      continue;
+    }
+    if (el.archived) {
+      findings.push({ code: "claim:orphaned", severity: "warning", element: el.id, file: dir, message: `${el.id} is archived but still carries a claim directory` });
+    }
+    if (h && h.kind === "claimed" && h.name !== el.assignee) {
+      findings.push({
+        code: "claim:mismatch",
+        severity: "warning",
+        element: el.id,
+        file: el.file,
+        message: `claimed by '${h.name}' but assignee is '${el.assignee || "(empty)"}'`
+      });
+    }
+    if (h && h.kind === "claimed" && isClaimStale(h.time, ctx.cfg.claims.staleAfterHours, nowMs())) {
+      findings.push({
+        code: "claim:stale",
+        severity: "warning",
+        element: el.id,
+        file: el.file,
+        message: `claimed by '${h.name}' since ${h.time}, past the ${ctx.cfg.claims.staleAfterHours}h staleness threshold`
+      });
+    }
+  }
+  return findings;
+}
+var CLAIMS_GITIGNORE_LINE = ".nanojira/claims/";
+function gitignoreHasClaimsLine(backlog) {
+  let content;
+  try {
+    content = fs12.readFileSync(path10.join(backlog, ".gitignore"), "utf8");
+  } catch {
+    return false;
+  }
+  return content.split("\n").some((l) => l.replace(/\r$/, "") === CLAIMS_GITIGNORE_LINE);
+}
+function claimsNeedGitignoreLine(backlog) {
+  return fs12.existsSync(claimsRootDir(backlog)) && !gitignoreHasClaimsLine(backlog);
+}
+function appendGitignoreLine(content, line) {
+  if (content === "") return line + "\n";
+  if (content.endsWith("\r\n")) return content + line + "\r\n";
+  if (content.endsWith("\n")) return content + line + "\n";
+  return content + "\n" + line + "\n";
+}
+function backlogLabel(backlog) {
+  const rel = path10.relative(workingDir(), backlog);
+  return (rel === "" ? "." : rel) + "/";
+}
+function describeFinding(code, el, dupGroups, cfg) {
+  switch (code) {
+    case "duplicate_id":
+      return `duplicate id, also in: ${dupGroups.get(el.id).filter((o) => o !== el).map((o) => o.file).join(", ")}`;
+    case "missing:title":
+      return "title is absent or empty";
+    case "missing:status":
+      return `status absent \u2014 defaulted`;
+    case "missing:created":
+      return "created absent \u2014 taken from file mtime";
+    case "missing:updated":
+      return "updated absent \u2014 taken from file mtime";
+    case "id:derived":
+      return "id absent \u2014 derived from the file name";
+    case "id:mismatch":
+      return `frontmatter id '${el.id}' does not match the file name`;
+    case "type:derived":
+      return `type absent \u2014 derived as '${el.type}'`;
+    case "type:folder":
+      return el.type === null ? "type cannot be determined from id, frontmatter or folder" : `type '${el.type}' does not match folder '${el.folder}/'`;
+    case "layout:misplaced":
+      return `file lies in '${el.folder === "" ? "." : el.folder}/', not where the layout puts it`;
+    case "parent:orphaned":
+      return "parent is absent";
+    case "parent:dangling":
+      return `parent '${el.parent}' points at nothing`;
+    case "parent:cycle":
+      return "parent chain contains a cycle";
+    case "parent:hierarchy":
+      return el.type === "epic" ? "an epic must not have a parent" : `a ${el.type} needs ${article(PARENT_TYPE[el.type])} ${PARENT_TYPE[el.type]} as parent`;
+    case "depends_on:dangling":
+      return `depends_on points at a missing element (${el.depends_on.join(", ")})`;
+    case "depends_on:cycle":
+      return "depends_on graph contains a cycle";
+    case "unknown:status":
+      return `unknown status '${el.status}'`;
+    case "unknown:priority":
+      return `unknown priority '${el.priority}' \u2014 sorted as normal, value left untouched`;
+    case "file:unreadable":
+      return "file cannot be read";
+    case "done:open_children":
+      return "done while children are not done";
+    case "archive:not_done":
+      return `archived but status is '${el.status}'`;
+    case "archive:split":
+      return `parent '${el.parent}' is archived while this element is not`;
+    case "title:h1_mismatch":
+      return "H1 in the body differs from title";
+    case "id:no_tombstone":
+      return "no tombstone in the ids folder \u2014 hand-created, or partial tombstone loss";
+    case "acceptance:no_checkbox":
+      return "acceptance criteria has content but no checkbox items \u2014 nothing for check to tick";
+    case "done:no_acceptance":
+      return "done with no acceptance criteria";
+    case "done:open_acceptance": {
+      const counts = sectionCheckboxCounts(el.body, cfg.sections.acceptance);
+      return `done with ${counts ? counts.unticked : "?"} of ${counts ? counts.total : "?"} acceptance boxes still unticked`;
+    }
+    default:
+      return code;
+  }
+}
+function cmdDoctor(flags) {
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("doctor")]), false);
+  const json = flags.has("json");
+  if (flags.has("fix")) return doctorFix(flags, json);
+  const ctx = context(flags, { lenient: true, tolerateConfig: true });
+  const findings = collectFindings(ctx);
+  const errors = findings.filter((f) => f.severity === "error");
+  const warnings = findings.filter((f) => f.severity === "warning");
+  if (json) {
+    out(JSON.stringify({ backlog: ctx.backlog, ok: errors.length === 0, problems: findings }, null, 2));
+  } else {
+    out(`${backlogLabel(ctx.backlog)}: ${ctx.elements.length} entries, ${errors.length} error${errors.length === 1 ? "" : "s"}, ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`);
+    if (findings.length > 0) out("");
+    for (const f of findings) {
+      const where = f.element ? f.element : path10.relative(ctx.backlog, f.file);
+      const line = f.line ? ` (line ${f.line})` : "";
+      out(`${f.severity === "error" ? "ERROR  " : "WARNING"} ${where}: ${f.message}${line}`);
+    }
+  }
+  return errors.length > 0 ? 2 : 0;
+}
+function fixSkip(el, notes) {
+  if (el.problems.has("file:unreadable")) {
+    notes.push(`${path10.basename(el.file)}: cannot be read \u2014 not touched by --fix`);
+    return true;
+  }
+  if (el.problems.has("frontmatter:unreadable")) {
+    notes.push(`${el.id}: has unparsable frontmatter lines \u2014 not touched by --fix, repair it by hand`);
+    return true;
+  }
+  return false;
+}
+function makeFixCtx(flags) {
+  const actions = [];
+  const notes = [];
+  const reload = () => context(flags, { lenient: true, tolerateConfig: true });
+  const skipped = /* @__PURE__ */ new Set();
+  const guard = (el) => {
+    if (!el.problems.has("file:unreadable") && !el.problems.has("frontmatter:unreadable")) return false;
+    if (!skipped.has(el.id)) {
+      skipped.add(el.id);
+      fixSkip(el, notes);
+    }
+    return true;
+  };
+  const absent = (el, k) => {
+    if (!el.fields.has(k)) return true;
+    const v = el.fields.get(k);
+    return Array.isArray(v) ? v.length === 0 : String(v === void 0 || v === null ? "" : v).trim() === "";
+  };
+  const mtimes = /* @__PURE__ */ new Map();
+  const rekey = (from, to) => {
+    for (const [k, v] of Array.from(mtimes)) {
+      if (k === from) {
+        mtimes.delete(k);
+        mtimes.set(to, v);
+      } else if (k.startsWith(from + path10.sep)) {
+        mtimes.delete(k);
+        mtimes.set(to + k.slice(from.length), v);
+      }
+    }
+  };
+  const rename = (from, to) => {
+    fs12.renameSync(from, to);
+    rekey(from, to);
+  };
+  const move = (plan) => {
+    runMove(plan);
+    for (const [from, to] of plan.renames) rekey(from, to);
+  };
+  return { actions, notes, guard, absent, mtimes, rename, move, reload, stage: 0 };
+}
+function fixStep0(ctx, fc) {
+  const backlog = ctx.backlog;
+  const v3Config = path10.join(backlog, V3_CONFIG_REL);
+  const v3Ids = path10.join(backlog, V3_IDS_REL);
+  if (fs12.existsSync(v3Config) || fs12.existsSync(v3Ids)) {
+    fc.notes.push(`both the v2 and the v3 place exist (${LEGACY_CONFIG_REL} / ${LEGACY_IDS_REL} and ${V3_CONFIG_REL} / ${V3_IDS_REL}) \u2014 ambiguous, nothing moved; remove one copy by hand and run \`nj doctor --fix\` again`);
+    return;
+  }
+  fs12.mkdirSync(path10.join(backlog, V3_DIR_REL), { recursive: true });
+  fc.rename(path10.join(backlog, LEGACY_CONFIG_REL), v3Config);
+  fc.rename(path10.join(backlog, LEGACY_IDS_REL), v3Ids);
+  const legacyIndex = path10.join(backlog, LEGACY_INDEX_REL);
+  if (fs12.existsSync(legacyIndex)) fs12.unlinkSync(legacyIndex);
+  fc.actions.push(`migrated the legacy layout: ${LEGACY_CONFIG_REL} \u2192 ${V3_CONFIG_REL}, ${LEGACY_IDS_REL}/ \u2192 ${V3_IDS_REL}/`);
+}
+function fixStrayIds(ctx, fc) {
+  const backlog = ctx.backlog;
+  const strayDir = path10.join(backlog, LEGACY_IDS_REL);
+  if (!fs12.existsSync(strayDir)) return;
+  const stray = readTombstones(strayDir);
+  const real = readTombstones(path10.join(backlog, V3_IDS_REL));
+  for (const id of stray) if (!real.has(id)) return;
+  fs12.rmSync(strayDir, { recursive: true, force: true });
+  fc.notes.push(`removed the stray top-level ${LEGACY_IDS_REL}/ (every tombstone in it was already in ${V3_IDS_REL}/, \xA7 14 step 0)`);
+}
+function fixGitignore(backlog, fc, verbose) {
+  const p = path10.join(backlog, ".gitignore");
+  let content;
+  try {
+    content = fs12.readFileSync(p, "utf8");
+  } catch {
+    if (verbose) fc.notes.push(".gitignore does not exist \u2014 not created");
+    return;
+  }
+  let changed = false;
+  const lines = content.split("\n").map((line) => {
+    const hasCR = line.endsWith("\r");
+    if ((hasCR ? line.slice(0, -1) : line) !== LEGACY_INDEX_REL) return line;
+    changed = true;
+    return V3_INDEX_REL + (hasCR ? "\r" : "");
+  });
+  if (!changed) {
+    if (verbose) fc.notes.push(`.gitignore does not have the '${LEGACY_INDEX_REL}' line verbatim \u2014 left alone`);
+    return;
+  }
+  atomicWrite(p, lines.join("\n"));
+  fc.actions.push(`.gitignore: replaced the '${LEGACY_INDEX_REL}' line with '${V3_INDEX_REL}'`);
+}
+function fixReadme(backlog, fc, verbose) {
+  const p = path10.join(backlog, "README.md");
+  let content;
+  try {
+    content = fs12.readFileSync(p, "utf8");
+  } catch {
+    return;
+  }
+  if (content !== V2_README) {
+    if (verbose) fc.notes.push("README.md is not the v2 init text \u2014 left alone");
+    return;
+  }
+  atomicWrite(p, V3_README);
+  fc.actions.push("README.md: replaced the v2 init text with the v3 text");
+}
+function fixSnapshotMtimes(fc) {
+  for (const el of fc.reload().elements) fc.mtimes.set(el.file, mtimeIso(el.file));
+  return { ...fc, stage: 1 };
+}
+function idShaped(el) {
+  return ID_FOLDER.test(el.id);
+}
+function fixStep1(fc) {
+  const ctx = fc.reload();
+  for (const el of ctx.elements) {
+    if (fc.guard(el) || !el.parsed || !idShaped(el)) continue;
+    const ov = /* @__PURE__ */ new Map();
+    if (el.problems.has("id:derived") && fc.absent(el, "id")) ov.set("id", el.id);
+    if (el.problems.has("type:derived") && el.type && fc.absent(el, "type")) ov.set("type", el.type);
+    if (ov.size === 0) continue;
+    ov.set("updated", nowIso());
+    atomicWrite(el.file, renderElement(el, ov, void 0));
+    fc.actions.push(`${el.id}: wrote ${Array.from(ov.keys()).filter((k) => k !== "updated").join(", ")} into the frontmatter`);
+  }
+  return { ...fc, stage: 2 };
+}
+function fixStep2(fc) {
+  const ctx = fc.reload();
+  for (const el of ctx.elements) {
+    if (fc.guard(el)) continue;
+    if (!el.problems.has("id:mismatch")) continue;
+    const target = path10.join(path10.dirname(el.file), el.id + ".md");
+    if (fs12.existsSync(target)) {
+      fc.notes.push(`${el.file}: cannot rename to ${path10.basename(target)} \u2014 target exists`);
+      continue;
+    }
+    fc.rename(el.file, target);
+    fc.actions.push(`renamed ${path10.basename(el.file)} \u2192 ${path10.basename(target)}`);
+  }
+  return { ...fc, stage: 3 };
+}
+function fixStep3(fc) {
+  const layout = fc.reload().cfg.layout;
+  const rounds = layout.group === "hierarchy" ? ["epic", "task", "subtask"] : [null];
+  const left = /* @__PURE__ */ new Set();
+  const noted = /* @__PURE__ */ new Set();
+  for (const round of rounds) {
+    for (let moved = true; moved; ) {
+      moved = false;
+      const ctx = fc.reload();
+      for (const el of ctx.elements) {
+        if (round !== null && el.type !== round) continue;
+        if (noted.has(el.id)) continue;
+        if (fc.guard(el) || el.type === null || !el.problems.has(misplacedCode(layout))) continue;
+        if (layout.group === "type") {
+          const pm = /^(EPIC|TSK|SUB)-/.exec(el.id);
+          if (!pm || PREFIX_TYPE[pm[1]] !== el.type) {
+            fc.notes.push(`${el.id}: id prefix and type disagree \u2014 not moved, resolve by hand`);
+            noted.add(el.id);
+            continue;
+          }
+        }
+        if (layout.group === "hierarchy" && chainProblem(el)) {
+          fc.notes.push(`${el.id}: its parent chain has problems \u2014 not moved, resolve by hand`);
+          noted.add(el.id);
+          continue;
+        }
+        const dir = moveTarget(el, el.byId, layout);
+        const own = layout.group === "hierarchy" ? ownFolder(el) : null;
+        if (own !== null && !folderArchivedAgrees(ctx.elements, own, el.archived || el.archivedAt !== null)) {
+          fc.notes.push(`${el.id}: its folder holds elements that disagree on archived: \u2014 not moved, resolve by hand`);
+          noted.add(el.id);
+          continue;
+        }
+        const src = own === null ? el.file : own;
+        const dst = own === null ? path10.join(ctx.backlog, dir, path10.basename(el.file)) : path10.join(ctx.backlog, dir);
+        const shown = (dir === "" ? "." : dir) + "/";
+        if (layout.group === "type") fs12.mkdirSync(path10.dirname(dst), { recursive: true });
+        const plan = planMove(src, dst);
+        if (plan.conflicts.length > 0) {
+          fc.notes.push(`${el.id}: cannot move into ${shown} \u2014 target exists`);
+          noted.add(el.id);
+          continue;
+        }
+        fc.move(plan);
+        left.add(path10.dirname(src));
+        fc.actions.push(own === null ? `moved ${el.id} \u2192 ${shown}` : `moved ${el.id} with its folder \u2192 ${shown}`);
+        moved = true;
+        break;
+      }
+    }
+  }
+  removeEmptiedIdFolders(fc.reload().backlog, left);
+  return { ...fc, stage: 4 };
+}
+function folderArchivedAgrees(elements, own, expectArchived) {
+  const prefix = own + path10.sep;
+  return elements.every((e) => !e.file.startsWith(prefix) || (e.archived || e.archivedAt !== null) === expectArchived);
+}
+function chainProblem(el) {
+  const byId = el.byId;
+  const seen = /* @__PURE__ */ new Set();
+  for (let cur = el; cur !== void 0 && !seen.has(cur.id); cur = cur.parent === null ? void 0 : byId.get(cur.parent)) {
+    seen.add(cur.id);
+    if (["parent:dangling", "parent:cycle", "parent:hierarchy"].some((c) => cur.problems.has(c))) return true;
+  }
+  return false;
+}
+function fixStep4(fc) {
+  const ctx = fc.reload();
+  const dir = ctx.idsDir;
+  fs12.mkdirSync(dir, { recursive: true });
+  const tombs = readTombstones(dir);
+  let created = 0;
+  for (const el of ctx.elements) {
+    if (!idShaped(el) || tombs.has(el.id)) continue;
+    try {
+      fs12.closeSync(fs12.openSync(path10.join(dir, el.id), "wx"));
+      created++;
+    } catch {
+    }
+  }
+  if (created > 0) {
+    fc.actions.push(`created ${created} missing tombstone${created === 1 ? "" : "s"} in ${path10.relative(ctx.backlog, dir)}/`);
+    fc.notes.push("tombstones for already-deleted IDs cannot be recovered \u2014 the never-reuse guarantee is void for those numbers");
+  }
+  return { ...fc, stage: 5 };
+}
+function fixStep5(fc) {
+  const ctx = fc.reload();
+  for (const el of ctx.elements) {
+    if (fc.guard(el) || !el.parsed || !idShaped(el)) continue;
+    const ov = /* @__PURE__ */ new Map();
+    if (el.problems.has("missing:status") && fc.absent(el, "status")) ov.set("status", el.status);
+    if (el.problems.has("missing:created") && fc.absent(el, "created")) {
+      ov.set("created", fc.mtimes.get(el.file) || el.created);
+    }
+    if (ov.size === 0 && !el.problems.has("missing:updated")) continue;
+    const wrote = Array.from(ov.keys());
+    ov.set("updated", nowIso());
+    atomicWrite(el.file, renderElement(el, ov, void 0));
+    fc.actions.push(`${el.id}: wrote ${wrote.concat(["updated"]).join(", ")}`);
+  }
+  return { ...fc, stage: 6 };
+}
+function fixStep6(fc) {
+  const ctx = fc.reload();
+  for (const el of ctx.elements) {
+    if (fc.guard(el) || !el.parsed || !el.problems.has("title:h1_mismatch")) continue;
+    atomicWrite(el.file, renderElement(el, /* @__PURE__ */ new Map([["updated", nowIso()]]), syncH1(el.body, el.title)));
+    fc.actions.push(`${el.id}: synchronised the H1 with title`);
+  }
+  return { ...fc, stage: 7 };
+}
+function fixStep7(fc) {
+  const ctx = fc.reload();
+  for (const file of strayTmpFiles(ctx.scan.dirs.concat(claimsScanDirs(ctx.backlog)))) {
+    fs12.unlinkSync(file);
+    fc.actions.push(`removed stray temp file ${path10.relative(ctx.backlog, file)}`);
+  }
+  return { ...fc, stage: 8 };
+}
+function fixStep7a(fc) {
+  const ctx = fc.reload();
+  for (const { id, dir } of allClaimDirs(ctx.backlog)) {
+    const el = ctx.elements.find((e) => e.id === id);
+    if (el && !el.archived) continue;
+    removeClaimDirWholesale(ctx.backlog, id);
+    if (!fs12.existsSync(dir)) fc.actions.push(`removed the orphaned claim directory for ${id}`);
+  }
+  if (claimsNeedGitignoreLine(ctx.backlog)) {
+    const p = path10.join(ctx.backlog, ".gitignore");
+    let content;
+    try {
+      content = fs12.readFileSync(p, "utf8");
+    } catch {
+      fc.notes.push(".gitignore does not exist \u2014 not created (the claims/ line was not added)");
+      return { ...fc, stage: 8 };
+    }
+    atomicWrite(p, appendGitignoreLine(content, CLAIMS_GITIGNORE_LINE));
+    fc.actions.push(`.gitignore: appended '${CLAIMS_GITIGNORE_LINE}'`);
+  }
+  return { ...fc, stage: 8 };
+}
+function fixStep8(fc) {
+  return { ...fc, stage: 9 };
+}
+function fixStep9(fc) {
+  const before = fc.reload();
+  if (refreshStatus(before.backlog, before.cfg, before)) fc.actions.push("regenerated STATUS.md");
+  const ctx = fc.reload();
+  const findings = collectFindings(ctx);
+  return { ...fc, stage: 10, ctx, findings };
+}
+function doctorFix(flags, json) {
+  const fc0 = makeFixCtx(flags);
+  let start = fc0.reload();
+  const wasLegacy = start.legacy;
+  if (start.legacy) {
+    fixStep0(start, fc0);
+    start = fc0.reload();
+  } else {
+    fixStrayIds(start, fc0);
+    start = fc0.reload();
+  }
+  if (start.legacy || start.configErrors.length > 0) return fixReport(json, fc0.actions, fc0.notes, start, collectFindings(start));
+  fixGitignore(start.backlog, fc0, wasLegacy);
+  fixReadme(start.backlog, fc0, wasLegacy);
+  const fc1 = fixSnapshotMtimes(fc0);
+  const fc2 = fixStep1(fc1);
+  const fc3 = fixStep2(fc2);
+  const fc4 = fixStep3(fc3);
+  const fc5 = fixStep4(fc4);
+  const fc6 = fixStep5(fc5);
+  const fc7 = fixStep6(fc6);
+  const fc8 = fixStep7(fc7);
+  const fc8a = fixStep7a(fc8);
+  const fc9 = fixStep8(fc8a);
+  const { actions, notes, ctx, findings } = fixStep9(fc9);
+  return fixReport(json, actions, notes, ctx, findings);
+}
+function fixReport(json, actions, notes, ctx, findings) {
+  const errors = findings.filter((f) => f.severity === "error");
+  if (json) {
+    out(JSON.stringify({ backlog: ctx.backlog, ok: errors.length === 0, fixed: actions, notes, problems: findings }, null, 2));
+  } else {
+    for (const a of actions) out(`FIXED   ${a}`);
+    for (const n of notes) out(`NOTE    ${n}`);
+    if (actions.length === 0) out("Nothing to fix.");
+    out("");
+    const warnings = findings.filter((f) => f.severity === "warning");
+    out(`${backlogLabel(ctx.backlog)}: ${ctx.elements.length} entries, ${errors.length} error${errors.length === 1 ? "" : "s"}, ${warnings.length} warning${warnings.length === 1 ? "" : "s"} remaining`);
+    for (const f of findings) {
+      const where = f.element ? f.element : path10.relative(ctx.backlog, f.file);
+      out(`${f.severity === "error" ? "ERROR  " : "WARNING"} ${where}: ${f.message}`);
+    }
+  }
+  return errors.length > 0 ? 2 : 0;
+}
+
+// src/commands/cmd-init.ts
+var fs13 = __toESM(require("fs"), 1);
+var path11 = __toESM(require("path"), 1);
+function cmdInit(flags) {
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json"]), false);
+  const json = flags.has("json");
+  const backlog = initLocation(flags);
+  if (fs13.existsSync(backlog)) fail("exists", `${backlog} already exists`);
+  try {
+    fs13.mkdirSync(backlog, { recursive: true });
+    for (const d of ["epics", "tasks", "subtasks", "archive", V3_IDS_REL]) {
+      fs13.mkdirSync(path11.join(backlog, d), { recursive: true });
+    }
+    const { claims, problems, ...written } = DEFAULT_CONFIG;
+    void claims;
+    void problems;
+    fs13.writeFileSync(path11.join(backlog, ".nanojira", "config.json"), JSON.stringify(written, null, 2) + "\n", "utf8");
+    fs13.writeFileSync(path11.join(backlog, ".gitignore"), ".nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n", "utf8");
+    fs13.writeFileSync(path11.join(backlog, "README.md"), V3_README, "utf8");
+  } catch (e) {
+    fail("io_error", `cannot create the backlog at ${backlog}: ${oneLine(e)}`);
+  }
+  refreshStatus(backlog, { ...DEFAULT_CONFIG });
+  if (json) out(JSON.stringify({ ok: true, backlog, changed: ["created"] }, null, 2));
+  else {
+    out(`Created backlog at ${backlog}`);
+    out("  epics/ tasks/ subtasks/ archive/ .nanojira/");
+    out("  .nanojira/config.json .nanojira/ids/ .gitignore README.md STATUS.md");
+  }
+  return 0;
+}
+
+// src/commands/cmd-log.ts
+var SOURCE_CREATED = 0;
+var SOURCE_CLAIM = 1;
+var SOURCE_NOTE = 2;
+function requireReadableForLog(el) {
+  if (el.problems.has("file:unreadable")) {
+    fail(
+      "refused:unreadable",
+      `${el.id} (${el.file}) cannot be read \u2014 refusing to log`,
+      "check the file and its permissions, then run `nj doctor`"
+    );
+  }
+  if (el.problems.has("frontmatter:unreadable")) {
+    fail(
+      "refused:unreadable",
+      `${el.id} (${el.file}) has unreadable frontmatter \u2014 refusing to log`,
+      "repair the file by hand, then run `nj doctor`"
+    );
+  }
+}
+function claimEvents(backlog, id) {
+  const events = [];
+  let prev = null;
+  for (const e of allEntriesAscending(backlog, id)) {
+    const kind = e.kind === "released" ? "released" : prev === null || prev.kind === "released" ? "claimed" : prev.name === e.name ? "reasserted" : "stolen";
+    events.push({ at: e.time, kind, actor: e.name, _source: SOURCE_CLAIM });
+    prev = { kind: e.kind, name: e.name };
+  }
+  return events;
+}
+function formatEvent(e) {
+  if (e.kind === "created") return `${e.at} created`;
+  if (e.kind === "note") {
+    const [first, ...rest] = (e.text || "").split("\n");
+    return [`${e.at} ${e.actor}: ${first}`, ...rest.map((l) => l === "" ? "  " : `  ${l}`)].join("\n");
+  }
+  const verb = e.kind === "reasserted" ? "re-asserted" : e.kind;
+  return `${e.at} ${verb} by ${e.actor}`;
+}
+function cmdLog(flags) {
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("log")]), false);
+  const json = flags.has("json");
+  const ctx = context(flags);
+  const el = resolveTarget(ctx, flags, true);
+  requireReadableForLog(el);
+  const events = [{ at: el.created, kind: "created", _source: SOURCE_CREATED }];
+  events.push(...claimEvents(ctx.backlog, el.id));
+  for (const n of parseNotes(el.body)) events.push({ at: n.at, kind: "note", actor: n.actor, text: n.text, _source: SOURCE_NOTE });
+  events.sort((a, b) => a.at !== b.at ? a.at < b.at ? -1 : 1 : a._source - b._source);
+  const merged = events.map(({ _source, ...rest }) => rest);
+  if (json) {
+    out(JSON.stringify({ ok: true, id: el.id, events: merged }, null, 2));
+    return 0;
+  }
+  for (const e of merged) out(formatEvent(e));
   return 0;
 }
 
@@ -4198,6 +4246,7 @@ ${archivedVictims.map((v) => "  " + v.id).join("\n")}`,
 }
 
 // src/commands/cmd-set.ts
+var path12 = __toESM(require("path"), 1);
 function buildSetInputFlags(inputValue) {
   const raw = readInputText(inputValue);
   const parsed = parseInputJson(raw);
@@ -4223,6 +4272,16 @@ function buildSetInputFlags(inputValue) {
     synFlags.set(key, value);
   }
   return synFlags;
+}
+function reparentMove(ctx, el, newParentId) {
+  if (ctx.cfg.layout.group !== "hierarchy") return null;
+  const byId = new Map(el.byId);
+  const shadow = { ...el, parent: newParentId };
+  byId.set(el.id, shadow);
+  const dir = expectedPlace(shadow, byId, ctx.cfg.layout);
+  if (el.type === "subtask") return { src: el.file, dst: path12.join(ctx.backlog, dir, path12.basename(el.file)) };
+  const own = ownFolder(el);
+  return { src: own, dst: path12.join(ctx.backlog, dir) };
 }
 function setsFinalStatus(ctx, overrides) {
   return overrides.get("status") === ctx.cfg.statuses[ctx.cfg.statuses.length - 1];
@@ -4256,8 +4315,8 @@ function cmdSet(flags) {
         const el2 = resolveById(ctx, id, true);
         requireWritable(el2);
         requireActive(el2, "set");
-        const { overrides: overrides2, changed: changed2, newBody: newBody2 } = collectSetOverrides(ctx, el2, sourceFlags, allowOpen);
-        return { el: el2, overrides: overrides2, changed: changed2, newBody: newBody2 };
+        const { overrides: overrides2, changed: changed2, newBody: newBody2, movePlan: movePlan2, moveDst: moveDst2 } = collectSetOverrides(ctx, el2, sourceFlags, allowOpen);
+        return { el: el2, overrides: overrides2, changed: changed2, newBody: newBody2, movePlan: movePlan2, moveDst: moveDst2 };
       },
       (item) => {
         if (item.changed.length === 0) {
@@ -4274,12 +4333,14 @@ function cmdSet(flags) {
           if (released2 !== void 0) undoRelease(ctx.backlog, item.el.id, released2.holder, ts2);
           throw e;
         }
-        const fresh2 = loadElement(item.el.file, ctx.backlog, ctx.cfg);
+        if (item.movePlan !== null) runMove(item.movePlan);
+        const fresh2 = loadElement(item.moveDst ?? item.el.file, ctx.backlog, ctx.cfg);
         deriveGraph(ctx.elements.map((e) => e.file === item.el.file ? fresh2 : e), ctx.idsDir, ctx.cfg.layout);
         const entry = entryJson(fresh2, ctx.backlog, ctx.cfg);
         return Object.assign(
           { ok: true, changed: item.changed, entry, _problems: entry._problems },
-          released2 !== void 0 ? { released: released2.holder } : {}
+          released2 !== void 0 ? { released: released2.holder } : {},
+          openAcceptanceExtra(fresh2, ctx.cfg, isFinal2)
         );
       }
     );
@@ -4292,7 +4353,7 @@ function cmdSet(flags) {
   const el = resolveTarget(ctx, flags, true);
   requireWritable(el);
   requireActive(el, "set");
-  const { overrides, changed, newBody } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
+  const { overrides, changed, newBody, movePlan, moveDst } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
   if (changed.length === 0) {
     if (json) emitWriteResult(true, el, [], ctx.backlog, ctx.cfg);
     else writeFeedback(el, ctx.cfg, `${el.id} unchanged`);
@@ -4312,11 +4373,14 @@ function cmdSet(flags) {
   } else {
     guardedWrite(el, renderElement(el, overrides, newBody), force, ctx.backlog);
   }
-  const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
+  if (movePlan !== null) runMove(movePlan);
+  const fresh = loadElement(moveDst ?? el.file, ctx.backlog, ctx.cfg);
   deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg.layout);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-  if (json) emitWriteResult(true, fresh, changed, ctx.backlog, ctx.cfg, released !== void 0 ? { released: released.holder } : void 0);
-  else writeFeedback(fresh, ctx.cfg, `${fresh.id} \u2192 ${changed.map((c) => `${c}=${describeField(fresh, c)}`).join(", ")}`);
+  if (json) {
+    const extra = Object.assign({}, released !== void 0 ? { released: released.holder } : {}, openAcceptanceExtra(fresh, ctx.cfg, isFinal));
+    emitWriteResult(true, fresh, changed, ctx.backlog, ctx.cfg, extra);
+  } else writeFeedback(fresh, ctx.cfg, `${fresh.id} \u2192 ${changed.map((c) => `${c}=${describeField(fresh, c)}`).join(", ")}`);
   return 0;
 }
 function validateFieldValues(ctx, flags) {
@@ -4363,6 +4427,29 @@ function collectSetOverrides(ctx, el, flags, allowOpen) {
       overrides.set("title", clean);
       changed.push("title");
       newBody = syncH1(el.body, clean);
+    }
+  }
+  const parent = flagString(flags, "parent");
+  let movePlan = null;
+  let moveDst = null;
+  if (parent !== void 0) {
+    const newParentId = checkExplicitParent(ctx, el.type, parent, "move");
+    if (newParentId !== el.parent) {
+      overrides.set("parent", newParentId);
+      changed.push("parent");
+      const move = reparentMove(ctx, el, newParentId);
+      if (move !== null) {
+        const plan = planMove(move.src, move.dst);
+        if (plan.conflicts.length > 0) {
+          fail(
+            "exists",
+            `${plan.conflicts[0]} already exists \u2014 refusing to overwrite; nothing was moved`,
+            "move or delete it, then set --parent again"
+          );
+        }
+        movePlan = plan;
+        moveDst = el.type === "subtask" ? move.dst : path12.join(move.dst, path12.basename(el.file));
+      }
     }
   }
   const status = flagString(flags, "status");
@@ -4429,7 +4516,7 @@ ${names}`,
     if (applied.body !== base) newBody = applied.body;
     changed.push(...applied.changed);
   }
-  return { overrides, changed, newBody };
+  return { overrides, changed, newBody, movePlan, moveDst };
 }
 function isSectionRole(field) {
   return field === "description" || field === "acceptance";
@@ -4569,7 +4656,7 @@ function cmdTree(flags) {
 }
 
 // src/commands/cmd-unarchive.ts
-var path12 = __toESM(require("path"), 1);
+var path13 = __toESM(require("path"), 1);
 var STABLE_HINT3 = "retry once the backlog is stable \u2014 unarchive takes no --force";
 var FIX_HINT = "run `nj doctor --fix` to move the files into their places, then unarchive again";
 function orderedSubtree(ctx, el) {
@@ -4600,7 +4687,7 @@ function buildUnits(stillArchived, hierarchy) {
   for (const e of stillArchived) {
     const own = hierarchy ? ownFolder(e) : null;
     const src = own !== null ? own : e.file;
-    if (covered.some((d) => src === d || src.startsWith(d + path12.sep))) continue;
+    if (covered.some((d) => src === d || src.startsWith(d + path13.sep))) continue;
     units.push({ e, src, dir: own !== null });
     if (own !== null) covered.push(own);
   }
@@ -4608,8 +4695,8 @@ function buildUnits(stillArchived, hierarchy) {
 }
 function unitTarget(backlog, byId, layout, u) {
   const dirRel = placeOf(u.e, byId, layout, false);
-  const dir = path12.join(backlog, dirRel);
-  return u.dir ? dir : path12.join(dir, path12.basename(u.e.file));
+  const dir = path13.join(backlog, dirRel);
+  return u.dir ? dir : path13.join(dir, path13.basename(u.e.file));
 }
 function cmdUnarchive(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("unarchive")]), true);
@@ -4639,7 +4726,7 @@ function cmdUnarchive(flags) {
   if (hierarchy) {
     for (const u of units) {
       if (!u.dir) continue;
-      const prefix = u.src + path12.sep;
+      const prefix = u.src + path13.sep;
       const foreign = ctx.elements.filter((x) => x.file.startsWith(prefix) && !full.includes(x));
       if (foreign.length > 0) {
         refuse(`${u.src} also holds files of other elements: ${foreign.map((f) => f.id).join(", ")}`);
@@ -4665,18 +4752,18 @@ function cmdUnarchive(flags) {
   const emptiedFrom = /* @__PURE__ */ new Set();
   for (const { u, plan } of plans) {
     runMove(plan);
-    emptiedFrom.add(path12.dirname(u.src));
+    emptiedFrom.add(path13.dirname(u.src));
   }
   removeEmptiedIdFolders(ctx.backlog, emptiedFrom);
   const moved = stillArchived.map((e) => {
     const own = units.find((u) => u.e.id === e.id);
     if (own) {
       const target2 = unitTarget(ctx.backlog, byId, layout, own);
-      return loadElement(own.dir ? path12.join(target2, path12.basename(e.file)) : target2, ctx.backlog, ctx.cfg);
+      return loadElement(own.dir ? path13.join(target2, path13.basename(e.file)) : target2, ctx.backlog, ctx.cfg);
     }
-    const covering = units.find((u) => u.dir && e.file.startsWith(u.src + path12.sep));
+    const covering = units.find((u) => u.dir && e.file.startsWith(u.src + path13.sep));
     const target = covering ? unitTarget(ctx.backlog, byId, layout, covering) : e.file;
-    const file = covering ? path12.join(target, path12.relative(covering.src, e.file)) : target;
+    const file = covering ? path13.join(target, path13.relative(covering.src, e.file)) : target;
     return loadElement(file, ctx.backlog, ctx.cfg);
   });
   deriveGraph(ctx.elements.filter((e) => !stillArchived.includes(e)).concat(moved), ctx.idsDir, layout);

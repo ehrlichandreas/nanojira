@@ -2567,6 +2567,94 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      TSK-053..055 and EPIC-014 are done. v3.8 is tagged and installed
      with tools/release-local.sh.
 
+176. **v3.9 scope: reparent and done with open boxes** (2026-10-09). Both
+     items come from outside-team feedback and were reproduced live on
+     3.8.0.
+     A. **`nj set --parent=<id>`** (team-b TSK-014). Moves an element
+        under another parent. The id, the body, the notes and the claim
+        log are kept. The type does not change: a task moves under another
+        epic, a subtask under another task. A subtask↔task conversion would
+        change the id prefix and is out of scope. The new parent must
+        exist, be live (not archived) and be of the right type. Otherwise
+        `invalid_value`. Epics take no `--parent`. `--input` accepts
+        `parent` in `set`. `nj undo` restores the old parent. If the layout
+        places files by parent, the file moves with it. The Oracle
+        specifies the exact behaviour.
+     B. **Warning `done:open_acceptance`** (team-c TSK-001). A live
+        element in a final status that still has an unticked `- [ ]` line
+        under `## Acceptance Criteria` gets a doctor warning, and `set` to a
+        final status reports the same warning in its result. It does not
+        block, and `problems.ignore` can silence it, as with
+        `done:no_acceptance` (D163/D167). The `--json` result names the
+        count (e.g. "1 of 3 unticked").
+     Process as usual: Oracle spec + AC (red), Implementer, Verifier, Lead
+     acceptance.
+
+177. **D176 corrections before implementation** (2026-10-09).
+     1. **There is no `nj undo` command.** D176's "nj undo restores the old
+        parent" was a Lead error, and so was "undo restores the claim" in
+        the answer note on team-b TSK-013. `undoRelease` is only the
+        internal rollback of a failed `set`. Ruling: there is no undo
+        criterion. Instead, `nj set --parent=<old>` moves the element back
+        and restores the previous state (same file location, same
+        frontmatter apart from `updated`). A correction note goes to
+        TSK-013.
+     2. **The error codes for `set --parent` mirror `new --parent`.** No
+        uniform `invalid_value`: agents already handle the codes `new`
+        uses for the same conditions. Missing parent → `not_found`, wrong
+        parent type → `invalid_target`, archived parent →
+        `refused:parent_archived`, `--parent` on an epic →
+        `invalid_value` (as `new` does). Nothing is written in any of
+        these cases. The Oracle adjusts § 9 and AC-53.
+
+178. **Releases ship `nj.cjs`, with `nj` as a symlink to it** (2026-10-09,
+     from a user question). The bundle is CommonJS (`format: 'cjs'`). For
+     a file without an extension, Node picks the module type from the
+     nearest package.json. Checked live on Node 24: `dist/nj` under a
+     `"type": "module"` scope fails with `require is not defined in ES
+     module scope`. That is why Team B stores it as `nj.cjs`. An ESM
+     bundle would only reverse the problem. Ruling: from v3.9,
+     tools/release-local.sh installs `nj.cjs` and `nj-mcp.cjs` plus the
+     symlinks `nj -> nj.cjs` and `nj-mcp -> nj-mcp.cjs`. Node takes the
+     module type from the target's extension, so `current/nj` works under
+     any package scope (tested live). nj-mcp finds `nj` next to itself as
+     before. `dist/` in the repo stays as it is. Releases already
+     installed are immutable and stay unchanged.
+
+179. **No symlinks in releases: wrapper scripts instead (replaces D178's
+     symlinks)** (2026-10-09, user ruling). A release directory holds:
+     - `nj.cjs` and `nj-mcp.cjs`, the CommonJS bundles (D178's reason
+       stands);
+     - `nj` and `nj-mcp`, POSIX sh wrappers:
+       `exec node "$(dirname "$0")/nj.cjs" "$@"`;
+     - `nj.cmd` and `nj-mcp.cmd` for Windows cmd/PowerShell:
+       `@node "%~dp0nj.cjs" %*`.
+     **`current` becomes a real directory of wrappers** instead of a
+     symlink. It holds the same four names, and each one calls into
+     `../<version>/`. A release rewrites each file via a temp file plus an
+     atomic rename. `current/nj` keeps its path, so the teams change
+     nothing.
+     **nj-mcp finds its sibling by its own extension.** If it runs as
+     `nj-mcp.cjs`, it spawns `nj.cjs` next to itself, otherwise `nj`
+     (dist/). A shell wrapper is never fed to `node`. This is the only code
+     change; the Oracle adds an AC leg (nj-mcp.cjs next to an sh-wrapper
+     `nj` must still answer a tool call).
+
+180. **v3.9 accepted** (2026-10-09). The Verifier passed the main check
+     (docs/verification/v3-9.md) and the final delta (§ 11): set --parent
+     incl. whole-folder moves and the compare-before-write guard,
+     done:open_acceptance with exact counts, D179 release wrappers live
+     under a `"type":"module"` scope incl. an nj-mcp tool call through the
+     wrapper chain, and the article fixes. Mutation tests bite. Gate:
+     1055 differing calls = the 540 accepted for v3.8 (22 now carry
+     `parent` in the known-fields hint) + 496 done:open_acceptance + 19
+     pure "a epic" → "an epic" wording changes. The Lead spot-checked
+     AC-32/39/52/53/54 and build:check. Known cosmetic gap, deferred: the
+     --input plan-nesting message still says "a epic cannot have a subtask
+     child" (cmd-new.ts). TSK-056/057 and EPIC-016 are done. v3.9 is
+     tagged and installed with the D179 wrapper layout; the first such
+     install turns `current` from a symlink into a directory.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

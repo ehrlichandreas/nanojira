@@ -22,7 +22,7 @@ const LIST_FIELDS = new Set(['tags', 'depends_on']);
 // written is the role's first configured name (§ 9).
 const SECTION_ROLES: ('description' | 'acceptance')[] = ['description', 'acceptance'];
 const SECTION_FLAGS = ['description', 'description-file', 'acceptance', 'acceptance-file'];
-const SETTABLE_FIELDS = ['title', 'status', 'priority', 'assignee', 'tags', 'depends_on'].concat(SECTION_FLAGS);
+const SETTABLE_FIELDS = ['title', 'parent', 'status', 'priority', 'assignee', 'tags', 'depends_on'].concat(SECTION_FLAGS);
 const NEW_FIELDS = ['type', 'parent', 'title', 'status', 'priority', 'assignee', 'tags', 'depends_on'].concat(SECTION_FLAGS);
 
 // Folder-name roles per element type; `layout.folders` maps each role (and
@@ -95,6 +95,7 @@ const SEVERITY: Record<string, string | null> = {
   'backlog:claims_unignored': 'warning',
   'acceptance:no_checkbox': 'warning',
   'done:no_acceptance': 'warning',
+  'done:open_acceptance': 'warning',
   'config:unknown_key': 'warning',
   'config:unknown_code': 'warning',
 };
