@@ -44,6 +44,9 @@ fs.writeFileSync(p(d, 'tasks/TSK-002.md'), body('Two'));
  * this test distinguishes. */
 fs.utimesSync(p(d, 'tasks/TSK-001.md'), T_A, T_A);
 fs.utimesSync(p(d, 'tasks/TSK-002.md'), T_B, T_B);
+/* the elements came after mkBacklog: refresh the overview (spec v3 § 4) so
+ * the pinned set below does not gain backlog:status_stale (DECISIONS 100) */
+H.writeStatus(d);
 
 const before = H.runJson(['doctor'], { cwd: d });
 /* The complete § 7 set for this fixture, not just the duplicate: both files

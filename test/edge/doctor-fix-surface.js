@@ -137,7 +137,7 @@ function fixJson(name, d, exit) {
  * tombstone. AMBIGUOUS, deliberately not used here: a backfill of ONE missing
  * tombstone (`id:no_tombstone`) is observationally the same as partial
  * tombstone loss (§ 7), and § 8's "reports that the never-reuse guarantee is
- * void" is stated for the missing-`.ids/` case — whether a partial backfill
+ * void" is stated for the missing-`.nanojira/ids/` case — whether a partial backfill
  * must carry that note too is not decided, so it is not asserted. */
 {
   const d = H.mkBacklog({
@@ -190,10 +190,10 @@ function fixJson(name, d, exit) {
  * the never-reuse guarantee is void for those numbers". */
 {
   const d = H.mkBacklog({ label: 'surface-notes-void', files: { 'epics/EPIC-001.md': EPIC }, tombstones: ['EPIC-001'] });
-  fs.rmSync(path.join(d, 'backlog', '.ids'), { recursive: true, force: true });
-  const notes = fixJson('.ids/ lost', d, 0);
-  T.eq('.ids/ lost — exactly one note', notes.length, 1);
-  T.contains('.ids/ lost — the note says the never-reuse guarantee is void (§ 8)',
+  fs.rmSync(path.join(d, 'backlog', H.IDS_REL), { recursive: true, force: true });
+  const notes = fixJson('.nanojira/ids/ lost', d, 0);
+  T.eq('.nanojira/ids/ lost — exactly one note', notes.length, 1);
+  T.contains('.nanojira/ids/ lost — the note says the never-reuse guarantee is void (§ 8)',
     String(notes[0]), 'never-reuse');
 }
 

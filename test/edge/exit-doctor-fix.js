@@ -64,7 +64,7 @@ const EPIC = {
   }, epicBody('E')),
 };
 
-const idsOf = d => H.lsOrEmpty(path.join(d, 'backlog', '.ids'));
+const idsOf = d => H.lsOrEmpty(path.join(d, 'backlog', H.IDS_REL));
 
 /**
  * Drive one fixture through `doctor` → `doctor --fix` → `doctor`.
@@ -89,7 +89,14 @@ function scenario(name, opts) {
   T.sameSet(name + ' — findings before --fix are exactly § 7\'s set',
     H.doctorSet(pre) || ['<no problems array>'], opts.preSet);
 
+  const statusPath = path.join(d, 'backlog', 'STATUS.md');
+  const statusBefore = H.readOrNull(statusPath);
   const fix = H.runJson(['doctor', '--fix'], { cwd: d, env: FIXENV });
+  /* DECISIONS 100: step 9 appears in fixed[] exactly when it changed
+   * STATUS.md's bytes — missing, stale, or made stale by an earlier step's
+   * move or rename. Observable from outside, so the expected count follows
+   * the bytes: before V3-3 they never change and nothing is added. */
+  const statusRegenerated = H.readOrNull(statusPath) !== statusBefore;
 
   /* (a) § 14's rule itself. */
   T.exit(name + ' — doctor --fix exits ' + opts.fixExit, fix, opts.fixExit);
@@ -208,8 +215,16 @@ function scenario(name, opts) {
   T.check(name + ' — the scenario declares its expected fixed[] steps', Array.isArray(opts.fixed),
     'opts.fixed missing');
   const wantFixed = Array.isArray(opts.fixed) ? opts.fixed : [];
-  T.eq(name + ' — fixed[] holds exactly ' + wantFixed.length + ' step(s)',
-    fixed === null ? '<no fixed array>' : fixed.length, wantFixed.length);
+  const wantCount = wantFixed.length + (statusRegenerated ? 1 : 0);
+  T.eq(name + ' — fixed[] holds exactly ' + wantFixed.length + ' step(s), plus step 9 iff STATUS.md changed',
+    fixed === null ? '<no fixed array>' : fixed.length, wantCount);
+  /* one check, whichever way the bytes went, so the count stays constant */
+  T.check(name + ' — fixed[] names STATUS.md exactly when step 9 changed it (D100), and last (step order)',
+    !!fixed && (statusRegenerated
+      ? fixed.length > 0 && String(fixed[fixed.length - 1]).includes('STATUS.md') &&
+        fixed.slice(0, -1).every(e => !String(e).includes('STATUS.md'))
+      : fixed.every(e => !String(e).includes('STATUS.md'))),
+    'STATUS.md changed: ' + statusRegenerated + ', fixed = ' + JSON.stringify(fixed));
   wantFixed.forEach((needles, i) => {
     const entry = fixed && typeof fixed[i] === 'string' ? fixed[i] : '';
     T.check(name + ' — fixed step ' + (i + 1) + ' names ' + needles.join(' + '),
@@ -267,7 +282,7 @@ scenario('id mismatch, target free (error, step 2)', {
    * tombstone) — in that order, exactly as § 14 requires. */
   fixed: [['TSK-001.md', 'TSK-002.md'], ['tombstone']],
   /* AMBIGUOUS (AMBIGUITIES 47): recorded, not derived. A PARTIAL backfill —
-   * one element's tombstone, `.ids/` otherwise intact — is not the case § 8
+   * one element's tombstone, `.nanojira/ids/` otherwise intact — is not the case § 8
    * words the void note for, yet `nj` emits it. The count is pinned as the
    * reading in force so a ruling on 47 is a one-line edit here. */
   notes: [['never-reuse']],
@@ -318,19 +333,19 @@ scenario('wrong type folder (error, step 3)', {
 /* § 14 step 4 on the ERROR half: `backlog:ids_missing`. AC-18 drives the same
  * loss but tolerates `[0, 2]` on the `--fix` call; here the code is the
  * assertion. */
-scenario('.ids/ lost entirely (error, step 4)', {
+scenario('.nanojira/ids/ lost entirely (error, step 4)', {
   fixed: [['tombstone']],
-  /* § 8's case exactly: `.ids/` gone, so deleted IDs' tombstones may be lost. */
+  /* § 8's case exactly: `.nanojira/ids/` gone, so deleted IDs' tombstones may be lost. */
   notes: [['never-reuse']],
   fixture: () => {
     const d = H.mkBacklog({
       label: 'exitfix-idsmissing', files: EPIC, tombstones: ['EPIC-001'],
     });
-    fs.rmSync(path.join(d, 'backlog', '.ids'), { recursive: true, force: true });
+    fs.rmSync(path.join(d, 'backlog', H.IDS_REL), { recursive: true, force: true });
     return d;
   },
   preExit: 2, fixExit: 0,
-  /* AMBIGUOUS: § 8 makes an absent `.ids/` `backlog:ids_missing` (error) and
+  /* AMBIGUOUS: § 8 makes an absent `.nanojira/ids/` `backlog:ids_missing` (error) and
    * separately makes an element without a tombstone `id:no_tombstone`
    * (warning). Both conditions literally hold here; the spec does not say
    * the backlog-level code suppresses the element-level one. Reading used:
@@ -344,7 +359,7 @@ scenario('.ids/ lost entirely (error, step 4)', {
 scenario('one tombstone missing (warning, step 4)', {
   fixed: [['tombstone']],
   /* AMBIGUOUS (AMBIGUITIES 47): recorded, not derived. A PARTIAL backfill —
-   * one element's tombstone, `.ids/` otherwise intact — is not the case § 8
+   * one element's tombstone, `.nanojira/ids/` otherwise intact — is not the case § 8
    * words the void note for, yet `nj` emits it. The count is pinned as the
    * reading in force so a ruling on 47 is a one-line edit here. */
   notes: [['never-reuse']],
@@ -651,7 +666,7 @@ scenario('id mismatch, target occupied (step 2 declines, exit 2)', {
  * `tasks/TSK-005.md` carrying `id: TSK-009`, with no tombstones at all. Both
  * findings are ERRORs (`id:mismatch`, `backlog:ids_missing`) and both are
  * repairable, so the exit is 0 — but the *evidence* is which tombstone
- * exists afterwards. Step 4 before step 2 would leave `.ids/TSK-005`: the
+ * exists afterwards. Step 4 before step 2 would leave `.nanojira/ids/TSK-005`: the
  * wrong number claimed, TSK-009 free for reuse, and § 8's never-reuse
  * guarantee quietly void. The exit code alone cannot see that, which is why
  * it is asserted separately. */
@@ -661,10 +676,10 @@ scenario('tombstone backfill runs after the rename (step 4 after step 2)', {
    * own ordering rule, made observable a second way alongside the `after`
    * assertion below. */
   fixed: [['TSK-005.md', 'TSK-009.md'], ['tombstone']],
-  /* `.ids/` empty = § 8's case. Two types are unclaimed and there is still
+  /* `.nanojira/ids/` empty = § 8's case. Two types are unclaimed and there is still
    * ONE report: § 8 says `--fix` "reports that" the guarantee is void. */
   notes: [['never-reuse']],
-  /* mkBacklog creates `.ids/` empty when no tombstones are given — which is
+  /* mkBacklog creates `.nanojira/ids/` empty when no tombstones are given — which is
    * itself `backlog:ids_missing`, the second (repairable) error here. */
   fixture: () => H.mkBacklog({
     label: 'exitfix-order',
@@ -676,10 +691,10 @@ scenario('tombstone backfill runs after the rename (step 4 after step 2)', {
     }),
   }),
   preExit: 2, fixExit: 0,
-  /* `.ids/` is empty while elements exist (`backlog:ids_missing`, error),
+  /* `.nanojira/ids/` is empty while elements exist (`backlog:ids_missing`, error),
    * TSK-005.md carries TSK-009 (`id:mismatch`, error), and neither element
    * is claimed (`id:no_tombstone` ×2, warning) — same co-occurrence reading
-   * as the `.ids/`-lost scenario above. */
+   * as the `.nanojira/ids/`-lost scenario above. */
   preSet: ['backlog:ids_missing:error', 'id:mismatch:error',
     'id:no_tombstone:warning', 'id:no_tombstone:warning'],
   postSet: [],

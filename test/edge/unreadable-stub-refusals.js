@@ -55,7 +55,10 @@ function fixture(label, stubAt) {
   const stub = p(d, stubAt);
   fs.mkdirSync(path.dirname(stub), { recursive: true });
   fs.symlinkSync(path.join(d, 'this-target-does-not-exist'), stub);
-  fs.writeFileSync(p(d, '.ids/STUB-001'), '');
+  fs.writeFileSync(p(d, H.IDS_REL + '/STUB-001'), '');
+  /* the stub came after mkBacklog: refresh the overview (spec v3 § 4), so the
+   * pinned doctor set below does not gain backlog:status_stale (DECISIONS 100) */
+  H.writeStatus(d);
   return { dir: d, stubRel: stubAt };
 }
 
@@ -92,7 +95,7 @@ for (const scope of SCOPES) {
    * condition the rule keys on, before the refusal proves anything. */
   const doc = H.runJson(['doctor'], { cwd: d });
   /* Two findings, both § 7 conditions literally met: the stub cannot be read
-   * (`file:unreadable`, error) and nothing in `.ids/` claims the id its file
+   * (`file:unreadable`, error) and nothing in `.nanojira/ids/` claims the id its file
    * name implies (`id:no_tombstone`, warning — the fixture's only tombstone
    * is STUB-001).
    *

@@ -8,6 +8,7 @@ import { checkFlags } from '../core/args.ts';
 import { context, resolveTarget, requireWritable, requireActive } from '../core/context.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, writeFeedback, emitWriteResult } from '../core/output.ts';
+import { refreshStatus } from '../core/status.ts';
 import { nowIso, guardedWrite, renderElement } from '../core/store.ts';
 
 function cmdNote(flags: Flags, positional: string[]) {
@@ -52,8 +53,9 @@ function cmdNote(flags: Flags, positional: string[]) {
   const overrides = new Map([['updated', ts]]);
   guardedWrite(el, renderElement(el, overrides, body), flags.has('force'), ctx.backlog);
 
-  const fresh = loadElement(el.file, el.folder, ctx.cfg);
-  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.backlog);
+  const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
+  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+  refreshStatus(ctx.backlog, ctx.cfg, ctx);
   if (json) emitWriteResult(true, fresh, ['body']);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} note added`);
   return 0;

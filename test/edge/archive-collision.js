@@ -150,7 +150,7 @@ function elementSums(d) {
   }
   for (const id of IDS) {
     T.check('tombstone ' + id + ' remains (§ 8)',
-      H.readOrNull(p(d, '.ids/' + id)) !== null, '.ids/' + id + ' is gone');
+      H.readOrNull(p(d, H.IDS_REL + '/' + id)) !== null, H.IDS_REL + '/' + id + ' is gone');
   }
 
   /* § 11: "The tool adds `archived: <ISO-8601 UTC>` to the frontmatter of every

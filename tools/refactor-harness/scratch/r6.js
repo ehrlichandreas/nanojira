@@ -18,12 +18,12 @@ const FM = (extra) => '---\nid: TSK-001\ntype: task\nparent: EPIC-001\ntitle: T\
 const EPIC = '---\nid: EPIC-001\ntype: epic\ntitle: E\nstatus: todo\ncreated: ' + NOW + '\nupdated: ' + NOW + '\n---\n\n# E\n\n## Description\nD\n';
 function mk(label, body, cfg, extraFiles) {
   const d = fs.mkdtempSync(path.join(SCRATCH_BASE, 'r6-' + label + '-')); const bl = path.join(d, 'backlog');
-  for (const s of ['epics','tasks','subtasks','archive','.ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
-  fs.writeFileSync(path.join(bl, '.nanojira.json'), cfg || CFG());
+  for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
+  fs.writeFileSync(path.join(bl, '.nanojira/config.json'), cfg || CFG());
   fs.writeFileSync(path.join(bl, 'epics', 'EPIC-001.md'), EPIC);
   if (body !== null) fs.writeFileSync(path.join(bl, 'tasks', 'TSK-001.md'), Buffer.isBuffer(body) ? body : FM() + body);
   for (const [rel, c] of Object.entries(extraFiles || {})) fs.writeFileSync(path.join(bl, rel), c);
-  for (const t of ['EPIC-001','TSK-001']) fs.writeFileSync(path.join(bl, '.ids', t), '');
+  for (const t of ['EPIC-001','TSK-001']) fs.writeFileSync(path.join(bl, '.nanojira/ids', t), '');
   return d;
 }
 function run(args, cwd, opts) { const o = opts || {}; const r = spawnSync(process.execPath, [NJ].concat(args), { cwd, input: o.input, env: Object.assign({}, process.env, { NJ_NOW: o.now || LATER }, o.env || {}), encoding: 'utf8', timeout: 20000 }); let json = null; try { json = JSON.parse(r.stdout); } catch {} return { status: r.status, out: r.stdout, err: r.stderr, json }; }
@@ -136,9 +136,9 @@ console.log('\n[5] stdin + --json, file sources, mutual exclusion');
   const xo = run(['set','--id=TSK-001','--description-file=-','--acceptance-file=' + path.join(d,'nope'),'--json'], d, { input: 'x' });
   ok('stdin for description + missing acceptance file → not_found, nothing written', xo.status === 1 && xo.json.error === 'not_found' && sha(fs.readFileSync(task(d))) === h);
   // new: rejection burns no tombstone, even with stdin
-  const ids = fs.readdirSync(path.join(d,'backlog','.ids')).sort().join();
+  const ids = fs.readdirSync(path.join(d,'backlog','.nanojira/ids')).sort().join();
   const xn = run(['new','--type=task','--parent=EPIC-001','--title=N','--description-file=-','--acceptance-file=-','--json'], d, { input: 'x' });
-  ok('new with - for both roles → invalid_value, no tombstone, no file', xn.json.error === 'invalid_value' && fs.readdirSync(path.join(d,'backlog','.ids')).sort().join() === ids && fs.readdirSync(path.join(d,'backlog','tasks')).length === 1);
+  ok('new with - for both roles → invalid_value, no tombstone, no file', xn.json.error === 'invalid_value' && fs.readdirSync(path.join(d,'backlog','.nanojira/ids')).sort().join() === ids && fs.readdirSync(path.join(d,'backlog','tasks')).length === 1);
   const xn2 = run(['new','--type=task','--parent=NOPE','--title=N','--description-file=-','--json'], d, { input: 'x' });
   ok('new: parent not_found reported before stdin matters', xn2.json.error === 'not_found');
   const xdup = run(['set','--id=TSK-001','--description=one','--description=two','--json'], d);
@@ -172,7 +172,7 @@ console.log('\n[6] changed ordering + composition with --title');
 console.log('\n[7] write refusals still apply to section writes');
 {
   const d = mk('refuse', '# T\n\n## Description\nold\n\n## Acceptance Criteria\n- [ ] x\n', null, { 'archive/TSK-009.md': FM().replace('TSK-001','TSK-009').replace(/status: todo/, 'status: done').replace('---\n$', 'archived: ' + NOW + '\n---\n') + '\n# A\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n', 'tasks/TSK-002.md': FM().replace('TSK-001','TSK-002').replace('title: T', 'title: B\nbroken line') + '\n# B\n' });
-  fs.writeFileSync(path.join(d,'backlog','.ids','TSK-009'), ''); fs.writeFileSync(path.join(d,'backlog','.ids','TSK-002'), '');
+  fs.writeFileSync(path.join(d,'backlog','.nanojira/ids','TSK-009'), ''); fs.writeFileSync(path.join(d,'backlog','.nanojira/ids','TSK-002'), '');
   ok('archived → refused:archived', run(['set','--id=TSK-009','--description=x','--json'], d).json.error === 'refused:archived');
   ok('frontmatter-unreadable → refused:unreadable', run(['set','--id=TSK-002','--description=x','--json'], d).json.error === 'refused:unreadable');
   fs.writeFileSync(path.join(d,'backlog','tasks','TSK-001-copy.md'), FM() + '# T\n');

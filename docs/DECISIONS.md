@@ -1065,6 +1065,272 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     - *F6* (a repeated flag: the last wins) and *F7* (a relative `--backlog`
       resolves against the physical cwd) are v2 behaviour, kept, not pinned.
 
+94. **The hierarchy archive merge is recursive** (implementer, accepted).
+    DECISIONS 90 read literally still dead-ends one level down: archive
+    SUB-007 → `archive/EPIC-001/TSK-003/SUB-007.md`; archiving TSK-003 then
+    finds its target folder holding an element file. The merge descends:
+    existing folders are merged into, only a file at a file's target path
+    (or a file/folder mismatch) is a conflict, all targets are verified
+    before the first move, nothing is ever overwritten. `--fix` step 3 uses
+    the same planner. § 11 updated.
+
+95. **V3-3/V3-4 pre-flight points B18–B23 ruled by the lead:**
+
+    - *B18 `STATUS.md` for problem elements* — pinned in § 4: listed under
+      the status `list` shows (derived `statuses[0]` for `missing:status`;
+      `?` for an unreadable stub); no title → `- [ID](path)`; both
+      `duplicate_id` files, by path; no escaping needed (the link text is the
+      ID).
+    - *B19* A failed overview leaves the `--json` result unchanged (stderr
+      warning only); `doctor --fix` keeps the exit code of its findings.
+    - *B20* Write commands get a perf measurement with V3-3 (TSK-027 already
+      requires it); the Toolsmith adds it to `tools/perf.js`.
+    - *B21* The ambiguous step 0 (v2 and v3 places both present) moves
+      nothing, and by § 14's DECISIONS 93 rule no later step writes either;
+      `backlog:legacy_layout` stays an error, exit 2.
+    - *B22* § 8 now writes `ids/` for `.nanojira/ids/`; `.ids/` always means
+      the legacy folder.
+    - *B23* § 12 says three injection points, as it lists.
+
+96. **V3-1 delta `1e85263` verified** (docs/verification/v3-1.md, 893caba):
+    pass with findings; replay identical to `d517837`'s 19 named diffs; the
+    FIFO `.njrc` that hung `d517837` is refused (F10). The remaining nits go
+    to TSK-029: a self-linking `.njrc` (ELOOP) is reported with its own
+    reason, not as "dangling"; a BOM counts only at the very start; a lone
+    `\r` is `invalid_njrc` (§ 4 amended); an unsearchable ancestor of the
+    cwd is `io_error` (F4 class). AC-21 covers the D90 cases since `62be2a6`
+    (the Oracle, 499 checks); TSK-029's suite adds only the D96 nits.
+
+97. **AC-22 ambiguities 56, 60–62 ruled by the lead:**
+
+    - *56* `layout.folders` may hold any subset of its four keys; a missing
+      key is its default, and distinctness is checked on the effective
+      names. "Exactly the four keys" in § 5 meant "no other keys" — reworded.
+    - *60* `doctor --fix` step 3 creates missing target folders (§ 14).
+    - *61* "Every element reports its old place" means every element whose
+      place changes; an element already where the new layout puts it
+      carries no code.
+    - *62* `set`/`note` write a misplaced file where it lies, in every
+      group; only `archive`, `doctor --fix` and the user move files.
+    - Step 3's "target not free" is testable without a duplicate id: a
+      directory, or a non-`.md` file, at the target path.
+
+98. **Hardening ambiguities 63–66 ruled** (Oracle-B, test/AMBIGUITIES.md):
+    *63* a symlinked `.njrc` passes only if link **and** target are owned by
+    the user or root — the planter may control either. *65* ownership is
+    checked first, before the file is read; a foreign file is never parsed.
+    *64* and *66*: the suite's readings are accepted as written (deleted cwd:
+    one line, `io_error`, path not required; `ENOTDIR`: the line names the
+    failing component or the target). § 4 amended for 63/65.
+    *67* A lone `\r` as the file's last byte is invalid too — it is not
+    followed by `\n`. *68* Its line number is the line holding the `\r`,
+    lines counted by `\n`.
+    *F3 and notes:* `--fix` on an invalid configuration adds **no** note;
+    `config:invalid` already says why nothing was written, and
+    `edge/exit-doctor-fix.js` pins `notes[]` empty — that contract holds.
+
+99. **The `STATUS.md` warning reads `Warning: STATUS.md not updated
+    (<reason>)`, on stderr** — the stderr counterpart of DECISIONS 88's
+    `Error: ` prefix; § 4 now spells it so. The existing `⚠` hints on
+    stdout (rm dependents, incompleteness) are write feedback, a different
+    channel, and stay as they are.
+
+100. **V3-3 test batch and `STATUS.md` edge rules, ruled by the lead** (the
+     Oracle's AC-23 impact list, 4956aea):
+
+     - *Batch strategy.* The shared harness gets one renderer, and
+       `H.mkBacklog` writes a fresh `STATUS.md` into every hand-built
+       fixture; whole-backlog snapshots leave `STATUS.md` out of the
+       compared set only where the suite is about something else. Since
+       v2 and V3-2 never read a top-level `STATUS.md`, the batch is neutral
+       for them and lands **before** V3-3, so V3-3 meets an adapted suite.
+     - *No overview check while `config:invalid` holds* — without a valid
+       status list there is nothing to render; `--fix` writes nothing then
+       (DECISIONS 93), `STATUS.md` included.
+     - *`doctor --fix` reports the regeneration in `fixed[]` exactly when
+       step 9 changes the file's bytes* — missing, stale before `--fix`, or
+       made stale by an earlier step's move or rename. `fixed[]` lists what
+       `--fix` wrote; a regeneration that changes nothing is not a repair
+       and leaves the file untouched (§ 14).
+     - *Concurrency.* A racing writer may leave `STATUS.md` one write behind
+       (§ 4); after the AC-7 run `doctor` must have no **error** finding, and
+       `backlog:status_stale` is the one tolerated warning.
+     - *70* An unknown `priority` value sorts with the weight of the default
+       priority — measured v2 behaviour, kept; the same order applies in
+       `STATUS.md`.
+     - The closed code table of `ac-13` gains every v3 code
+       (`layout:misplaced`, `backlog:unreadable_dir`,
+       `backlog:legacy_layout`, `backlog:status_stale`).
+     - Shared `.md` files under `test/` are committed right after each edit;
+       two authors never leave uncommitted edits in the same file.
+
+101. **AC-24 ambiguities 71–74 ruled** (Oracle-B, a57f98f):
+     *71* a v2 backlog reached through any source — search, `--backlog`,
+     `NJ_BACKLOG`, `.njrc` — is `legacy_layout`: the backlog is there, only
+     old. *72* `init` at a v2 backlog is `exists`, like any occupied target.
+     *73* an empty `.nanojira/` is not "both present"; the ambiguity needs a
+     v3 configuration or v3 tombstones. *74* an absent `.gitignore` is
+     "otherwise": not created, a note says so; `doctor` on a legacy backlog
+     runs every other check against the v2 places. The verbatim-line match
+     ignores a trailing `\r`, and the replacement keeps the line's ending.
+
+102. **The backlog README and placement under an invalid config** (the
+     Oracle, while writing docs/GUIDE.md and docs/MIGRATION-v3.md, abd9b35):
+
+     - *README.md written by `init`* is not spec-pinned, but the corpus
+       hashes it. Its text changes to the v3 wording with V3-4, as one named
+       replay class of V3-4's re-record. The spec keeps pinning facts, not
+       bytes. § 14 step 0 replaces a migrated backlog's `README.md` only when
+       it is byte-identical to the v2 `init` text; otherwise it is left alone
+       with a note. The draft text is in docs/MIGRATION-v3.md's appendix.
+     - *No placement judgement while `config:invalid` holds.* With a
+       forbidden folder name, `doctor` reported `config:invalid` *and* a
+       `type:folder` for every file, judged against the default folders —
+       noise that points at the wrong repair. Suppressed, like
+       `backlog:status_stale` in DECISIONS 100 (§ 5 amended). A V3-2
+       follow-up, tested before the fix.
+
+103. **`STATUS.md` refresh: a full scan, not a full re-read** (implementer,
+     V3-3). Measured on 10k files in Low Power Mode: readdir 18 ms, stat 30
+     ms, reading every file 245 ms; the literal re-read made every write
+     +70 % (new 441 → 712 ms). Ruled: after a write, the overview is rendered
+     from a scan that lists every folder and stats every file, and re-reads
+     only files whose `ctime` is newer than the command's load start minus
+     2 s; every other file reuses the element the command already loaded.
+     `ctime` cannot be set by `utimes` and is bumped by every write, rename
+     and racing writer, so the result equals a full re-read — racing writers'
+     changes are still picked up — at about one-sixth of the cost. It stays
+     "one full scan per write" in the sense of § 4. The write cost is
+     measured and written into § 13 with V3-3; the A/B gate for V3-3 is
+     reads-only (`--gate=reads`), writes are reported.
+
+104. **v3.1 proposal ambiguities 75–81 ruled** (Oracle-B, AC-25/AC-26 at
+     625b373; to be folded into docs/proposals/v3.1.md):
+
+     - *75 Unarchive after a layout change: the current layout wins.* The
+       subtree is gathered from the archive by its `id`/`parent` chain,
+       wherever its files lie there, and placed by the current layout. The
+       archive's shape only decides whether one folder `rename` is possible;
+       otherwise files move one by one. `refused:misplaced` is kept for a
+       foreign element inside the subtree's archived folder (moving the folder
+       would carry it). *Amended (82):* a member of the subtree lying
+       outside the archive (the `archive:split` state) is no refusal in any
+       group — § 11a leaves non-archived descendants untouched, and
+       unarchiving the parent heals the split; under `hierarchy` the parent's
+       folder merges into the existing active one (DECISIONS 90/94).
+     - *76 `NJ_AUTHOR` whitespace:* only spaces and tabs are trimmed (as in
+       TSK-029's `.njrc` trim); any `\n` or `\r` left, trailing included, is
+       multi-line → `invalid_env`. Unicode spaces are literal.
+     - *77 Precedence:* argument parsing (`unknown_field`, `missing_argument`,
+       `missing_value`) → the acting name (`invalid_env` / `invalid_value`)
+       → target resolution (`not_found`, `duplicate_id`) → refusals.
+     - *78 `before-compare` on a multi-file unarchive* fires once per file
+       write, in top-down order. On abort, the earlier files carry their
+       in-place write and nothing has moved — the crashed-unarchive state of
+       U6, completed by a second `unarchive`.
+     - *79* Result `ids` are top-down in pre-order (depth-first, as `tree`
+       prints: EPIC-001, TSK-001, SUB-001, TSK-002); siblings by id
+       ascending (83).
+     - *80* `refused:misplaced` for an unresolvable chain applies under
+       `hierarchy` only; under `type`/`flat` placement does not depend on the
+       chain.
+     - *81 Refusal precedence:* `refused:unreadable` → `refused:not_archived`
+       → `refused:parent_archived` → `refused:misplaced` → `exists` (target
+       verification last, as in `archive`).
+
+105. **V3-2 regressions found by Verifier-B, ruled before V3-3 builds on
+     them** (interim report on `76db3b2`):
+
+     - *A configured folder that is a directory symlink is followed.*
+       `tasks -> ../shared` was silently dropped: `list` showed 0 tasks,
+       `doctor` was clean, and `nj new` wrote an element that then vanished
+       from `list` — data a user cannot see is the worst failure of § 4. v2
+       followed such links. Ruled: the configured layout folders at the
+       backlog's top level (`epics`, `tasks`, `subtasks`, `archive`) are
+       followed when they are symlinks to directories, as in v2; DECISIONS 91
+       B11's "never follow a directory symlink" holds for every directory
+       *below* them and for any other directory. A symlinked layout folder
+       that points at nothing is `backlog:unreadable_dir`.
+     - *Folder-name matching is case-insensitive.* On APFS,
+       `folders.tasks: "Tasks"` (or a v2 backlog whose folder is `Tasks/` on
+       disk) gave every task a permanent `type:folder` that `--fix` could not
+       clear, and an `Archive/` folder un-archived its elements. DECISIONS 91
+       B14 already makes configured names distinct case-insensitively, so
+       matching a path segment against a configured folder name — for
+       placement and for archived-ness — is case-insensitive and
+       unambiguous. A move whose target is the same file as its source
+       (same device and inode) is no move: the element is in place.
+     - *`doctor --fix` must never crash in step 3.* A misplaced ID folder
+       holding another misplaced ID folder of the same type ended in
+       `internal_error` with a stack mid-run. The planner must handle
+       nested misplaced folders; a case it cannot plan is reported and left
+       alone.
+
+     All three are a V3-2 follow-up, tested before the fix, done right after
+     V3-3 together with DECISIONS 102.
+
+106. **Remaining V3-2 and TSK-029 findings, ruled together to finish v3**
+     (docs/verification/v3-2.md F4–F10, docs/verification/tsk-029.md T1–T4;
+     the user asked to finish quickly, 2026-09-29):
+
+     - *F4* `archive`, `rm` and `set --status=done` refuse with the new code
+       `refused:unreadable_dir` (additive) while an unreadable directory lies
+       inside the folder they move, delete or judge. `list` and bare `nj`
+       count backlog-level errors in their summary line.
+     - *F5* `doctor --fix` steps 1, 4 and 5 write only files whose name has
+       the § 8 ID shape; any other `*.md` is reported, never written, and
+       burns no tombstone.
+     - *F6* Under `hierarchy`, step 3 does not move a folder whose subtree
+       disagrees on `archived:`; it notes it and moves nothing.
+     - *TSK-029 T1* The `.njrc` ownership check and the read use one file
+       descriptor: `lstat` for the link owner, then `open(O_RDONLY|O_NONBLOCK)`,
+       `fstat` for owner and regular-file, read from that descriptor — no
+       swap window, no FIFO hang.
+     - *TSK-029 T2* The move planner reports a file/folder mismatch at an
+       archive target as `exists` before the first write, so no file is left
+       stamped. The top-level net maps a system error to `io_error` only for
+       filesystem calls on a named target; anything else stays
+       `internal_error`.
+     - *T3* Non-printable characters in `.njrc`-derived paths and keys are
+       shown escaped in messages. *T4* The ownership error adds "use
+       --backlog or NJ_BACKLOG, or change the owner".
+     - *F7–F10* (stack traces in move paths, scan hazards, `new` overwriting a
+       hand-written `.MD`): fixed where the same code is touched; F10 —
+       `new` never overwrites an existing file, case-insensitively.
+
+107. **V3-3 accepted** (docs/verification/v3-3.md, bc062c0: pass with
+     findings). All 1892 replay diffs against `oracle-frozen-8` fall into the
+     four named classes (STATUS.md appears, `init` prose names it,
+     `status_stale` on fixtures without one, `fixed[]` regeneration);
+     nothing else differs. *Gate rule for a behaviour-changing step (F1):*
+     the frozen suites that pinned the old behaviour are red by
+     construction, so `gate.js` exit 8 is expected; conformance is judged
+     from the classified byte diff plus the step's own `test/` run, and the
+     commit message states the gate's exit code and names the red frozen
+     suites. *Baseline:* no separate c4 for V3-3 — the V3-2/TSK-029
+     follow-up (DECISIONS 102/105/106) changes behaviour again right after;
+     c4-baseline is recorded once, on the accepted follow-up. F2 (the
+     case-insensitivity bug now visible in `STATUS.md`) is fixed by that
+     follow-up.
+
+108. **V3-4 accepted** (docs/verification/v3-4.md, 4f025ae: pass). The
+     `.njrc` swap race (TSK-029 T1) is closed: 0 bypasses in 800 runs, 0
+     FIFO hangs in 200. All 2987 replay diffs against `oracle-frozen-8`
+     trace to the v2-era corpus tooling (fixtures writing v2 backlogs,
+     `record.js` snapshotting v2 paths, 27 wording diffs); none hides a
+     product diff. The project's own backlog migrated with zero element
+     files touched and the tombstones byte-identical.
+     *G2, fixed before c4:* a crash after step 0's renames but before its
+     `.gitignore`/README fix-ups left them undone forever, because step 0
+     only runs on a legacy backlog. The `.gitignore` and README fix-ups
+     now run on every `--fix` (both are no-ops when nothing matches).
+     *G1, accepted as a known gap:* a crash between the two renames leaves
+     a stray `.ids/` with the original tombstones; harmless (it only
+     doubles never-reuse), not cleaned up.
+     *Not testable black-box, deferred:* a deterministic hook for the
+     `.njrc` swap race; the suite's timing-based leg rarely lands a hit
+     when `nj` runs under a Node parent.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

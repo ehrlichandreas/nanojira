@@ -132,7 +132,7 @@ function stubbed(label, withStub) {
      * `edge/unreadable-stub-refusals.js` uses it: a chmod fixture stops
      * testing anything when the suite runs as root. */
     fs.symlinkSync(path.join(d, 'no-such-target'), p(d, 'tasks/TSK-003.md'));
-    fs.writeFileSync(p(d, '.ids/TSK-003'), '');
+    fs.writeFileSync(p(d, H.IDS_REL + '/TSK-003'), '');
   }
   return d;
 }
@@ -232,7 +232,7 @@ function badConfig(label) {
 /* 3. Discovery runs before anything it would enable (§ 4)             */
 /* ================================================================== */
 
-/* § 4: "If a `backlog/` exists but `.nanojira.json` is missing, the error
+/* § 4: "If a `backlog/` exists but `.nanojira/config.json` is missing, the error
  * says exactly that and points at `nj doctor` (which tolerates the missing
  * file and reports `config:invalid`) — never a plain 'no backlog found'."
  *

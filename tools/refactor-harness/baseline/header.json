@@ -1,10 +1,10 @@
 {
-  "njSha256": "e445981e4d25fbea965882d29d63b625ac2447913e623e78fb9bf9c9d8f9a838",
-  "njPath": "../../../../../../../tmp/c2-dist-nj",
-  "node": "v26.7.0",
+  "njSha256": "86a0cb9640b4836edebfcabc32a86c43e3d3b617ae14071263327abcd4fe9c1d",
+  "njPath": "dist/nj",
+  "node": "v24.21.0",
   "platform": "darwin-arm64",
-  "recordedAt": "2026-09-23T21:30:08.450Z",
-  "calls": 3454,
+  "recordedAt": "2026-10-03T00:41:45.017Z",
+  "calls": 4829,
   "parts": [
     {
       "name": "fixtures",
@@ -13,8 +13,8 @@
     },
     {
       "name": "oracle",
-      "calls": 1341,
-      "detail": "passed 64/64, failed 0, cannot run 0"
+      "calls": 2716,
+      "detail": "passed 70/72, failed 0, cannot run 2"
     },
     {
       "name": "scratch",
@@ -43,6 +43,10 @@
     "ac/ac-18-tombstone-integrity.js",
     "ac/ac-19-doctor-axis.js",
     "ac/ac-20-section-writes.js",
+    "ac/ac-21-backlog-location.js",
+    "ac/ac-22-layout.js",
+    "ac/ac-23-status-overview.js",
+    "ac/ac-24-legacy-migration.js",
     "fault/det-fence-heading.js",
     "fault/det-id-retry.js",
     "fault/fault-hook-json.js",
@@ -55,6 +59,7 @@
     "edge/archive-collision.js",
     "edge/archive-hint-dependents.js",
     "edge/archive-rm-byte-identity.js",
+    "edge/coverage-v3-gaps.js",
     "edge/cycle-parent-archived.js",
     "edge/cycle-parent-shapes.js",
     "edge/discovery-message.js",
@@ -73,6 +78,8 @@
     "edge/fix-duplicate-mtimes.js",
     "edge/fix-mtime-snapshot.js",
     "edge/frontmatter-grammar.js",
+    "edge/hardening-njrc-foreign-link.js",
+    "edge/hardening-v3-1.js",
     "edge/norm-tag-assignee-typos.js",
     "edge/norm-title-nfc-nfd.js",
     "edge/order-doctor-problems-severity.js",
@@ -86,9 +93,10 @@
     "edge/stdout-epipe.js",
     "edge/tombstone-partial-loss.js",
     "edge/unreadable-stub-refusals.js",
+    "edge/v3-2-regressions.js",
     "edge/write-encoding.js"
   ],
-  "testDigest": "4ede76894036562dd65ef99789f4a86a18f2864a66dd93d4be382a6d4b44490d",
+  "testDigest": "88bf0b8104751968591516fcdc8ce15e47d4df31dbdd597fae46442cdb90b3a4",
   "testDigestScope": [
     "test/ac/",
     "test/edge/",
@@ -101,9 +109,20 @@
   "cannotRun": [],
   "notRecorded": [
     "fault/det-id-retry.js (preload-instrumented: verdict taken directly, calls not in the corpus)",
+    "edge/hardening-v3-1.js (the shim's own process.cwd() call throws in its deleted/unsearchable-CWD legs, before the real nj runs: verdict taken directly, calls not in the corpus)",
     "edge/stdout-epipe.js (timing-dependent: verdict taken directly, calls not in the corpus)",
-    "verify.js (white-box probe: reads nj's source, verdict taken directly, calls not in the corpus)"
+    "verify.js (white-box probe: reads nj's source, 123/123 checks, verdict taken directly, calls not in the corpus)"
+  ],
+  "verdictOnlySuites": [
+    "ac/ac-15-no-dependencies.js",
+    "edge/hardening-njrc-foreign-link.js",
+    "edge/hardening-v3-1.js",
+    "edge/stdout-epipe.js"
+  ],
+  "expectedGaps": [
+    "ac/ac-15-no-dependencies.js: searches a fixed set of paths relative to its own location for the runtime Node (§ 3: workspace/portable/runtime/<platform>/bin/node), honouring NJ_NODE only as an explicit override; this recording machine's runtime lives somewhere else entirely, none of the fixed paths exist, and NJ_NODE is deliberately left unset here so every suite is driven the same way the suite itself is designed to be run",
+    "edge/hardening-njrc-foreign-link.js: needs root, or a symlink owned by another non-root uid on the scratch filesystem, to prove a foreign-owned .njrc link is refused (DECISIONS 98); a normal user account on this machine has neither (718c230)"
   ],
   "note": "Comparison key excludes per-file raw sha; nsha (normalised content) is normative.",
-  "corpusSha256": "0cd4bfc0474d42fd0b63a4a644424875e7e3424b6fd21f9af49b2bb13e82c1e0"
+  "corpusSha256": "2bca3e7859c03278ae5913636397cd986b4183e98a2f8ebce6fe988c3c46bcbc"
 }

@@ -105,9 +105,9 @@ function archivedParent(label) {
   /* AMBIGUOUS: § 8 claims an ID with a tombstone and § 9 pins no ordering
    * between validation and allocation, so whether a refused `nj new` may burn
    * a fresh tombstone is unpinned. The oracle asserts only that no pre-existing
-   * tombstone was altered — not that `.ids/` gained nothing. */
+   * tombstone was altered — not that `.nanojira/ids/` gained nothing. */
   T.check('no pre-existing tombstone was altered',
-    H.readOrNull(p(d, '.ids/EPIC-001')) !== null, '.ids/EPIC-001 is gone');
+    H.readOrNull(p(d, H.IDS_REL + '/EPIC-001')) !== null, '.nanojira/ids/EPIC-001 is gone');
 }
 
 /* ---- (b) the parent is an unreadable stub ------------------------------- */

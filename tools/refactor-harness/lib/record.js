@@ -108,13 +108,18 @@ function normalize(text, ctx) {
   return s;
 }
 
-/** nj's own discovery rule (§ 4), so the shim snapshots the same backlog. */
+/**
+ * nj's own discovery rule (§ 4), so the shim snapshots the same backlog.
+ * A backlog holds either the v3 config (.nanojira/config.json) or, for a
+ * legacy-layout fixture, the v2 one (.nanojira.json) — either counts.
+ */
 function findBacklog(cwd, env) {
   if (env && env.NJ_BACKLOG) return env.NJ_BACKLOG;
   let dir = cwd;
   for (;;) {
-    if (fs.existsSync(path.join(dir, 'backlog', '.nanojira.json'))) {
-      return path.join(dir, 'backlog');
+    const b = path.join(dir, 'backlog');
+    if (fs.existsSync(path.join(b, '.nanojira', 'config.json')) || fs.existsSync(path.join(b, '.nanojira.json'))) {
+      return b;
     }
     const up = path.dirname(dir);
     if (up === dir) return null;
@@ -169,7 +174,10 @@ function snapshotBacklog(backlog, ctx) {
     files[f.rel] = { sha: raw, nsha };
   }
   let ids = [];
-  try { ids = fs.readdirSync(path.join(backlog, '.ids')).sort(); } catch { ids = null; }
+  const idsDir = fs.existsSync(path.join(backlog, '.nanojira.json'))
+    ? path.join(backlog, '.ids')
+    : path.join(backlog, '.nanojira', 'ids');
+  try { ids = fs.readdirSync(idsDir).sort(); } catch { ids = null; }
   return { files, ids, stray };
 }
 

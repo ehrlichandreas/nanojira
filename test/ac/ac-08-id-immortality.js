@@ -5,7 +5,7 @@
  *  is 51 (or the next free number above every tombstone)."
  *
  * The normative part is the parenthesis: the allocator's start value is the
- * highest number across .ids/ and all element files (active and archive), and
+ * highest number across .nanojira/ids/ and all element files (active and archive), and
  * O_CREAT|O_EXCL does the claiming. The test therefore asserts the ID is above
  * every tombstone rather than pinning the literal 51 — but it also pins 51,
  * because in this setup that is what the rule yields.
@@ -49,7 +49,7 @@ T.eq('40 task files remain',
   String(H.lsOrEmpty(tasksDir).filter(f => f.endsWith('.md')).length), '40');
 
 /* The 10 deleted IDs must survive as tombstones — that is the whole point. */
-const idsDir = path.join(d, 'backlog', '.ids');
+const idsDir = path.join(d, 'backlog', H.IDS_REL);
 const tombstones = H.lsOrEmpty(idsDir);
 for (let i = 41; i <= 50; i++) {
   const id = 'TSK-' + String(i).padStart(3, '0');
@@ -83,7 +83,7 @@ const newId = active[0] ? active[0].replace('.md', '') : '(none)';
 T.eq('new ID is TSK-051', newId, 'TSK-051');
 
 /* The allocation under test claims its own tombstone, so that tombstone is in
- * .ids/ by the time we look. Counting it would make `newNum > highest` a
+ * .nanojira/ids/ by the time we look. Counting it would make `newNum > highest` a
  * comparison of the ID with itself — the claim is that the allocator started
  * above every tombstone that existed *before* this allocation. */
 const priorTombstones = H.lsOrEmpty(idsDir)

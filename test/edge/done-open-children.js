@@ -109,7 +109,7 @@ const epicPath = d => path.join(d, 'backlog', 'epics', 'EPIC-001.md');
     status: 'todo', depends_on: '[EPIC-001]',
     created: H.FIXED_NOW, updated: H.FIXED_NOW,
   }, '# Depends on an open parent\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n'));
-  fs.writeFileSync(path.join(d, 'backlog', '.ids', 'TSK-003'), '');
+  fs.writeFileSync(path.join(d, 'backlog', H.IDS_REL, 'TSK-003'), '');
 
   const list = H.runJson(['list', '--ready'], { cwd: d });
   const ready = ((list.json && list.json.entries) || []).map(e => e.id);

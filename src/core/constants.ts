@@ -10,7 +10,6 @@ import type { Config } from './types.ts';
 
 const TYPE_PREFIX: Record<string, string> = { epic: 'EPIC', task: 'TSK', subtask: 'SUB' };
 const PREFIX_TYPE: Record<string, string> = { EPIC: 'epic', TSK: 'task', SUB: 'subtask' };
-const TYPE_DIR: Record<string, string> = { epic: 'epics', task: 'tasks', subtask: 'subtasks' };
 const TYPES = ['epic', 'task', 'subtask'];
 const PARENT_TYPE: Record<string, string> = { task: 'epic', subtask: 'task' };
 const PRIORITIES = ['low', 'normal', 'high', 'urgent'];
@@ -26,10 +25,32 @@ const SECTION_FLAGS = ['description', 'description-file', 'acceptance', 'accepta
 const SETTABLE_FIELDS = ['title', 'status', 'priority', 'assignee', 'tags', 'depends_on'].concat(SECTION_FLAGS);
 const NEW_FIELDS = ['type', 'parent', 'title', 'status', 'priority', 'assignee', 'tags', 'depends_on'].concat(SECTION_FLAGS);
 
+// Folder-name roles per element type; `layout.folders` maps each role (and
+// `archive`) to the name actually used (§ 5).
+const TYPE_FOLDER_ROLE: Record<string, 'epics' | 'tasks' | 'subtasks'> = { epic: 'epics', task: 'tasks', subtask: 'subtasks' };
+const FOLDER_ROLES: ('epics' | 'tasks' | 'subtasks' | 'archive')[] = ['epics', 'tasks', 'subtasks', 'archive'];
+const GROUPS = ['type', 'hierarchy', 'flat'];
+
+// The v3 bookkeeping lives in one hidden folder; the v2 (legacy) places are
+// at the backlog's top level. `.ids` always means the legacy folder; the v3
+// one is `.nanojira/ids` (§ 4, § 8, DECISIONS 95 B22).
+const V3_DIR_REL = '.nanojira';
+const V3_CONFIG_REL = '.nanojira/config.json';
+const V3_IDS_REL = '.nanojira/ids';
+const V3_INDEX_REL = '.nanojira/index.json';
+const LEGACY_CONFIG_REL = '.nanojira.json';
+const LEGACY_IDS_REL = '.ids';
+const LEGACY_INDEX_REL = '.nanojira-index.json';
+
 const DEFAULT_CONFIG: Config = {
   schema: 1,
   statuses: ['todo', 'doing', 'blocked', 'review', 'done'],
   sections: { description: ['Description'], acceptance: ['Acceptance Criteria'] },
+  layout: {
+    group: 'type',
+    folders: { epics: 'epics', tasks: 'tasks', subtasks: 'subtasks', archive: 'archive' },
+    statusFile: true,
+  },
 };
 
 // Closed problem vocabulary (§ 7). severity null === workflow-only code.
@@ -45,6 +66,7 @@ const SEVERITY: Record<string, string | null> = {
   'id:mismatch': 'error',
   'type:derived': 'warning',
   'type:folder': 'error',
+  'layout:misplaced': 'error',
   'parent:orphaned': 'warning',
   'parent:dangling': 'error',
   'parent:cycle': 'error',
@@ -63,17 +85,18 @@ const SEVERITY: Record<string, string | null> = {
   'id:no_tombstone': 'warning',
   'backlog:stray_tmp': 'warning',
   'backlog:ids_missing': 'error',
+  'backlog:unreadable_dir': 'error',
   'config:invalid': 'error',
 };
 
 const BLOCKS_READY = new Set([
   'frontmatter:unreadable', 'file:unreadable', 'duplicate_id', 'missing:title', 'id:mismatch',
-  'type:folder', 'parent:dangling', 'parent:cycle', 'parent:hierarchy',
+  'type:folder', 'layout:misplaced', 'parent:dangling', 'parent:cycle', 'parent:hierarchy',
   'depends_on:dangling', 'depends_on:cycle', 'unknown:status',
   'done:open_children', 'archive:not_done', 'archive:split',
   'incomplete:description', 'incomplete:acceptance',
 ]);
 
-const BACKLOG_LEVEL = new Set(['backlog:stray_tmp', 'backlog:ids_missing', 'config:invalid']);
+const BACKLOG_LEVEL = new Set(['backlog:stray_tmp', 'backlog:ids_missing', 'backlog:unreadable_dir', 'config:invalid']);
 
-export { TYPE_PREFIX, PREFIX_TYPE, TYPE_DIR, TYPES, PARENT_TYPE, PRIORITIES, PRIORITY_WEIGHT, FIELD_ORDER, LIST_FIELDS, SECTION_ROLES, SETTABLE_FIELDS, NEW_FIELDS, DEFAULT_CONFIG, SEVERITY, BLOCKS_READY, BACKLOG_LEVEL };
+export { TYPE_PREFIX, PREFIX_TYPE, TYPE_FOLDER_ROLE, FOLDER_ROLES, GROUPS, TYPES, PARENT_TYPE, PRIORITIES, PRIORITY_WEIGHT, FIELD_ORDER, LIST_FIELDS, SECTION_ROLES, SETTABLE_FIELDS, NEW_FIELDS, DEFAULT_CONFIG, SEVERITY, BLOCKS_READY, BACKLOG_LEVEL, V3_DIR_REL, V3_CONFIG_REL, V3_IDS_REL, V3_INDEX_REL, LEGACY_CONFIG_REL, LEGACY_IDS_REL, LEGACY_INDEX_REL };

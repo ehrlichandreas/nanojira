@@ -82,8 +82,8 @@ const sums = d => ({
   T.check('the parent epic survives', fs.existsSync(p(d, 'epics/EPIC-001.md')));
 
   /* "Tombstones remain either way." */
-  T.check('tombstone TSK-001 remains', fs.existsSync(p(d, '.ids/TSK-001')));
-  T.check('tombstone SUB-001 remains', fs.existsSync(p(d, '.ids/SUB-001')));
+  T.check('tombstone TSK-001 remains', fs.existsSync(p(d, H.IDS_REL + '/TSK-001')));
+  T.check('tombstone SUB-001 remains', fs.existsSync(p(d, H.IDS_REL + '/SUB-001')));
 
   /* "A mode that leaves orphaned elements does not exist." */
   const doc = H.runJson(['doctor'], { cwd: d });
@@ -137,7 +137,7 @@ const sums = d => ({
   }
   T.check('epics/ is empty',
     fs.readdirSync(p(d, 'epics')).filter(f => f.endsWith('.md')).length === 0);
-  T.check('tombstones remain after archive', fs.existsSync(p(d, '.ids/TSK-001')));
+  T.check('tombstones remain after archive', fs.existsSync(p(d, H.IDS_REL + '/TSK-001')));
 }
 
 T.finish();

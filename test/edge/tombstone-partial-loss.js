@@ -1,7 +1,7 @@
 'use strict';
 /* Edge — partial tombstone loss (§ 8).
  *
- * AC-18 covers the total loss of .ids/. The partial case is the one that is
+ * AC-18 covers the total loss of .nanojira/ids/. The partial case is the one that is
  * easy to get wrong in the other direction: it is *not* an error.
  *
  * § 8: "An element file without a tombstone is a WARNING (id:no_tombstone):
@@ -33,7 +33,7 @@ const d = H.mkBacklog({
       status: 'todo', created: H.FIXED_NOW, updated: H.FIXED_NOW,
     }, '# Lost its tombstone\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n'),
   },
-  // TSK-002 deliberately has no tombstone. .ids/ is non-empty, so this is
+  // TSK-002 deliberately has no tombstone. .nanojira/ids/ is non-empty, so this is
   // NOT backlog:ids_missing.
   tombstones: ['EPIC-001', 'TSK-001'],
 });
@@ -67,7 +67,7 @@ T.check('a hand-drafted element stays eligible for --ready', readyIds.includes('
 
 /* ---- allocation still starts above every element number --------------- */
 const r = H.runNj(['new', '--type=task', '--parent=EPIC-001', '--title=Next'], { cwd: d });
-T.exit('nj new works with a partial .ids/', r, 0);
+T.exit('nj new works with a partial .nanojira/ids/', r, 0);
 const created = fs.readdirSync(path.join(bl, 'tasks')).filter(f => f.endsWith('.md')).sort();
 T.eq('the new ID is above the highest element number', created.join(','),
   'TSK-001.md,TSK-002.md,TSK-003.md');
@@ -75,7 +75,7 @@ T.eq('the new ID is above the highest element number', created.join(','),
 /* ---- --fix restores it ------------------------------------------------ */
 T.check('doctor --fix runs', H.runNj(['doctor', '--fix'], { cwd: d }).status !== null);
 T.check('--fix created the missing tombstone',
-  fs.existsSync(path.join(bl, '.ids', 'TSK-002')));
+  fs.existsSync(path.join(bl, H.IDS_REL, 'TSK-002')));
 
 const after = H.runJson(['doctor'], { cwd: d });
 T.check('id:no_tombstone is gone after --fix',

@@ -7,19 +7,33 @@ import type { Flags, Element, Context, Finding } from '../core/types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { checkFlags } from '../core/args.ts';
-import { PREFIX_TYPE, TYPE_DIR, PARENT_TYPE, SEVERITY } from '../core/constants.ts';
+import {
+  PREFIX_TYPE, PARENT_TYPE, SEVERITY,
+  V3_DIR_REL, V3_CONFIG_REL, V3_IDS_REL, V3_INDEX_REL, LEGACY_CONFIG_REL, LEGACY_IDS_REL, LEGACY_INDEX_REL,
+} from '../core/constants.ts';
+import { workingDir } from '../core/config.ts';
 import { context } from '../core/context.ts';
 import { elementProblems, compareElements } from '../core/derive.ts';
+import { ID_FOLDER, moveTarget, misplacedCode, ownFolder } from '../core/layout.ts';
 import { out } from '../core/output.ts';
 import { syncH1 } from '../core/parse.ts';
-import { nowIso, mtimeIso, readTombstones, atomicWrite, renderElement } from '../core/store.ts';
+import { V2_README, V3_README } from '../core/readme-texts.ts';
+import { statusIsFresh, refreshStatus } from '../core/status.ts';
+import { nowIso, mtimeIso, readTombstones, atomicWrite, planMove, runMove, renderElement } from '../core/store.ts';
 
 // ------------------------------------------------------------------- doctor
 
 function collectFindings(ctx: Context): Finding[] {
   const findings: Finding[] = [];
+  // Backlog-level, no element: the v2 layout itself is the finding (§ 4,
+  // § 14 — "doctor is the one command that runs on a legacy backlog").
+  if (ctx.legacy) {
+    findings.push({ code: 'backlog:legacy_layout', severity: 'error', file: path.join(ctx.backlog, LEGACY_CONFIG_REL),
+      message: `the backlog is in the v2 (legacy) layout (${LEGACY_CONFIG_REL}, ${LEGACY_IDS_REL}/) — \`nj doctor --fix\` migrates it to .nanojira/` });
+  }
+  const configFile = path.join(ctx.backlog, ctx.legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
   for (const e of ctx.configErrors) {
-    findings.push({ code: 'config:invalid', severity: 'error', file: path.join(ctx.backlog, '.nanojira.json'), message: e });
+    findings.push({ code: 'config:invalid', severity: 'error', file: configFile, message: e });
   }
 
   const elements = ctx.elements.slice().sort(compareElements);
@@ -33,6 +47,11 @@ function collectFindings(ctx: Context): Finding[] {
     for (const code of elementProblems(el)) {
       const sev = SEVERITY[code];
       if (sev === null || sev === undefined) continue;
+      // While the configuration is invalid, every element is judged against
+      // the DEFAULT layout (loadConfig's fallback), so a renamed folder or an
+      // unrelated typo would report every file misplaced — noise pointing at
+      // the wrong repair. Suppressed, like backlog:status_stale (DECISIONS 102).
+      if (ctx.configErrors.length > 0 && (code === 'type:folder' || code === 'layout:misplaced')) continue;
       if (code === 'frontmatter:unreadable' || code === 'file:unreadable') {
         for (const d of el.detail) {
           if (d.code !== code) continue;
@@ -44,27 +63,46 @@ function collectFindings(ctx: Context): Finding[] {
     }
   }
 
-  for (const folder of ['', 'epics', 'tasks', 'subtasks', 'archive', '.ids']) {
-    const dir = path.join(ctx.backlog, folder);
-    let names;
-    try { names = fs.readdirSync(dir); } catch { continue; }
-    for (const n of names.sort()) {
-      if (n.startsWith('.nj-tmp-')) {
-        findings.push({ code: 'backlog:stray_tmp', severity: 'warning', file: path.join(dir, n), message: 'stray temp file from an interrupted write' });
-      }
-    }
+  const scan = ctx.scan;
+  for (const file of strayTmpFiles(scan.dirs)) {
+    findings.push({ code: 'backlog:stray_tmp', severity: 'warning', file, message: 'stray temp file from an interrupted write' });
+  }
+  // A folder the scan cannot list may hold element files nobody sees (DECISIONS 93 F9).
+  for (const { dir, reason } of scan.unreadable) {
+    findings.push({ code: 'backlog:unreadable_dir', severity: 'error', file: dir, message: `folder cannot be listed (${reason}) — element files in it are not seen` });
   }
 
-  const tombs = readTombstones(ctx.backlog);
+  const tombs = readTombstones(ctx.idsDir);
   if (ctx.elements.length > 0 && tombs.size === 0) {
-    findings.push({ code: 'backlog:ids_missing', severity: 'error', file: path.join(ctx.backlog, '.ids'), message: '.ids/ is missing or empty while element files exist — the never-reuse guarantee is not in force' });
+    findings.push({ code: 'backlog:ids_missing', severity: 'error', file: ctx.idsDir, message: `${path.relative(ctx.backlog, ctx.idsDir)}/ is missing or empty while element files exist — the never-reuse guarantee is not in force` });
+  }
+
+  // Without a valid configuration there is no status list to render against
+  // (DECISIONS 100); with `statusFile: false` the file is not nj's (§ 4). A
+  // legacy backlog predates STATUS.md and so has none, which is exactly a
+  // stale rendering — doctor runs every other check against the v2 places,
+  // this included (DECISIONS 101, AMBIGUITIES 74).
+  if (ctx.configErrors.length === 0 && ctx.cfg.layout.statusFile && !statusIsFresh(ctx.backlog, ctx.elements, ctx.cfg)) {
+    findings.push({ code: 'backlog:status_stale', severity: 'warning', file: path.join(ctx.backlog, 'STATUS.md'), message: 'STATUS.md is missing or differs from a fresh rendering — `nj doctor --fix` regenerates it' });
   }
 
   return findings;
 }
 
+// A write leaves its temp file in the target's folder (§ 12), and under
+// `hierarchy` that can be any folder of the backlog.
+function strayTmpFiles(dirs: string[]): string[] {
+  const found: string[] = [];
+  for (const dir of dirs) {
+    let names;
+    try { names = fs.readdirSync(dir); } catch { continue; }
+    for (const n of names.sort()) if (n.startsWith('.nj-tmp-')) found.push(path.join(dir, n));
+  }
+  return found;
+}
+
 function backlogLabel(backlog: string) {
-  const rel = path.relative(process.cwd(), backlog);
+  const rel = path.relative(workingDir(), backlog);
   return (rel === '' ? '.' : rel) + '/';
 }
 
@@ -79,6 +117,7 @@ function describeFinding(code: string, el: Element, dupGroups: Map<string, Eleme
     case 'id:mismatch': return `frontmatter id '${el.id}' does not match the file name`;
     case 'type:derived': return `type absent — derived as '${el.type}'`;
     case 'type:folder': return el.type === null ? 'type cannot be determined from id, frontmatter or folder' : `type '${el.type}' does not match folder '${el.folder}/'`;
+    case 'layout:misplaced': return `file lies in '${el.folder === '' ? '.' : el.folder}/', not where the layout puts it`;
     case 'parent:orphaned': return 'parent is absent';
     case 'parent:dangling': return `parent '${el.parent}' points at nothing`;
     case 'parent:cycle': return 'parent chain contains a cycle';
@@ -92,7 +131,7 @@ function describeFinding(code: string, el: Element, dupGroups: Map<string, Eleme
     case 'archive:not_done': return `archived but status is '${el.status}'`;
     case 'archive:split': return `parent '${el.parent}' is archived while this element is not`;
     case 'title:h1_mismatch': return 'H1 in the body differs from title';
-    case 'id:no_tombstone': return 'no tombstone in .ids/ — hand-created, or partial tombstone loss';
+    case 'id:no_tombstone': return 'no tombstone in the ids folder — hand-created, or partial tombstone loss';
     default: return code;
   }
 }
@@ -145,12 +184,14 @@ interface FixShared {
   absent(el: Element, k: string): boolean;
   mtimes: Map<string, string>;
   rename(from: string, to: string): void;
+  move(plan: ReturnType<typeof planMove>): void;
   reload(): Context;
 }
 
 /**
- * doctorFix runs nine steps in a fixed sequence -- the eight § 14 enumerates
- * plus the mtime snapshot it doesn't count (S4 karte § 1-2): step 5 needs the
+ * doctorFix runs ten steps in a fixed sequence -- § 14's steps 1-9 (step 0,
+ * the legacy migration, arrives with V3-4) plus the mtime snapshot § 14
+ * doesn't count (S4 karte § 1-2): step 5 needs the
  * file's ORIGINAL mtime even though step 1 may already have rewritten it, and
  * `exit-doctor-fix.js` pins `fixed[]` in exactly this order ("Steps run in
  * this order", § 14). Unlike loadElement's derivers, no step's OUTPUT feeds
@@ -181,11 +222,102 @@ function makeFixCtx(flags: Flags): FixCtx<0> {
     return Array.isArray(v) ? v.length === 0 : String(v === undefined || v === null ? '' : v).trim() === '';
   };
   const mtimes: Map<string, string> = new Map();
+  const rekey = (from: string, to: string) => {
+    for (const [k, v] of Array.from(mtimes)) {
+      if (k === from) { mtimes.delete(k); mtimes.set(to, v); }
+      else if (k.startsWith(from + path.sep)) { mtimes.delete(k); mtimes.set(to + k.slice(from.length), v); }
+    }
+  };
   const rename = (from: string, to: string) => {
     fs.renameSync(from, to);
-    if (mtimes.has(from)) { mtimes.set(to, mtimes.get(from) as string); mtimes.delete(from); }
+    rekey(from, to);
   };
-  return { actions, notes, guard, absent, mtimes, rename, reload, stage: 0 };
+  // Step 3's moves: a file, or a whole folder with everything in it.
+  const move = (plan: ReturnType<typeof planMove>) => {
+    runMove(plan);
+    for (const [from, to] of plan.renames) rekey(from, to);
+  };
+  return { actions, notes, guard, absent, mtimes, rename, move, reload, stage: 0 };
+}
+
+// 0. migrate a legacy layout, when unambiguous: create `.nanojira/`, rename
+// the v2 configuration and tombstone folder into it, and delete the v2 index
+// cache (§ 14 step 0). An EMPTY `.nanojira/` beside the v2 files does not
+// count as "both present" — the ambiguity needs a v3 configuration or v3
+// tombstones, i.e. the config file or the ids FOLDER actually existing
+// (AMBIGUITIES 73) — so step 0 still proceeds past a bare `mkdir .nanojira`
+// left over from a previous, aborted attempt.
+//
+// fixGitignore/fixReadme are NOT called here. They used to run only on this
+// path, which meant a crash after these renames but before them (process
+// killed, disk full) left `.gitignore`/README unfixed forever: the next
+// `--fix` sees a v3 layout already, `ctx.legacy` is false, and this
+// function never runs again (G2). doctorFix calls them unconditionally on
+// every run instead — they are already no-ops once the line/text no longer
+// matches, so a pristine v3 backlog pays nothing for it.
+function fixStep0(ctx: Context, fc: FixShared) {
+  const backlog = ctx.backlog;
+  const v3Config = path.join(backlog, V3_CONFIG_REL);
+  const v3Ids = path.join(backlog, V3_IDS_REL);
+  if (fs.existsSync(v3Config) || fs.existsSync(v3Ids)) {
+    fc.notes.push(`both the v2 and the v3 place exist (${LEGACY_CONFIG_REL} / ${LEGACY_IDS_REL} and ${V3_CONFIG_REL} / ${V3_IDS_REL}) — ambiguous, nothing moved; remove one copy by hand and run \`nj doctor --fix\` again`);
+    return;
+  }
+  fs.mkdirSync(path.join(backlog, V3_DIR_REL), { recursive: true });
+  fc.rename(path.join(backlog, LEGACY_CONFIG_REL), v3Config);
+  fc.rename(path.join(backlog, LEGACY_IDS_REL), v3Ids);
+  const legacyIndex = path.join(backlog, LEGACY_INDEX_REL);
+  if (fs.existsSync(legacyIndex)) fs.unlinkSync(legacyIndex);
+  fc.actions.push(`migrated the legacy layout: ${LEGACY_CONFIG_REL} → ${V3_CONFIG_REL}, ${LEGACY_IDS_REL}/ → ${V3_IDS_REL}/`);
+}
+
+// The ONE verbatim line, replaced in place; a trailing `\r` is line-end
+// whitespace, not part of the match, and the replacement keeps whichever
+// ending the matched line had (CRLF stays CRLF). Anything else about the
+// file — the line reworded, commented, missing, or the file itself absent —
+// is left exactly as it is, noted when `verbose` (DECISIONS 101,
+// AMBIGUITIES 74). `verbose` is false on a backlog that was not legacy at
+// the START of this run (G2): calling this unconditionally on every v3
+// backlog, most of which never had the v2 line to begin with, would spam a
+// "left alone" note on every `--fix`. A match is still fixed either way —
+// only the no-op's note is quieted.
+function fixGitignore(backlog: string, fc: FixShared, verbose: boolean) {
+  const p = path.join(backlog, '.gitignore');
+  let content: string;
+  try {
+    content = fs.readFileSync(p, 'utf8');
+  } catch {
+    if (verbose) fc.notes.push('.gitignore does not exist — not created');
+    return;
+  }
+  let changed = false;
+  const lines = content.split('\n').map((line) => {
+    const hasCR = line.endsWith('\r');
+    if ((hasCR ? line.slice(0, -1) : line) !== LEGACY_INDEX_REL) return line;
+    changed = true;
+    return V3_INDEX_REL + (hasCR ? '\r' : '');
+  });
+  if (!changed) {
+    if (verbose) fc.notes.push(`.gitignore does not have the '${LEGACY_INDEX_REL}' line verbatim — left alone`);
+    return;
+  }
+  atomicWrite(p, lines.join('\n'));
+  fc.actions.push(`.gitignore: replaced the '${LEGACY_INDEX_REL}' line with '${V3_INDEX_REL}'`);
+}
+
+// Replaced only when byte-identical to the exact text a v2 `nj init` wrote —
+// a user's own edit, however small, is never overwritten (DECISIONS 102).
+// `verbose`: see fixGitignore above.
+function fixReadme(backlog: string, fc: FixShared, verbose: boolean) {
+  const p = path.join(backlog, 'README.md');
+  let content: string;
+  try { content = fs.readFileSync(p, 'utf8'); } catch { return; }
+  if (content !== V2_README) {
+    if (verbose) fc.notes.push('README.md is not the v2 init text — left alone');
+    return;
+  }
+  atomicWrite(p, V3_README);
+  fc.actions.push('README.md: replaced the v2 init text with the v3 text');
 }
 
 // Step 5 writes `created` from the file mtime — but step 1 already rewrote
@@ -200,12 +332,27 @@ function fixSnapshotMtimes(fc: FixCtx<0>): FixCtx<1> {
   return { ...fc, stage: 1 };
 }
 
+// Whether `el` carries an identity with the § 8 ID shape — its frontmatter
+// `id`, or (absent that) the id `deriveId` falls back to, which is the file's
+// OWN basename. A genuinely stray document (`meeting-notes.md`, no `id:`
+// field) derives a non-ID-shaped id this way and is excluded; a misnamed but
+// real element (`id: TSK-007` in a file still called `wrongname.md`, ahead of
+// step 2's rename) is not — its NAME does not have the shape yet, but its
+// identity already does, and step 1 filling in the type it derives from that
+// same id is exactly the repair (§ 14) that must still happen. Steps 1, 4 and
+// 5 act only on these: a stray document is read and reported like any
+// element (DECISIONS 86), but writing an `id` into a colleague's meeting
+// notes, or burning it a tombstone, is not a repair (DECISIONS 106 F5).
+function idShaped(el: Element): boolean {
+  return ID_FOLDER.test(el.id);
+}
+
 // 1. write missing id / type — only when the key is genuinely absent; an
 //    existing non-empty value is never overwritten, not even an invalid one (§ 14).
 function fixStep1(fc: FixCtx<1>): FixCtx<2> {
   const ctx = fc.reload();
   for (const el of ctx.elements) {
-    if (fc.guard(el) || !el.parsed) continue;
+    if (fc.guard(el) || !el.parsed || !idShaped(el)) continue;
     const ov: Map<string, string | string[]> = new Map();
     if (el.problems.has('id:derived') && fc.absent(el, 'id')) ov.set('id', el.id);
     if (el.problems.has('type:derived') && el.type && fc.absent(el, 'type')) ov.set('type', el.type);
@@ -231,45 +378,132 @@ function fixStep2(fc: FixCtx<2>): FixCtx<3> {
   return { ...fc, stage: 3 };
 }
 
-// 3. move into the correct type folder (only when id prefix and type agree).
-// The tombstone claim in step 4 does NOT depend on this running first: el.id
-// is fixed at load time from the frontmatter, unaffected by which folder the
-// file sits in (measured, S4 karte § 2) -- 3 precedes 4 only because § 14 and
-// `exit-doctor-fix.js` pin `fixed[]` in this order, not because a later 4
-// would claim a different id.
+// 3. move each file to its layout place (§ 14). Under `type` only when id
+// prefix and type agree (frontmatter > prefix > folder; the folder loses);
+// under `hierarchy` only when the parent chain resolves without parent:*
+// problems (a parentless task or subtask has a place of its own, DECISIONS
+// 91 B15). A move never rewrites a file: every element file is byte-identical
+// afterwards. The tombstone claim in step 4 does NOT depend on this running
+// first: el.id is fixed at load time from the frontmatter, unaffected by
+// which folder the file sits in (measured, S4 karte § 2) -- 3 precedes 4 only
+// because § 14 and `exit-doctor-fix.js` pin `fixed[]` in this order.
 function fixStep3(fc: FixCtx<3>): FixCtx<4> {
-  const ctx = fc.reload();
-  for (const el of ctx.elements) {
-    if (fc.guard(el)) continue;
-    if (el.archived || !el.problems.has('type:folder') || el.type === null) continue;
-    const pm = /^(EPIC|TSK|SUB)-/.exec(el.id);
-    if (!pm || PREFIX_TYPE[pm[1]] !== el.type) {
-      fc.notes.push(`${el.id}: id prefix and type disagree — not moved, resolve by hand`);
-      continue;
+  const layout = fc.reload().cfg.layout;
+  // Top-down under `hierarchy`: an epic's or task's folder carries its
+  // children along in one rename, so each level re-reads what the level above
+  // left. The other groups move files only, in one pass in scan order (v2's).
+  const rounds = layout.group === 'hierarchy' ? ['epic', 'task', 'subtask'] : [null];
+  const left: Set<string> = new Set();
+  // Names already reported this step: skipped on every later pass, so a note
+  // is printed once, not once per reload (DECISIONS 105 F3).
+  const noted: Set<string> = new Set();
+  for (const round of rounds) {
+    // Reloaded after EVERY move, not once per round: a folder rename can
+    // carry a nested misplaced element along with it (two epics, one inside
+    // the other's misplaced folder), and the stale path an un-reloaded loop
+    // would still use for that nested element no longer exists — planMove's
+    // `lstat` on its target then answers ENOENT, plans a rename, and the
+    // rename throws (DECISIONS 105 F3, found by Verifier-B). One reload per
+    // actual move keeps every remaining candidate's path current.
+    for (let moved = true; moved; ) {
+      moved = false;
+      const ctx = fc.reload();
+      for (const el of ctx.elements) {
+        if (round !== null && el.type !== round) continue;
+        if (noted.has(el.id)) continue;
+        if (fc.guard(el) || el.type === null || !el.problems.has(misplacedCode(layout))) continue;
+        if (layout.group === 'type') {
+          const pm = /^(EPIC|TSK|SUB)-/.exec(el.id);
+          if (!pm || PREFIX_TYPE[pm[1]] !== el.type) {
+            fc.notes.push(`${el.id}: id prefix and type disagree — not moved, resolve by hand`);
+            noted.add(el.id);
+            continue;
+          }
+        }
+        if (layout.group === 'hierarchy' && chainProblem(el)) {
+          fc.notes.push(`${el.id}: its parent chain has problems — not moved, resolve by hand`);
+          noted.add(el.id);
+          continue;
+        }
+        const dir = moveTarget(el, el.byId as Map<string, Element>, layout) as string;
+        const own = layout.group === 'hierarchy' ? ownFolder(el) : null;
+        // A folder move carries every descendant with it in one `rename`, so
+        // it must never disagree with one of them on `archived:` — that would
+        // archive (or un-archive) a child `--fix` never touches on its own
+        // (DECISIONS 92 Q2, DECISIONS 106 F6).
+        if (own !== null && !folderArchivedAgrees(ctx.elements, own, el.archived || el.archivedAt !== null)) {
+          fc.notes.push(`${el.id}: its folder holds elements that disagree on archived: — not moved, resolve by hand`);
+          noted.add(el.id);
+          continue;
+        }
+        const src = own === null ? el.file : own;
+        const dst = own === null ? path.join(ctx.backlog, dir, path.basename(el.file)) : path.join(ctx.backlog, dir);
+        const shown = (dir === '' ? '.' : dir) + '/';
+        if (layout.group === 'type') fs.mkdirSync(path.dirname(dst), { recursive: true });
+        const plan = planMove(src, dst);
+        if (plan.conflicts.length > 0) {
+          fc.notes.push(`${el.id}: cannot move into ${shown} — target exists`);
+          noted.add(el.id);
+          continue;
+        }
+        fc.move(plan);
+        left.add(path.dirname(src));
+        fc.actions.push(own === null ? `moved ${el.id} → ${shown}` : `moved ${el.id} with its folder → ${shown}`);
+        moved = true;
+        break;
+      }
     }
-    const dir = path.join(ctx.backlog, TYPE_DIR[el.type]);
-    fs.mkdirSync(dir, { recursive: true });
-    const target = path.join(dir, path.basename(el.file));
-    if (fs.existsSync(target)) { fc.notes.push(`${el.id}: cannot move into ${TYPE_DIR[el.type]}/ — target exists`); continue; }
-    fc.rename(el.file, target);
-    fc.actions.push(`moved ${el.id} → ${TYPE_DIR[el.type]}/`);
   }
+  removeEmptiedIdFolders(fc.reload().backlog, left);
   return { ...fc, stage: 4 };
+}
+
+/**
+ * Every element physically inside `own` (the folder about to move as one)
+ * must be going the same way — archived or not — as the element that owns
+ * it, or the folder move would carry a mismatched child along (DECISIONS 106
+ * F6).
+ */
+function folderArchivedAgrees(elements: Element[], own: string, expectArchived: boolean): boolean {
+  const prefix = own + path.sep;
+  return elements.every((e) => !e.file.startsWith(prefix) || (e.archived || e.archivedAt !== null) === expectArchived);
+}
+
+/** The element or an ancestor carries a parent:* error: its place is not to be trusted. */
+function chainProblem(el: Element): boolean {
+  const byId = el.byId as Map<string, Element>;
+  const seen: Set<string> = new Set();
+  for (let cur: Element | undefined = el; cur !== undefined && !seen.has(cur.id); cur = cur.parent === null ? undefined : byId.get(cur.parent)) {
+    seen.add(cur.id);
+    if (['parent:dangling', 'parent:cycle', 'parent:hierarchy'].some((c) => (cur as Element).problems.has(c))) return true;
+  }
+  return false;
+}
+
+// The folders a move left behind: removed once empty, walking up, but only
+// the ID-shaped ones `hierarchy` creates — never a type folder, never with
+// anything still in it, never recursively (DECISIONS 92).
+function removeEmptiedIdFolders(backlog: string, dirs: Set<string>) {
+  for (const start of dirs) {
+    for (let d = start; d !== backlog && d.startsWith(backlog + path.sep) && ID_FOLDER.test(path.basename(d)); d = path.dirname(d)) {
+      try { fs.rmdirSync(d); } catch { break; }
+    }
+  }
 }
 
 // 4. backfill tombstones
 function fixStep4(fc: FixCtx<4>): FixCtx<5> {
   const ctx = fc.reload();
-  const dir = path.join(ctx.backlog, '.ids');
+  const dir = ctx.idsDir;
   fs.mkdirSync(dir, { recursive: true });
-  const tombs = readTombstones(ctx.backlog);
+  const tombs = readTombstones(dir);
   let created = 0;
   for (const el of ctx.elements) {
-    if (tombs.has(el.id)) continue;
+    if (!idShaped(el) || tombs.has(el.id)) continue;
     try { fs.closeSync(fs.openSync(path.join(dir, el.id), 'wx')); created++; } catch { /* raced */ }
   }
   if (created > 0) {
-    fc.actions.push(`created ${created} missing tombstone${created === 1 ? '' : 's'} in .ids/`);
+    fc.actions.push(`created ${created} missing tombstone${created === 1 ? '' : 's'} in ${path.relative(ctx.backlog, dir)}/`);
     fc.notes.push('tombstones for already-deleted IDs cannot be recovered — the never-reuse guarantee is void for those numbers');
   }
   return { ...fc, stage: 5 };
@@ -280,7 +514,7 @@ function fixStep4(fc: FixCtx<4>): FixCtx<5> {
 function fixStep5(fc: FixCtx<5>): FixCtx<6> {
   const ctx = fc.reload();
   for (const el of ctx.elements) {
-    if (fc.guard(el) || !el.parsed) continue;
+    if (fc.guard(el) || !el.parsed || !idShaped(el)) continue;
     const ov: Map<string, string | string[]> = new Map();
     if (el.problems.has('missing:status') && fc.absent(el, 'status')) ov.set('status', el.status);
     if (el.problems.has('missing:created') && fc.absent(el, 'created')) {
@@ -309,34 +543,67 @@ function fixStep6(fc: FixCtx<6>): FixCtx<7> {
 // 7. remove stray temp files
 function fixStep7(fc: FixCtx<7>): FixCtx<8> {
   const ctx = fc.reload();
-  for (const folder of ['', 'epics', 'tasks', 'subtasks', 'archive', '.ids']) {
-    const d = path.join(ctx.backlog, folder);
-    let names;
-    try { names = fs.readdirSync(d); } catch { continue; }
-    for (const n of names.sort()) {
-      if (!n.startsWith('.nj-tmp-')) continue;
-      fs.unlinkSync(path.join(d, n));
-      fc.actions.push(`removed stray temp file ${path.join(folder, n)}`);
-    }
+  for (const file of strayTmpFiles(ctx.scan.dirs)) {
+    fs.unlinkSync(file);
+    fc.actions.push(`removed stray temp file ${path.relative(ctx.backlog, file)}`);
   }
   return { ...fc, stage: 8 };
 }
 
-interface FixResult extends FixCtx<9> {
+interface FixResult extends FixCtx<10> {
   ctx: Context;
   findings: Finding[];
 }
 
-// 8. rebuild the index — round two, intentionally a no-op — and collect
-//    whatever remains for the report.
-function fixStep8(fc: FixCtx<8>): FixResult {
+// 8. rebuild the index — round two, intentionally a no-op.
+function fixStep8(fc: FixCtx<8>): FixCtx<9> {
+  return { ...fc, stage: 9 };
+}
+
+// 9. regenerate STATUS.md — last, so it reflects every repair above; this
+//    also resolves a merge conflict in it. Reported in fixed[] only when its
+//    bytes changed (DECISIONS 100). Then collect what remains for the report.
+function fixStep9(fc: FixCtx<9>): FixResult {
+  const before = fc.reload();
+  if (refreshStatus(before.backlog, before.cfg, before)) fc.actions.push('regenerated STATUS.md');
   const ctx = fc.reload();
   const findings = collectFindings(ctx);
-  return { ...fc, stage: 9, ctx, findings };
+  return { ...fc, stage: 10, ctx, findings };
 }
 
 function doctorFix(flags: Flags, json: boolean) {
   const fc0 = makeFixCtx(flags);
+  let start = fc0.reload();
+  // Measured before step 0 runs: whether THIS backlog was legacy when this
+  // `--fix` started, as opposed to a plain v3 backlog that was never legacy
+  // at all. Used only to decide whether a non-matching .gitignore/README is
+  // worth a note below (verbose) — it is not how step 0 itself still
+  // decides to run; see the `start.legacy` check right after.
+  const wasLegacy = start.legacy;
+  // Step 0, first: a legacy layout migrates (or, ambiguous, stays exactly as
+  // it is) before anything else is even attempted. Reload afterwards — a
+  // successful migration changes `start.legacy` and every v3 path context()
+  // computes from it.
+  if (start.legacy) {
+    fixStep0(start, fc0);
+    start = fc0.reload();
+  }
+  // Nothing else is repaired against a legacy layout still standing
+  // (ambiguous step 0) or an invalid configuration: every later step reads
+  // it (statuses, folder names), and a missing one usually means `--fix` was
+  // pointed at something that is not a backlog at all (DECISIONS 93 F3, 95
+  // B21). The report is the plain one: the backlog-level finding heads the
+  // remaining findings.
+  if (start.legacy || start.configErrors.length > 0) return fixReport(json, fc0.actions, fc0.notes, start, collectFindings(start));
+  // Unconditional (G2): a backlog that migrated on an earlier, interrupted
+  // `--fix` run arrives here already v3 (`start.legacy` is false), and this
+  // is the only remaining chance to finish the migration's `.gitignore`/
+  // README text fix-ups. A match is still fixed regardless of `wasLegacy` —
+  // only the "nothing matched" note is gated on it, so a backlog that was
+  // never legacy at all (the common case) does not get a spurious note on
+  // every `--fix`.
+  fixGitignore(start.backlog, fc0, wasLegacy);
+  fixReadme(start.backlog, fc0, wasLegacy);
   const fc1 = fixSnapshotMtimes(fc0);
   const fc2 = fixStep1(fc1);
   const fc3 = fixStep2(fc2);
@@ -345,7 +612,12 @@ function doctorFix(flags: Flags, json: boolean) {
   const fc6 = fixStep5(fc5);
   const fc7 = fixStep6(fc6);
   const fc8 = fixStep7(fc7);
-  const { actions, notes, ctx, findings } = fixStep8(fc8);
+  const fc9 = fixStep8(fc8);
+  const { actions, notes, ctx, findings } = fixStep9(fc9);
+  return fixReport(json, actions, notes, ctx, findings);
+}
+
+function fixReport(json: boolean, actions: string[], notes: string[], ctx: Context, findings: Finding[]) {
   const errors = findings.filter((f) => f.severity === 'error');
 
   if (json) {

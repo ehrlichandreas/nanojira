@@ -181,7 +181,7 @@ const CASES = [
     bad: badTask({}, [], '# Stale heading\n\n## Description\nDo the thing.\n\n' +
       '## Acceptance Criteria\n- [ ] It works\n') },
   { code: 'id:no_tombstone', doctor: 0, blocks: false,
-    // .ids/ stays non-empty (the epic keeps its tombstone), so this is not
+    // .nanojira/ids/ stays non-empty (the epic keeps its tombstone), so this is not
     // also backlog:ids_missing.
     bad: badTask({}), tombstones: ['EPIC-001', 'SUB-001'] },
 

@@ -18,10 +18,10 @@ function el(f, body) { const order = ['id','type','parent','title','status','pri
 const complete = t => '# ' + t + '\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n';
 function mk(label, files, tomb, cfg) {
   const d = fs.mkdtempSync(path.join(SCRATCH_BASE, 'r3-' + label + '-')); const bl = path.join(d, 'backlog');
-  for (const s of ['epics','tasks','subtasks','archive','.ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
-  if (cfg !== null) fs.writeFileSync(path.join(bl, '.nanojira.json'), cfg || CFG);
+  for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
+  if (cfg !== null) fs.writeFileSync(path.join(bl, '.nanojira/config.json'), cfg || CFG);
   for (const [rel, c] of Object.entries(files || {})) { const p = path.join(bl, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, c); }
-  for (const t of tomb || []) fs.writeFileSync(path.join(bl, '.ids', t), '');
+  for (const t of tomb || []) fs.writeFileSync(path.join(bl, '.nanojira/ids', t), '');
   return d;
 }
 function run(args, cwd, env, now) {
@@ -201,14 +201,14 @@ console.log('\n[f] nj new with an unreadable parent');
   const bl = path.join(d, 'backlog');
   fs.symlinkSync(path.join(bl, 'gone.md'), path.join(bl, 'tasks', 'TSK-002.md'));
   fs.chmodSync(path.join(bl, 'tasks', 'TSK-001.md'), 0o000);
-  const before = sums(d); const tombs = fs.readdirSync(path.join(bl, '.ids')).sort();
+  const before = sums(d); const tombs = fs.readdirSync(path.join(bl, '.nanojira/ids')).sort();
   const r1 = run(['new','--type=subtask','--parent=TSK-002','--title=x','--json'], d);
   ok('dangling-symlink parent → refused:unreadable', r1.status === 1 && r1.json && r1.json.error === 'refused:unreadable', r1.out);
   const r2 = run(['new','--type=subtask','--parent=TSK-001','--title=x','--json'], d);
   ok('chmod-000 parent → refused:unreadable', r2.status === 1 && r2.json && r2.json.error === 'refused:unreadable', r2.out);
   const r3 = run(['new','--type=subtask','--parent=TSK-003','--title=x','--json'], d);
   ok('frontmatter-unreadable parent → refused:unreadable (code says both)', r3.status === 1 && r3.json && r3.json.error === 'refused:unreadable', r3.out);
-  ok('nothing written, no tombstone burnt', JSON.stringify(sums(d)) === JSON.stringify(before) && JSON.stringify(fs.readdirSync(path.join(bl, '.ids')).sort()) === JSON.stringify(tombs), fs.readdirSync(path.join(bl, '.ids')).join());
+  ok('nothing written, no tombstone burnt', JSON.stringify(sums(d)) === JSON.stringify(before) && JSON.stringify(fs.readdirSync(path.join(bl, '.nanojira/ids')).sort()) === JSON.stringify(tombs), fs.readdirSync(path.join(bl, '.nanojira/ids')).join());
   fs.chmodSync(path.join(bl, 'tasks', 'TSK-001.md'), 0o644);
   ok('readable parent still works', run(['new','--type=subtask','--parent=TSK-001','--title=x','--json'], d).json.ok === true);
 }

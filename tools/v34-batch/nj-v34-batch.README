@@ -1,0 +1,97 @@
+V3-4 test batch (Oracle-B; verified and re-reported by Oracle against HEAD
+2c520aa, 2026-09-29). NOT applied to test/ yet — the flip lands together with
+V3-4 (TSK-028, .nanojira/ + migration).
+
+tools/v34-batch/nj-v34-batch-transform.py   the generator: python3 nj-v34-batch-transform.py <tree root>
+                                            edits <root>/test in place; asserts every special-case anchor,
+                                            so it fails loudly instead of mis-editing.
+tools/v34-batch/nj-v34-batch.patch          a git diff captured against 6b75df0 (before the V3-3 batch and
+                                            everything since). STALE relative to current HEAD — test/ has
+                                            moved (the V3-3 batch, T1-T3, v3-2-regressions.js, coverage
+                                            gaps, ac-25/ac-26). Kept for reference only; do not `git apply`
+                                            it. Regenerate with `git diff` after running the script, if a
+                                            patch form is wanted again.
+
+Verification (2026-09-29, Oracle): ran the script in a throwaway worktree at
+HEAD 2c520aa. It applied cleanly — every `must()` anchor matched, zero
+assertion failures, every edited file's syntax checks with `node --check`.
+A full-tree grep afterward confirms no `.js` file outside the two
+intentional exceptions (`ac/ac-24-legacy-migration.js`,
+`edge/coverage-v3-gaps.js`) still names a v2 bookkeeping path as a literal —
+the three remaining hits are the deliberate ones: the history note in
+ac-21's header comment, and ac-01's new "no v2 file exists" assertion, which
+names `.nanojira.json`/`.ids` on purpose to check their ABSENCE. No script
+changes were needed; this batch was already correct for the current tree.
+
+What it does:
+- test/lib/harness.js: new exports CONFIG_REL='.nanojira/config.json', IDS_REL='.nanojira/ids',
+  INDEX_REL='.nanojira/index.json', GITIGNORE; mkBacklog() builds the v3 layout.
+- every suite that names a bookkeeping path: '.nanojira.json' -> H.CONFIG_REL, '.ids' -> H.IDS_REL,
+  v2 .gitignore -> H.GITIGNORE, index skip -> r === H.INDEX_REL; prose .nanojira.json/.ids//.nanojira-index.json
+  -> v3 names. 31 files, listed below.
+- ac-22/ac-23: local CONFIG_REL/IDS_REL now = H.*; staging comments rewritten to say "since V3-4" instead
+  of "V3-4 flips them".
+- ac-01: checks .nanojira/, the v3 config path, the .gitignore pair, ".nanojira/ids/ never ignored"
+  (also not via ignoring the whole .nanojira/ folder), no v2 files at the top level, and the full § 5
+  layout block (DECISIONS 92 Q1).
+- fault/det-id-retry.js: the EEXIST shim's tombstone-path regex matches .nanojira/ids/.
+- ac-21: one history comment updated (says "since V3-4" instead of describing a future move); its
+  fixtures are hand-built by H.mkBacklog() regardless, so no functional change.
+- ac-24-legacy-migration.js and edge/coverage-v3-gaps.js are excluded on purpose: their v2 paths are
+  the legacy layout under test, not staging.
+- harness's STATUS_CONFIG_REL (the V3-3 STATUS.md renderer, Oracle's batch) flips to
+  '.nanojira/config.json' too, via the same run.
+
+Files it changes (verified list, 31 .js files + none outside test/):
+  test/lib/harness.js
+  test/ac/ac-01-basic-run.js
+  test/ac/ac-03-fault-tolerance.js
+  test/ac/ac-08-id-immortality.js
+  test/ac/ac-11-archive-rules.js
+  test/ac/ac-12-discovery.js
+  test/ac/ac-13-json-contract.js
+  test/ac/ac-17-configuration.js
+  test/ac/ac-18-tombstone-integrity.js
+  test/ac/ac-20-section-writes.js
+  test/ac/ac-21-backlog-location.js
+  test/ac/ac-22-layout.js
+  test/ac/ac-23-status-overview.js
+  test/ac/ac-26-unarchive.js
+  test/edge/archive-collision.js
+  test/edge/archive-rm-byte-identity.js
+  test/edge/discovery-message.js
+  test/edge/doctor-fix-surface.js
+  test/edge/done-open-children.js
+  test/edge/exit-doctor-fix.js
+  test/edge/exit-precedence.js
+  test/edge/failure-vocabulary.js
+  test/edge/parent-refusals.js
+  test/edge/rm-and-archive-refusals.js
+  test/edge/rm-dependents.js
+  test/edge/state-tombstone-burn.js
+  test/edge/tombstone-partial-loss.js
+  test/edge/unreadable-stub-refusals.js
+  test/edge/v3-2-regressions.js
+  test/fault/det-id-retry.js
+  test/stress/concurrency.js
+
+Deliberately untouched: ac/ac-24-legacy-migration.js, edge/coverage-v3-gaps.js
+(v2 paths spelled out on purpose), and every other suite that never names a
+bookkeeping path directly (ac-25-note-author.js, a future ac-27 for `nj claim` when it lands,
+edge/hardening-v3-1.js, edge/hardening-njrc-foreign-link.js — these reach
+config/tombstones only through H.mkBacklog()/H.* and need no edit).
+
+Caveat, inherent and not a bug: the flipped tree, run against any nj that
+does not yet implement V3-4, will crash or fail hard wherever a fixture
+writes bookkeeping files directly (bypassing nj) at the new paths — e.g.
+edge/v3-2-regressions.js's R6 fixture writes tombstones straight to
+H.IDS_REL after `nj init`, and a pre-V3-4 `nj init` only ever creates the v2
+`.ids/`. That is expected: this batch is meant to be applied together with
+a V3-4-capable `nj`, not run against today's build. Do not read a crash from
+that combination as a script defect.
+
+How to apply when V3-4 lands:
+  python3 tools/v34-batch/nj-v34-batch-transform.py <path to the working tree>
+(pass the repo root, not test/ — the script joins 'test' itself). Then run
+the oracle against the new dist/nj and fix whatever the real V3-4 changes
+call for beyond this mechanical rename.

@@ -15,10 +15,10 @@ function el(f, body) { const order = ['id','type','parent','title','status','pri
 const complete = t => '# ' + t + '\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n';
 function mk(label, files, tomb) {
   const d = fs.mkdtempSync(path.join(SCRATCH_BASE, 'r4-' + label + '-')); const bl = path.join(d, 'backlog');
-  for (const s of ['epics','tasks','subtasks','archive','.ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
-  fs.writeFileSync(path.join(bl, '.nanojira.json'), CFG);
+  for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
+  fs.writeFileSync(path.join(bl, '.nanojira/config.json'), CFG);
   for (const [rel, c] of Object.entries(files || {})) { const p = path.join(bl, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, c); }
-  for (const t of tomb || []) fs.writeFileSync(path.join(bl, '.ids', t), '');
+  for (const t of tomb || []) fs.writeFileSync(path.join(bl, '.nanojira/ids', t), '');
   return d;
 }
 function run(args, cwd, env, now) {

@@ -1,10 +1,10 @@
 'use strict';
 /* Edge — tombstone burn: a deleted ID is never reallocated (§ 8, § 15 AC-8).
  *
- * § 8: "IDs are never reused — provided `.ids/` is preserved. ... `nj archive`
+ * § 8: "IDs are never reused — provided `.nanojira/ids/` is preserved. ... `nj archive`
  * and `nj rm` leave tombstones in place — the ID stays claimed forever...
  * The allocator computes only a start value — the highest number found across
- * `.ids/` *and* all element files (active and archive) — and probes upward
+ * `.nanojira/ids/` *and* all element files (active and archive) — and probes upward
  * from there with `O_CREAT|O_EXCL`."
  *
  * § 15 AC-8: "Archive 50 elements and delete 10; create one of the same type;
@@ -30,7 +30,7 @@ const T = H.T;
 
 const bl = d => path.join(d, 'backlog');
 const tasksOf = d => H.lsOrEmpty(path.join(bl(d), 'tasks'));
-const idsOf = d => H.lsOrEmpty(path.join(bl(d), '.ids')).filter(f => /^TSK-/.test(f));
+const idsOf = d => H.lsOrEmpty(path.join(bl(d), H.IDS_REL)).filter(f => /^TSK-/.test(f));
 
 function fixture(label) {
   return H.mkBacklog({
@@ -69,7 +69,7 @@ T.check('rm reports ok:true', rm.json && rm.json.ok === true, JSON.stringify(rm.
 T.eq('the task file is gone', JSON.stringify(tasksOf(d)), JSON.stringify(['TSK-001.md']));
 T.eq('the tombstone remains — the ID stays claimed forever',
   JSON.stringify(idsOf(d)), JSON.stringify(['TSK-001', 'TSK-002']));
-const tombstoneBytes = H.readOrNull(path.join(bl(d), '.ids', 'TSK-002'));
+const tombstoneBytes = H.readOrNull(path.join(bl(d), H.IDS_REL, 'TSK-002'));
 T.eq('the tombstone is an empty file (§ 8: an empty tombstone file)', tombstoneBytes, '');
 
 /* The next task of the same type must skip the burned number entirely. */

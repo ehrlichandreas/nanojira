@@ -1079,6 +1079,308 @@ through `--backlog` and as an empty `./backlog`. *Was:* § 4: `init` "refuses wi
 `exists` if anything already exists at the target". Is an empty directory
 "anything"?
 
+## 56–62. Spec v3 § 4/§ 5/§ 14, layout (AC-22, extended AC-17)
+
+Raised while writing `ac/ac-22-layout.js` and the layout half of
+`ac/ac-17-configuration.js` from spec v3 alone, before V3-2. 57–59 are
+**ruled** (DECISIONS 91, 92) and asserted; 60–62 carry a reading the suite
+asserts (marked in the source); 56 is **not tested** until ruled. The other
+V3-2 questions — scan bounds, the `backlog` folder name, case-insensitive
+names, the hierarchy archive merge, `refused:misplaced` — were ruled in
+DECISIONS 90–92 before they reached this file, and are asserted directly.
+
+**56. `layout.folders` with fewer than four keys.** § 5: "`layout.folders`:
+exactly the four keys `epics`, `tasks`, `subtasks`, `archive`", but also
+"Every part of it is optional: a missing `layout`, or a missing key inside
+it, means the default shown here". Is `folders: {"archive": "shelf"}` valid
+(the other three default) or invalid (not exactly four keys)? **Not
+tested** — every `folders` object in the suites names all four.
+
+**57. Renaming the archive folder on a populated backlog. — RULED (DECISIONS
+92 Q2):** archived-ness stays location-based; below the old archive folder a
+file is misplaced, and `archived:` decides only the target — with it, the new
+archive folder; without it, the active place. `--fix` never archives or
+un-archives. Asserted in B3 (type and hierarchy) and for the file without
+`archived:`. *Was:* § 4: an element
+file "is archived exactly when it lies below the archive folder". After
+`archive` → `shelf`, files in the old `archive/` are no longer below the
+archive folder — active by that rule, yet they carry `archived:` and § 4 also
+says "the frontmatter is the truth". Are they active and misplaced (and
+`--fix` moves them to the *active* places), or archived and misplaced (moved
+into `shelf/`)?
+
+**58. `layout:misplaced` on an unresolvable chain. — RULED (DECISIONS 91
+B15):** no layout code, never moved; a task or subtask *without* `parent` has
+a place at the top of the tree and is judged like any other. B5 asserts both.
+*Was:* Under `hierarchy` an
+element whose `parent` chain does not resolve has no defined place. Does it
+also carry `layout:misplaced` besides its `parent:*` code?
+
+**59. README.md / STATUS.md below the top level. — RULED (DECISIONS 91
+B12):** the exclusions hold at the top level only; a deeper `README.md` is an
+element file and is reported (asserted in B6). *Was:* § 4 excludes "`README.md`,
+`STATUS.md` and anything under `.nanojira/`" from the element scan. Only the
+top-level files, or a file of that name at any depth (`epics/README.md`)?
+(STATUS.md is V3-3's and is not asserted in AC-22 at all.)
+
+**60. `--fix` creates missing target folders.** § 14 step 3 moves a file "to
+its layout place"; it does not say the folder is created when absent (renamed
+type folders, a new `hierarchy` tree). *Reading used:* it is — AC-22's own
+scenario (edit the configuration, run one `--fix`, everything moved) cannot
+hold otherwise. Asserted in B3.
+
+**61. "every element reports `type:folder` or `layout:misplaced`".** Some
+changes leave some elements in place: renaming only the type folders, or
+`type` → `flat`, keeps archived files at `<archive>/<id>.md`, which is right
+under both. *Reading used:* every element whose place the change moves reports
+the code; the others report neither. Asserted in B3.
+
+**62. `set` on a misplaced file.** § 4: "under `hierarchy` a file moves only
+through `nj archive`, `nj doctor --fix`, or by hand" — worded for
+`hierarchy`. *Reading used:* in every group, a write (`set`) on a misplaced
+file writes it where it lies and does not relocate it. Asserted in B3 for all
+seven layout changes.
+
+## 63–68. Hardening after V3-1 — `.njrc` ownership, `io_error`, `.njrc` lexing (DECISIONS 93, 96)
+
+Raised while writing `edge/hardening-v3-1.js` from spec v3 (§ 4 "Ownership",
+§ 9 `io_error`, § 14 `--fix`, and the § 4 lexing amended by DECISIONS 96)
+before TSK-029 is implemented. **All six are ruled** (DECISIONS 98) and
+asserted.
+
+How the suite gets a foreign-owned `.njrc` without root: it hard-links a
+readable file that genuinely belongs to another non-root uid on this machine
+(found under `/Users/Shared`, `/private/var/db`, … on the scratch
+filesystem — here `/Users/Shared/.betamigrated`, uid 248, empty) into the
+scratch tree as `.njrc`. A hard link is the file itself, one inode and one
+owner, so no reading of "owned" is involved. A symlink's target, by contrast, can be
+any foreign file or directory (DECISIONS 98). As root the suite `chown`s
+instead.
+With neither available the leg fails as `CANNOT RUN`, never a silent pass.
+
+**63. Whose ownership counts for a symlinked `.njrc`? — RULED (DECISIONS
+98):** both the link and the target must be owned by the user or root (§ 4
+amended). Asserted as follows. My link → a foreign file, and my link → a
+foreign directory, are refused with the target's uid. My link → a root-owned
+empty file is accepted. A foreign link → my target is in
+`edge/hardening-njrc-foreign-link.js`, which reports CANNOT RUN without root
+(macOS `link(2)` follows symlinks, and no foreign symlink exists here). *Was:* § 4 says a symlinked
+`.njrc` resolves a relative value against "the directory where the link
+lies", and that a reached `.njrc` "must be owned by the current user or by
+root". It doesn't say whether that means the link (`lstat`) or its target
+(`stat`). The two readings give opposite answers. For example, a link of
+mine pointing at an empty file of uid 248 is obeyed under `lstat` (the search
+continues) and refused under `stat`. The planter controls the link, but the
+content comes from the target. *Suggested ruling:* both must be owned by the
+current user or root, which is the strictest reading and the only one that
+closes both directions.
+
+**64. Which path does `io_error` name for a deleted working directory? —
+RULED (DECISIONS 98): the reading below is accepted.**
+§ 9's table pins the code, `io_error` (not `no_backlog`), and DECISIONS 93
+pins the form: one line, the path, the OS reason, never a stack. But a deleted
+cwd has no path the OS will report (`uv_cwd` fails); `nj` could know it only
+from `$PWD`. *Reading asserted:* exit 1, `io_error`, well-formed JSON, exactly
+one stderr line, no stack. The path and the reason are **not asserted** for
+this case. The same holds for a cwd with an **unsearchable ancestor**
+(DECISIONS 96): `getcwd()` fails there as well (`EACCES`). There the
+suite asserts `io_error`, one line, no stack and the OS reason
+(`EACCES`/"permission denied"), but not the path. Also untested: whether an absolute `--backlog` from a deleted cwd
+still fails. No cwd is needed to resolve it, so the spec's "a deleted working
+directory" reads as the case where the cwd is actually used.
+
+**65. Ownership vs. the other `.njrc` faults: which is reported first? —
+RULED (DECISIONS 98):** ownership first, before the file is read (§ 4
+amended). Asserted with a foreign file that is also malformed, one that is
+also unreadable, and my link → a foreign directory. Each gets the ownership
+message, never `line <n>`, a read error, or "not a regular file". *Was:* Take
+a `.njrc` that is foreign-owned **and** unreadable, or foreign-owned **and**
+malformed (`line <n>: …`). § 4 gives each condition its own message and no
+precedence. *Security reading:* ownership first, because a foreign file must
+be "never obeyed", and parsing it already reads it. The suite avoids the
+question: its foreign file is readable and empty, so only the owner is
+wrong.
+
+**66. "Naming the path" when the parent is a regular file. — RULED
+(DECISIONS 98): the reading below is accepted.** For
+`init --backlog=<file>/sub` the named target is `<file>/sub`, but the failing
+call (`mkdir`, `ENOTDIR`) is on `<file>`. *Reading asserted:* the line
+contains `<file>`'s path (given or canonical spelling), which is satisfied
+whether it names the target or the failing component. The OS reason is
+asserted loosely: `ENOTDIR` or "not a directory", and for the read-only
+parent `EACCES`/`EPERM`/"permission denied"/"read-only"/"not permitted". For
+the read-only parent the line must contain the read-only directory's path.
+
+**67. A single `\r` as the file's last byte. — RULED (DECISIONS 98):**
+invalid, like any `\r` not followed by `\n`. Asserted: `backlog = backlog\r`
+(line 1), and the same after a CRLF line (line 2). *Was:* § 4 (as amended by
+DECISIONS 96): "a trailing `\r` counts as line-end whitespace (CRLF files
+work), but a `\r` not followed by `\n` is `invalid_njrc`." A file ending in
+`backlog = x\r` with no `\n` after it fits both halves. It is a trailing
+`\r` at the end of the last line, and it is also a `\r` not followed by
+`\n`. **Not tested.** The suite's lone-`\r` cases all have the `\r`
+followed by another character: a classic-Mac file, `\r` inside a value, and
+`\r` inside a comment line.
+
+**68. The line number of a lone-`\r` violation. — RULED (DECISIONS 98):**
+`line <n>: <reason>`, where n is the line holding the `\r` and lines are
+counted by `\n`. Asserted for all six lone-`\r` cases, including a
+classic-Mac file (line 1) and a `\r` on line 3. *Was:* § 4 prints a format
+violation as `line <n>: <reason>`, and a file that isn't a readable regular
+file without a line number. A lone `\r` is a lexing fault. Is it a format
+violation, and if so, is `\r` a line break for counting (in a classic-Mac
+file, is the second `\r`-separated line "line 2" or all of it "line 1")?
+*Reading asserted:* only `Error: invalid .njrc at <abs path>: …`, the path,
+exit 1 and `invalid_njrc`. The line number and its presence are not
+asserted.
+
+## 69–70. Spec v3 § 4, status overview (AC-23)
+
+Raised while writing `ac/ac-23-status-overview.js` from spec v3 alone, before
+V3-3. The STATUS.md problem-element rules and the failure rule were ruled
+before they reached this file (DECISIONS 95 B18, B19) and are asserted
+directly.
+
+**69. The prefix of the STATUS.md warning. — RULED (DECISIONS 99):** the line
+is `Warning: STATUS.md not updated (<reason>)` on stderr; § 4 now spells it
+so. *Was:* § 4 wrote `nj: warning: …`; DECISIONS 88 had ruled § 4's `nj: `
+error lines illustrative of the message, and no stderr warning convention
+existed (today's warnings go to stdout with `⚠`). Asserted as a full line.
+
+**70. The sort weight of an unknown `priority`. — RULED (DECISIONS 100):**
+the default's weight (2), tied with `normal` and ordered by id — measured v2
+behaviour, kept; asserted in `ac-14` (list) and `ac-23` C3b (STATUS.md).
+*Was:* STATUS.md sections use
+`list` order, and § 9 gives weights for `urgent`, `high`, `normal`, `low` and
+a missing priority (2). A value outside that set (`unknown:priority`) has no
+stated weight.
+
+## 71–74. Spec v3 § 4/§ 14, legacy migration (AC-24)
+
+Raised while writing `ac/ac-24-legacy-migration.js` from spec v3 (§ 4, § 7,
+§ 14 step 0, § 15 AC-24) and DECISIONS 86, 93 and 95 B21, before V3-4.
+**All four are ruled** (DECISIONS 101) and asserted.
+
+**71. A v2 backlog reached through `--backlog`, `NJ_BACKLOG` or `.njrc`. —
+RULED (DECISIONS 101): `legacy_layout` from every source, as read.** *Was:*
+§ 4 says "holds a backlog" means `.nanojira/config.json` exists, and a
+binding source whose target holds none is `invalid_backlog_{flag,env,njrc}`.
+The same paragraph also says "a folder with the legacy `.nanojira.json` at
+its top level is `legacy_layout`", with no restriction to the search.
+*Reading asserted:* `legacy_layout` from every source, because the more
+specific rule wins, the same way `backlog_without_config` does for a
+search-found `backlog/`. The binding-error reading would send a v2 user to
+"no backlog at …" and not to `nj doctor --fix`.
+
+**72. `init` where a v2 backlog is. — RULED (DECISIONS 101):** `exists`,
+like any occupied target. Now asserted. *Was:* § 9 maps "backlog in the v2 layout
+(any command except `doctor`)" to `legacy_layout`, and "`init` target
+already exists" to `exists`. Both fit. *Asserted:* only exit 1, `ok:false`
+and "nothing changed".
+
+**73. An empty `.nanojira/` beside the v2 files. — RULED (DECISIONS 101), as
+read:** the ambiguity needs a v3 configuration or v3 tombstones. *Was:* Step 0 says "create
+`.nanojira/`", and "both the v2 and the v3 location … exist" names the v3
+locations as `.nanojira/config.json` and `.nanojira/ids/`. An empty
+`.nanojira/` is neither. *Reading asserted:* the migration proceeds; it is
+not the ambiguous case.
+
+**74. Two "obvious" completions of step 0 and of `doctor` on a legacy
+backlog. — RULED (DECISIONS 101), both as read.** Also ruled: the verbatim
+match ignores a trailing `\r`, and the replacement keeps the line's ending.
+Now asserted with a CRLF file, a mixed-ending file, and the line as the
+last line with no newline. *Was:*
+(a) `.gitignore` absent. "Replace … only when that line is present verbatim;
+otherwise `.gitignore` is left alone and a note says so." *Reading
+asserted:* an absent file is "otherwise": it is not created, and `notes[]`
+is non-empty.
+(b) `doctor` on a legacy backlog runs every other check. It reads
+`.nanojira.json`/`.ids/` "from their v2 places" (§ 14). *Reading asserted:*
+the missing `STATUS.md` of a v2 backlog is reported as
+`backlog:status_stale` next to `backlog:legacy_layout`. Custom v2 statuses
+and a missing v2 tombstone surface as `unknown:status` and
+`id:no_tombstone`.
+A CRLF `.gitignore` line (`.nanojira-index.json\r\n`): is that "verbatim"?
+
+## 75–83. Proposal v3.1 § 0/§ A/§ B — note author and unarchive (AC-25, AC-26)
+
+Raised while writing `ac/ac-25-note-author.js` and `ac/ac-26-unarchive.js`
+from `docs/proposals/v3.1.md` (5d1c83d) and the lead's rulings A-1, B-1, B-2
+and B-3, before v3.1 exists. **75–81 are ruled in DECISIONS 104** and
+asserted (AC-25 N1/N4/N7, AC-26 U3/U4/U6 and the `ids` checks). 82 and 83
+arose from those rulings and are open.
+
+**75. A layout change to `hierarchy` between archive and unarchive.** **— RULED (DECISIONS 104): the current layout wins.** The subtree is gathered by its `id`/`parent` chain wherever it lies in the archive. `refused:misplaced` remains only for a foreign element in the subtree's archived folder, or a member lying outside the archive. Now asserted: type → hierarchy, flat → hierarchy, and a member moved elsewhere inside the archive (gathered). The refusal is asserted for a member outside the archive. *Was:* AC-26
+says "changing `group` between `archive` and `unarchive` places the files by
+the new layout", and § 11a places by "the configured layout at the time of
+the command". But an archive made under `type` or `flat` is flat, and under
+`hierarchy` its members do not "lie in X's archived folder". § 11a makes
+that `refused:misplaced`. Which rule wins: place by the new layout, or
+refuse and point at `nj doctor --fix` (which would move the archive into
+hierarchy shape first)? *Tested:* hierarchy → type, type → flat, type →
+renamed type folders. **Not tested:** type/flat → hierarchy.
+
+**76. What "whitespace" and "a single line" mean for `NJ_AUTHOR`.** **— RULED (DECISIONS 104):** only spaces and tabs are trimmed. Any `\n` or `\r` left, trailing included, is `invalid_env`, and Unicode spaces are literal. Now asserted: trailing, leading, inner and CRLF cases; NBSP/U+2003 signed literally; a single NBSP is a valid name. *Was:* A name is
+valid "after dropping leading and trailing whitespace" if it "is a single
+line".
+- Is `reviewer\n` (a trailing newline, as `$(cmd)` substitutions rarely leave
+  it, but templating can) trimmed to `reviewer`, or is it multi-line?
+- Is a lone `\r` inside a line break?
+- Are Unicode spaces (NBSP, U+2003) trimmed?
+*Tested:* ASCII spaces and tabs around the name are trimmed; spaces-only and
+tab-only are invalid (A-1); an inner `\n` is invalid. **Not tested:** a
+trailing `\n`, a `\r`, Unicode spaces.
+
+**77. `nj note` precedence: an invalid `NJ_AUTHOR` against other failures.** **— RULED (DECISIONS 104):** argument parsing → the acting name → target resolution → refusals. Now asserted: `unknown_field`, `missing_argument` and `missing_value` beat `invalid_env`, which beats `not_found` and `refused:archived`. *Was:*
+On an archived element (`refused:archived`), an unknown `--id`
+(`not_found`), or a missing text, which code comes first: `invalid_env` or
+the other? § 9's precedence rules (AMBIGUITIES 31–35, ruled unpinned) don't
+cover it. **Not tested.**
+
+**78. `NJ_FAULT=before-compare` on a multi-file unarchive.** **— RULED (DECISIONS 104):** once per file, top-down. On abort the earlier files carry their in-place write and nothing has moved; a second unarchive completes. Now asserted with a parallel edit of TSK-002 only. *Was:* The hook
+"after the first read and before the compare re-read" is defined per file
+write. With several files, does it fire once, before the first guarded
+write, or before each? Are files already rewritten in place (their
+`archived:` gone) when the run aborts? *Asserted:* exit 1,
+`changed_in_parallel`, nothing moved out of the archive, and the parallel
+edit is never overwritten. The test edits every file of the subtree, so
+whichever file is compared first has changed. **Not asserted:** the state of
+the other files.
+
+**79. The order of `ids` among siblings.** **— RULED (DECISIONS 104):** top-down, siblings by id ascending. Asserted: parent before child, TSK-001 before TSK-002. *Was:* "`ids` in the order the elements
+were moved (top-down)". *Asserted:* every parent comes before its children.
+**Not asserted:** the order of siblings (by id? by moving order?).
+
+**80. `refused:misplaced` for an unresolvable chain outside `hierarchy`.** **— RULED (DECISIONS 104):** `hierarchy` only. Now asserted: under `type` and `flat` a dangling-parent archived task comes back to its place. *Was:*
+The chain bullet ("X's `parent` chain does not resolve … the active place
+cannot be computed") is not scoped to a group. Under `type` and `flat` the
+active place doesn't depend on the chain. The failure-code table row reads
+"(`hierarchy`)". *Tested:* under `hierarchy`. **Not tested:** under `type`
+and `flat`.
+
+**81. Refusal precedence beyond the unreadable rule.** **— RULED (DECISIONS 104):** unreadable → not_archived → parent_archived → misplaced → exists. Now asserted pairwise. *Was:* § 11a pins only
+`refused:unreadable` "before the target is resolved"; that is asserted
+against an active target and an unknown one. The order among
+`not_archived`, `parent_archived`, `misplaced` and `exists` when several
+hold is not pinned. **Not tested.**
+
+**82. "A member lying outside the archive" under `type`/`flat`, and against
+§ 11a's "descendants not archived are untouched".** DECISIONS 104 keeps
+`refused:misplaced` for "a member of the subtree lying outside the archive".
+§ 11a also says "Descendants of X that are *not* archived are untouched;
+they already lie at their active places". An archived epic with one active
+task (the `archive:split` state) fits both. Is it a refusal (D104) under
+every group, or only under `hierarchy`, where the misplaced refusals live?
+*Asserted:* the refusal under `hierarchy`. **Not tested:** `type`/`flat`.
+
+**83. "Top-down" for `ids`: pre-order or level order?** DECISIONS 104 79 pins
+"top-down, siblings by id ascending". For EPIC-001 → {TSK-001 → SUB-001,
+TSK-002}, that could be depth-first `[EPIC-001, TSK-001, SUB-001, TSK-002]`
+or breadth-first `[EPIC-001, TSK-001, TSK-002, SUB-001]`. *Asserted:*
+parent before child, TSK-001 before TSK-002. The per-file `before-compare`
+leg (78) edits TSK-002, which comes after EPIC-001 and TSK-001 in either
+order. **Not tested:** the position of SUB-001.
+
 ## Not an ambiguity, recorded because it looks like one
 
 - **The prefix of the § 4 location errors.** § 4 spells the messages as

@@ -15,8 +15,8 @@ const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 const orig = (st, up) => `---\nid: TSK-001\ntype: task\nparent: EPIC-001\ntitle: T\nstatus: ${st}\ncreated: ${NOW}\nupdated: ${up}\n---\n\n# T\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n`;
 function mk(label) {
   const d = fs.mkdtempSync(SCRATCH_BASE + '/' + label + '-'); const bl = path.join(d, 'backlog');
-  for (const s of ['epics','tasks','subtasks','archive','.ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
-  fs.writeFileSync(path.join(bl, '.nanojira.json'), CFG); fs.writeFileSync(path.join(bl, 'tasks', 'TSK-001.md'), orig('todo', NOW)); fs.writeFileSync(path.join(bl, '.ids', 'TSK-001'), '');
+  for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
+  fs.writeFileSync(path.join(bl, '.nanojira/config.json'), CFG); fs.writeFileSync(path.join(bl, 'tasks', 'TSK-001.md'), orig('todo', NOW)); fs.writeFileSync(path.join(bl, '.nanojira/ids', 'TSK-001'), '');
   return d;
 }
 function start(args, cwd, env) {

@@ -57,6 +57,14 @@ try {
   if (e instanceof Fail) {
     emitFailure(e.code, e.message, e.hint);
   } else {
+    // `io_error` is reported only where a command already knows what named
+    // target it was acting on — `init`'s own target, `workingDir()` — and
+    // wraps that specific operation itself. A generic catch here cannot know
+    // the target, so it cannot tell an OS answer about a path from a real
+    // bug; conflating the two once hid a genuine defect (an archive's own
+    // `mkdir` failing mid-move) behind an innocent-looking environment label,
+    // with the stack that would have said "bug" gone (TSK-029 T2). Anything
+    // that reaches here keeps its stack.
     emitFailure('internal_error', e && e.stack ? e.stack : String(e));
   }
 }

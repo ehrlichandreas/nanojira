@@ -6,16 +6,23 @@ import type { Flags, Element, EntryJson } from '../core/types.ts';
 
 import * as fs from 'fs';
 import { checkFlags } from '../core/args.ts';
-import { context, resolveTarget, requireNoStubs, requireActive } from '../core/context.ts';
+import { context, resolveTarget, requireNoStubs, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
 import { compareElements, entryJson } from '../core/derive.ts';
+import { ownFolder } from '../core/layout.ts';
 import { descendants } from '../core/load.ts';
 import { fail, out } from '../core/output.ts';
+import { refreshStatus } from '../core/status.ts';
+
+function removeIfEmpty(dir: string) {
+  try { fs.rmdirSync(dir); } catch { /* not empty (or already gone): it stays */ }
+}
 
 function cmdRm(flags: Flags) {
   checkFlags(flags, [], new Set(['json', 'cascade', 'id', 'file']), true);
   const json = flags.has('json');
   const ctx = context(flags);
   requireNoStubs(ctx, 'rm');
+  requireNoUnreadableDirs(ctx, 'rm');
   const el = resolveTarget(ctx, flags, true);
   requireActive(el, 'rm');
   const kids = descendants(ctx, el);
@@ -40,7 +47,15 @@ function cmdRm(flags: Flags) {
     .sort(compareElements);
 
   const entries: EntryJson[] = victims.map(entryJson);
-  for (const v of victims) fs.unlinkSync(v.file);
+  // Children first, so an interrupted cascade never leaves an orphan behind.
+  // Under `hierarchy` an epic's or task's own folder goes too, but only once
+  // it is empty — never a recursive delete of whatever else it holds (§ 12).
+  for (const v of victims.slice().reverse()) {
+    fs.unlinkSync(v.file);
+    const own = ctx.cfg.layout.group === 'hierarchy' ? ownFolder(v) : null;
+    if (own !== null) removeIfEmpty(own);
+  }
+  refreshStatus(ctx.backlog, ctx.cfg, ctx);
 
   if (json) {
     if (flags.has('cascade') && kids.length > 0) {

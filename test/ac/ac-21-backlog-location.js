@@ -18,12 +18,11 @@
  * Every assertion below cites one of those passages. The clause → check map
  * is in the section headers (A1 … A9), mirrored in AC-MATRIX.md.
  *
- * "Holds a backlog" (§ 4) means `.nanojira/config.json` exists — from V3-4.
- * Until then the v2 marker `.nanojira.json` decides (DECISIONS 88,
+ * "Holds a backlog" (§ 4) means `.nanojira/config.json` exists (since V3-4;
+ * before it the v2 marker `.nanojira.json` decided — DECISIONS 88,
  * AMBIGUITIES 49). This suite never builds a backlog layout itself: every
  * backlog is made by `H.mkBacklog()` and moved into place, so "a backlog"
- * is whatever the harness builds, and the V3-4 test batch that moves the
- * harness to `.nanojira/` moves this suite with it.
+ * is whatever the harness builds.
  *
  * The prose prefix is the implementation's `Error: `; § 4's `nj: ` lines
  * illustrate the message, not the prefix (DECISIONS 88).
@@ -680,6 +679,92 @@ function usesBacklogIds(desc, o, expected) {
   const near = backlogAt(path.join(stopped, 'proj', 'backlog'), 'TSK-044');
   usesBacklog('A7 a nearer backlog/ stops the search: a malformed .njrc further up is never read',
     { cwd: mkdir(path.join(stopped, 'proj', 'src')) }, near, 'TSK-044');
+}
+
+/* ===================================================================== */
+/* A7b — .njrc lexing and odd files, as § 4 pins them (DECISIONS 90)      */
+/* ===================================================================== */
+
+/* § 4: a .njrc that is not a readable regular file: "invalid .njrc at <abs
+ * path>: <reason>", no line number (prefix per DECISIONS 88). */
+const NJRC_FILE_RE = /^Error: invalid \.njrc at (.+?): (.+)$/m;
+
+function njrcFileFailure(desc, o, rcPath) {
+  const r = run(['list'], o);
+  T.exit(desc + ': exit 1', r, 1);
+  const m = NJRC_FILE_RE.exec(r.stderr || '');
+  T.check(desc + ': stderr carries "Error: invalid .njrc at <abs path>: <reason>" (§ 4)', !!m, 'stderr = ' + J(r.stderr));
+  if (m) {
+    T.check(desc + ': the path is the absolute path of that .njrc',
+      path.isAbsolute(m[1]) && canon(path.dirname(m[1])) === canon(path.dirname(rcPath)) && path.basename(m[1]) === '.njrc',
+      'path = ' + J(m[1]));
+    T.check(desc + ': no line number', !/^line \d+:/.test(m[2]), J(m[2]));
+  }
+  const rj = runJ(['list'], o);
+  T.eq(desc + ' --json: invalid_njrc', rj.json && rj.json.error, 'invalid_njrc');
+}
+
+{
+  const root = H.freshDir('ac21-lex');
+  let n = 0;
+  const lex = (what, content, dirName, markerId, decoy) => {
+    const d = mkdir(path.join(root, 'l' + (n++)));
+    const target = backlogAt(path.join(d, dirName), markerId);
+    if (decoy) backlogAt(path.join(d, decoy), 'TSK-095');
+    njrc(d, content);
+    usesBacklog('A7b ' + what, { cwd: d }, target, markerId);
+  };
+  lex('a UTF-8 BOM at the start is dropped', '\uFEFFbacklog = bombl\n', 'bombl', 'TSK-071');
+  lex('CRLF line ends work', '# c\r\nbacklog = crlfbl\r\n', 'crlfbl', 'TSK-072', 'crlfbl\r');
+  lex('a line splits at its first "=" — the value may contain "="', 'backlog = a=b\n', 'a=b', 'TSK-073', 'a');
+  lex('an inline "#" is part of the value', 'backlog = bl #note\n', 'bl #note', 'TSK-074', 'bl');
+
+  const cs = mkdir(path.join(root, 'case'));
+  backlogAt(path.join(cs, 'backlog'), 'TSK-075');
+  const rcCase = njrc(cs, 'Backlog = backlog\n');
+  njrcFailure('A7b keys are case-sensitive: Backlog is an unknown key', ['list'], { cwd: cs }, rcCase, 1);
+
+  /* not a readable regular file */
+  const asDir = mkdir(path.join(root, 'asdir'));
+  backlogAt(path.join(asDir, 'backlog'), 'TSK-076');
+  mkdir(path.join(asDir, '.njrc'));
+  njrcFileFailure('A7b a .njrc that is a directory', { cwd: asDir }, path.join(asDir, '.njrc'));
+
+  const dang = mkdir(path.join(root, 'dangling'));
+  backlogAt(path.join(dang, 'backlog'), 'TSK-077');
+  fs.symlinkSync(path.join(root, 'no-such-file'), path.join(dang, '.njrc'));
+  njrcFileFailure('A7b a .njrc that is a dangling symlink', { cwd: dang }, path.join(dang, '.njrc'));
+
+  const unread = mkdir(path.join(root, 'unreadable'));
+  backlogAt(path.join(unread, 'backlog'), 'TSK-078');
+  const rcU = njrc(unread, 'backlog = backlog\n');
+  fs.chmodSync(rcU, 0o000);
+  let readable = true;
+  try { fs.readFileSync(rcU); } catch (e) { readable = false; }
+  if (readable) {
+    T.check('A7b a .njrc without read permission: not covered — this process can read mode 000 (root?)', false, rcU);
+  } else {
+    njrcFileFailure('A7b a .njrc without read permission', { cwd: unread }, rcU);
+  }
+  fs.chmodSync(rcU, 0o644);
+
+  /* a symlinked .njrc resolves against the directory where the link lies */
+  const real = mkdir(path.join(root, 'realdir'));
+  fs.writeFileSync(path.join(real, 'shared.njrc'), 'backlog = bl\n');
+  backlogAt(path.join(real, 'bl'), 'TSK-094');                       // decoy: the target's directory
+  const linkDir = mkdir(path.join(root, 'linkdir'));
+  const viaLink = backlogAt(path.join(linkDir, 'bl'), 'TSK-079');
+  fs.symlinkSync(path.join(real, 'shared.njrc'), path.join(linkDir, '.njrc'));
+  usesBacklog('A7b a symlinked .njrc resolves against the link\'s directory', { cwd: linkDir }, viaLink, 'TSK-079');
+
+  /* ~/.njrc is an ordinary ancestor: read when HOME is on the search path */
+  const inHome = mkdir(path.join(HOME, 'proj', 'src'));
+  const homeBl = backlogAt(path.join(HOME, 'homeonly'), 'TSK-080');
+  const homeRc = njrc(HOME, 'backlog = homeonly\n');
+  usesBacklog('A7b ~/.njrc is read like any ancestor when HOME is on the search path', { cwd: inHome }, homeBl, 'TSK-080');
+  fs.rmSync(homeRc);
+  fs.rmSync(homeBl, { recursive: true, force: true });
+  fs.rmSync(path.join(HOME, 'proj'), { recursive: true, force: true });
 }
 
 /* ===================================================================== */
