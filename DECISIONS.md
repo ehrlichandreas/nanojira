@@ -312,7 +312,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     steps are: **S0** baseline harness (precondition — no step runs before it) ·
     **S1** `deriveGraph` into 8 passes · **S2** `deriveGraph` uses `childMap()`
     instead of its own children map (`nj:630-635`, a duplicate since round two) ·
-    **S3** `loadElement` into 8 derivers · **S4** `doctorFix` into `fixCtx` plus 8
+    **S3** `loadElement` into 9 derivers · **S4** `doctorFix` into `fixCtx` plus 8
     step functions · **S5** extract `cmdNew` validation · **S6** extract `cmdSet`
     overrides · **S7** `JSON_MODE` into an `output` object · **S8** JSDoc and the
     header map.
@@ -351,6 +351,23 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     `git show <ref>:nj > nj`: same result, no index side effect. Reserve
     `git checkout <ref> -- <path>` for the rollback itself, where staging the
     restored file is what you want.
+
+    **S3 says nine because someone counted.** The first version of this entry said
+    eight, written while nobody had yet cut `loadElement` open. The natural seam
+    yields nine; eight is reachable only by merging `deriveTitle` into `deriveBody`,
+    and completeness has nothing to do with the title — that merge would be a number,
+    not a reason. Treat the other counts in this list the same way: they are
+    intentions from planning, and the measurement wins.
+
+    Two constraints from that same map, because they are the kind that gets lost.
+    Unlike `deriveGraph`, **the order of the derivers is load-bearing** — each reads
+    `el.*` fields its predecessors wrote — and violating it does **not** crash: a
+    `deriveParent` running before `deriveType` quietly yields `parent:orphaned`
+    instead of `parent:hierarchy`. An order whose violation throws is harmless; one
+    whose violation returns a different answer is a trap. And `el.assignee` is
+    deliberately **not** normalised where `el.parent` is: a missing assignee becomes
+    `''`, not `null`, and `cmdSet` relies on it to delete the field. Anyone tidying
+    that inconsistency silently changes what `nj set --assignee=` does.
 
     Recorded here because until now this order lived only in `/tmp` and in a
     handover message. The one constraint most likely to be lost that way is the one
@@ -412,6 +429,18 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     day one does, the order becomes load-bearing — and nothing currently in
     place would notice. That sentence belongs in the comment at `deriveGraph`,
     where the next person to add a pass will read it.
+
+    **That condition was one of three, and this entry named only the first.**
+    Measured later with a mutant that runs `attachGraph` before every mark pass
+    (scenario 0/94, corpus 0/1878, oracle 62/62 — against a control mutant the
+    same setup catches 88/94): the order is free only while **(1)** no pass reads
+    another pass's `problems` set, **(2)** no pass writes an element field other
+    than `problems`, and **(3)** no mark pass reads `el.byId` or `el.children`.
+    Break any of the three and some position becomes load-bearing — and the
+    corpus scenario `attach-second-derive` provably does not tell you. The
+    implementer found the gap while correcting a comment in `fixtures.js` that
+    promised a third fault form nobody had measured; the same three conditions
+    now stand there, next to the scenario they bound.
 
     The two index builds are a separate case and need no protection: their
     dependants (`markOpenChildren`, `attachGraph`) read `children`, so moving a
@@ -546,6 +575,90 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     recording window for it piecemeal. **One window per batch, after the batch is
     closed** — otherwise the window chases a moving target and each attempt costs
     a full recording.
+
+    **Third half, found after the above was written: measured is not durable.**
+    The second attempt was confirmed by all seven writers and measured five times
+    over seven minutes — and still froze the wrong thing. The digest `66891340`
+    described the **working tree**. `HEAD:test/` was a different tree (`d696062c`,
+    56 suites); the recorded one was HEAD plus five untracked suites plus
+    uncommitted edits to thirteen files. A `git stash` by anyone would have flipped
+    the digest and aborted every replay in the team with code 6, and nobody would
+    have looked for the cause in a colleague's working tree. Worse, the corpus was
+    reproducible from no commit at all, which means the reference point was not one.
+    Found by a teammate preparing an unrelated measurement, not by any of the five
+    samples — five correct measurements of the wrong thing. **Commit the tree and
+    tag it before recording against it**; `oracle-frozen-2` is that tag for this
+    corpus. Confirmed · measured · *recorded*.
+
+    One more command trap, same family as the index one in entry 75 and caught by
+    the same teammate two hours after that rule was issued — in a tag message
+    written by the lead who issued it. `git checkout <ref> -- <dir>` stages the
+    directory too, and `git show <ref>:<path> >` cannot restore a directory at all.
+    The index-neutral form for a tree is
+    `git restore --source=<ref> --worktree -- <dir>`; without `--staged` the index
+    is untouched. Verified in a throwaway repo rather than assumed:
+
+        git checkout HEAD~1 -- d                     worktree v1  index v1  staged [d/f]
+        git restore --source=HEAD~1 --worktree -- d  worktree v1  index v2  staged []
+
+81. **A right decision can rest on a wrong reason, and the wrong reason is the
+    part that gets quoted later.** S2 carried a constraint: do not memoise
+    `childMap` across `deriveGraph`'s five calls. The constraint is correct. The
+    justification recorded in its commit message is not — and it took an
+    independent round to notice, because nothing about the result looked wrong.
+
+    The commit says memoising "would have broken `markOpenChildren` and
+    `attachGraph` on the second graph — the class the corpus scenario
+    `attach-second-derive` catches". Built as a two-line mutant, it breaks
+    nothing: replay reports 0 diffs over 2806 compared calls, the oracle 61/61,
+    and fourteen targeted differential probes (seven shapes × prose/json, each
+    followed by `doctor --json` and `list --all --json`) are byte-identical.
+
+    The verifier did the thing that makes this usable: before reporting a gap, he
+    asked which of two categories it was — **(i) provably equivalent** or
+    **(ii) observable but uncaught** — instead of concluding "the net has a hole"
+    from a green replay. It is (i), and there are three independent structural
+    reasons. `attachGraph`'s post-write output is read by nobody; both readers run
+    on the first graph. `markOpenChildren` on graph two only touches the written
+    element's `_problems`, and `cmdSet` cannot move an element: `SETTABLE_FIELDS`
+    (`nj:27`) contains no `parent`. And `cmdRm` does not call `deriveGraph` after
+    writing at all — the four post-write sites are `1371` new, `1402` set, `1547`
+    note, `1814` archive.
+
+    So: keep the constraint, and **replace** the justification rather than dropping
+    it — the verifier's third option, and better than the two I offered him. A rule
+    with no reason gets deleted by the next person who looks for one. The reason
+    that holds is narrower and states its own expiry:
+
+    > The memo would be harmless **today, and only because round one has no verb
+    > that moves parentage.** `set` takes no `--parent` (`SETTABLE_FIELDS`,
+    > `nj:27`), `doctor --fix` never touches `parent` (§ 14 forbids inventing
+    > parents outright), `rm` does not re-derive after writing, and `archive`
+    > cannot differ because archiving presupposes the whole subtree is `done`.
+    > These are **properties of round one, not guarantees of the spec.** The moment
+    > a verb can move an element — a `set --parent`, an `unarchive`, a re-parenting
+    > in `--fix` — the memo becomes a real bug, and **no net reports it.**
+
+    That also answers the cost question: **do not build a fixture.** None can be
+    written today, because no command can produce the triggering state. Hang the
+    trigger on the rule instead, so the step that introduces `--parent` must bring
+    the fixture with it.
+
+    And what `attach-second-derive` *does* catch, so nobody writes it off: "a pass
+    computes and does not write back" (oracle 53/56 red) and "the second call works
+    on copies" (oracle green, replay red — the valuable one). Three different
+    faults; the constraint cited the wrong one. Anyone who later says "the corpus
+    covers this" is citing a scenario that does not measure what they think it
+    measures. That is the same failure as a header
+    comment claiming the spec leaves something open when § 9 decides it, or a
+    backlog note naming a superseded digest method: **documentation that is wrong
+    about itself while the code is right.** It is worse than a wrong result,
+    because it survives every test.
+
+    Stated limit, his: absence of a difference is weaker evidence than its
+    demonstration. Seven shapes are not a proof. If someone finds a shape where a
+    parent-child relation moves across a write *and* is reported, this verdict
+    flips.
 
 ## Known gaps, stated plainly
 

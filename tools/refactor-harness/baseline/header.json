@@ -3,18 +3,18 @@
   "njPath": "nj",
   "node": "v24.21.0",
   "platform": "darwin-arm64",
-  "recordedAt": "2026-09-22T14:04:47.733Z",
-  "calls": 3317,
+  "recordedAt": "2026-09-22T17:42:14.120Z",
+  "calls": 3451,
   "parts": [
     {
       "name": "fixtures",
-      "calls": 1752,
-      "detail": "26 scenarios, 0 threw"
+      "calls": 1878,
+      "detail": "29 scenarios, 0 threw"
     },
     {
       "name": "oracle",
-      "calls": 1330,
-      "detail": "passed 61/61, failed 0, cannot run 0"
+      "calls": 1338,
+      "detail": "passed 62/62, failed 0, cannot run 0"
     },
     {
       "name": "scratch",
@@ -57,6 +57,7 @@
     "edge/cycle-parent-archived.js",
     "edge/cycle-parent-shapes.js",
     "edge/discovery-message.js",
+    "edge/doctor-fix-surface.js",
     "edge/done-open-children.js",
     "edge/duplicate-id-write-refusal.js",
     "edge/empty-value-rule.js",
@@ -85,7 +86,7 @@
     "edge/unreadable-stub-refusals.js",
     "edge/write-encoding.js"
   ],
-  "testDigest": "66891340eb58d83c8aa531c847a885c6b3a282182df858885af146008ebb3ed5",
+  "testDigest": "ce6e08ed4a299f9f6081f00874a1dde92445e3705f400e54176d0fafdfd7bcec",
   "testDigestScope": [
     "test/ac/",
     "test/edge/",
@@ -101,5 +102,5 @@
     "verify.js (white-box probe: reads nj's source, verdict taken directly, calls not in the corpus)"
   ],
   "note": "Comparison key excludes per-file raw sha; nsha (normalised content) is normative.",
-  "corpusSha256": "231a1c795656e24ea5236616e7b411aafd62f05e14ab13b84da1d0dfd6006038"
+  "corpusSha256": "cf0cd890a782c778a29ba8b099b2e5b26d8529eafb02f14588c44d35e39c6f45"
 }
