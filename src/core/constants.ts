@@ -52,6 +52,7 @@ const DEFAULT_CONFIG: Config = {
     statusFile: true,
   },
   claims: { staleAfterHours: 24 },
+  problems: { ignore: [] },
 };
 
 // Closed problem vocabulary (§ 7). severity null === workflow-only code.
@@ -92,6 +93,10 @@ const SEVERITY: Record<string, string | null> = {
   'claim:orphaned': 'warning',
   'claim:stale': 'warning',
   'backlog:claims_unignored': 'warning',
+  'acceptance:no_checkbox': 'warning',
+  'done:no_acceptance': 'warning',
+  'config:unknown_key': 'warning',
+  'config:unknown_code': 'warning',
 };
 
 const BLOCKS_READY = new Set([
@@ -102,6 +107,6 @@ const BLOCKS_READY = new Set([
   'incomplete:description', 'incomplete:acceptance',
 ]);
 
-const BACKLOG_LEVEL = new Set(['backlog:stray_tmp', 'backlog:ids_missing', 'backlog:unreadable_dir', 'config:invalid']);
+const BACKLOG_LEVEL = new Set(['backlog:stray_tmp', 'backlog:ids_missing', 'backlog:unreadable_dir', 'config:invalid', 'config:unknown_key', 'config:unknown_code']);
 
 export { TYPE_PREFIX, PREFIX_TYPE, TYPE_FOLDER_ROLE, FOLDER_ROLES, GROUPS, TYPES, PARENT_TYPE, PRIORITIES, PRIORITY_WEIGHT, FIELD_ORDER, LIST_FIELDS, SECTION_ROLES, SETTABLE_FIELDS, NEW_FIELDS, DEFAULT_CONFIG, SEVERITY, BLOCKS_READY, BACKLOG_LEVEL, V3_DIR_REL, V3_CONFIG_REL, V3_IDS_REL, V3_INDEX_REL, LEGACY_CONFIG_REL, LEGACY_IDS_REL, LEGACY_INDEX_REL };

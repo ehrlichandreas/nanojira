@@ -10,8 +10,14 @@ import { nowMs } from './store.ts';
 
 // -------------------------------------------------------------- derivations
 
-function elementProblems(el: Element) {
-  return Array.from(el.problems).filter((c) => !BACKLOG_LEVEL.has(c)).sort();
+// `ignore` (§ 5/§ 7 "problems.ignore", DECISIONS 165/166): warning codes a
+// backlog has opted to suppress everywhere they're reported -- never here
+// in a way that reaches `isReady` (below), which reads `el.problems`
+// directly, not through this function, so suppressing a report can never
+// quietly change the readiness computation (§ 7 "never the readiness
+// computation itself").
+function elementProblems(el: Element, ignore: readonly string[] = []) {
+  return Array.from(el.problems).filter((c) => !BACKLOG_LEVEL.has(c) && !ignore.includes(c)).sort();
 }
 
 function hasError(el: Element) {
@@ -94,7 +100,7 @@ function entryJson(el: Element, backlog: string, cfg: Config): EntryJson {
   // claims directory and the clock, not on the element file alone. Field
   // order (_problems before _claim) matches the pre-existing EntryJson shape.
   const claim = readClaim(backlog, el.id);
-  const probs = elementProblems(el);
+  const probs = elementProblems(el, cfg.problems.ignore);
   if (claim && isClaimStale(claim.since, cfg.claims.staleAfterHours, nowMs())) probs.push('claim:stale');
   e._problems = probs.sort();
   e._claim = claim;

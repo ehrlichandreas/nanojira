@@ -45,7 +45,10 @@ const FLAG_TABLE: Record<string, CommandSpec> = {
   // cmd-new.ts/cmd-set.ts already validate against — one list, not two
   // hand-kept-in-sync copies.
   new: { fields: NEW_FIELDS.map(str) },
-  set: { fields: [str('id'), str('file')].concat(SETTABLE_FIELDS.map(str)) },
+  // --add-tags/--remove-tags (DECISIONS 163 B): an incremental alternative
+  // to --tags=, set-only, hyphenated like case-sensitive/allow-open-children
+  // (no pre-existing Element field to normalise onto, unlike depends-on).
+  set: { fields: [str('id'), str('file')].concat(SETTABLE_FIELDS.map(str), [str('add-tags'), str('remove-tags')]) },
   note: { fields: [str('id'), str('file'), str('as'), { name: 'text', kind: 'string', positional: true }] },
   check: { fields: [str('id'), str('file'), str('text'), str('item'), bool('on'), bool('off')] },
   claim: { fields: [str('id'), str('file'), str('as'), str('steal'), str('status')] },
@@ -56,6 +59,10 @@ const FLAG_TABLE: Record<string, CommandSpec> = {
   archive: { fields: [str('id'), str('file')] },
   unarchive: { fields: [str('id'), str('file')] },
   doctor: { fields: [bool('fix')] },
+  // `rm` answers only `nj rm --help`'s question (DECISIONS 163 A) -- it is
+  // never an `nj-mcp` tool (TOOL_NAMES omits it unconditionally, § 17),
+  // and this entry does not change that.
+  rm: { fields: [str('id'), str('file'), bool('cascade')] },
 };
 
 function spec(command: string): CommandSpec {

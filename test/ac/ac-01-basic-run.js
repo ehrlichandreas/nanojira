@@ -67,6 +67,33 @@ function entriesOf(r) { return (r.json && Array.isArray(r.json.entries)) ? r.jso
     folders: { epics: 'epics', tasks: 'tasks', subtasks: 'subtasks', archive: 'archive' },
     statusFile: true,
   });
+  /* § 5: "claims.staleAfterHours ... not written by init", and the same for
+   * problems.ignore / minVersion (DECISIONS 165/166) -- each is an optional
+   * block with its own documented default, never part of what init writes.
+   * A membership check per key ("config schema is 1", etc., above) cannot
+   * catch an EXTRA key no assertion names: that is exactly the bug the
+   * Implementer's gate run (--diff-out) caught and the AC suite did not --
+   * init started writing problems: {ignore: []} because the key was added
+   * to DEFAULT_CONFIG without excluding it the way claims already was, and
+   * 3092 replay diffs later nothing here had noticed. Two independent
+   * checks close that gap: the exact key set, and the exact bytes. */
+  T.sameSet('config has exactly these top-level keys, no more',
+    cfg ? Object.keys(cfg) : ['<parse failed>'], ['schema', 'statuses', 'sections', 'layout']);
+  T.check('config does not carry claims, problems or minVersion',
+    !!cfg && cfg.claims === undefined && cfg.problems === undefined && cfg.minVersion === undefined,
+    JSON.stringify(cfg));
+  T.eq('config.json is byte-exact against the § 5 documented default',
+    readText(bl(d, H.CONFIG_REL)),
+    JSON.stringify({
+      schema: 1,
+      statuses: ['todo', 'doing', 'blocked', 'review', 'done'],
+      sections: { description: ['Description'], acceptance: ['Acceptance Criteria'] },
+      layout: {
+        group: 'type',
+        folders: { epics: 'epics', tasks: 'tasks', subtasks: 'subtasks', archive: 'archive' },
+        statusFile: true,
+      },
+    }, null, 2) + '\n');
   T.check('init writes no v2 file (.nanojira.json, .ids/) at the top level',
     !exists(d, '.nanojira.json') && !exists(d, '.ids'), JSON.stringify(H.lsOrEmpty(bl(d))));
 

@@ -73,6 +73,12 @@ const TABLE = [
   'backlog:claims_unignored',
   /* spec v3.2 § B, promoted 8822e95: stale claims */
   'claim:stale',
+  /* spec v3.7, DECISIONS 163 E/F: acceptance quality warnings */
+  'acceptance:no_checkbox',
+  'done:no_acceptance',
+  /* spec v3.7, DECISIONS 166: config forward compatibility */
+  'config:unknown_key',
+  'config:unknown_code',
 ];
 
 /* Codes whose Doctor column is "—": workflow state that never becomes a doctor
@@ -257,7 +263,17 @@ function write(desc, args, cwd, expectId) {
    * leaves them Incomplete. Epics need only description; task/subtask need
    * both (§ 7). A mutant that added any other valid-but-wrong code to one of
    * these entries — the finding this suite's old vocabulary-only check could
-   * not see — is caught by the exact-set comparison. */
+   * not see — is caught by the exact-set comparison.
+   *
+   * TSK-001/SUB-001 are also `status: done` with an empty acceptance
+   * section at this point — exactly done:no_acceptance's own trigger
+   * (DECISIONS 163 F). Without DECISIONS 167's "live elements only"
+   * exemption this exact-set assertion (and doctor's "problems is empty"
+   * below) would both go red the moment that code existed, since these two
+   * are archived in the very same call these assertions check. The
+   * Implementer found this while landing E/F; DECISIONS 167 is the fix,
+   * not a change to this fixture or these assertions — they hold again
+   * once an archived element is excluded from both new codes. */
   T.eq('archive: EPIC-001 is exactly incomplete:description',
     problemsOf(aj.entries, 'EPIC-001'), ['incomplete:description']);
   T.eq('archive: TSK-001 is exactly incomplete:acceptance + incomplete:description',

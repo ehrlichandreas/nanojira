@@ -37,6 +37,12 @@ function collectFindings(ctx: Context): Finding[] {
   for (const e of ctx.configErrors) {
     findings.push({ code: 'config:invalid', severity: 'error', file: configFile, message: e });
   }
+  // config:unknown_key / config:unknown_code (§ 7, DECISIONS 166): warnings,
+  // never invalidate the configuration -- reported alongside any real
+  // config:invalid findings above, not instead of them.
+  for (const w of ctx.configWarnings) {
+    findings.push({ code: w.code, severity: 'warning', file: configFile, message: w.message });
+  }
 
   const elements = ctx.elements.slice().sort(compareElements);
   const dupGroups: Map<string, Element[]> = new Map();
@@ -93,7 +99,14 @@ function collectFindings(ctx: Context): Finding[] {
     findings.push({ code: 'backlog:status_stale', severity: 'warning', file: path.join(ctx.backlog, 'STATUS.md'), message: 'STATUS.md is missing or differs from a fresh rendering — `nj doctor --fix` regenerates it' });
   }
 
-  return findings;
+  // problems.ignore (§ 7, DECISIONS 165/166): suppressed everywhere a code
+  // is reported, element-level or backlog-level alike -- one filter here
+  // covers both, rather than threading the ignore list into every push
+  // site above. Never touches the readiness computation (isReady reads
+  // el.problems directly, not this findings list).
+  if (ctx.cfg.problems.ignore.length === 0) return findings;
+  const ignore = new Set(ctx.cfg.problems.ignore);
+  return findings.filter((f) => !ignore.has(f.code));
 }
 
 // A write leaves its temp file in the target's folder (§ 12), and under
@@ -198,6 +211,8 @@ function describeFinding(code: string, el: Element, dupGroups: Map<string, Eleme
     case 'archive:split': return `parent '${el.parent}' is archived while this element is not`;
     case 'title:h1_mismatch': return 'H1 in the body differs from title';
     case 'id:no_tombstone': return 'no tombstone in the ids folder — hand-created, or partial tombstone loss';
+    case 'acceptance:no_checkbox': return 'acceptance criteria has content but no checkbox items — nothing for check to tick';
+    case 'done:no_acceptance': return 'done with no acceptance criteria';
     default: return code;
   }
 }

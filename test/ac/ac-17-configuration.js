@@ -201,9 +201,6 @@ const withFolder = (k, v, group) =>
   ({ group: group || 'type', folders: Object.assign({}, FOLDERS, { [k]: v }) });
 
 const INVALID_LAYOUT = [
-  { label: 'unknown key inside layout', layout: { group: 'type', colour: 'blue' } },
-  { label: 'unknown key inside layout.folders',
-    layout: { group: 'type', folders: Object.assign({}, FOLDERS, { docs: 'docs' }) } },
   { label: 'group is not type, hierarchy or flat', layout: { group: 'tree' } },
   { label: 'folder name with a space', layout: withFolder('tasks', 'my tasks') },
   { label: 'folder name starting with a dash', layout: withFolder('tasks', '-tasks') },
@@ -267,6 +264,28 @@ for (const bad of INVALID_LAYOUT) {
     inv.length >= 1 && !inv[0].element, J(inv[0] || null));
   T.exit('layout: doctor (human) exits 2 (' + bad.label + ')', H.runNj(['doctor'], { cwd: d }), 2);
   noOverviewCreated('layout: ' + bad.label, d);
+}
+
+/* An unknown key INSIDE `layout`/`layout.folders` (DECISIONS 166, amending
+ * the original pre-v3.7 behaviour, where these two cases lived in
+ * INVALID_LAYOUT above): a WARNING (config:unknown_key), not
+ * invalid_config -- every command still succeeds. */
+const UNKNOWN_KEY_LAYOUT = [
+  { label: 'unknown key inside layout', layout: { group: 'type', colour: 'blue' } },
+  { label: 'unknown key inside layout.folders',
+    layout: { group: 'type', folders: Object.assign({}, FOLDERS, { docs: 'docs' }) } },
+];
+for (const bad of UNKNOWN_KEY_LAYOUT) {
+  const d = fixtureWith(bad.label, layoutConfig(bad.layout));
+  const r = H.runJson(['list'], { cwd: d });
+  T.exit('layout: list still exits 0 (' + bad.label + ')', r, 0);
+
+  const rj = H.runJson(['doctor'], { cwd: d });
+  T.exit('layout: doctor exits 0 (warning only, ' + bad.label + ')', rj, 0);
+  T.check('layout: doctor reports config:unknown_key (' + bad.label + ')',
+    (H.doctorSet(rj) || []).includes('config:unknown_key:warning'), J(rj.json && rj.json.problems));
+  T.check('layout: config:invalid is NOT reported (' + bad.label + ')',
+    !(H.doctorSet(rj) || []).includes('config:invalid:error'), J(rj.json && rj.json.problems));
 }
 
 /* Valid layout blocks: every part is optional (§ 5). The elements lie in
@@ -376,9 +395,15 @@ const PLACEMENT = [
     valid: { group: 'hierarchy' },
     invalid: { group: 'tree' },
     files: { 'EPIC-001/EPIC-001.md': E1, 'EPIC-001/TSK-001/TSK-001.md': T1, 'EPIC-001/TSK-002/TSK-002.md': T2 } },
-  { label: 'flat, then an unknown layout key',
+  { label: 'flat, then a wrong-type group',
+    /* Was an unknown layout key (`colour: 'blue'`) -- DECISIONS 166 made
+     * that a warning (config:unknown_key), not invalid_config, so it no
+     * longer stands in for "invalid configuration" here (DECISIONS 167).
+     * A wrong-TYPE group value is still a genuine invalid_config, same as
+     * the "unknown group" case above but a different kind of defect
+     * (type, not vocabulary) -- group must be a string, § 5. */
     valid: { group: 'flat' },
-    invalid: { group: 'flat', colour: 'blue' },
+    invalid: { group: 123 },
     files: { 'EPIC-001.md': E1, 'TSK-001.md': T1, 'TSK-002.md': T2 } },
   { label: 'flat, then duplicate folder names',
     valid: { group: 'flat' },

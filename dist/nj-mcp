@@ -87,6 +87,11 @@ function flagString(flags, name) {
 var fs = __toESM(require("fs"), 1);
 var os = __toESM(require("os"), 1);
 var path = __toESM(require("path"), 1);
+
+// src/core/version.ts
+var VERSION = "3.7.0";
+
+// src/core/config.ts
 var SOURCE_CODE = { flag: "invalid_backlog_flag", env: "invalid_backlog_env", njrc: "invalid_backlog_njrc" };
 function sourceName(src) {
   return src.kind === "flag" ? "--backlog" : src.kind === "env" ? "NJ_BACKLOG" : src.file;
@@ -288,7 +293,10 @@ var FLAG_TABLE = {
   // cmd-new.ts/cmd-set.ts already validate against — one list, not two
   // hand-kept-in-sync copies.
   new: { fields: NEW_FIELDS.map(str) },
-  set: { fields: [str("id"), str("file")].concat(SETTABLE_FIELDS.map(str)) },
+  // --add-tags/--remove-tags (DECISIONS 163 B): an incremental alternative
+  // to --tags=, set-only, hyphenated like case-sensitive/allow-open-children
+  // (no pre-existing Element field to normalise onto, unlike depends-on).
+  set: { fields: [str("id"), str("file")].concat(SETTABLE_FIELDS.map(str), [str("add-tags"), str("remove-tags")]) },
   note: { fields: [str("id"), str("file"), str("as"), { name: "text", kind: "string", positional: true }] },
   check: { fields: [str("id"), str("file"), str("text"), str("item"), bool("on"), bool("off")] },
   claim: { fields: [str("id"), str("file"), str("as"), str("steal"), str("status")] },
@@ -298,7 +306,11 @@ var FLAG_TABLE = {
   next: { fields: [str("as"), str("status"), str("type"), str("tag"), str("parent"), str("assignee")] },
   archive: { fields: [str("id"), str("file")] },
   unarchive: { fields: [str("id"), str("file")] },
-  doctor: { fields: [bool("fix")] }
+  doctor: { fields: [bool("fix")] },
+  // `rm` answers only `nj rm --help`'s question (DECISIONS 163 A) -- it is
+  // never an `nj-mcp` tool (TOOL_NAMES omits it unconditionally, § 17),
+  // and this entry does not change that.
+  rm: { fields: [str("id"), str("file"), bool("cascade")] }
 };
 function spec(command) {
   const s = FLAG_TABLE[command];
@@ -308,9 +320,6 @@ function spec(command) {
 function commandFields(command) {
   return spec(command).fields;
 }
-
-// src/core/version.ts
-var VERSION = "3.6.0";
 
 // src/nj-mcp.ts
 var MODERN_VERSION = "2026-07-28";

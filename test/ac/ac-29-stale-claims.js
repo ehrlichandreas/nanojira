@@ -176,8 +176,9 @@ function bytes(p) { return H.readOrNull(p); }
 }
 
 /* ===================================================================== */
-/* E5 — invalid values and an unknown key: invalid_config on commands,      */
-/* config:invalid as the doctor finding (§ 5, § 7, § 9)                    */
+/* E5 — invalid VALUES: invalid_config on commands, config:invalid as     */
+/* the doctor finding (§ 5, § 7, § 9). An unknown KEY is a separate case, */
+/* E5b below (DECISIONS 166 amends it to a warning, not an error).        */
 /* ===================================================================== */
 for (const [label, claims] of [
   ['negative', { staleAfterHours: -1 }],
@@ -185,7 +186,6 @@ for (const [label, claims] of [
   ['a string', { staleAfterHours: '24' }],
   ['a boolean', { staleAfterHours: true }],
   ['null', { staleAfterHours: null }],
-  ['an unknown key', { staleAfterHours: 24, bogus: 1 }],
 ]) {
   const x = model('ac29-e5-' + label.replace(/[^a-z0-9]+/gi, '-'));
   setClaims(x, claims);
@@ -202,6 +202,24 @@ for (const [label, claims] of [
   setClaims(x, { staleAfterHours: 48 });
   const r = runJ(['list'], { cwd: x.dir, env: at(NOW_REF) });
   T.exit('E5 a valid claims.staleAfterHours=48: list exits 0', r, 0);
+}
+
+/* ===================================================================== */
+/* E5b — an unknown key INSIDE `claims` (DECISIONS 166, amending the      */
+/* original pre-v3.7 behaviour): a WARNING (config:unknown_key), not      */
+/* invalid_config -- every command still succeeds                        */
+/* ===================================================================== */
+{
+  const x = model('ac29-e5b-unknown-key');
+  setClaims(x, { staleAfterHours: 24, bogus: 1 });
+  const r = runJ(['list'], { cwd: x.dir, env: at(NOW_REF) });
+  T.exit('E5b an unknown key inside claims: list still exits 0', r, 0);
+  const d = runJ(['doctor'], { cwd: x.dir, env: at(NOW_REF) });
+  T.exit('E5b doctor exits 0 (warning only, not an error)', d, 0);
+  T.check('E5b doctor reports config:unknown_key',
+    (H.doctorSet(d) || []).includes('config:unknown_key:warning'), J(d.json && d.json.problems));
+  T.check('E5b config:invalid is NOT reported for this',
+    !(H.doctorSet(d) || []).includes('config:invalid:error'), J(d.json && d.json.problems));
 }
 
 /* ===================================================================== */

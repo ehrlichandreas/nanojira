@@ -133,10 +133,39 @@ function validateFieldValues(ctx: Context, flags: Flags) {
   if (priority !== undefined && !PRIORITIES.includes(priority)) {
     fail('invalid_value', `unknown priority '${priority}'`, valueHint('priority', priority, PRIORITIES));
   }
+  validateTagsCombination(flags);
+}
+
+/** --tags= replaces the whole list; --add-tags/--remove-tags change it
+ * incrementally (DECISIONS 163 B). Mixing the two intentions in one call
+ * is never assumed to mean one or the other -- invalid_value, in every
+ * combination, nothing written. */
+function validateTagsCombination(flags: Flags) {
+  const direct = flagString(flags, 'tags');
+  if (direct === undefined) return;
+  if (flagString(flags, 'add-tags') !== undefined || flagString(flags, 'remove-tags') !== undefined) {
+    fail('invalid_value', '--tags cannot be combined with --add-tags or --remove-tags',
+      'use --tags=<list> to replace the whole list, or --add-tags/--remove-tags to change it incrementally');
+  }
+}
+
+/** Remove, then add (DECISIONS 163 B, pinned order): every tag in `remove`
+ * is dropped from wherever it sits; every tag in `add`, in its own order,
+ * is appended to what remains, but only if not already there -- a tag
+ * named in both lists ends up present, moved to the end; a tag repeated
+ * within `add` itself is added only once (the `includes` check below
+ * catches its own second occurrence the same way). Tags not removed keep
+ * their original relative order. */
+function applyTagsEdits(current: string[], remove: string[] | undefined, add: string[] | undefined): string[] {
+  const kept = remove === undefined ? current.slice() : current.filter((t) => !remove.includes(t));
+  if (add === undefined) return kept;
+  for (const t of add) if (!kept.includes(t)) kept.push(t);
+  return kept;
 }
 
 function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen: boolean) {
   const sections = readSectionFlags(flags);
+  validateTagsCombination(flags);
   const overrides: Map<string, string | string[] | undefined> = new Map();
   const changed: SetField[] = [];
 
@@ -185,18 +214,33 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
     changed.push('assignee');
   }
 
-  for (const field of ['tags', 'depends_on'] as const) {
-    const v = parseListFlag(flags, field);
-    if (v === undefined) continue;
-    if (field === 'depends_on') {
-      for (const d of v) {
-        if (!ctx.elements.some((e: Element) => e.id === d)) fail('not_found', `depends_on target '${d}' does not exist`);
-      }
+  // --tags= replaces the list outright; --add-tags/--remove-tags edit it
+  // incrementally (DECISIONS 163 B) -- validateTagsCombination above
+  // already refused any call naming both kinds, so at most one path here
+  // ever applies.
+  const directTags = parseListFlag(flags, 'tags');
+  const addTags = parseListFlag(flags, 'add-tags');
+  const removeTags = parseListFlag(flags, 'remove-tags');
+  const nextTags = directTags !== undefined ? directTags
+    : addTags !== undefined || removeTags !== undefined ? applyTagsEdits(el.tags, removeTags, addTags)
+      : undefined;
+  if (nextTags !== undefined) {
+    const cur = el.tags;
+    if (nextTags.length !== cur.length || nextTags.some((x, i) => x !== cur[i])) {
+      overrides.set('tags', nextTags.length === 0 ? undefined : nextTags);
+      changed.push('tags');
     }
-    const cur = el[field];
-    if (v.length !== cur.length || v.some((x: string, i: number) => x !== cur[i])) {
-      overrides.set(field, v.length === 0 ? undefined : v);
-      changed.push(field);
+  }
+
+  const depsV = parseListFlag(flags, 'depends_on');
+  if (depsV !== undefined) {
+    for (const d of depsV) {
+      if (!ctx.elements.some((e: Element) => e.id === d)) fail('not_found', `depends_on target '${d}' does not exist`);
+    }
+    const cur = el.depends_on;
+    if (depsV.length !== cur.length || depsV.some((x, i) => x !== cur[i])) {
+      overrides.set('depends_on', depsV.length === 0 ? undefined : depsV);
+      changed.push('depends_on');
     }
   }
 

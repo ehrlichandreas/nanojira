@@ -71,7 +71,8 @@ var DEFAULT_CONFIG = {
     folders: { epics: "epics", tasks: "tasks", subtasks: "subtasks", archive: "archive" },
     statusFile: true
   },
-  claims: { staleAfterHours: 24 }
+  claims: { staleAfterHours: 24 },
+  problems: { ignore: [] }
 };
 var SEVERITY = {
   "frontmatter:unreadable": "error",
@@ -109,7 +110,11 @@ var SEVERITY = {
   "claim:mismatch": "warning",
   "claim:orphaned": "warning",
   "claim:stale": "warning",
-  "backlog:claims_unignored": "warning"
+  "backlog:claims_unignored": "warning",
+  "acceptance:no_checkbox": "warning",
+  "done:no_acceptance": "warning",
+  "config:unknown_key": "warning",
+  "config:unknown_code": "warning"
 };
 var BLOCKS_READY = /* @__PURE__ */ new Set([
   "frontmatter:unreadable",
@@ -131,7 +136,7 @@ var BLOCKS_READY = /* @__PURE__ */ new Set([
   "incomplete:description",
   "incomplete:acceptance"
 ]);
-var BACKLOG_LEVEL = /* @__PURE__ */ new Set(["backlog:stray_tmp", "backlog:ids_missing", "backlog:unreadable_dir", "config:invalid"]);
+var BACKLOG_LEVEL = /* @__PURE__ */ new Set(["backlog:stray_tmp", "backlog:ids_missing", "backlog:unreadable_dir", "config:invalid", "config:unknown_key", "config:unknown_code"]);
 
 // src/core/claims.ts
 var fs = __toESM(require("fs"), 1);
@@ -509,11 +514,33 @@ function sectionHeadingIndex(lines, names) {
   }
   return -1;
 }
+var CHECKBOX_RE = /^([ \t]*)(-|\*|\+|\d+\.|\d+\))\ \[( |x|X)\](.*)$/;
 function sectionEnd(lines, headingIdx) {
   for (let i = headingIdx + 1; i < lines.length; i++) {
     if (/^#{1,2}[ \t]/.test(lines[i])) return i;
   }
   return lines.length;
+}
+function sectionHasCheckbox(body, names) {
+  const lines = body.split("\n");
+  const idx = sectionHeadingIndex(lines, names);
+  if (idx === -1) return false;
+  const end = sectionEnd(lines, idx);
+  let fence = null;
+  for (let i = idx + 1; i < end; i++) {
+    const line = lines[i];
+    const fm = /^[ \t]*(`{3,}|~{3,})/.exec(line);
+    if (fence) {
+      if (fm && fm[1][0] === fence.ch && fm[1].length >= fence.len) fence = null;
+      continue;
+    }
+    if (fm) {
+      fence = { ch: fm[1][0], len: fm[1].length };
+      continue;
+    }
+    if (CHECKBOX_RE.test(line)) return true;
+  }
+  return false;
 }
 function normalizeSectionContent(raw) {
   let t = String(raw);
@@ -823,8 +850,8 @@ function renderElement(el, fieldOverrides, bodyOverride) {
 }
 
 // src/core/derive.ts
-function elementProblems(el) {
-  return Array.from(el.problems).filter((c) => !BACKLOG_LEVEL.has(c)).sort();
+function elementProblems(el, ignore = []) {
+  return Array.from(el.problems).filter((c) => !BACKLOG_LEVEL.has(c) && !ignore.includes(c)).sort();
 }
 function hasError(el) {
   return elementProblems(el).some((c) => SEVERITY[c] === "error");
@@ -881,7 +908,7 @@ function entryJson(el, backlog, cfg) {
   if (el.archivedAt !== null) e.archived = el.archivedAt;
   e.file = el.file;
   const claim2 = readClaim(backlog, el.id);
-  const probs = elementProblems(el);
+  const probs = elementProblems(el, cfg.problems.ignore);
   if (claim2 && isClaimStale(claim2.since, cfg.claims.staleAfterHours, nowMs())) probs.push("claim:stale");
   e._problems = probs.sort();
   e._claim = claim2;
@@ -921,19 +948,21 @@ process.stdout.on("error", (err) => {
 function out(s) {
   process.stdout.write(s + "\n");
 }
-function problemSuffix(el) {
-  const codes = elementProblems(el);
+function problemSuffix(el, cfg) {
+  const codes = elementProblems(el, cfg.problems.ignore);
   return codes.length > 0 ? "  " + codes.join(" ") : "";
 }
 function printEntryLine(el, cfg) {
   const arch = el.archived ? " (archived)" : "";
-  out(`  ${el.id}  ${el.status.padEnd(8)} ${el.title}${arch}${problemSuffix(el)}`);
+  out(`  ${el.id}  ${el.status.padEnd(8)} ${el.title}${arch}${problemSuffix(el, cfg)}`);
 }
 function writeFeedback(el, cfg, headline) {
   out(headline);
-  for (const code of elementProblems(el)) {
+  for (const code of elementProblems(el, cfg.problems.ignore)) {
     if (code === "incomplete:acceptance") out(`\u26A0 ${el.id} has no acceptance criteria. Add them before starting.`);
     else if (code === "incomplete:description") out(`\u26A0 ${el.id} has no description. Add one before starting.`);
+    else if (code === "acceptance:no_checkbox") out(`\u26A0 ${el.id} has acceptance criteria with no checkbox items \u2014 nothing for check to tick.`);
+    else if (code === "done:no_acceptance") out(`\u26A0 ${el.id} is done with no acceptance criteria.`);
     else out(`\u26A0 ${el.id}: ${code}`);
   }
 }
@@ -1083,7 +1112,10 @@ var FLAG_TABLE = {
   // cmd-new.ts/cmd-set.ts already validate against — one list, not two
   // hand-kept-in-sync copies.
   new: { fields: NEW_FIELDS.map(str) },
-  set: { fields: [str("id"), str("file")].concat(SETTABLE_FIELDS.map(str)) },
+  // --add-tags/--remove-tags (DECISIONS 163 B): an incremental alternative
+  // to --tags=, set-only, hyphenated like case-sensitive/allow-open-children
+  // (no pre-existing Element field to normalise onto, unlike depends-on).
+  set: { fields: [str("id"), str("file")].concat(SETTABLE_FIELDS.map(str), [str("add-tags"), str("remove-tags")]) },
   note: { fields: [str("id"), str("file"), str("as"), { name: "text", kind: "string", positional: true }] },
   check: { fields: [str("id"), str("file"), str("text"), str("item"), bool("on"), bool("off")] },
   claim: { fields: [str("id"), str("file"), str("as"), str("steal"), str("status")] },
@@ -1093,7 +1125,11 @@ var FLAG_TABLE = {
   next: { fields: [str("as"), str("status"), str("type"), str("tag"), str("parent"), str("assignee")] },
   archive: { fields: [str("id"), str("file")] },
   unarchive: { fields: [str("id"), str("file")] },
-  doctor: { fields: [bool("fix")] }
+  doctor: { fields: [bool("fix")] },
+  // `rm` answers only `nj rm --help`'s question (DECISIONS 163 A) -- it is
+  // never an `nj-mcp` tool (TOOL_NAMES omits it unconditionally, § 17),
+  // and this entry does not change that.
+  rm: { fields: [str("id"), str("file"), bool("cascade")] }
 };
 function spec(command) {
   const s = FLAG_TABLE[command];
@@ -1115,10 +1151,28 @@ var path6 = __toESM(require("path"), 1);
 var fs4 = __toESM(require("fs"), 1);
 var os = __toESM(require("os"), 1);
 var path3 = __toESM(require("path"), 1);
+
+// src/core/version.ts
+var VERSION = "3.7.0";
+function parseVersionTuple(s) {
+  const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
+  return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
+}
+function compareVersionTuples(a, b) {
+  for (let i = 0; i < 3; i++) if (a[i] !== b[i]) return a[i] - b[i];
+  return 0;
+}
+
+// src/core/config.ts
+var TOP_LEVEL_KEYS = ["schema", "statuses", "sections", "layout", "claims", "problems", "minVersion"];
 function validateConfig(obj) {
   const errs = [];
+  const warnings = [];
   if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
-    return ["configuration must be a JSON object"];
+    return { errors: ["configuration must be a JSON object"], warnings: [] };
+  }
+  for (const k of Object.keys(obj)) {
+    if (!TOP_LEVEL_KEYS.includes(k)) warnings.push({ code: "config:unknown_key", message: `unknown top-level key '${k}'` });
   }
   if (obj.schema !== void 0 && obj.schema !== 1) errs.push(`unsupported schema ${JSON.stringify(obj.schema)} (expected 1)`);
   const st = obj.statuses;
@@ -1139,15 +1193,56 @@ function validateConfig(obj) {
       }
     }
   }
-  if (obj.layout !== void 0) errs.push(...validateLayout(obj.layout));
-  if (obj.claims !== void 0) errs.push(...validateClaims(obj.claims));
-  return errs;
+  if (obj.layout !== void 0) {
+    const r = validateLayout(obj.layout);
+    errs.push(...r.errors);
+    warnings.push(...r.warnings);
+  }
+  if (obj.claims !== void 0) {
+    const r = validateClaims(obj.claims);
+    errs.push(...r.errors);
+    warnings.push(...r.warnings);
+  }
+  if (obj.problems !== void 0) {
+    const r = validateProblems(obj.problems);
+    errs.push(...r.errors);
+    warnings.push(...r.warnings);
+  }
+  if (obj.minVersion !== void 0 && parseVersionTuple(typeof obj.minVersion === "string" ? obj.minVersion : "") === null) {
+    errs.push(`minVersion must be exactly three dot-separated non-negative integers (got ${JSON.stringify(obj.minVersion)})`);
+  }
+  return { errors: errs, warnings };
+}
+function validateProblems(p) {
+  if (p === null || typeof p !== "object" || Array.isArray(p)) return { errors: ["problems must be an object"], warnings: [] };
+  const errs = [];
+  const warnings = [];
+  for (const k of Object.keys(p)) {
+    if (k !== "ignore") warnings.push({ code: "config:unknown_key", message: `unknown key 'problems.${k}'` });
+  }
+  if (p.ignore !== void 0) {
+    if (!Array.isArray(p.ignore) || p.ignore.some((c) => typeof c !== "string")) {
+      errs.push("problems.ignore must be an array of strings");
+    } else {
+      for (const code of p.ignore) {
+        const sev = SEVERITY[code];
+        if (sev === void 0) warnings.push({ code: "config:unknown_code", message: `unknown code '${code}' in problems.ignore` });
+        else if (sev !== "warning") errs.push(`problems.ignore: '${code}' is not a warning-severity code and cannot be ignored`);
+      }
+    }
+  }
+  return { errors: errs, warnings };
+}
+function readProblems(p) {
+  if (!p || !Array.isArray(p.ignore)) return { ignore: [] };
+  return { ignore: p.ignore.filter((c) => SEVERITY[c] === "warning") };
 }
 function validateClaims(c) {
-  if (c === null || typeof c !== "object" || Array.isArray(c)) return ["claims must be an object"];
+  if (c === null || typeof c !== "object" || Array.isArray(c)) return { errors: ["claims must be an object"], warnings: [] };
   const errs = [];
+  const warnings = [];
   for (const k of Object.keys(c)) {
-    if (k !== "staleAfterHours") errs.push(`unknown key 'claims.${k}'`);
+    if (k !== "staleAfterHours") warnings.push({ code: "config:unknown_key", message: `unknown key 'claims.${k}'` });
   }
   if (c.staleAfterHours !== void 0) {
     const v = c.staleAfterHours;
@@ -1155,27 +1250,31 @@ function validateClaims(c) {
       errs.push(`claims.staleAfterHours must be a non-negative integer (got ${JSON.stringify(v)})`);
     }
   }
-  return errs;
+  return { errors: errs, warnings };
 }
 function readClaims(c) {
   const d = DEFAULT_CONFIG.claims.staleAfterHours;
   return { staleAfterHours: c && c.staleAfterHours !== void 0 ? c.staleAfterHours : d };
 }
 function validateLayout(lay) {
-  if (lay === null || typeof lay !== "object" || Array.isArray(lay)) return ["layout must be an object"];
+  if (lay === null || typeof lay !== "object" || Array.isArray(lay)) return { errors: ["layout must be an object"], warnings: [] };
   const errs = [];
+  const warnings = [];
   for (const k of Object.keys(lay)) {
-    if (!["group", "folders", "statusFile"].includes(k)) errs.push(`unknown key 'layout.${k}'`);
+    if (!["group", "folders", "statusFile"].includes(k)) warnings.push({ code: "config:unknown_key", message: `unknown key 'layout.${k}'` });
   }
   if (lay.group !== void 0 && !GROUPS.includes(lay.group)) {
     errs.push(`layout.group must be one of ${GROUPS.join(", ")} (got ${JSON.stringify(lay.group)})`);
   }
   if (lay.statusFile !== void 0 && typeof lay.statusFile !== "boolean") errs.push("layout.statusFile must be true or false");
   const f = lay.folders;
-  if (f === void 0) return errs;
-  if (f === null || typeof f !== "object" || Array.isArray(f)) return errs.concat(["layout.folders must be an object"]);
+  if (f === void 0) return { errors: errs, warnings };
+  if (f === null || typeof f !== "object" || Array.isArray(f)) {
+    errs.push("layout.folders must be an object");
+    return { errors: errs, warnings };
+  }
   for (const k of Object.keys(f)) {
-    if (!FOLDER_ROLES.includes(k)) errs.push(`unknown key 'layout.folders.${k}'`);
+    if (!FOLDER_ROLES.includes(k)) warnings.push({ code: "config:unknown_key", message: `unknown key 'layout.folders.${k}'` });
   }
   const names = [];
   for (const role of FOLDER_ROLES) {
@@ -1189,7 +1288,7 @@ function validateLayout(lay) {
     if (names.includes(name.toLowerCase())) errs.push(`layout.folders: '${name}' is used twice \u2014 folder names must be distinct`);
     names.push(name.toLowerCase());
   }
-  return errs;
+  return { errors: errs, warnings };
 }
 function readLayout(lay) {
   const d = DEFAULT_CONFIG.layout;
@@ -1207,25 +1306,34 @@ function loadConfig(backlog, legacy) {
   try {
     raw = fs4.readFileSync(file, "utf8");
   } catch {
-    return { config: DEFAULT_CONFIG, errors: [`${rel} is missing`] };
+    return { config: DEFAULT_CONFIG, errors: [`${rel} is missing`], warnings: [], needsNewerNj: null };
   }
   let obj;
   try {
     obj = JSON.parse(raw);
   } catch (e) {
-    return { config: DEFAULT_CONFIG, errors: [`${rel} is not valid JSON: ${e.message}`] };
+    return { config: DEFAULT_CONFIG, errors: [`${rel} is not valid JSON: ${e.message}`], warnings: [], needsNewerNj: null };
   }
-  const errors = validateConfig(obj);
-  if (errors.length > 0) return { config: DEFAULT_CONFIG, errors };
+  if (obj !== null && typeof obj === "object" && !Array.isArray(obj) && typeof obj.minVersion === "string") {
+    const required = parseVersionTuple(obj.minVersion);
+    if (required !== null && compareVersionTuples(parseVersionTuple(VERSION), required) < 0) {
+      return { config: DEFAULT_CONFIG, errors: [], warnings: [], needsNewerNj: { running: VERSION, required: obj.minVersion } };
+    }
+  }
+  const { errors, warnings } = validateConfig(obj);
+  if (errors.length > 0) return { config: DEFAULT_CONFIG, errors, warnings, needsNewerNj: null };
   return {
     config: {
       schema: 1,
       statuses: obj.statuses.slice(),
       sections: { description: obj.sections.description.slice(), acceptance: obj.sections.acceptance.slice() },
       layout: readLayout(obj.layout),
-      claims: readClaims(obj.claims)
+      claims: readClaims(obj.claims),
+      problems: readProblems(obj.problems)
     },
-    errors: []
+    errors: [],
+    warnings,
+    needsNewerNj: null
   };
 }
 var SOURCE_CODE = { flag: "invalid_backlog_flag", env: "invalid_backlog_env", njrc: "invalid_backlog_njrc" };
@@ -1699,7 +1807,13 @@ function deriveBody(el, p, cfg) {
     const descOk = sectionPresent(p.body, cfg.sections.description);
     if (!descOk) el.problems.add("incomplete:description");
     if (el.type === "task" || el.type === "subtask") {
-      if (!sectionPresent(p.body, cfg.sections.acceptance)) el.problems.add("incomplete:acceptance");
+      const acceptanceOk = sectionPresent(p.body, cfg.sections.acceptance);
+      if (!acceptanceOk) {
+        el.problems.add("incomplete:acceptance");
+        if (el.status === "done" && !el.archived) el.problems.add("done:no_acceptance");
+      } else if (!sectionHasCheckbox(p.body, cfg.sections.acceptance) && !el.archived) {
+        el.problems.add("acceptance:no_checkbox");
+      }
     }
   }
   return el;
@@ -1903,7 +2017,14 @@ function context(flags, opts) {
       "run `nj doctor --fix` to migrate it to the v3 layout"
     );
   }
-  const { config, errors } = loadConfig(backlog, legacy);
+  const { config, errors, warnings, needsNewerNj } = loadConfig(backlog, legacy);
+  if (needsNewerNj) {
+    fail(
+      "needs_newer_nj",
+      `this backlog requires nj ${needsNewerNj.required} or newer; running ${needsNewerNj.running}`,
+      `running ${needsNewerNj.running}, requires ${needsNewerNj.required} \u2014 upgrade nj`
+    );
+  }
   if (errors.length > 0 && !(opts && opts.tolerateConfig)) {
     const configFile = path6.join(backlog, legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
     fail("invalid_config", `invalid configuration in ${configFile}: ${errors[0]}`, "run `nj doctor` for the full report");
@@ -1911,7 +2032,7 @@ function context(flags, opts) {
   const idsDir = path6.join(backlog, legacy ? LEGACY_IDS_REL : V3_IDS_REL);
   const loadedAt = Date.now();
   const { elements, scan } = loadBacklog(backlog, config, idsDir);
-  return { backlog, cfg: config, configErrors: errors, elements, scan, loadedAt, legacy, idsDir };
+  return { backlog, cfg: config, configErrors: errors, configWarnings: warnings, elements, scan, loadedAt, legacy, idsDir };
 }
 function requireTargetFlagSyntax(flags) {
   const file = flagString(flags, "file");
@@ -2166,7 +2287,7 @@ ${names}`,
       ids: moved.map((m) => m.id),
       changed: ["archived"],
       entries: moved.map((m) => entryJson(m, ctx.backlog, ctx.cfg)),
-      _problems: Array.from(new Set(moved.flatMap(elementProblems))).sort()
+      _problems: Array.from(new Set(moved.flatMap((m) => elementProblems(m, ctx.cfg.problems.ignore)))).sort()
     }, null, 2));
   } else {
     for (const m of moved) out(`${m.id} archived \u2192 ${m.file}`);
@@ -2220,7 +2341,6 @@ function runBatch(ids, preflight, write) {
 }
 
 // src/commands/cmd-check.ts
-var CHECKBOX_RE = /^([ \t]*)(-|\*|\+|\d+\.|\d+\))\ \[( |x|X)\](.*)$/;
 function scanCheckboxes(body) {
   const lines = body.split("\n");
   const boxes = [];
@@ -2680,6 +2800,9 @@ function collectFindings(ctx) {
   for (const e of ctx.configErrors) {
     findings.push({ code: "config:invalid", severity: "error", file: configFile, message: e });
   }
+  for (const w of ctx.configWarnings) {
+    findings.push({ code: w.code, severity: "warning", file: configFile, message: w.message });
+  }
   const elements = ctx.elements.slice().sort(compareElements);
   const dupGroups = /* @__PURE__ */ new Map();
   for (const el of elements) {
@@ -2724,7 +2847,9 @@ function collectFindings(ctx) {
   if (ctx.configErrors.length === 0 && ctx.cfg.layout.statusFile && !statusIsFresh(ctx.backlog, ctx.elements, ctx.cfg)) {
     findings.push({ code: "backlog:status_stale", severity: "warning", file: path9.join(ctx.backlog, "STATUS.md"), message: "STATUS.md is missing or differs from a fresh rendering \u2014 `nj doctor --fix` regenerates it" });
   }
-  return findings;
+  if (ctx.cfg.problems.ignore.length === 0) return findings;
+  const ignore = new Set(ctx.cfg.problems.ignore);
+  return findings.filter((f) => !ignore.has(f.code));
 }
 function strayTmpFiles(dirs) {
   const found = [];
@@ -2848,6 +2973,10 @@ function describeFinding(code, el, dupGroups) {
       return "H1 in the body differs from title";
     case "id:no_tombstone":
       return "no tombstone in the ids folder \u2014 hand-created, or partial tombstone loss";
+    case "acceptance:no_checkbox":
+      return "acceptance criteria has content but no checkbox items \u2014 nothing for check to tick";
+    case "done:no_acceptance":
+      return "done with no acceptance criteria";
     default:
       return code;
   }
@@ -3235,8 +3364,9 @@ function cmdInit(flags) {
     for (const d of ["epics", "tasks", "subtasks", "archive", V3_IDS_REL]) {
       fs11.mkdirSync(path10.join(backlog, d), { recursive: true });
     }
-    const { claims, ...written } = DEFAULT_CONFIG;
+    const { claims, problems, ...written } = DEFAULT_CONFIG;
     void claims;
+    void problems;
     fs11.writeFileSync(path10.join(backlog, ".nanojira", "config.json"), JSON.stringify(written, null, 2) + "\n", "utf8");
     fs11.writeFileSync(path10.join(backlog, ".gitignore"), ".nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n", "utf8");
     fs11.writeFileSync(path10.join(backlog, "README.md"), V3_README, "utf8");
@@ -3748,9 +3878,28 @@ function validateFieldValues(ctx, flags) {
   if (priority !== void 0 && !PRIORITIES.includes(priority)) {
     fail("invalid_value", `unknown priority '${priority}'`, valueHint("priority", priority, PRIORITIES));
   }
+  validateTagsCombination(flags);
+}
+function validateTagsCombination(flags) {
+  const direct = flagString(flags, "tags");
+  if (direct === void 0) return;
+  if (flagString(flags, "add-tags") !== void 0 || flagString(flags, "remove-tags") !== void 0) {
+    fail(
+      "invalid_value",
+      "--tags cannot be combined with --add-tags or --remove-tags",
+      "use --tags=<list> to replace the whole list, or --add-tags/--remove-tags to change it incrementally"
+    );
+  }
+}
+function applyTagsEdits(current, remove, add) {
+  const kept = remove === void 0 ? current.slice() : current.filter((t) => !remove.includes(t));
+  if (add === void 0) return kept;
+  for (const t of add) if (!kept.includes(t)) kept.push(t);
+  return kept;
 }
 function collectSetOverrides(ctx, el, flags, allowOpen) {
   const sections = readSectionFlags(flags);
+  validateTagsCombination(flags);
   const overrides = /* @__PURE__ */ new Map();
   const changed = [];
   const title = flagString(flags, "title");
@@ -3800,18 +3949,26 @@ ${names}`,
     overrides.set("assignee", assignee === "" ? void 0 : assignee);
     changed.push("assignee");
   }
-  for (const field of ["tags", "depends_on"]) {
-    const v = parseListFlag(flags, field);
-    if (v === void 0) continue;
-    if (field === "depends_on") {
-      for (const d of v) {
-        if (!ctx.elements.some((e) => e.id === d)) fail("not_found", `depends_on target '${d}' does not exist`);
-      }
+  const directTags = parseListFlag(flags, "tags");
+  const addTags = parseListFlag(flags, "add-tags");
+  const removeTags = parseListFlag(flags, "remove-tags");
+  const nextTags = directTags !== void 0 ? directTags : addTags !== void 0 || removeTags !== void 0 ? applyTagsEdits(el.tags, removeTags, addTags) : void 0;
+  if (nextTags !== void 0) {
+    const cur = el.tags;
+    if (nextTags.length !== cur.length || nextTags.some((x, i) => x !== cur[i])) {
+      overrides.set("tags", nextTags.length === 0 ? void 0 : nextTags);
+      changed.push("tags");
     }
-    const cur = el[field];
-    if (v.length !== cur.length || v.some((x, i) => x !== cur[i])) {
-      overrides.set(field, v.length === 0 ? void 0 : v);
-      changed.push(field);
+  }
+  const depsV = parseListFlag(flags, "depends_on");
+  if (depsV !== void 0) {
+    for (const d of depsV) {
+      if (!ctx.elements.some((e) => e.id === d)) fail("not_found", `depends_on target '${d}' does not exist`);
+    }
+    const cur = el.depends_on;
+    if (depsV.length !== cur.length || depsV.some((x, i) => x !== cur[i])) {
+      overrides.set("depends_on", depsV.length === 0 ? void 0 : depsV);
+      changed.push("depends_on");
     }
   }
   if (sections.size > 0) {
@@ -3848,12 +4005,12 @@ function cmdShow(flags) {
   }
   for (const one of shown) {
     if (shown.length > 1) out(`--- ${one.file} ---`);
-    showOne(one);
+    showOne(one, ctx.cfg);
     if (one !== shown[shown.length - 1]) out("");
   }
   return 0;
 }
-function showOne(el) {
+function showOne(el, cfg) {
   out(`${el.id}  ${el.title}`);
   out(`  type      ${el.type}`);
   if (el.parent) out(`  parent    ${el.parent}`);
@@ -3866,7 +4023,7 @@ function showOne(el) {
   out(`  updated   ${el.updated}`);
   if (el.archivedAt) out(`  archived  ${el.archivedAt}`);
   out(`  file      ${el.file}`);
-  const probs = elementProblems(el);
+  const probs = elementProblems(el, cfg.problems.ignore);
   out(`  problems  ${probs.length ? probs.join(" ") : "(none)"}`);
   out("");
   process.stdout.write(el.body.replace(/^\n/, ""));
@@ -3950,7 +4107,7 @@ function cmdTree(flags) {
     return 0;
   }
   for (const { el, depth } of ordered) {
-    out(`${"  ".repeat(depth)}${el.id}  ${el.status.padEnd(8)} ${el.title}${el.archived ? " (archived)" : ""}${problemSuffix(el)}`);
+    out(`${"  ".repeat(depth)}${el.id}  ${el.status.padEnd(8)} ${el.title}${el.archived ? " (archived)" : ""}${problemSuffix(el, ctx.cfg)}`);
   }
   return 0;
 }
@@ -4074,7 +4231,7 @@ function cmdUnarchive(flags) {
       ids: moved.map((m) => m.id),
       changed: ["unarchived"],
       entries: moved.map((m) => entryJson(m, ctx.backlog, ctx.cfg)),
-      _problems: Array.from(new Set(moved.flatMap(elementProblems))).sort()
+      _problems: Array.from(new Set(moved.flatMap((m) => elementProblems(m, ctx.cfg.problems.ignore)))).sort()
     }, null, 2));
   } else {
     for (const m of moved) out(`${m.id} unarchived \u2192 ${m.file}`);
@@ -4174,9 +4331,6 @@ function commandHelp(command, flags) {
   }
   return lines.join("\n") + "\n";
 }
-
-// src/core/version.ts
-var VERSION = "3.6.0";
 
 // src/nj.ts
 var GLOBAL_PREFIX_FLAGS = /* @__PURE__ */ new Set(["backlog", "json"]);

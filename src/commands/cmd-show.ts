@@ -2,7 +2,7 @@
 
 // `nj show`.
 
-import type { Flags, Element } from '../core/types.ts';
+import type { Flags, Element, Config } from '../core/types.ts';
 
 import { checkFlags } from '../core/args.ts';
 import { cliFieldNames } from '../core/flag-table.ts';
@@ -27,13 +27,13 @@ function cmdShow(flags: Flags) {
   }
   for (const one of shown) {
     if (shown.length > 1) out(`--- ${one.file} ---`);
-    showOne(one);
+    showOne(one, ctx.cfg);
     if (one !== shown[shown.length - 1]) out('');
   }
   return 0;
 }
 
-function showOne(el: Element) {
+function showOne(el: Element, cfg: Config) {
   out(`${el.id}  ${el.title}`);
   out(`  type      ${el.type}`);
   if (el.parent) out(`  parent    ${el.parent}`);
@@ -46,7 +46,7 @@ function showOne(el: Element) {
   out(`  updated   ${el.updated}`);
   if (el.archivedAt) out(`  archived  ${el.archivedAt}`);
   out(`  file      ${el.file}`);
-  const probs = elementProblems(el);
+  const probs = elementProblems(el, cfg.problems.ignore);
   out(`  problems  ${probs.length ? probs.join(' ') : '(none)'}`);
   out('');
   process.stdout.write(el.body.replace(/^\n/, ''));

@@ -26,7 +26,15 @@ function context(flags: Flags, opts?: { lenient?: boolean; tolerateConfig?: bool
     fail('legacy_layout', `${backlog} is a legacy (v2) backlog — every command but \`doctor\` refuses it`,
       'run `nj doctor --fix` to migrate it to the v3 layout');
   }
-  const { config, errors } = loadConfig(backlog, legacy);
+  const { config, errors, warnings, needsNewerNj } = loadConfig(backlog, legacy);
+  // minVersion (§ 5, DECISIONS 166): applies to every command, including
+  // `doctor` -- `tolerateConfig` exempts it from `invalid_config` only;
+  // there is nothing `doctor --fix` could repair about the running
+  // binary's own version, so this gate is unconditional.
+  if (needsNewerNj) {
+    fail('needs_newer_nj', `this backlog requires nj ${needsNewerNj.required} or newer; running ${needsNewerNj.running}`,
+      `running ${needsNewerNj.running}, requires ${needsNewerNj.required} — upgrade nj`);
+  }
   if (errors.length > 0 && !(opts && opts.tolerateConfig)) {
     const configFile = path.join(backlog, legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
     fail('invalid_config', `invalid configuration in ${configFile}: ${errors[0]}`, 'run `nj doctor` for the full report');
@@ -36,7 +44,7 @@ function context(flags: Flags, opts?: { lenient?: boolean; tolerateConfig?: bool
   // elements loaded here only for files whose ctime predates it (DECISIONS 103).
   const loadedAt = Date.now();
   const { elements, scan } = loadBacklog(backlog, config, idsDir);
-  return { backlog, cfg: config, configErrors: errors, elements, scan, loadedAt, legacy, idsDir };
+  return { backlog, cfg: config, configErrors: errors, configWarnings: warnings, elements, scan, loadedAt, legacy, idsDir };
 }
 
 // resolveTarget (below) bundles the --id/--file argument-syntax checks
