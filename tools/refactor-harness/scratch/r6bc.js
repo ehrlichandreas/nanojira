@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 // corpus part they feed vanished on reboot and `record` aborted with code 4.
 // os.tmpdir() always exists; HARNESS_SCRATCH_BASE overrides it.
 const SCRATCH_BASE = process.env.HARNESS_SCRATCH_BASE || require('os').tmpdir();
+const { track } = require('./lib/cleanup.js');
 // argv[2] zuerst: ohne das laeuft die Sonde am Shim vorbei, traegt nichts
 // zum Korpus bei -- und prueft obendrein ein anderes nj als das, das
 // gerade unter Test steht.
@@ -12,7 +13,7 @@ const NJ = process.argv[2] || path.join(__dirname, '..', '..', '..', 'src', 'nj.
 const NOW = '2026-09-21T18:00:00Z', LATER = '2026-09-21T19:30:00Z';
 const CFG = JSON.stringify({ schema: 1, statuses: ['todo','done'], sections: { description: ['Description'], acceptance: ['Acceptance Criteria'] } }, null, 2) + '\n';
 const FM = '---\nid: TSK-001\ntype: task\nparent: EPIC-001\ntitle: T\nstatus: todo\ncreated: ' + NOW + '\nupdated: ' + NOW + '\n---\n';
-const d = fs.mkdtempSync(SCRATCH_BASE + '/r6bc-'); const bl = path.join(d, 'backlog');
+const d = track(fs.mkdtempSync(SCRATCH_BASE + '/r6bc-')); const bl = path.join(d, 'backlog');
 for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
 fs.writeFileSync(path.join(bl, '.nanojira/config.json'), CFG); fs.writeFileSync(path.join(bl, '.nanojira/ids', 'TSK-001'), '');
 const f = path.join(bl, 'tasks', 'TSK-001.md'); fs.writeFileSync(f, FM + '\n# T\n\n## Description\nold\n\n## Acceptance Criteria\n- [ ] x\n');

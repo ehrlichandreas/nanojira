@@ -5,6 +5,7 @@ const { spawnSync } = require('child_process');
 // corpus part they feed vanished on reboot and `record` aborted with code 4.
 // os.tmpdir() always exists; HARNESS_SCRATCH_BASE overrides it.
 const SCRATCH_BASE = process.env.HARNESS_SCRATCH_BASE || require('os').tmpdir();
+const { track } = require('./lib/cleanup.js');
 const NJ = process.argv[2] || path.join(__dirname, '..', '..', '..', 'src', 'nj.ts');
 const NOW = '2026-09-21T18:00:00Z', LATER = '2026-09-21T19:30:00Z';
 const CFG = JSON.stringify({ schema: 1, statuses: ['todo','doing','blocked','review','done'], sections: { description: ['Description'], acceptance: ['Acceptance Criteria'] } }, null, 2) + '\n';
@@ -14,7 +15,7 @@ const sha = s => crypto.createHash('sha256').update(s).digest('hex');
 function el(f, body) { const order = ['id','type','parent','title','status','priority','assignee','tags','depends_on','created','updated','archived']; const keys = order.filter(k => f[k] !== undefined).concat(Object.keys(f).filter(k => !order.includes(k))); return '---\n' + keys.map(k => k + ': ' + f[k]).join('\n') + '\n---\n\n' + (body || ''); }
 const complete = t => '# ' + t + '\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n';
 function mk(label, files, tomb) {
-  const d = fs.mkdtempSync(path.join(SCRATCH_BASE, 'r4-' + label + '-')); const bl = path.join(d, 'backlog');
+  const d = track(fs.mkdtempSync(path.join(SCRATCH_BASE, 'r4-' + label + '-'))); const bl = path.join(d, 'backlog');
   for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
   fs.writeFileSync(path.join(bl, '.nanojira/config.json'), CFG);
   for (const [rel, c] of Object.entries(files || {})) { const p = path.join(bl, rel); fs.mkdirSync(path.dirname(p), { recursive: true }); fs.writeFileSync(p, c); }

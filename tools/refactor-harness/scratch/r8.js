@@ -5,6 +5,7 @@ const fs = require('fs'), path = require('path'); const { spawnSync } = require(
 // corpus part they feed vanished on reboot and `record` aborted with code 4.
 // os.tmpdir() always exists; HARNESS_SCRATCH_BASE overrides it.
 const SCRATCH_BASE = process.env.HARNESS_SCRATCH_BASE || require('os').tmpdir();
+const { track } = require('./lib/cleanup.js');
 const NOW = '2026-09-21T18:00:00Z', LATER = '2026-09-21T19:30:00Z';
 const CFG = JSON.stringify({ schema: 1, statuses: ['todo','done'], sections: { description: ['Description'], acceptance: ['Acceptance Criteria'] } }) + '\n';
 const FM = '---\nid: TSK-001\ntype: task\nparent: EPIC-001\ntitle: T\nstatus: todo\ncreated: ' + NOW + '\nupdated: ' + NOW + '\n---\n';
@@ -19,7 +20,7 @@ const shapes = {
 const bins = process.argv.slice(2);
 for (const [name, body] of Object.entries(shapes)) {
   const outs = bins.map(nj => {
-    const d = fs.mkdtempSync(SCRATCH_BASE + '/r8-'); const bl = path.join(d, 'backlog');
+    const d = track(fs.mkdtempSync(SCRATCH_BASE + '/r8-')); const bl = path.join(d, 'backlog');
     for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
     fs.writeFileSync(path.join(bl, '.nanojira/config.json'), CFG); fs.writeFileSync(path.join(bl, '.nanojira/ids', 'TSK-001'), '');
     fs.writeFileSync(path.join(bl, 'tasks', 'TSK-001.md'), FM + body);

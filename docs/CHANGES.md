@@ -5,6 +5,18 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nj --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 3.12.1
+
+Tooling patch only — no command, flag or output behaviour changed.
+
+- The refactor-harness's own white-box scratch probes now remove the
+  throwaway fixtures they create, including when killed by SIGTERM,
+  SIGINT or SIGHUP partway through a run.
+
+- The project's git history was squashed to one commit per release tag;
+  `docs/history-squash-20261009.map` maps old commit hashes to the tag
+  that now carries their tree, for anyone with a reference to an old hash.
+
 ## 3.12.0
 
 Packaging changes only — no command, flag or output behaviour changed.

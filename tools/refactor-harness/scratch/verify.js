@@ -5,6 +5,7 @@ const { spawnSync } = require('child_process');
 // corpus part they feed vanished on reboot and `record` aborted with code 4.
 // os.tmpdir() always exists; HARNESS_SCRATCH_BASE overrides it.
 const SCRATCH_BASE = process.env.HARNESS_SCRATCH_BASE || require('os').tmpdir();
+const { track } = require('./lib/cleanup.js');
 // argv[2] zuerst: ohne das laeuft die Sonde am Shim vorbei, traegt nichts
 // zum Korpus bei -- und prueft obendrein ein anderes nj als das, das
 // gerade unter Test steht.
@@ -18,7 +19,7 @@ function sha(s) { return crypto.createHash('sha256').update(s).digest('hex'); }
 function el(f, body) { const order = ['id','type','parent','title','status','priority','assignee','tags','depends_on','created','updated','archived']; const keys = order.filter(k => f[k] !== undefined).concat(Object.keys(f).filter(k => !order.includes(k))); return '---\n' + keys.map(k => k + ': ' + f[k]).join('\n') + '\n---\n\n' + (body || ''); }
 function complete(t) { return '# ' + t + '\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n'; }
 function mk(label, files, tomb, cfg) {
-  const d = fs.mkdtempSync(path.join(SCRATCH_BASE, label + '-'));
+  const d = track(fs.mkdtempSync(path.join(SCRATCH_BASE, label + '-')));
   const bl = path.join(d, 'backlog');
   for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true });
   if (cfg !== null) fs.writeFileSync(path.join(bl, '.nanojira/config.json'), cfg || CFG);
@@ -198,7 +199,7 @@ console.log('\n[M3] --file through symlinked absolute paths');
 console.log('\n[SPEC] pinned changes');
 {
   // discovery
-  const d0 = fs.mkdtempSync(SCRATCH_BASE + '/disc-'); fs.mkdirSync(path.join(d0, 'backlog', 'tasks'), { recursive: true }); fs.mkdirSync(path.join(d0, 'a', 'b'), { recursive: true });
+  const d0 = track(fs.mkdtempSync(SCRATCH_BASE + '/disc-')); fs.mkdirSync(path.join(d0, 'backlog', 'tasks'), { recursive: true }); fs.mkdirSync(path.join(d0, 'a', 'b'), { recursive: true });
   const r = run(['list'], d0); const rj = run(['list','--json'], path.join(d0, 'a', 'b'));
   ok('backlog/ without config → exit 1, names the missing file, points at doctor', r.status === 1 && /\.nanojira\/config\.json/.test(r.err) && /nj doctor/.test(r.err) && !/no backlog found/.test(r.err), r.err);
   ok('… from nested dir, --json: {ok:false,error:backlog_without_config,hint}', rj.json && rj.json.ok === false && rj.json.error === 'backlog_without_config' && typeof rj.json.hint === 'string', rj.out);
@@ -216,7 +217,7 @@ console.log('\n[SPEC] pinned changes');
   // (an agent session's HOME has none), and then the spawn failed and this
   // check was a standing environmental ✗ (docs/verification/v3-preflight.md
   // A4). Once a ✗ gates, a ✗ that says nothing about nj must not exist.
-  const none = run(['list','--json'], fs.mkdtempSync(SCRATCH_BASE + '/nobacklog-'), { NJ_BACKLOG: '' });
+  const none = run(['list','--json'], track(fs.mkdtempSync(SCRATCH_BASE + '/nobacklog-')), { NJ_BACKLOG: '' });
   ok('no backlog at all → no_backlog', none.json && none.json.error === 'no_backlog', none.out);
   // failure shape variants
   const d = mk('spec', { 'epics/EPIC-001.md': el({ id: 'EPIC-001', type: 'epic', title: 'E', status: 'todo', created: NOW, updated: NOW }, '# E\n\n## Description\nD\n'),

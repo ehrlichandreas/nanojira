@@ -5,6 +5,7 @@ const { spawnSync } = require('child_process');
 // corpus part they feed vanished on reboot and `record` aborted with code 4.
 // os.tmpdir() always exists; HARNESS_SCRATCH_BASE overrides it.
 const SCRATCH_BASE = process.env.HARNESS_SCRATCH_BASE || require('os').tmpdir();
+const { track } = require('./lib/cleanup.js');
 // argv[2] zuerst: ohne das laeuft die Sonde am Shim vorbei, traegt nichts
 // zum Korpus bei -- und prueft obendrein ein anderes nj als das, das
 // gerade unter Test steht.
@@ -15,7 +16,7 @@ let n = 0, bad = 0;
 function ok(desc, cond, detail) { n++; if (!cond) { bad++; console.log('  ✗ ' + desc + (detail !== undefined ? '\n      ' + String(detail).slice(0, 700) : '')); } else console.log('  ✓ ' + desc); }
 function el(f, body) { const order = ['id','type','parent','title','status','priority','assignee','tags','depends_on','created','updated','archived']; const keys = order.filter(k => f[k] !== undefined).concat(Object.keys(f).filter(k => !order.includes(k))); return '---\n' + keys.map(k => k + ': ' + f[k]).join('\n') + '\n---\n\n' + (body || ''); }
 const complete = t => '# ' + t + '\n\n## Description\nD\n\n## Acceptance Criteria\n- [ ] x\n';
-function mk(label, files, tomb) { const d = fs.mkdtempSync(path.join(SCRATCH_BASE, 'r5-' + label + '-')); const bl = path.join(d, 'backlog'); for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true }); fs.writeFileSync(path.join(bl, '.nanojira/config.json'), CFG); for (const [rel, c] of Object.entries(files || {})) fs.writeFileSync(path.join(bl, rel), c); for (const t of tomb || []) fs.writeFileSync(path.join(bl, '.nanojira/ids', t), ''); return d; }
+function mk(label, files, tomb) { const d = track(fs.mkdtempSync(path.join(SCRATCH_BASE, 'r5-' + label + '-'))); const bl = path.join(d, 'backlog'); for (const s of ['epics','tasks','subtasks','archive','.nanojira/ids']) fs.mkdirSync(path.join(bl, s), { recursive: true }); fs.writeFileSync(path.join(bl, '.nanojira/config.json'), CFG); for (const [rel, c] of Object.entries(files || {})) fs.writeFileSync(path.join(bl, rel), c); for (const t of tomb || []) fs.writeFileSync(path.join(bl, '.nanojira/ids', t), ''); return d; }
 function run(args, cwd, env, now) { const r = spawnSync(process.execPath, [NJ].concat(args), { cwd, env: Object.assign({}, process.env, { NJ_NOW: now || NOW }, env || {}), encoding: 'utf8', timeout: 20000 }); let json = null; try { json = JSON.parse(r.stdout); } catch {} return { status: r.status, out: r.stdout, err: r.stderr, json }; }
 const keys = o => Object.keys(o || {}).sort().join(',');
 const E = (id, st) => el({ id, type: 'epic', title: id, status: st || 'todo', created: NOW, updated: NOW }, '# ' + id + '\n\n## Description\nD\n');
@@ -50,7 +51,7 @@ console.log('[sweep] every command JSON shape vs §9 table');
   console.log('    note: rm --cascade dependents = ' + JSON.stringify(rc && rc.dependents) + ' (TSK-002 is archived and depends on deleted TSK-001)');
   const fl = j(['set','--id=NOPE','--status=done']);
   ok('failure → {error,ok} (+hint optional)', keys(fl) === 'error,ok' || keys(fl) === 'error,hint,ok', keys(fl));
-  const init = run(['init','--json'], fs.mkdtempSync(SCRATCH_BASE + '/r5-init-')).json;
+  const init = run(['init','--json'], track(fs.mkdtempSync(SCRATCH_BASE + '/r5-init-'))).json;
   console.log('    note: init --json → ' + keys(init) + ' (no §9 row for init)');
   const fx = j(['doctor','--fix'], LATER);
   ok('doctor --fix → {backlog,fixed,notes,ok,problems}', keys(fx) === 'backlog,fixed,notes,ok,problems', keys(fx));
