@@ -6,16 +6,17 @@
 // before either claims it. Built on `claim`'s own CAS (`claimOne`) — never
 // a second implementation of it.
 
-import type { Flags, Element } from '../core/types.ts';
+import type { Flags } from '../core/types.ts';
 
 import { resolveActingName } from '../core/actor.ts';
 import { checkFlags, flagString } from '../core/args.ts';
 import { cliFieldNames } from '../core/flag-table.ts';
 import { context, resolveById, requireWritable, requireActive } from '../core/context.ts';
-import { isReady } from '../core/derive.ts';
+import { isReady, hasOpenChild } from '../core/derive.ts';
 import { Fail, fail, out } from '../core/output.ts';
 import { refreshStatus } from '../core/status.ts';
 import { nowIso } from '../core/store.ts';
+import { valueHint } from '../core/suggest.ts';
 import { applyFilters, availableToActor } from './cmd-list.ts';
 import { claimOne } from './cmd-claim.ts';
 
@@ -27,7 +28,7 @@ function cmdNext(flags: Flags) {
   const ctx = context(flags);
   const status = flagString(flags, 'status');
   if (status !== undefined && !ctx.cfg.statuses.includes(status)) {
-    fail('invalid_value', `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(', ')}`);
+    fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses));
   }
 
   // `--status` is next's own write target (as on `claim`), not a filter —
@@ -40,9 +41,16 @@ function cmdNext(flags: Flags) {
   // type it is — a childless epic, or one whose children are all done, is
   // unaffected. This is `next`'s own extra filter, applied after `list`'s
   // own `--ready`/filters; `list --ready` and bare `nj` are unchanged.
-  const hasOpenChild = (e: Element) => (e.children as Element[]).some((c) => !c.archived && c.status !== 'done');
+  //
+  // D158 PA-5: an `assignee` naming someone other than the acting name is
+  // also disqualifying, on by default — not an option. This composes with
+  // the `--assignee=<v>` filter `applyFilters` already applied above: with
+  // `--assignee=` (empty) or `--assignee=<name>` the two conditions agree;
+  // with any other value they can never both hold, so the result is
+  // `none_ready`, not a special case.
   const candidates = applyFilters(ctx.elements, filterFlags, ctx.cfg)
-    .filter((e) => isReady(e, ctx.cfg) && availableToActor(ctx.backlog, e.id, name) && !hasOpenChild(e));
+    .filter((e) => isReady(e, ctx.cfg) && availableToActor(ctx.backlog, e.id, name) && !hasOpenChild(e)
+      && (e.assignee === '' || e.assignee === name));
 
   const skipped: string[] = [];
   for (const candidate of candidates) {

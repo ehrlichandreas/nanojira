@@ -29,9 +29,34 @@ import { cmdShow } from './commands/cmd-show.ts';
 import { cmdStatus } from './commands/cmd-status.ts';
 import { cmdTree } from './commands/cmd-tree.ts';
 import { cmdUnarchive } from './commands/cmd-unarchive.ts';
-import { HELP } from './core/help.ts';
+import { HELP, commandHelp } from './core/help.ts';
 import { Fail, fail, output, emitFailure } from './core/output.ts';
 import { VERSION } from './core/version.ts';
+
+// ------------------------------------------------------------- global flags
+
+// `--backlog`/`--json` may precede the command word (§ 9 "Rules", DECISIONS
+// 158 EV-6): a leading run of exactly these two (either order, repeated,
+// mixed) is skipped while searching for the command word. Nothing is
+// reordered — the command word, once found, is simply removed from the
+// stream; every flag (global or the command's own) keeps its original
+// relative position in what remains. A token during the scan that is
+// neither a global flag nor the command word (starts with `--` but isn't
+// `--backlog`/`--json`) stops the search outright: the whole, unmodified
+// input is then the **bare** invocation's own arguments — no partial
+// reordering, no silent fallback to a different command.
+const GLOBAL_PREFIX_FLAGS = new Set(['backlog', 'json']);
+
+function splitCommand(argv: string[]): { cmd: string | null; rest: string[] } {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--')) return { cmd: a, rest: argv.slice(0, i).concat(argv.slice(i + 1)) };
+    const eq = a.indexOf('=');
+    const name = eq === -1 ? a.slice(2) : a.slice(2, eq);
+    if (!GLOBAL_PREFIX_FLAGS.has(name)) break;
+  }
+  return { cmd: null, rest: argv };
+}
 
 // --------------------------------------------------------------------- main
 
@@ -53,10 +78,15 @@ function main(argv: string[]) {
     fail('unknown_field', `unknown field 'version'.`, '--version takes no other flag and names no command');
   }
 
-  const cmd = argv[0] !== undefined && !argv[0].startsWith('--') ? argv[0] : null;
-  const { flags, positional } = parseArgs(cmd === null ? argv : argv.slice(1));
+  const { cmd, rest } = splitCommand(argv);
+  const { flags, positional } = parseArgs(rest);
 
-  if (cmd === 'help' || flags.has('help')) { process.stdout.write(HELP); return 0; }
+  // `help`/`--help`'s own precedence is unchanged: checked before anything
+  // else, regardless of other flags, never failing (§ 9). `--help` now
+  // resolves to a per-command text when a command word is present, the
+  // general one otherwise — `nj help`/bare `--help` are untouched.
+  if (cmd === 'help') { process.stdout.write(HELP); return 0; }
+  if (flags.has('help')) { process.stdout.write(cmd === null ? HELP : commandHelp(cmd, flags)); return 0; }
 
   switch (cmd) {
     case null: return cmdStatus(flags);

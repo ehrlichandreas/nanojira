@@ -762,6 +762,96 @@ tolerates being combined with anything; it recognises only itself and
 
 `nj help` lists `--version` in its command summary.
 
+### `--help` (per-command, DECISIONS 158 EV-2/EV-3)
+
+`nj <command> --help` prints **that command's own** synopsis and flags —
+not the general help every command used to fall back to. `nj help` and
+bare `--help` (no command word before it) are unchanged: the same general
+command list as always. The precedence `--help`/`help` already has —
+checked before anything else, regardless of what other flags are present,
+never failing on an unknown or malformed flag alongside it — is
+unaffected; it now resolves to a **per-command** text when a command word
+is present, the general one otherwise.
+
+A command's own `--help` text has, in order:
+
+1. Its synopsis line(s), exactly as `nj help`'s own command list already
+   shows them (§ 9 "Commands (round one)") — one `--help` source, not a
+   second copy to keep in sync.
+2. One line per flag the command accepts, from the same per-command flag
+   table `nj-mcp`'s own tool schemas already read (`core/flag-table.ts`,
+   § 17) — so this, `nj-mcp`'s schemas, and the CLI's own flag validation
+   can never drift apart from each other. A flag with a **closed
+   vocabulary** (`--type`, `--status`, `--priority`) names its allowed
+   values on the same line; any other flag is marked free-form, nothing
+   invented about it.
+
+**Allowed values shown:** `--type` is always `epic | task | subtask`;
+`--priority` is always `low | normal | high | urgent` — neither is
+configurable, so these never vary by backlog. `--status` shows the
+**current backlog's configured `statuses`** (§ 5) when one resolves
+cleanly (a valid config found by the usual search, § 4); otherwise — no
+backlog at all, or one whose configuration is invalid or unreadable — it
+falls back to the **default** list (`todo, doing, blocked, review, done`,
+§ 5's own `DEFAULT_CONFIG`). Resolving a backlog for this purpose is
+**best-effort and silent**: `--help` itself never fails and never reports
+`no_backlog`/`invalid_config` the way every other command would — the
+same "works anywhere" discipline `--version` already has (§ 9
+"`--version`"); an agent asking what `--status` accepts should get an
+answer even from an empty directory, the defaults standing in for "no
+backlog resolved."
+
+`--json` has no meaning combined with `--help`, on any command: output is
+prose regardless, the same rule `nj help` itself already has (§ 9
+"Failure codes — closed vocabulary": "`--json` is defined for the command
+set of this section. `nj help` is not one of them").
+
+### Did-you-mean (DECISIONS 158 EV-3, 160)
+
+An invalid `--type`/`--status`/`--priority` value stays `invalid_value`,
+unchanged — the vocabulary is exactly as closed as before, and no alias is
+ever *accepted* as a value. Only the **hint** (never the message) gains a
+suggestion when exactly one is unambiguous, checked in this order:
+
+1. **A tiny, fixed synonym table** — today exactly one entry,
+   `priority`'s `medium → normal` — checked first, verbatim, regardless
+   of edit distance (`medium` is six edits from `normal`; a distance rule
+   alone would never catch it, which is the table's whole reason to
+   exist).
+2. Otherwise, the **optimal-string-alignment (OSA) distance** from the
+   given value to every allowed value (the backlog's configured
+   `statuses` for `--status`, the fixed lists for `--type`/`--priority`),
+   case-sensitive like every other exact-string comparison in this
+   document. OSA is Levenshtein (insert/delete/substitute, each cost 1)
+   plus an adjacent transposition, also cost 1, not two substitutions
+   (DECISIONS 160 addendum) — a swapped pair of letters is the most
+   common typo, and plain Levenshtein would otherwise put `hgih` two
+   edits from `high` instead of one. The threshold depends on the given
+   value's own length (DECISIONS 160): **≤ 1** when it has **≤ 4
+   characters**, **≤ 2** otherwise — for a short word, distance 2
+   replaces half of it, which is noise rather than a hint (`--status=nope`,
+   4 characters, is distance 2 from `done` — no transposition shortens
+   it — and gets no suggestion; `--status=don`, 3 characters, is distance
+   1 from `done` and does; `--priority=hgih`, 4 characters, is distance 1
+   from `high` via the `gi`/`ih` transposition and still does too). If
+   the single smallest distance across all allowed values is at or under
+   that threshold and reached by **exactly one** of them, that value is
+   suggested. A tie at the minimum distance, or every distance over the
+   threshold, suggests nothing — guessing wrong is worse than not
+   guessing (§ 14's own "never guess" discipline, applied to a hint
+   instead of a repair).
+
+When a suggestion exists, the hint gains a leading sentence: `did you mean
+'<value>'?`, followed by the existing `Known <fields>: …` list, unchanged
+in content and order. The message itself (`unknown <field> '<value>'`) is
+never touched, so anything already matching it by substring still does.
+`medium` for `--priority` therefore becomes:
+
+```
+Error: unknown priority 'medium'
+did you mean 'normal'? Known priorities: low, normal, high, urgent
+```
+
 ### The acting name
 
 Two commands need to know **who is acting**: `nj note` (§ 10, who signs) and
@@ -801,6 +891,38 @@ model `assignee` has (§ 6).
 ### Rules
 
 - **Verb as a subcommand**, not as a flag: `nj set`, not `nj --set`.
+- **`--backlog` and `--json` may precede the command word** (DECISIONS
+  158, EV-6) — `nj --backlog=<path> list`, `nj --json list
+  --backlog=<path>`, or any mix of the two in either order, any number of
+  times (the last occurrence of a repeated one wins, the same as anywhere
+  else a flag repeats). These are the **only** two flags this applies to:
+  the search for the command word skips past a leading run of exactly
+  `--backlog[=…]`/`--json` and stops at the first token that either does
+  not start with `--` (that token is the command) or does (anything
+  else — including a flag that would be perfectly valid for whatever
+  command follows, such as `--status=doing` ahead of `set`). In the
+  second case no reordering happens: the entire input, unchanged, is
+  parsed as the **bare** (no-command) invocation's own flags, and that
+  flag is `unknown_field` against the bare command's known flags
+  (`--backlog`, `--json`) — a clear error, never a silent fallback to a
+  different command. Once a command word **is** found this way, it is
+  removed from the stream and everything else — `--backlog`/`--json`
+  wherever they actually sat, plus the command's own flags and
+  positionals — is parsed together, in original order, as that command's
+  own arguments; the command word itself is never silently dropped (the
+  bug this closes: `nj --backlog=X list` used to run the bare, no-command
+  status instead of `list`, and `nj --backlog=X show --id=…` used to fail
+  `unknown_field` for `--id` against the bare command, never reaching
+  `show` at all). `--version`'s own exclusivity (§ 9 "`--version`",
+  DECISIONS 151/152) is checked first, against the complete, unmodified
+  argument list, and is untouched by this rule: `--version` combined with
+  `--backlog` in either order is still `unknown_field` for `--version`,
+  never a backlog-scoped version query. `help`/`--help` keep their own
+  existing precedence (recognised regardless of where `--help` sits,
+  unconditionally printing the general help) and are not changed by this
+  rule either — a per-command `--help` is separate, later work, not part
+  of this rule, and `nj --backlog=X help`/`nj --backlog=X --help` both
+  still just print the general help today, backlog unused.
 - **Addressing is only by `--id`** — exact, case-sensitive. Titles are labels,
   not addresses, and carry no uniqueness requirement. References (in files and
   in `--parent`/`--depends-on`) are matched exactly; `doctor` reports anything
@@ -1063,6 +1185,22 @@ do; broken references are caught by the code table instead. So
 holds, and never an element another acting name has claimed; a backlog
 without claims answers exactly as before condition 5 existed.
 
+**Bare `nj`'s own "Ready to work" section additionally excludes a
+container** (DECISIONS 158, EV-4): an element that is `--ready` by the
+five conditions above but has at least one **open child** (neither `done`
+nor archived) is left out of bare `nj`'s list, the same leaf-work rule
+`next` applies to its own candidates (§ 12b, DECISIONS 156) — reused here,
+not reimplemented. `list --ready` itself is **unchanged**: it stays a pure
+readiness filter over exactly the five conditions, container or not, so
+`nj list --ready` and bare `nj`'s "Ready to work" can now name different
+sets for the same backlog on purpose — bare `nj` is answering "what could
+I hand out right now", `list --ready` is answering "what satisfies
+`--ready`'s own definition". This is a new, accepted replay class: a
+bare-status call on a backlog containing a container whose children are
+all non-leaf-ready differs from a pre-v3.6 baseline by construction, the
+same deliberate, named exception the replay gate already carries for
+help-text differences (DECISIONS 151/152/154/155/156).
+
 ```
 $ nj list --ready
 Ready to work:
@@ -1173,6 +1311,7 @@ its code. These mappings are normative:
 | backlog in the v2 layout (any command except `doctor`) | `legacy_layout` | § 4 |
 | `.nanojira/config.json` violates § 5 | `invalid_config` | § 5 |
 | unknown field flag | `unknown_field` | § 9 |
+| a flag other than `--backlog`/`--json` precedes the command word | `unknown_field` | § 9 "Rules" |
 | `--version` combined with another flag or an explicit subcommand | `unknown_field` | § 9 |
 | unknown subcommand | `unknown_command` | § 9 |
 | a required flag or its value is missing | `missing_argument` / `missing_value` | § 9 |
@@ -1235,6 +1374,15 @@ $ nj set --id=TSK-009 --status=doing
 TSK-009 → doing
 ⚠ TSK-009 has no acceptance criteria. Add them before starting.
 ```
+
+This already answers DECISIONS 158 PA-2 ("`new`/`set` text output says
+when the element is not `--ready` and why"): every open `incomplete:*`
+code (and any other open problem) is already named in prose here, on
+`new` exactly as on `set` — no new field, no new behaviour; `_problems`
+in the JSON result already carries the same codes (§ 9 "JSON shapes per
+command"). PA-2's own suggested new JSON field (`not_ready_reason`) is
+deliberately not added: it would be a second name for exactly what
+`_problems` already is.
 
 ### Exit codes
 
@@ -1340,7 +1488,9 @@ Rules:
 - Line format: `- <ISO-8601 UTC> <author>: <text>`. `<author>` is the acting
   name (`--as`, else `NJ_AUTHOR`; § 9), trimmed, if set and valid; else the
   element's `assignee` if set; else `?`. Consecutive notes are consecutive
-  lines directly below the heading — no blank lines between them.
+  lines directly below the heading — no blank line between **two different**
+  notes (a blank line *within* one note's own text is a different thing,
+  below).
 - An invalid acting name makes `nj note` exit 1 — `invalid_env` for
   `NJ_AUTHOR`, `invalid_value` for `--as` — and writes nothing. Other writes
   (`new`, `set`, …) do not use the acting name and ignore it; reads never
@@ -1358,6 +1508,70 @@ Rules:
   result reports `changed: ["body"]`.
 - `updated` is refreshed; the atomic write and compare-before-write rules
   (§ 12) apply.
+
+### Multi-line text (DECISIONS 158, EV-7)
+
+A note's text is **not** flattened to one line. `\r\n` and a lone `\r` in
+the given text are normalised to `\n` first (the same normalisation every
+other write path in this document already applies, § 7); the overall text
+is then trimmed, exactly as today (no leading/trailing blank lines). What
+remains is split on `\n`:
+
+- The **first** line becomes `<text>` on the `- <ISO-8601 UTC> <author>:
+  <text>` line itself, exactly as a single-line note always has.
+- **Every following line** — blank or not — is written on its own line,
+  immediately below, indented by exactly **two spaces** (the width of the
+  `- ` marker): a genuine Markdown list continuation, so the whole note
+  renders as one list item in any viewer, not a separate paragraph or a
+  new list item. A blank line in the middle of the text is still written
+  indented (two spaces, nothing else) rather than truly empty — the
+  deliberate exception to this project's usual "no trailing whitespace"
+  rule, because it is exactly what tells the reader (and `nj log`,
+  below) that the blank line belongs to *this* note's continuation and
+  is not the blank line that would otherwise mark the end of `## Notes`.
+  No other line hygiene is applied: a continuation line's own content is
+  written as given (after the `\r`/`\r\n` normalisation above), not
+  re-trimmed.
+
+```markdown
+## Notes
+- 2026-10-06T18:00:00Z tracker: Line one
+  Line two
+  
+  Line four, after a blank line
+```
+
+**Reading it back** (`parseNotes`, used by `nj find` and `nj log`): after a
+line matching `- <ISO-8601> <author>: <text>`, every immediately following
+line that is **either** completely empty **or** starts with exactly two
+spaces is a continuation of that same note, consumed until a line that is
+neither (a fresh, unindented note line; a heading; anything else) ends it.
+Continuation lines are rejoined with `\n`, in order, the two-space prefix
+stripped where present (a genuinely empty line stays empty) — reconstructing
+the exact text that was written. Because a continuation line is always
+either indented or empty, it can **never** be read as a fresh note (which
+must start at column 0 with `- `) or as a checkbox (`nj check`'s own scope
+already excludes `## Notes` entirely, § 10a, independent of indentation) —
+a continuation line that happens to read `- [ ] like a checkbox` is just
+more of the previous note's text, indented, nothing else. A line that is
+hand-added directly below a note and is neither empty nor two-space-indented
+is read as ending that note's continuation, the same "trust the shape,
+don't guess" rule a line that matches neither pattern anywhere else in
+`## Notes` already gets (v3.5, DECISIONS 155) — so a stray hand edit there
+is silently excluded from the note it was meant to extend, not merged into
+it and not an error.
+
+**No new size limit.** A note's text, single-line or multi-line, has no
+length or line-count cap — the same as `--description`/`--description-file`
+already have none.
+
+**Unaffected by this:** `--as`/`NJ_AUTHOR` validation (§ 9 "The acting
+name") — a multi-line acting name is still `invalid_value`/`invalid_env`,
+unrelated to the note *text*'s own newlines. `nj find`'s substring match
+(§ 9a) already treats the whole body, notes included, as one block of text;
+a continuation line's two-space indent is just more of that text, nothing
+special-cased. `nj doctor` does not parse note structure at all and is
+unaffected.
 
 Notes are how decisions, findings and verification reports get captured in
 the backlog — the body is the project memory, `nj note` is its sanctioned
@@ -1968,6 +2182,33 @@ is itself ready — so it is a legitimate candidate (once the leaf-work
 rule above also passes), and claiming it is the ordinary re-assertion
 `claim` itself defines (§ 12a step 2), not a race.
 
+**Respects an existing `assignee` — on by default, not an option**
+(DECISIONS 158, PA-5): a `--ready`, leaf element whose `assignee` names
+someone **other than** the acting name is **not a candidate** either. An
+`assignee` is a statement of intent (§ 6) — set by a human, by `--assignee`
+on `new`/`set`, or by a prior `claim`/`next` — and `next` silently handing
+that element to a different name regardless would overrule it without
+telling anyone; refusing to consider it at all is the only safe default.
+A candidate therefore needs `assignee` to be **empty, or exactly equal to
+the acting name** — compared byte-for-byte, the same exact-string
+equality every other identity comparison in this document already uses
+(ids, tags, acting names themselves — no case-folding, no trimming beyond
+what the acting name's own resolution already did, § 9): `Alice` and
+`alice` are different assignees, and an `assignee` with incidental
+leading/trailing whitespace from a hand edit matches nothing until it is
+cleaned up. This interacts with the **`--assignee=<v>`** filter above,
+which is unchanged in what it does (narrows candidates to exactly
+`assignee == <v>`) but now composes with the default: `--assignee=` (the
+empty string) narrows to unassigned candidates only, excluding ones
+already assigned to the acting name itself; `--assignee=<the acting
+name>` narrows to candidates already assigned to the acting name,
+excluding unassigned ones; `--assignee=<anyone else>` can never match
+anything (it demands `assignee == <v>` while the default demands
+`assignee` is empty or the acting name) and reaches **`none_ready`**
+every time — not a special case, just what the two conditions intersect
+to. `list --ready` is **unchanged**: this is a `next`-only narrowing, the
+same way the leaf-work rule above is.
+
 **The acting name is required.** Omit it and the call fails
 `missing_argument` — the same rule `claim`/`release` already have (§ 9
 "The acting name"); "the next ready element" means nothing without
@@ -2084,11 +2325,16 @@ easy to miss:**
     event immediately before this one in the merged list.
 - **Notes**, read in document order (§ 10): each `- <ISO-8601> <author>:
   <text>` line becomes one event, kind **`note`**, actor the author,
-  text everything after the first `: ` following the author. A line
-  under `## Notes` that does **not** match this shape — a hand edit, most
-  often — is **silently skipped**, not an error and not a degraded
-  event: the same tolerance this specification already has elsewhere for
-  a hand-edited body that doesn't match a parsing rule it depends on.
+  text everything after the first `: ` following the author — **plus any
+  continuation lines** (§ 10 "Multi-line text", DECISIONS 158), rejoined
+  with `\n` in the same `text` field, so a multi-line note's JSON `text` is
+  byte-identical to what was written, continuation indent stripped. A line
+  under `## Notes` that does **not** match a fresh note line, is not a
+  continuation of the one before it, and is not itself text already
+  claimed by a continuation — a genuine hand edit, most often — is
+  **silently skipped**, not an error and not a degraded event: the same
+  tolerance this specification already has elsewhere for a hand-edited body
+  that doesn't match a parsing rule it depends on.
 
 **Merging.** Every event from every source above is merged into one list
 by `at` ascending. **Tie-break**, for two events sharing the exact same
@@ -2117,7 +2363,12 @@ $ nj log --id=TSK-007
 
 A note line reuses its own `<author>: <text>` shape; a claim-derived
 line reads `<verb> by <actor>` — `claimed`, `re-asserted`, `stolen` or
-`released`.
+`released`. A **multi-line** note's event is the one exception to "one
+line per event": its first line is `<time> <author>: <first line of
+text>`, exactly as above, and each further line of the text is printed
+on its own following line, indented the same two spaces the file itself
+stores (§ 10) — full fidelity, never truncated, never joined back into
+one line.
 
 **Addressing.** `log` is a read — no acting name, no `--all` (there is
 nothing to filter; it addresses exactly one element) — but it is a
@@ -2717,6 +2968,99 @@ reported, not guessed at.
     (§ 12a) — a field-level change (`status`, `priority`, …) is not
     shown at all, by design, and the spec states both limits plainly.
     An unreadable stub addressed directly is `refused:unreadable`.
+42. **Global flags before the command word.** `nj --backlog=<path> list`
+    and `nj --json list --backlog=<path>` both run `list`, byte-identical
+    to the same call with `--backlog`/`--json` placed after `list`; so
+    does any other order or repetition of just those two flags ahead of
+    the command word. `nj --backlog=<path> show --id=X` runs `show
+    --id=X` against that backlog, not `unknown_field` for `--id`. A flag
+    other than `--backlog`/`--json` ahead of the command word — including
+    one valid for the command that follows, e.g. `nj --status=doing set
+    --id=X` — is `unknown_field` against the bare command's own known
+    flags (`--backlog`, `--json`), the whole input parsed as the bare
+    invocation; the command word that followed is never run and never
+    silently substituted for. `nj --backlog=X` alone (every token a
+    recognised global flag) is bare `nj` against that backlog, unchanged.
+    `nj --version --backlog=X` and `nj --backlog=X --version` are each
+    still `unknown_field` for `--version` (DECISIONS 151/152), in either
+    order.
+43. **Multi-line notes.** `nj note --id=X "$(printf 'one\ntwo\n\nfour')"`
+    writes `- <ts> <author>: one` followed by three more lines —
+    `  two`, a line that is exactly two spaces, and `  four` — each
+    indented exactly two spaces; `\r\n` and lone `\r` in the given text
+    normalise to `\n` first, the same as every other write path. `nj log
+    --id=X --json`'s matching event's `text` is exactly `"one\ntwo\n\nfour"`
+    — continuation lines rejoined, indent stripped, the blank line
+    restored empty; its human line prints `one`, then `two`, a blank
+    line, then `four`, each of the continuation lines indented the same
+    two spaces the file stores. `nj check` never matches a checkbox-shaped
+    continuation line (`## Notes` is out of its scope entirely, § 10a,
+    independent of indentation); `nj find` still matches a substring
+    anywhere in the note's text, continuation lines included, as plain
+    body text. A hand-added line directly below a note that is neither
+    empty nor two-space-indented ends that note's continuation and is
+    itself silently skipped if it doesn't start a fresh note (DECISIONS
+    155), never merged into the note above it. `--as`/`NJ_AUTHOR` reject
+    a multi-line acting name exactly as before — unaffected by any of
+    this, since it governs the name, not the note text.
+44. **`nj next` respects an existing `assignee`.** A `--ready`, leaf
+    element with `assignee` set to a name other than the acting name is
+    never a candidate: given TSK-001 (`assignee: bob`) and TSK-002
+    (unassigned), both otherwise equally ranked, `nj next --as=alice`
+    claims TSK-002, skipping TSK-001 entirely (not even in `skipped`,
+    since it was never a candidate to begin with — the same way an
+    element claimed by someone else never appears as a `next` candidate
+    either). `nj next --as=bob` (matching TSK-001's own `assignee`)
+    claims TSK-001. The comparison is exact, byte-for-byte — `Bob` does
+    not match `bob`, and an `assignee` with incidental whitespace matches
+    nothing. `--assignee=` (empty) narrows to unassigned candidates only;
+    `--assignee=<the acting name>` narrows to candidates already assigned
+    to the acting name; `--assignee=<anyone else>` always yields
+    `none_ready` (the filter and the default can never both be satisfied
+    by the same candidate unless the two names are the same). `list
+    --ready` is unchanged by any of this — confirmed by a fixture where
+    `list --ready` still shows an element assigned to someone else, while
+    `next --as=<a different name>` does not offer it.
+45. **Bare `nj`'s "Ready to work" applies the leaf rule, `list --ready`
+    does not.** Given an epic whose only child is open (not `done`, not
+    archived) and otherwise `--ready`, bare `nj` omits the epic from
+    "Ready to work" (the child appears instead, if it is itself `--ready`)
+    while `nj list --ready` still names the epic — the same backlog,
+    two different, both-correct answers, confirmed in one fixture rather
+    than inferred. An epic with no children, or whose children are all
+    `done`/archived, appears in both. This is the named, accepted replay
+    class DECISIONS 158 records: a bare-status call on a backlog
+    containing such a container differs from a pre-v3.6 baseline by
+    construction.
+46. **Per-command `--help`.** `nj new --help` prints `new`'s own synopsis
+    and flags, not the general command list; `nj --help`/`nj help` (no
+    command word) are unchanged. `--type`'s and `--priority`'s allowed
+    values are always `epic|task|subtask` and `low|normal|high|urgent`;
+    `--status`'s are the resolved backlog's own configured `statuses`
+    when one resolves cleanly, else the default list — confirmed by one
+    fixture with a non-default `statuses` list showing those exact
+    values in `nj set --help`, and one with no backlog at all (an empty
+    directory) still succeeding with the defaults, never `no_backlog`.
+    `--json` makes no difference to `--help`'s output, on any command.
+    This already answers PA-2 too: `new`/`set`'s existing prose already
+    names every open `incomplete:*` code after a write, unchanged by
+    this round (confirmed, not assumed).
+47. **Did-you-mean.** `--priority=medium` is still `invalid_value`, its
+    hint now `did you mean 'normal'? Known priorities: …` (the fixed
+    synonym, checked first). A `--status`/`--type`/`--priority` value
+    within the length-dependent threshold (OSA distance ≤ 1 for a ≤
+    4-character value, ≤ 2 otherwise — DECISIONS 160; OSA counts an
+    adjacent transposition as one edit, so `hgih`→`high` and `tsak`→
+    `task` are distance 1, not 2) of exactly one allowed value gets the
+    same treatment; a value equidistant from two allowed values, or
+    further than the threshold from all of them, gets the unchanged hint
+    with no suggestion — confirmed with a constructed tie case, not
+    merely a documented intention. `--status=nope` (4 characters,
+    distance 2 from `done` — no transposition applies) gets no
+    suggestion, where the old flat ≤ 2 rule would have hinted one. No
+    alias is ever accepted
+    as the value itself: `nj set --priority=medium` still fails, exactly
+    as before.
 
 ---
 

@@ -18,7 +18,6 @@
  * Black box: nj via spawnSync; exit code, stdout, stderr and file bytes.
  */
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const H = require('../lib/harness.js');
 const T = H.T;
@@ -67,7 +66,10 @@ if (ME === null) cannotRun('no process.getuid() on this platform — ownership i
 
 /* Decide feasibility before any scratch directory exists, so a CANNOT RUN
  * leaves nothing behind. */
-const foreignLink = ME === 0 ? null : findForeignSymlink(fs.statSync(os.tmpdir()).dev);
+/* The same device `H.freshDir()`'s own fixtures live on (H.TMP_ROOT, not
+ * os.tmpdir() — see harness.js for why), so a found foreign symlink can
+ * actually be hard-linked into the fixtures this file builds below. */
+const foreignLink = ME === 0 ? null : findForeignSymlink(fs.statSync(H.TMP_ROOT).dev);
 if (ME !== 0 && !foreignLink) {
   cannotRun('not root, and no symlink owned by a non-root uid other than ' + ME +
     ' on the scratch filesystem (searched ' + SEARCH_ROOTS.join(', ') + ')');

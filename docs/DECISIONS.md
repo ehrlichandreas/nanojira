@@ -2175,6 +2175,106 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        so the files on disk were re-added. Fixed in 5e1fe80 with a plain
        commit of the staged removal.
 
+158. **v3.6: feedback from the first two outside teams** (2026-10-06,
+     feedback/team-b-tests EV-1..7 and feedback/team-a PA-1..5,
+     both on nj 3.5.0; the user: "Andere Teams verwenden nun nanojira …").
+     Triage by the Lead:
+     - **A: bugs, fixed.**
+       - *EV-6:* a global flag before the command word (`nj --backlog=X
+         list`) silently drops the command: `list` falls back to the bare
+         status, and `show` fails with a misleading `unknown field`. Global
+         flags (`--backlog`, `--json`) are accepted before the command word
+         and the command runs. An unknown word is never swallowed.
+       - *EV-7:* `nj note` flattens a multi-line text into one line without
+         saying so. Multi-line notes are kept: continuation lines are
+         indented under the `- <time> <author>:` line (a Markdown list
+         continuation, readable in any viewer). `nj log`/parseNotes and the
+         note-related rules are updated to match. The Oracle pins the
+         details: CRLF, blank lines, trailing newlines, size.
+     - **B: `nj next` and assignment.**
+       - *PA-5:* `next` must not hand out an element whose `assignee` names
+         someone else. This is the default, not an option: an explicit
+         assignment is a statement of intent, and handing it to another
+         agent overrides it silently. Candidates are therefore unassigned
+         or assigned to the acting name.
+       - *PA-4:* "an author gets their own review". No new exclusion field
+         for now: with PA-5 fixed, assigning the review to the reviewer is
+         the reliable way. GUIDE and AGENT-INSTRUCTIONS say so. To be
+         revisited if teams still hit it.
+     - **C: ready list.** *EV-4 / D157:* bare `nj` "Ready to work" applies
+       the D156 leaf rule (no element with an open child). `list --ready`
+       stays a pure readiness filter. A new, accepted replay class:
+       bare-status calls on backlogs with containers.
+     - **D: discoverability.**
+       - *EV-2:* `nj <command> --help` prints that command's synopsis,
+         flags and allowed values.
+       - *EV-3 / PA-1:* the allowed `--type`/`--status`/`--priority` values
+         (from the backlog's config when there is one, else the defaults)
+         appear in the help, and an invalid value names the nearest valid
+         one ("did you mean 'normal'?" for `medium`). There are no aliases;
+         the vocabulary stays closed.
+       - *PA-2:* `new`/`set` text output says when the element is not
+         `--ready` and why (the `incomplete:*` codes). JSON already carries
+         `_problems`.
+     - **E: docs only.**
+       - *EV-1:* GUIDE § 2 states that the empty directories need not be
+         committed; nj recreates them.
+       - *PA-3:* GUIDE § 1 adds starting nj with an explicit node (`node
+         /path/dist/nj …`).
+     - **Open, for the user:** *EV-5*, distribution (a remote or package to
+       fetch `dist/nj` from). The user deprioritised distribution (D151),
+       and it needs a remote only the user can provide.
+     Process as usual. Answers go back as notes in the teams' own feedback
+     backlogs when v3.6 is accepted.
+
+159. **Local releases for other teams** (2026-10-06, user: "Ja. Einige dich
+     dazu auch mit den anderen Teams."). The Team B and team-a
+     teams ran `nanojira/dist/nj` straight from our working tree, so every
+     in-progress build was live for them. From now on accepted, tagged
+     releases are installed with `tools/release-local.sh <tag>` into
+     `workspace/bin/nanojira/<version>/` (never changed after install) with a
+     `current` symlink. The other teams point their wrappers at
+     `…/bin/nanojira/current/nj`; they own their wrappers, and we only
+     propose the change. 3.5.0 is installed from tag v3.5. `current` moves
+     only on acceptance plus tag. Arrangement with the other leads is in
+     progress.
+
+160. **Did-you-mean tightened.** The replay showed `set --status=nope`
+     hinting "did you mean 'done'?". That is edit distance 2, so it is
+     correct under the § 9 rule, but it is noise: for short words, distance 2
+     replaces half the word. New threshold: distance ≤ 1 when the input
+     has ≤ 4 characters, ≤ 2 otherwise. Ties still mean no suggestion, and
+     the synonym table (medium→normal) is unchanged. Examples: "urgnet"→urgent,
+     "hgh"→high, "nrmal"→normal, "nope"→no suggestion.
+     Addendum: distance is the optimal-string-alignment distance (an
+     adjacent transposition counts 1), because swapped letters are the most
+     common typo. "hgih"→high and "tsak"→task stay hinted at distance 1, and
+     "nope"→done stays at 2, so no hint. The Oracle amends § 9 + AC-47 (legs for "nope" and a
+     4-character distance-1 case); then the Implementer applies it.
+
+161. **v3.6 accepted: outside-team feedback.** Batch 1 (global flags,
+     multi-line notes, `next` respects assignee, bare-nj leaf rule) passed
+     verification in docs/verification/v3-6-batch1.md (6430dc3). Batch 2
+     (per-command help, did-you-mean with OSA + length threshold, release
+     docs) passed in v3-6-batch2.md (1521a78). The Lead re-ran AC-32/39/40
+     and 42–47: all pass; build:check is byte-identical; `nj --version` gives
+     3.6.0. Replay vs oracle-frozen-12: 195 differing calls, all of them
+     either the D158 leaf rule or help text; no did-you-mean diffs, because
+     the corpus's only near-miss ("nope") is below the D160 threshold.
+     The run-all "hang" was not reproduced. It is about 30 s of deliberate
+     waits in three fault suites. Fixed along the way:
+     - the test and harness fixture root is no longer os.tmpdir(), which
+       had a foreign backlog as an ancestor (148697c, c5c33a8);
+     - stale fixtures (AC-40 N3, doctor-fix-surface, AC-46 P3);
+     - the AC-42 G5 gap.
+     Known, for v3.7: `nj rm --help` lacks flag lines (rm has no
+     flag-table entry). Also for v3.7, from the outside teams:
+     team-b-tests TSK-008 (`--tags` add/remove), TSK-009 (STATUS.md
+     merge noise), TSK-010 (name the override flag in the JSON error).
+     TSK-044..048 and EPIC-012 are done; tag `v3.6`. Installed with
+     tools/release-local.sh; `current` → 3.6.0. Both teams are notified, and
+     the answers are noted in their feedback backlogs.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

@@ -562,20 +562,42 @@ function applySections(body, wanted, cfg) {
 }
 var NOTE_LINE_RE = /^-\ (\S+)\ (.*)$/;
 function parseNotes(body) {
+  const lines = body.split("\n");
   const notes = [];
   let inNotes = false;
-  for (const line of body.split("\n")) {
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
     if (/^#{1,2}[ \t]/.test(line)) {
       const h2 = /^##[ \t]+(.*?)[ \t]*$/.exec(line);
       inNotes = !!h2 && h2[1].replace(/:\s*$/, "").trim().toLowerCase() === "notes";
+      i++;
       continue;
     }
-    if (!inNotes) continue;
+    if (!inNotes) {
+      i++;
+      continue;
+    }
     const m = NOTE_LINE_RE.exec(line);
-    if (!m) continue;
+    if (!m) {
+      i++;
+      continue;
+    }
     const idx = m[2].indexOf(": ");
-    if (idx === -1) continue;
-    notes.push({ at: m[1], actor: m[2].slice(0, idx), text: m[2].slice(idx + 2) });
+    if (idx === -1) {
+      i++;
+      continue;
+    }
+    const actor = m[2].slice(0, idx);
+    const parts = [m[2].slice(idx + 2)];
+    let j = i + 1;
+    while (j < lines.length && (lines[j] === "" || lines[j].startsWith("  "))) {
+      parts.push(lines[j] === "" ? "" : lines[j].slice(2));
+      j++;
+    }
+    while (parts.length > 1 && parts[parts.length - 1] === "") parts.pop();
+    notes.push({ at: m[1], actor, text: parts.join("\n") });
+    i = j;
   }
   return notes;
 }
@@ -823,6 +845,9 @@ function isReady(el, cfg) {
     if (t.problems.has("done:open_children")) return false;
   }
   return true;
+}
+function hasOpenChild(el) {
+  return el.children.some((c) => !c.archived && c.status !== "done");
 }
 function idSortKey(id) {
   const m = /^([A-Za-z]+)-(\d+)$/.exec(id);
@@ -1077,6 +1102,9 @@ function spec(command) {
 }
 function cliFieldNames(command) {
   return spec(command).fields.filter((f) => !f.positional).map((f) => f.name);
+}
+function commandFields(command) {
+  return spec(command).fields;
 }
 
 // src/core/context.ts
@@ -2329,6 +2357,51 @@ function actingNameForRead() {
   return validActorName(envRaw);
 }
 
+// src/core/suggest.ts
+var SYNONYMS = {
+  type: {},
+  status: {},
+  priority: { medium: "normal" }
+};
+var FIELD_LABEL = { type: "types", status: "statuses", priority: "priorities" };
+function osaDistance(a, b) {
+  const m = a.length, n = b.length;
+  const d = [];
+  for (let i = 0; i <= m; i++) d.push([i]);
+  for (let j = 1; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        v = Math.min(v, d[i - 2][j - 2] + 1);
+      }
+      d[i][j] = v;
+    }
+  }
+  return d[m][n];
+}
+function suggestValue(field, value, allowed) {
+  const synonym = SYNONYMS[field][value];
+  if (synonym !== void 0 && allowed.includes(synonym)) return synonym;
+  const threshold = value.length <= 4 ? 1 : 2;
+  let best = [];
+  let bestDist = Infinity;
+  for (const v of allowed) {
+    const d = osaDistance(value, v);
+    if (d < bestDist) {
+      bestDist = d;
+      best = [v];
+    } else if (d === bestDist) best.push(v);
+  }
+  return bestDist <= threshold && best.length === 1 ? best[0] : null;
+}
+function valueHint(field, value, allowed) {
+  const known = `Known ${FIELD_LABEL[field]}: ${allowed.join(", ")}`;
+  const suggestion = suggestValue(field, value, allowed);
+  return suggestion === null ? known : `did you mean '${suggestion}'? ${known}`;
+}
+
 // src/commands/cmd-claim.ts
 var STABLE_HINT2 = "the element changed in parallel \u2014 nj claim takes no --force; retry once it is stable";
 function claimOne(ctx, el, name, status, steal, ts) {
@@ -2385,7 +2458,7 @@ function cmdClaim(flags) {
   const name = resolveActingName(flags, true);
   const status = flagString(flags, "status");
   if (status !== void 0 && !ctx.cfg.statuses.includes(status)) {
-    fail("invalid_value", `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(", ")}`);
+    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses));
   }
   const steal = flagString(flags, "steal");
   const batchIds = parseBatchIds(flags);
@@ -2432,13 +2505,13 @@ function applyFilters(elements, flags, cfg) {
   const status = flagString(flags, "status");
   if (status !== void 0) {
     if (!cfg.statuses.includes(status)) {
-      fail("invalid_value", `unknown status '${status}'`, `Known statuses: ${cfg.statuses.join(", ")}`);
+      fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, cfg.statuses));
     }
     list = list.filter((e) => e.status === status);
   }
   const type = flagString(flags, "type");
   if (type !== void 0) {
-    if (!TYPES.includes(type)) fail("invalid_value", `unknown type '${type}'`, `Known types: ${TYPES.join(", ")}`);
+    if (!TYPES.includes(type)) fail("invalid_value", `unknown type '${type}'`, valueHint("type", type, TYPES));
     list = list.filter((e) => e.type === type);
   }
   const tag = flagString(flags, "tag");
@@ -3212,7 +3285,10 @@ function claimEvents(backlog, id) {
 }
 function formatEvent(e) {
   if (e.kind === "created") return `${e.at} created`;
-  if (e.kind === "note") return `${e.at} ${e.actor}: ${e.text}`;
+  if (e.kind === "note") {
+    const [first, ...rest] = (e.text || "").split("\n");
+    return [`${e.at} ${e.actor}: ${first}`, ...rest.map((l) => l === "" ? "  " : `  ${l}`)].join("\n");
+  }
   const verb = e.kind === "reasserted" ? "re-asserted" : e.kind;
   return `${e.at} ${verb} by ${e.actor}`;
 }
@@ -3251,7 +3327,7 @@ function collidesCaseInsensitively(dir, name) {
 function validateNewFlags(ctx, flags) {
   const type = flagString(flags, "type");
   if (type === void 0) return fail("missing_argument", "--type is required", `Known types: ${TYPES.join(", ")}`);
-  if (!TYPES.includes(type)) return fail("invalid_value", `unknown type '${type}'`, `Known types: ${TYPES.join(", ")}`);
+  if (!TYPES.includes(type)) return fail("invalid_value", `unknown type '${type}'`, valueHint("type", type, TYPES));
   const title = flagString(flags, "title");
   if (title === void 0 || normalizeTitle(title) === "") return fail("missing_argument", "--title is required and must not be empty");
   const cleanTitle = normalizeTitle(title);
@@ -3280,11 +3356,11 @@ function validateNewFlags(ctx, flags) {
   }
   const status = flagString(flags, "status");
   if (status !== void 0 && !ctx.cfg.statuses.includes(status)) {
-    fail("invalid_value", `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(", ")}`);
+    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses));
   }
   const priority = flagString(flags, "priority");
   if (priority !== void 0 && !PRIORITIES.includes(priority)) {
-    fail("invalid_value", `unknown priority '${priority}'`, `Known priorities: ${PRIORITIES.join(", ")}`);
+    fail("invalid_value", `unknown priority '${priority}'`, valueHint("priority", priority, PRIORITIES));
   }
   const assignee = flagString(flags, "assignee");
   const tags = parseListFlag(flags, "tags");
@@ -3361,12 +3437,11 @@ function cmdNext(flags) {
   const ctx = context(flags);
   const status = flagString(flags, "status");
   if (status !== void 0 && !ctx.cfg.statuses.includes(status)) {
-    fail("invalid_value", `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(", ")}`);
+    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses));
   }
   const filterFlags = new Map(flags);
   filterFlags.delete("status");
-  const hasOpenChild = (e) => e.children.some((c) => !c.archived && c.status !== "done");
-  const candidates = applyFilters(ctx.elements, filterFlags, ctx.cfg).filter((e) => isReady(e, ctx.cfg) && availableToActor(ctx.backlog, e.id, name) && !hasOpenChild(e));
+  const candidates = applyFilters(ctx.elements, filterFlags, ctx.cfg).filter((e) => isReady(e, ctx.cfg) && availableToActor(ctx.backlog, e.id, name) && !hasOpenChild(e) && (e.assignee === "" || e.assignee === name));
   const skipped = [];
   for (const candidate of candidates) {
     const el = resolveById(ctx, candidate.id, true);
@@ -3399,8 +3474,12 @@ function cmdNext(flags) {
 }
 
 // src/commands/cmd-note.ts
+function noteLine(ts, signer, text) {
+  const [first, ...rest] = text.split("\n");
+  return [`- ${ts} ${signer}: ${first}`, ...rest.map((l) => l === "" ? "  " : `  ${l}`)].join("\n");
+}
 function withNote(el, text, signer, ts) {
-  const line = `- ${ts} ${signer}: ${text.replace(/[\r\n]+/g, " ")}`;
+  const line = noteLine(ts, signer, text);
   let body = el.body;
   const lines = body.split("\n");
   let idx = -1;
@@ -3425,7 +3504,7 @@ ${line}
     }
   }
   let insert = end;
-  while (insert > idx + 1 && lines[insert - 1].trim() === "") insert--;
+  while (insert > idx + 1 && lines[insert - 1] === "") insert--;
   lines.splice(insert, 0, line);
   return lines.join("\n");
 }
@@ -3434,7 +3513,7 @@ function cmdNote(flags, positional) {
   const json = flags.has("json");
   const ctx = context(flags);
   requireTargetFlagSyntax(flags);
-  const text = positional.join(" ").trim();
+  const text = positional.join(" ").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
   if (text === "") fail("missing_argument", "nj note needs the note text as an argument", 'nj note --id=TSK-007 "\u2026"');
   const author = resolveActingName(flags, false);
   const batchIds = parseBatchIds(flags);
@@ -3663,11 +3742,11 @@ function validateFieldValues(ctx, flags) {
   if (title !== void 0 && normalizeTitle(title) === "") fail("invalid_value", "--title must not be empty");
   const status = flagString(flags, "status");
   if (status !== void 0 && !ctx.cfg.statuses.includes(status)) {
-    fail("invalid_value", `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(", ")}`);
+    fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses));
   }
   const priority = flagString(flags, "priority");
   if (priority !== void 0 && !PRIORITIES.includes(priority)) {
-    fail("invalid_value", `unknown priority '${priority}'`, `Known priorities: ${PRIORITIES.join(", ")}`);
+    fail("invalid_value", `unknown priority '${priority}'`, valueHint("priority", priority, PRIORITIES));
   }
 }
 function collectSetOverrides(ctx, el, flags, allowOpen) {
@@ -3688,7 +3767,7 @@ function collectSetOverrides(ctx, el, flags, allowOpen) {
   const status = flagString(flags, "status");
   if (status !== void 0) {
     if (!ctx.cfg.statuses.includes(status)) {
-      fail("invalid_value", `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(", ")}`);
+      fail("invalid_value", `unknown status '${status}'`, valueHint("status", status, ctx.cfg.statuses));
     }
     if (status === "done") {
       requireNoUnreadableDirs(ctx, "set --status=done");
@@ -3710,7 +3789,7 @@ ${names}`,
   }
   const priority = flagString(flags, "priority");
   if (priority !== void 0) {
-    if (!PRIORITIES.includes(priority)) fail("invalid_value", `unknown priority '${priority}'`, `Known priorities: ${PRIORITIES.join(", ")}`);
+    if (!PRIORITIES.includes(priority)) fail("invalid_value", `unknown priority '${priority}'`, valueHint("priority", priority, PRIORITIES));
     if (priority !== el.priority) {
       overrides.set("priority", priority);
       changed.push("priority");
@@ -3800,7 +3879,7 @@ function cmdStatus(flags) {
   const ctx = context(flags);
   const scope = ctx.elements.filter((e) => !e.archived);
   const counts = countsOf(scope, ctx.scan.unreadable.length);
-  const ready = scope.filter((e) => isReady(e, ctx.cfg)).sort(compareElements).slice(0, 5);
+  const ready = scope.filter((e) => isReady(e, ctx.cfg) && !hasOpenChild(e)).sort(compareElements).slice(0, 5);
   const incomplete = scope.filter(isIncomplete).sort(compareElements).slice(0, 5);
   if (flags.has("json")) {
     out(JSON.stringify({
@@ -4040,11 +4119,77 @@ every named element; results come back as {ok, results: [...]}.
 
 Exit codes: 0 success \xB7 1 command failed \xB7 2 doctor found at least one error.
 `;
+function synopsisFor(command) {
+  const lines = HELP.split("\n");
+  const out2 = [];
+  let capturing = false;
+  let found = false;
+  for (const line of lines) {
+    const m = /^ {2}nj {1,}(\S+)/.exec(line);
+    if (m) {
+      capturing = m[1] === command;
+      if (capturing) {
+        found = true;
+        out2.push(line);
+      }
+      continue;
+    }
+    if (capturing && /^ {2,}\[/.test(line)) {
+      out2.push(line);
+      continue;
+    }
+    capturing = false;
+  }
+  return found ? out2 : null;
+}
+function closedVocab(fieldName, flags) {
+  if (fieldName === "type") return TYPES;
+  if (fieldName === "priority") return PRIORITIES;
+  if (fieldName !== "status") return null;
+  try {
+    const backlog = findBacklog(flags, false);
+    if (isLegacyBacklog(backlog)) return DEFAULT_CONFIG.statuses;
+    const { config, errors } = loadConfig(backlog, false);
+    return errors.length === 0 ? config.statuses : DEFAULT_CONFIG.statuses;
+  } catch {
+    return DEFAULT_CONFIG.statuses;
+  }
+}
+function commandHelp(command, flags) {
+  const synopsis = synopsisFor(command);
+  if (synopsis === null) return HELP;
+  let fields;
+  try {
+    fields = commandFields(command).filter((f) => !f.positional);
+  } catch {
+    return synopsis.join("\n") + "\n";
+  }
+  const lines = synopsis.slice();
+  if (fields.length > 0) {
+    lines.push("");
+    for (const f of fields) {
+      const vocab = closedVocab(f.name, flags);
+      lines.push(vocab ? `  --${f.name}=<value>   allowed: ${vocab.join(", ")}` : `  --${f.name}`);
+    }
+  }
+  return lines.join("\n") + "\n";
+}
 
 // src/core/version.ts
-var VERSION = "3.5.0";
+var VERSION = "3.6.0";
 
 // src/nj.ts
+var GLOBAL_PREFIX_FLAGS = /* @__PURE__ */ new Set(["backlog", "json"]);
+function splitCommand(argv) {
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith("--")) return { cmd: a, rest: argv.slice(0, i).concat(argv.slice(i + 1)) };
+    const eq = a.indexOf("=");
+    const name = eq === -1 ? a.slice(2) : a.slice(2, eq);
+    if (!GLOBAL_PREFIX_FLAGS.has(name)) break;
+  }
+  return { cmd: null, rest: argv };
+}
 function main(argv) {
   const pre = parseArgs(argv);
   output.json = pre.flags.has("json");
@@ -4057,10 +4202,14 @@ function main(argv) {
     }
     fail("unknown_field", `unknown field 'version'.`, "--version takes no other flag and names no command");
   }
-  const cmd = argv[0] !== void 0 && !argv[0].startsWith("--") ? argv[0] : null;
-  const { flags, positional } = parseArgs(cmd === null ? argv : argv.slice(1));
-  if (cmd === "help" || flags.has("help")) {
+  const { cmd, rest } = splitCommand(argv);
+  const { flags, positional } = parseArgs(rest);
+  if (cmd === "help") {
     process.stdout.write(HELP);
+    return 0;
+  }
+  if (flags.has("help")) {
+    process.stdout.write(cmd === null ? HELP : commandHelp(cmd, flags));
     return 0;
   }
   switch (cmd) {

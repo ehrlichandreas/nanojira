@@ -16,6 +16,7 @@ import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, out } from '../core/output.ts';
 import { refreshStatus } from '../core/status.ts';
 import { compareGuard, mirrorWrite, nowIso, renderElement } from '../core/store.ts';
+import { valueHint } from '../core/suggest.ts';
 
 const STABLE_HINT = 'the element changed in parallel — nj claim takes no --force; retry once it is stable';
 
@@ -92,7 +93,7 @@ function cmdClaim(flags: Flags) {
 
   const status = flagString(flags, 'status');
   if (status !== undefined && !ctx.cfg.statuses.includes(status)) {
-    fail('invalid_value', `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(', ')}`);
+    fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, ctx.cfg.statuses));
   }
   const steal = flagString(flags, 'steal');
 

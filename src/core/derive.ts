@@ -37,6 +37,17 @@ function isReady(el: Element, cfg: Config) {
   return true;
 }
 
+/**
+ * The leaf-work rule (DECISIONS 156, reused by `next` and, since v3.6
+ * DECISIONS 158 EV-4, bare `nj`'s own "Ready to work"): true when `el` has
+ * at least one child that is neither `done` nor archived. `list --ready`
+ * never calls this — it stays a pure readiness filter over § 9's five
+ * conditions, container or not.
+ */
+function hasOpenChild(el: Element): boolean {
+  return (el.children as Element[]).some((c) => !c.archived && c.status !== 'done');
+}
+
 function idSortKey(id: string): [string, number, string] {
   const m = /^([A-Za-z]+)-(\d+)$/.exec(id);
   return m ? [m[1], parseInt(m[2], 10), ''] : ['￿', 0, id];
@@ -102,4 +113,4 @@ function countsOf(scope: Element[], backlogErrors = 0) {
   };
 }
 
-export { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf };
+export { elementProblems, isIncomplete, isReady, hasOpenChild, compareElements, entryJson, countsOf };

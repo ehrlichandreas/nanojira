@@ -6,7 +6,7 @@ import type { Flags } from '../core/types.ts';
 
 import { checkFlags } from '../core/args.ts';
 import { context } from '../core/context.ts';
-import { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } from '../core/derive.ts';
+import { elementProblems, isIncomplete, isReady, hasOpenChild, compareElements, entryJson, countsOf } from '../core/derive.ts';
 import { out } from '../core/output.ts';
 
 function cmdStatus(flags: Flags) {
@@ -14,7 +14,11 @@ function cmdStatus(flags: Flags) {
   const ctx = context(flags);
   const scope = ctx.elements.filter((e) => !e.archived);
   const counts = countsOf(scope, ctx.scan.unreadable.length);
-  const ready = scope.filter((e) => isReady(e, ctx.cfg)).sort(compareElements).slice(0, 5);
+  // D158 EV-4: bare `nj`'s own "Ready to work" applies the D156 leaf rule
+  // (reused, not reimplemented) — an element with an open child is left
+  // out here, in favor of that child if it is itself ready. `list --ready`
+  // (cmd-list.ts) does not call this: it stays a pure readiness filter.
+  const ready = scope.filter((e) => isReady(e, ctx.cfg) && !hasOpenChild(e)).sort(compareElements).slice(0, 5);
   const incomplete = scope.filter(isIncomplete).sort(compareElements).slice(0, 5);
 
   if (flags.has('json')) {

@@ -308,24 +308,50 @@ interface NoteLine { at: string; actor: string; text: string }
  * first `: ` after it is an unambiguous boundary, exactly as § 12c states
  * ("text everything after the first ': ' following the author").
  * `## Notes` detection mirrors `cmd-check.ts`'s own `scanCheckboxes`.
+ *
+ * Multi-line text (DECISIONS 158 EV-7): a line immediately following a
+ * note's own first line that is either completely empty or starts with
+ * exactly two spaces is a continuation, consumed until a line that is
+ * neither (a fresh note, a heading, a hand-added line — never merged in,
+ * § 10 "Multi-line text"). A continuation can never itself start a fresh
+ * note (it never begins `- ` at column 0), so this never misfires.
  */
 const NOTE_LINE_RE = /^-\ (\S+)\ (.*)$/;
 
 function parseNotes(body: string): NoteLine[] {
+  const lines = body.split('\n');
   const notes: NoteLine[] = [];
   let inNotes = false;
-  for (const line of body.split('\n')) {
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
     if (/^#{1,2}[ \t]/.test(line)) {
       const h2 = /^##[ \t]+(.*?)[ \t]*$/.exec(line);
       inNotes = !!h2 && h2[1].replace(/:\s*$/, '').trim().toLowerCase() === 'notes';
-      continue;
+      i++; continue;
     }
-    if (!inNotes) continue;
+    if (!inNotes) { i++; continue; }
     const m = NOTE_LINE_RE.exec(line);
-    if (!m) continue;
+    if (!m) { i++; continue; }
     const idx = m[2].indexOf(': ');
-    if (idx === -1) continue;
-    notes.push({ at: m[1], actor: m[2].slice(0, idx), text: m[2].slice(idx + 2) });
+    if (idx === -1) { i++; continue; }
+    const actor = m[2].slice(0, idx);
+    const parts = [m[2].slice(idx + 2)];
+    let j = i + 1;
+    while (j < lines.length && (lines[j] === '' || lines[j].startsWith('  '))) {
+      parts.push(lines[j] === '' ? '' : lines[j].slice(2));
+      j++;
+    }
+    // A note's own text is always trimmed before it is written (it can
+    // never legitimately END in a blank line), so any blank line(s) left
+    // at the tail of what was just consumed are never the note's own —
+    // either this file's single mandatory trailing newline (a
+    // `String.split` artifact, not content) or genuine padding before the
+    // next heading/EOF. A blank strictly between two non-blank lines is
+    // untouched; only a trailing run is dropped.
+    while (parts.length > 1 && parts[parts.length - 1] === '') parts.pop();
+    notes.push({ at: m[1], actor, text: parts.join('\n') });
+    i = j;
   }
   return notes;
 }

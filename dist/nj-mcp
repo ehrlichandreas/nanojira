@@ -310,7 +310,7 @@ function commandFields(command) {
 }
 
 // src/core/version.ts
-var VERSION = "3.5.0";
+var VERSION = "3.6.0";
 
 // src/nj-mcp.ts
 var MODERN_VERSION = "2026-07-28";

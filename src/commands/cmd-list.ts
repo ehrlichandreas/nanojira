@@ -12,6 +12,7 @@ import { TYPES } from '../core/constants.ts';
 import { context } from '../core/context.ts';
 import { elementProblems, isIncomplete, isReady, compareElements, entryJson, countsOf } from '../core/derive.ts';
 import { fail, out, printEntryLine } from '../core/output.ts';
+import { valueHint } from '../core/suggest.ts';
 
 // --ready condition 5 (§ 9, § 12 "Claims"): unclaimed, or claimed by the
 // acting name. `list` has no `--as`; an invalid or absent `NJ_AUTHOR` is no
@@ -31,13 +32,13 @@ function applyFilters(elements: Element[], flags: Flags, cfg: Config) {
   const status = flagString(flags, 'status');
   if (status !== undefined) {
     if (!cfg.statuses.includes(status)) {
-      fail('invalid_value', `unknown status '${status}'`, `Known statuses: ${cfg.statuses.join(', ')}`);
+      fail('invalid_value', `unknown status '${status}'`, valueHint('status', status, cfg.statuses));
     }
     list = list.filter((e) => e.status === status);
   }
   const type = flagString(flags, 'type');
   if (type !== undefined) {
-    if (!TYPES.includes(type)) fail('invalid_value', `unknown type '${type}'`, `Known types: ${TYPES.join(', ')}`);
+    if (!TYPES.includes(type)) fail('invalid_value', `unknown type '${type}'`, valueHint('type', type, TYPES));
     list = list.filter((e) => e.type === type);
   }
   const tag = flagString(flags, 'tag');
