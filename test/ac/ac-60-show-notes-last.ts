@@ -32,6 +32,18 @@ interface Model { dir: string; bl: string }
 function run(args: string[], o?: { cwd?: string; env?: Record<string, string> }) { return H.runNj(args, o); }
 function runJ(args: string[], o?: { cwd?: string; env?: Record<string, string> }) { return H.runJson(args, o); }
 
+/* `show`'s human form prints the fixture's absolute path (its `file`
+ * line), and the random mkdtemp suffix in it can contain a short note
+ * text: a run on 2026-10-18 got `…/nj-c-notes-last-n-n1hy5D/…` and failed
+ * C1's "no `n1`". Every human `show` below goes through showHuman(), which
+ * cuts that directory out (as `<dir>`) before any text check; the file
+ * names after it (`TSK-009.md`) stay. */
+function showHuman(args: string[], dir: string): H.RunResult {
+  const r = run(['show'].concat(args), { cwd: dir });
+  const real = fs.realpathSync(dir);
+  return Object.assign({}, r, { stdout: r.stdout.split(real).join('<dir>').split(dir).join('<dir>') });
+}
+
 function ok(r: H.RunResult, what: string) {
   if (r.missing || r.status !== 0) T.check('fixture: ' + what, false, r.status + ' ' + J(r.stderr));
   return r;
@@ -67,7 +79,7 @@ function sectionA() {
   const t = newTask(x, e);
   for (const n of ['one', 'two', 'three']) addNote(x, t, n);
 
-  const human = run(['show', `--id=${t}`], { cwd: x.dir });
+  const human = showHuman([`--id=${t}`], x.dir);
   T.exit('A1 plain show exits 0', human, 0);
   T.contains('A1 body prints every note untouched', human.stdout, 'one');
   T.contains('A1 body prints every note untouched (2)', human.stdout, 'two');
@@ -90,7 +102,7 @@ function sectionB() {
   const t = newTask(x, e);
   for (const n of ['alpha', 'bravo', 'charlie']) addNote(x, t, n);
 
-  const human = run(['show', `--id=${t}`, '--notes=none'], { cwd: x.dir });
+  const human = showHuman([`--id=${t}`, '--notes=none'], x.dir);
   T.exit('B1 show --notes=none exits 0', human, 0);
   T.check('B1 real note text is hidden', !human.stdout.includes('alpha') && !human.stdout.includes('bravo') && !human.stdout.includes('charlie'), human.stdout);
   T.contains('B1 placeholder names the total hidden', human.stdout, '(3 notes hidden');
@@ -112,7 +124,7 @@ function sectionC() {
   const t = newTask(x, e);
   for (const n of ['n1', 'n2', 'n3', 'n4']) addNote(x, t, n);
 
-  const human = run(['show', `--id=${t}`, '--notes=last:2'], { cwd: x.dir });
+  const human = showHuman([`--id=${t}`, '--notes=last:2'], x.dir);
   T.exit('C1 show --notes=last:2 exits 0', human, 0);
   T.check('C1 earlier notes are hidden', !human.stdout.includes('n1') && !human.stdout.includes('n2'), human.stdout);
   T.contains('C1 the last 2 notes still print, in order', human.stdout, 'n3');
@@ -139,8 +151,8 @@ function sectionD() {
   const t = newTask(x, e);
   addNote(x, t, 'only one');
 
-  const human = run(['show', `--id=${t}`, '--notes=all'], { cwd: x.dir });
-  const humanDefault = run(['show', `--id=${t}`], { cwd: x.dir });
+  const human = showHuman([`--id=${t}`, '--notes=all'], x.dir);
+  const humanDefault = showHuman([`--id=${t}`], x.dir);
   T.eq('D1 --notes=all human output is identical to the default', human.stdout, humanDefault.stdout);
 
   const r = runJ(['show', `--id=${t}`, '--notes=all', '--json'], { cwd: x.dir });
@@ -205,9 +217,9 @@ function sectionF() {
   const x = model('f-zero-notes');
   const e = newEpic(x);
 
-  const humanDefault = run(['show', `--id=${e}`], { cwd: x.dir });
-  const humanNone = run(['show', `--id=${e}`, '--notes=none'], { cwd: x.dir });
-  const humanLast = run(['show', `--id=${e}`, '--notes=last:5'], { cwd: x.dir });
+  const humanDefault = showHuman([`--id=${e}`], x.dir);
+  const humanNone = showHuman([`--id=${e}`, '--notes=none'], x.dir);
+  const humanLast = showHuman([`--id=${e}`, '--notes=last:5'], x.dir);
   T.eq('F1 --notes=none on a zero-note element is a no-op', humanNone.stdout, humanDefault.stdout);
   T.eq('F2 --notes=last:N on a zero-note element is a no-op', humanLast.stdout, humanDefault.stdout);
   T.check('F3 no Notes heading is invented', !humanNone.stdout.includes('## Notes'), humanNone.stdout);
@@ -227,8 +239,8 @@ function sectionG() {
   const t = newTask(x, e);
   addNote(x, t, 'solo');
 
-  const humanDefault = run(['show', `--id=${t}`], { cwd: x.dir });
-  const humanLast = run(['show', `--id=${t}`, '--notes=last:10'], { cwd: x.dir });
+  const humanDefault = showHuman([`--id=${t}`], x.dir);
+  const humanLast = showHuman([`--id=${t}`, '--notes=last:10'], x.dir);
   T.eq('G1 --notes=last:N >= total matches the default byte-for-byte', humanLast.stdout, humanDefault.stdout);
   T.check('G2 no hidden-count banner appears', !humanLast.stdout.includes('hidden'), humanLast.stdout);
 }
@@ -245,7 +257,7 @@ function sectionH() {
   const multi = 'kept note\nsecond line\n\nfourth line, after a blank one';
   ok(run(['note', `--id=${t}`, multi], { cwd: x.dir }), 'multi-line note');
 
-  const human = run(['show', `--id=${t}`, '--notes=last:1'], { cwd: x.dir });
+  const human = showHuman([`--id=${t}`, '--notes=last:1'], x.dir);
   T.exit('H1 show --notes=last:1 exits 0', human, 0);
   T.contains('H1 first line of the kept note', human.stdout, ': kept note');
   T.contains('H1 continuation line two-space indented', human.stdout, '\n  second line\n');
@@ -286,7 +298,7 @@ function sectionI() {
   T.eq('I3 the 3-note file reports its own total', byTotal[1].notes_total, 3);
   T.check('I4 no additive top-level entry key for a duplicate_id target', !('entry' in r.json), J(Object.keys(r.json)));
 
-  const human = run(['show', '--id=TSK-009', '--notes=none'], { cwd: d });
+  const human = showHuman(['--id=TSK-009', '--notes=none'], d);
   T.exit('I5 duplicate_id human output exits 0', human, 0);
   T.contains('I5 both files are printed', human.stdout, 'TSK-009.md');
   T.contains('I5 both files are printed (2)', human.stdout, 'TSK-009-dup.md');
@@ -373,7 +385,7 @@ function sectionM() {
     },
   });
 
-  const humanNone = run(['show', '--id=TSK-001', '--notes=none'], { cwd: d });
+  const humanNone = showHuman(['--id=TSK-001', '--notes=none'], d);
   T.exit('M1 show --notes=none exits 0', humanNone, 0);
   T.check('M1 the malformed line itself never prints', !humanNone.stdout.includes('hand-edited line'), humanNone.stdout);
   T.contains('M1 placeholder counts only the 2 well-formed notes', humanNone.stdout, '(2 notes hidden');
@@ -383,7 +395,7 @@ function sectionM() {
   T.eq('M2 entry.notes is empty', rNone.json.entry.notes, []);
   T.eq('M2 entry.notes_total counts only the well-formed notes', rNone.json.entry.notes_total, 2);
 
-  const humanLast = run(['show', '--id=TSK-001', '--notes=last:1'], { cwd: d });
+  const humanLast = showHuman(['--id=TSK-001', '--notes=last:1'], d);
   T.exit('M3 show --notes=last:1 exits 0', humanLast, 0);
   T.check('M3 the malformed line itself never prints', !humanLast.stdout.includes('hand-edited line'), humanLast.stdout);
   T.contains('M3 the last well-formed note still prints', humanLast.stdout, 'keep2');
@@ -414,7 +426,7 @@ function sectionN() {
     },
   });
 
-  const human = run(['show', '--id=TSK-009', '--notes=last:1'], { cwd: d });
+  const human = showHuman(['--id=TSK-009', '--notes=last:1'], d);
   T.exit('N1 duplicate_id human --notes=last:1 exits 0', human, 0);
   T.contains('N1 both files are printed', human.stdout, 'TSK-009.md');
   T.contains('N1 both files are printed (2)', human.stdout, 'TSK-009-dup.md');

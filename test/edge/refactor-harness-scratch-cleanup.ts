@@ -28,8 +28,7 @@
  */
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
-import { spawn, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import { fileURLToPath } from 'node:url';
 import * as H from '../lib/harness.ts';
 const T = H.T;
@@ -41,7 +40,6 @@ H.requireNj();
 
 const REPO_ROOT = path.join(__dirname, '..', '..');
 const SCRATCH_DIR = path.join(REPO_ROOT, 'tools', 'refactor-harness', 'scratch');
-const TMP_ROOT = fs.realpathSync(os.tmpdir());
 
 function discoverProbes() {
   if (!fs.existsSync(SCRATCH_DIR)) return [];
@@ -49,25 +47,75 @@ function discoverProbes() {
     fs.readFileSync(path.join(SCRATCH_DIR, n), 'utf8').includes('mkdtempSync')).sort();
 }
 
+/* Under H.TMP_ROOT (tmpfs /tmp), not os.tmpdir(): TMPDIR may be on disk,
+ * and a base made by H.freshDir is removed by the harness's exit and
+ * signal handlers too, so a run stopped mid-probe by SIGTERM, SIGINT or
+ * SIGHUP leaves nothing behind (SIGKILL runs no handler). */
 function freshScratchBase(label: string) {
-  return fs.mkdtempSync(path.join(TMP_ROOT, 'nj-d189-' + label + '-'));
+  return H.freshDir('d189-' + label);
 }
 
+/* What a probe run reports back: the fields spawnSync returned before the
+ * probes ran concurrently, with the same meaning (a timeout or an output
+ * overflow is `error`, as spawnSync's ETIMEDOUT / ENOBUFS were). */
+type ProbeResult = { status: number | null; signal: NodeJS.Signals | null; error?: Error; stdout: string; stderr: string };
+
+/* 300 s, not 120 s: r4/r6/verify run 50-80 nj calls back to back and
+ * bc/r3bc/r4bc add 10 s hook waits, which an 8-wide run-all pool
+ * (DECISIONS 199) can stretch past 120 s -- a kill the detail() line
+ * below would report, but a false red all the same. */
+const PROBE_TIMEOUT_MS = 300000;
+const PROBE_MAX_BUFFER = 64 * 1024 * 1024;
+
 /** Run one probe directly against `njPath`, with HARNESS_SCRATCH_BASE set
- * to `scratchBase`. Returns the spawnSync result. */
-function runProbe(name: string, njPath: string, scratchBase: string) {
-  const p = path.join(SCRATCH_DIR, name);
-  return spawnSync(process.execPath, [p, njPath], {
-    cwd: SCRATCH_DIR,
-    env: Object.assign({}, process.env, { HARNESS_SCRATCH_BASE: scratchBase }),
-    encoding: 'utf8',
-    /* 300 s, not 120 s: r4/r6/verify run 50-80 nj calls back to back and
-     * bc/r3bc/r4bc add 10 s hook waits, which an 8-wide run-all pool
-     * (DECISIONS 199) can stretch past 120 s -- a kill the detail() line
-     * below would report, but a false red all the same. */
-    timeout: 300000,
-    maxBuffer: 64 * 1024 * 1024,
+ * to `scratchBase`. Resolves once the probe has exited and its output is
+ * closed. */
+function runProbe(name: string, njPath: string, scratchBase: string): Promise<ProbeResult> {
+  return new Promise((resolve) => {
+    const p = path.join(SCRATCH_DIR, name);
+    const child = spawn(process.execPath, [p, njPath], {
+      cwd: SCRATCH_DIR,
+      env: Object.assign({}, process.env, { HARNESS_SCRATCH_BASE: scratchBase }),
+    });
+    let stdout = '', stderr = '', size = 0, error: Error | undefined, done = false;
+    const kill = (e: Error) => { if (!error) error = e; try { child.kill('SIGTERM'); } catch (k) { /* already gone */ } };
+    const collect = (append: (d: string) => void) => (d: string) => {
+      size += Buffer.byteLength(d);
+      if (size > PROBE_MAX_BUFFER) kill(new Error('spawn ENOBUFS: output over ' + PROBE_MAX_BUFFER + ' bytes'));
+      else append(d);
+    };
+    child.stdout.setEncoding('utf8'); child.stdout.on('data', collect((d) => { stdout += d; }));
+    child.stderr.setEncoding('utf8'); child.stderr.on('data', collect((d) => { stderr += d; }));
+    const timer = setTimeout(() => kill(new Error('spawn ETIMEDOUT after ' + PROBE_TIMEOUT_MS + ' ms')), PROBE_TIMEOUT_MS);
+    const finish = (status: number | null, signal: NodeJS.Signals | null) => {
+      if (done) return;
+      done = true; clearTimeout(timer);
+      resolve({ status, signal, error, stdout, stderr });
+    };
+    child.on('error', (e) => { if (!error) error = e; finish(null, null); });
+    child.on('close', (status, signal) => finish(status, signal));
   });
+}
+
+/* The probes are independent -- each one's fixtures live under its own
+ * HARNESS_SCRATCH_BASE, and the before-compare legs (bc, r3bc, r4bc, r6bc)
+ * synchronise on a marker inside their own backlog -- so they run
+ * concurrently, at most PROBE_CONCURRENCY at once. Most of the file's time
+ * is fixed holds, not work: bc.ts alone waits out the 10 s before-compare
+ * timeout three times (~33 s), r3bc/r4bc ~13 s each. Longest first, so
+ * bc.ts sets the critical path and the short ones fill the other slots.
+ * The checks are emitted afterwards, in the original order. */
+const PROBE_CONCURRENCY = 4;
+const LONGEST_FIRST = ['bc.ts', 'r3bc.ts', 'r4bc.ts', 'verify.ts'];
+
+async function inPool<R>(jobs: (() => Promise<R>)[], cap: number): Promise<R[]> {
+  const results: R[] = new Array(jobs.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < jobs.length) { const i = next++; results[i] = await jobs[i](); }
+  };
+  await Promise.all(Array.from({ length: Math.min(cap, jobs.length) }, worker));
+  return results;
 }
 
 function removeIfPresent(dir: string) {
@@ -86,19 +134,18 @@ T.check('fixture: at least one mkdtempSync-using probe was found under ' + SCRAT
  * follow-up: the gate found bc.ts had left all 6 of its own dirs behind
  * in one run, and the detail line is what makes a kill-under-load
  * recognisable immediately instead of needing a second, manual repro). */
-function detail(left: string[] | null, r: ReturnType<typeof runProbe>) {
+function detail(left: string[] | null, r: ProbeResult) {
   return 'left=' + JSON.stringify(left) + ' status=' + r.status + ' signal=' + r.signal;
 }
 
-for (const name of probes) {
-  const base = freshScratchBase(name.replace(/\.ts$/, ''));
-  const r = runProbe(name, H.NJ_BUNDLE as string, base);
+/** One probe leg: a fresh scratch base, the run, what it left behind. */
+type Leg = { r: ProbeResult; left: string[] | null };
+async function leg(name: string, njPath: string, label: string): Promise<Leg> {
+  const base = freshScratchBase(label);
+  const r = await runProbe(name, njPath, base);
   const left = fs.existsSync(base) ? fs.readdirSync(base) : null;
-  T.check(name + ': the probe spawned and exited (did not fail to start)',
-    !r.error, r.error && r.error.message);
-  T.check(name + ': HARNESS_SCRATCH_BASE is empty once the probe exits',
-    JSON.stringify(left) === JSON.stringify([]), detail(left, r));
   removeIfPresent(base);
+  return { r, left };
 }
 
 /* Failure path, reached without touching any probe's own source: point
@@ -109,15 +156,31 @@ for (const name of probes) {
  * exception, crashing the probe before any cleanup could run (once added)
  * gets a chance to. This is exactly the "injected throw" / "probe whose
  * nj command fails" case D189 asks this file to cover. */
-{
-  const base = freshScratchBase('r6bc-failure');
-  const r = runProbe('r6bc.ts', '/dev/null', base);
-  const left = fs.existsSync(base) ? fs.readdirSync(base) : null;
+const FAILURE_LEG = 'r6bc-failure';
+
+async function probeLegs(): Promise<Map<string, Leg>> {
+  const rank = (n: string) => { const i = LONGEST_FIRST.indexOf(n); return i === -1 ? LONGEST_FIRST.length : i; };
+  const order = probes.slice().sort((a, b) => rank(a) - rank(b));
+  const keys = order.concat([FAILURE_LEG]);
+  const jobs = order.map((name) => () => leg(name, H.NJ_BUNDLE as string, name.replace(/\.ts$/, '')))
+    .concat([() => leg('r6bc.ts', '/dev/null', FAILURE_LEG)]);
+  const legs = await inPool(jobs, PROBE_CONCURRENCY);
+  return new Map(keys.map((k, i) => [k, legs[i]]));
+}
+
+function assertProbeLegs(legs: Map<string, Leg>): void {
+  for (const name of probes) {
+    const { r, left } = legs.get(name) as Leg;
+    T.check(name + ': the probe spawned and exited (did not fail to start)',
+      !r.error, r.error && r.error.message);
+    T.check(name + ': HARNESS_SCRATCH_BASE is empty once the probe exits',
+      JSON.stringify(left) === JSON.stringify([]), detail(left, r));
+  }
+  const { r, left } = legs.get(FAILURE_LEG) as Leg;
   T.check('r6bc.ts failure path: a broken nj really did make the probe fail (non-zero exit)',
     r.status !== 0, 'status=' + r.status + ' stderr=' + (r.stderr || '').slice(0, 300));
   T.check('r6bc.ts failure path: HARNESS_SCRATCH_BASE is still empty after the probe dies on an uncaught exception',
     JSON.stringify(left) === JSON.stringify([]), detail(left, r));
-  removeIfPresent(base);
 }
 
 /* ===================================================================== */
@@ -187,6 +250,7 @@ async function bcSignalLeg(sig: NodeJS.Signals) {
 }
 
 (async () => {
+  assertProbeLegs(await probeLegs());
   const sigs: NodeJS.Signals[] = ['SIGTERM', 'SIGINT', 'SIGHUP'];
   for (const sig of sigs) await bcSignalLeg(sig);
   T.finish();

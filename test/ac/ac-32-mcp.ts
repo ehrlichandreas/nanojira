@@ -10,7 +10,8 @@
  * doctor --fix / --allow-destructive gate, no backlog field in any
  * schema), tools/call result fidelity against `dist/nj --json`, isError
  * with the unmodified body, per-call `as` validation (D119), explicit
- * --backlog confinement, concurrent pipelined calls, and cancellation.
+ * --backlog confinement, concurrent pipelined calls, cancellation, and
+ * an invalid NJ_NOW refused per call, not at startup (D207, TSK-018).
  *
  * AC-32: tools/list names exactly list/show/find/tree/new/set/note/
  * check/claim/release/next/log/archive/unarchive/doctor; rm never
@@ -394,6 +395,60 @@ async function withServerAt(njMcpPath: string, x: Model, args: string[], env: Re
     const r2 = await s.modernToolsList({});
     T.check('M12b after the failed call, tools/list in the SAME session still answers normally', !r2.error && Array.isArray(r2.result && r2.result.tools), J(r2));
   });
+}
+
+/* ===================================================================== */
+/* M13 — an invalid NJ_NOW: refused per call, never at startup            */
+/* (DECISIONS 207, TSK-018). nanojira-mcp itself never reads NJ_NOW; it   */
+/* passes its environment to every child, whose dispatch refuses it       */
+/* (§ 12). So the server starts and answers the handshake and tools/list, */
+/* and each tool call, a read and a write, is an isError `invalid_env`    */
+/* with nothing written -- .nanojira/ids included: a late, lazy check     */
+/* would let `new` burn its id before refusing (D207).                    */
+/* ===================================================================== */
+function snapshotBacklog(bl: string): string[] {
+  const out: string[] = [];
+  (function walk(abs: string, rel: string) {
+    const st = fs.lstatSync(abs);
+    if (st.isDirectory()) {
+      for (const k of fs.readdirSync(abs).sort()) walk(path.join(abs, k), rel + '/' + k);
+      return;
+    }
+    out.push(rel + ' ' + H.sha256(fs.readFileSync(abs)));
+  })(bl, '.');
+  return out;
+}
+{
+  const x = model('mcp-m13');
+  const before = snapshotBacklog(x.bl);
+  await withServer(x, [], { NJ_NOW: 'bogus' }, async s => {
+    /* A server that refused at startup would reject the first request
+     * (mcp-stdio.ts rejects pending calls once the child exits): one clean
+     * failing check, not an unhandled rejection (M12's note). */
+    try {
+      const init = await s.initialize();
+      T.check('M13 bogus NJ_NOW: the server starts, initialize answers', !init.error && !!init.result, J(init));
+    } catch (e) {
+      T.check('M13 bogus NJ_NOW: the server starts, initialize answers', false, String(e && (e as Error).message) + ' stderr=' + s.stderr());
+      return;
+    }
+    const list = await s.legacyToolsList();
+    T.eq('M13 bogus NJ_NOW: tools/list answers the full set',
+      ((list.result || {}).tools || []).map((t: any) => t.name).sort(), TOOLS.slice().sort());
+    const calls: [string, Record<string, unknown>][] = [
+      ['list', {}],
+      ['new', { type: 'task', parent: 'EPIC-001', title: 'Probe' }],
+    ];
+    for (const [name, args] of calls) {
+      const r = await s.legacyToolsCall(name, args);
+      const body = r.result && r.result.structuredContent;
+      T.check('M13 bogus NJ_NOW: tools/call ' + name + ' is a tool error, not a protocol error',
+        !r.error && r.result && r.result.isError === true, J(r));
+      T.check('M13 bogus NJ_NOW: tools/call ' + name + ' carries the CLI\'s invalid_env',
+        !!body && body.ok === false && body.error === 'invalid_env', J(body));
+    }
+  });
+  T.eq('M13 bogus NJ_NOW: the backlog is byte-identical, .nanojira/ids included', snapshotBacklog(x.bl), before);
 }
 
 T.finish();

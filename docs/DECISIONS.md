@@ -3727,7 +3727,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        in each `cmd-*`'s own `checkFlags(...)` call moved into
        `core/cli-flags.ts` (`CLI_SPEC`, split into `fields`/`controls`
        exactly as each call site had them, so every "Known fields:"/"Known
-       flags:" hint is byte-identical — verified against bfd25ed for all
+       flags:" hint is byte-identical — verified against the pre-fix build for all
        19 commands, text and `--json`). Every command now calls
        `checkCommandFlags(flags, '<command>')`; `commandHelp` reads
        `acceptedFlagNames(command)` from the same entry. The `--backlog`/
@@ -3747,7 +3747,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        43 candidate flags alone against every command (19, bare
        `nanojira` included) and asserts: A accepted ⊆ shown, B shown ⊆
        accepted, C the accepted set equals a pinned per-command oracle
-       (pinned from the bfd25ed build by the same probe), D a description
+       (pinned from the pre-fix build by the same probe), D a description
        on every line, E `--depends-on` shown, `--depends_on` never; Z
        calibrates the probe. ac-46 P7 now asserts rm's control flags ARE
        listed (it asserted the opposite). Mutation, each red: dropping
@@ -3830,6 +3830,9 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        change nothing they print.
      - Not changed: `nanojira-mcp` does not validate `NJ_NOW` itself. Each
        tool call spawns the CLI, which now answers `invalid_env` per call.
+       Kept on purpose (TSK-018): the server starts and lists its tools,
+       every call is an `isError` `invalid_env` with nothing written, and
+       ac-32's leg M13 pins that, a read and a write call alike.
      - Tests: ac-62 gets leg 3. Two invalid values (`bogus`, and one
        missing its `Z`) are tried against:
        - `list` on an empty backlog;
@@ -3843,6 +3846,378 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      - Mutation: a bundle with the dispatch call removed (lazy again) fails
        34 of 157 checks. That covers every unclaimed read, list on the empty
        backlog, and `new`'s "nothing written" on both twins.
+
+208. **git-history-tools is pinned to the tag `#v0.4.0`; release.ts passes
+     its value flags as `--flag=value`** (2026-10-18, TSK-014; Lead).
+     - The pin: `github:ehrlichandreas/git-history-tools#2282aed` named a
+       commit that git-history-tools' whole-history re-sign orphaned. It
+       is the re-dated and re-signed twin of fa3529b: the same tree, but
+       authored and committed at 20:10 instead of 21:30. Nothing references
+       it any more, so GitHub may garbage-collect it, and `npm ci` from a
+       clean clone would then fail. The pin is now the signed release tag
+       `#v0.4.0`: a name that release flow keeps, checkable with
+       `git tag -v`.
+     - The lock: `package-lock.json` can only be regenerated (by npm,
+       never by hand) once v0.4.0 is pushed, so the pin change lands
+       together with the regenerated lock, never alone.
+     - v0.4.0 is never moved after the push. The lock records the commit
+       the tag resolved to, not the tag, so moving the tag would orphan
+       that commit exactly as the re-sign orphaned 2282aed.
+     - The flags: from v0.4.0 on, git-history-tools' parser reads a
+       space-separated value that starts with `--` as a missing value,
+       exit 2 (its D17; `--message --apply` used to swallow `--apply`).
+       release.ts passed `--name`, `--tag` and `--message`/`--message-file`
+       space-separated, so a release title starting with `--` would now be
+       refused. Every value flag now goes as `--flag=value`, which the old
+       and the new parser both accept; `--apply` stays a bare flag.
+       release.ts's own command line is unchanged.
+     - Checked by hand: `tail` dry runs through the old and the new
+       release.ts are byte-identical, for `--message` and
+       `--message-file`, against the installed git-history-tools and
+       against ght's main at the time, 6f7a3ca (pre-Route-A; superseded by
+       v0.4.0 = de23ea8). Calling the bin directly gives the same
+       output in the space and the `=` form. The one difference is the
+       case above: `--message --dashes` against 6f7a3ca is
+       `missing value for --message` (exit 2), and `--message=--dashes`
+       plans normally.
+     - Tests: release-regression AC10. A recording fake
+       `node_modules/.bin/git-release-squash`, written into the scratch
+       clone's own `node_modules` (never the shared one), checks
+       release.ts's exact argv, for a title starting with `--` and for
+       `--message-file`, whichever git-history-tools version is installed.
+       Mutation: putting `--tag` back in the space form fails both AC10
+       checks.
+
+209. **A fixture the tests build identically many times is built once and
+     copied** (2026-10-18, TestSpeed; ac-63, ac-26, ac-25; ac-27 by
+     Implementer3).
+     - The cost: ac-63 rebuilt the same backlog (init + 4× `new`) per leg,
+       and ac-26 rebuilt the same one (init + 6× `new` + 4× `set`, under
+       6 layouts) about 44 times. That was most of their spawns and made
+       them the two longest files in the suite (~185 s and ~141 s pooled
+       at 8 jobs).
+     - The rule: such a fixture is built **once per variant** (ac-26: per
+       layout; ac-25: with and without an assignee) through the real
+       binary, with exactly the old steps, into a template under
+       `H.freshDir()`. Every leg gets its own fresh dir and an
+       `fs.cpSync(template, dir, { recursive: true })` of it, with
+       `preserveTimestamps` where a snapshot compares mtimes. The template
+       is never handed to a leg itself.
+     - Why a copy is equivalent: the backlog stores no absolute path and
+       no index (checked file by file), and `NJ_NOW` is pinned while it is
+       built, so a copy is byte-identical to a fresh build. `ctime` cannot
+       be copied; that only makes D103's `STATUS.md` refresh re-read the
+       copied files, which gives the same result. mtime is read only as
+       the fallback for a missing `created`/`updated`, which these
+       fixtures never lack.
+     - When it does not apply: a leg whose build is itself under test
+       (ac-63's init legs still run `init`), a fixture whose steps or
+       `NJ_NOW` vary per leg, and hand-built fixtures (`mkBacklog`), which
+       spawn nothing anyway.
+     - Symlinks: by default `fs.cpSync` turns a relative symlink into an
+       absolute one that points into the template (Node 24.21), so the
+       copy would still read, or write through to, the template. A
+       template containing a symlink is copied with
+       `verbatimSymlinks: true`, or the pattern does not apply. None of
+       the current templates holds one.
+     - The template key is exactly the inputs the build steps read, with
+       the same truthiness the steps apply. ac-25's steps add
+       `--assignee` only when it is truthy, so the key is
+       `J(assignee || null)`: `undefined`, `null` and `''` share one
+       template, because they build the same backlog.
+     - Only the copied directory is copied. State outside it (a pinned
+       `HOME`, a `.njrc` above the backlog, environment variables) is not
+       part of the template; a leg that needs it sets it up itself, as
+       before.
+     - Same spirit, smaller: a check that spawns the same read several
+       times for one verdict reads it once (ac-26: `list` inside
+       `every()`/`some()` plus again for the detail, up to 5 spawns, now
+       1). The predicate and the detail stay the same.
+     - Proof standard for every such change:
+       - the check count is unchanged, and no check name or predicate is
+         touched;
+       - a product mutant fails the identical list of checks under the
+         old and the new file;
+       - a mutant that hands every leg the shared template must fail,
+         showing the legs really need their own copy.
+     - Results:
+       - ac-63: 550 checks. Alone 123 s → 37 s; pooled ~185 s → 29 s. A
+         mutant without either dry-run guard fails the same 35 checks
+         under both files. The shared-template mutant crashes at once.
+       - ac-26: 714 checks, ~700 → ~220 spawns. Alone 174 s → 76 s (load
+         18–22); old/new pairs under the same load were 115/35 s and
+         108/40 s. A mutant that keeps the `archived` key fails the same
+         136 checks under both files; a `list` that shows archived
+         elements fails the same 1 check, which is one of the
+         de-duplicated reads. The shared-template mutant crashes.
+       - ac-27 (Implementer3): 273 checks. Alone 94 s → 19 s. Two
+         templates: model, and model + `claim alice` for 24 legs. Three
+         dist mutants hit identical checks under the old and the new
+         file; a shared-template variant fails 136. Same spirit,
+         different technique: the two 10 s before-compare legs now run
+         async. The pooled number follows from Implementer3.
+       - ac-25: 234 checks, 135 fixture spawns → 6. Alone 42 s → 25 s
+         (load ~5). A mutant that stops trimming the acting name fails the
+         same 18 checks under both files; one where `NJ_AUTHOR` outranks
+         `--as` fails the same 1 check (N6, two copied twins). The
+         shared-template mutant fails 16. N4's per-leg control reads stay:
+         computing them once would no longer re-check the control after
+         each leg's own write, so it is not the same coverage.
+     - `@slow` follows the times (test/README.md): ac-63 loses it, and
+       ac-31 and ac-61 (~59 s pooled) get it; ac-26 (141 s → 54 s pooled)
+       and ac-25 (62 s → 50 s) lose it too. The pool now ends at about its
+       summed time / 8, so start order barely matters any more; further
+       gains come only from less total work. So only clear outliers keep
+       the mark (test/README.md; on 2026-10-18 over ~60 s pooled against a
+       ~14 s mean): ac-31 and ac-61 lose it again, and ac-63,
+       coverage-v3-gaps and ac-64 are not marked although they sometimes
+       rank in the top 8. Ranks 5–12 form a 39–59 s band that reshuffles
+       from run to run (ac-63: 29, 52, 87 and 59 s in four runs).
+     - Rejected: pointing the tests at `dist/` instead of `bin/nanojira`
+       (saves ~23 ms per spawn, measured, but changes what is tested; a leaner
+       launcher is a separate proposal), and one shared fixture directory
+       for read-only legs (one stray write would silently couple legs).
+
+210. **Harness: async `runNj` with per-leg buffered checks, flushed in
+     declared order** (2026-10-18, suite-speed follow-up, prerequisite for
+     ac-17/ac-22).
+     - Why: ac-17 and ac-22's spawns are all under test (no setup to
+       template, no fixed waits to overlap), so running independent legs
+       CONCURRENTLY is the only lever left to speed them up. But `T` is one
+       shared, mutable object (`_failures`/`_checks`), and legs that each
+       call `T.check`/`T.eq` directly as soon as their own async work
+       resolves would feed it in COMPLETION order, not the test file's own
+       declared order — nondeterministic output and check counts, since
+       which spawn finishes first depends on the machine and the pool's
+       load that run.
+     - Fix (`test/lib/harness.ts`):
+       - `runNjAsync(args, opts)`: the async twin of `runNj`, via
+         `child_process.spawn` instead of `spawnSync` so independent calls
+         can actually overlap in wall time. Capped by its own internal
+         semaphore (default 4) so unbounded concurrent legs cannot fork an
+         unbounded number of `nanojira` processes; same env handling,
+         `RunResult` shape, timeout and output cap as the sync `runPath`.
+       - `BufferedContext` + `createBufferedContext()`: the exact same
+         `check`/`eq`/`goldenEq`/`exit`/`contains`/`sameSet`/`notCovered`
+         behaviour as `T`, factored out once (`makeCheckAssertions`) and
+         shared by both, but recording calls into a local buffer instead
+         of touching `T` — so a leg's own checks run in plain,
+         single-threaded call order no matter what it awaits in between
+         (that part was never actually at risk), and nothing reaches `T`
+         until the buffer's own `flush()` runs.
+       - `runLegs(legs, {concurrency})`: runs `legs` (each given its own
+         `BufferedContext`) through a small worker pool (default cap 4),
+         then calls every leg's `flush()` in `legs`' own ARRAY order —
+         never completion order. A caller converting a file replaces its
+         sequential `model()`-style calls with an array of async leg
+         functions and one `await H.runLegs([...])`; independent legs run
+         concurrently, dependent ones stay sequential (nested inside one
+         leg, or run outside `runLegs` entirely).
+     - `runLegs`' `concurrency` caps how many legs' *own bodies* are in
+       flight at once; `runNjAsync`'s own semaphore separately caps
+       concurrent spawns specifically (one leg can itself issue more than
+       one `runNjAsync` call).
+     - Tests (`test/tools/harness-self-test.ts` — a regression test for
+       the harness itself, same category as `test/tools/release-regression.ts`,
+       collected and run by `test/run-all.ts` like every other `tools/`
+       file, never skipped: a self-test living somewhere run-all does not
+       collect never actually runs in practice, a silent coverage gap,
+       not a saved few seconds, Lead-found): checks flush in declared
+       order with the slowest leg
+       declared first (and, separately, declared in the middle, to rule
+       out a first/last special case); the concurrency cap is both
+       respected AND actually exercised (max concurrent legs equals the
+       cap, not less); an async leg's checks — one passing `check`, one
+       passing `eq`, one DELIBERATELY FAILING `check` — match an
+       equivalent synchronous run exactly in count and in the failing
+       check's own description and detail text; `runNjAsync` agrees with
+       `runNj` on a real `--help` invocation (status, stdout, stderr); two
+       concurrent `runNjAsync` calls take noticeably less than twice one
+       call's own wall time, proving the spawn is genuinely concurrent and
+       not secretly serial.
+     - Mutation: flushing in completion order instead of declared order
+       (reversing the flush loop under this file's own out-of-order
+       fixture) turns the two ordering checks red. Ignoring the
+       `concurrency` option entirely (always running every leg at once)
+       turns the cap check red (observed max active = all 6 legs, not 2).
+       Both restored and reconfirmed green.
+     - Existing tests are unchanged: `T`'s own public shape and behaviour
+       are identical to before this decision; `runNjAsync`/`runLegs` are
+       additive.
+     - **ac-17 converted** (its two biggest independent-leg loops, SUB-006):
+       `INVALID` (5 legs) and `INVALID_LAYOUT` (17 legs) each build their
+       own isolated `H.mkBacklog`/`fixtureWith` fixture and assert only on
+       it — no cross-iteration state — so both convert mechanically to
+       `H.runLegs(...)`, with `H.runJsonAsync` added (the async twin of
+       `runJson`, same shape as `runNjAsync`/`runJson`) for the `doctor`
+       calls inside them. `noOverviewCreated` took a `BufferedContext`
+       parameter instead of touching `T` directly, since both its callers
+       now run inside a leg. The smaller loops (`UNKNOWN_KEY_LAYOUT`,
+       `VALID_LAYOUT`, the default-layout-equivalence block, the two-case
+       `--fix` loop; each a handful of spawns total) and the `PLACEMENT`
+       loop (5 legs, ~25 spawns) were left synchronous — the two converted
+       loops already account for the great majority of the file's own
+       spawns (14 `COMMANDS` entries × 22 total iterations, plus each
+       iteration's own `doctor`/`--fix` calls).
+       - Proof (Implementer3's `--import` preload recipe, `/tmp/ac-equiv-recipe/`):
+         same check count both ways (848); the unmutated bin (`M0`) produces
+         0 failures, byte-identical logs, on both the pre-conversion and
+         post-conversion file; two product mutants that each reach a
+         converted leg specifically (the `layout.folders.*` name regex
+         admitting a space, and the status-shape regex admitting
+         `[a-zA-Z_ ]` instead of `[a-z_]`) each fail the exact same 63 and
+         33 checks respectively on both files, sorted-log-identical.
+       - Timing, alone (not pooled; two runs each): sync (pre-conversion)
+         ~104-105 s; converted (`runLegs`, concurrency 4) ~31-35 s — roughly
+         a 3× reduction, far past the 10 s pooled-gain bar this decision set.
+     - **ac-22 left unconverted.** At 1007 lines and ~86 s alone (775
+       checks) it is comparably spawn-heavy to ac-17, and has at least as
+       many independent-leg candidates (`VARIANTS`, the hierarchy-merge
+       pair, `MIGRATIONS`, the dangling-ids loop, …) — but it is roughly
+       2× ac-17's size, spread across six-plus top-level loops instead of
+       two, several of which share helpers (`doctorClean`, `archivedBytes`)
+       that — like `noOverviewCreated` above — would each need converting
+       to take a `BufferedContext` rather than touching `T`. Converting it
+       properly (one loop at a time, each with its own full proof) is a
+       reasonable follow-up, but attempting it within this same pass risked
+       a half-finished conversion of the larger, more interdependent file
+       for a marginal gain over what ac-17 alone already delivers. Left as
+       a candidate for a dedicated follow-up task rather than converted
+       here.
+     - **Review findings on 15b5ab1/b6f8096, fixed on top of 26414c8**
+       (Reviewer-found):
+       - **A throwing leg used to take every other leg down with it.**
+         `runLegs` awaited each leg inside a bare `Promise.all`; a leg
+         that threw rejected the whole `Promise.all`, so `runLegs` itself
+         rejected and the `for (const c of contexts) c.flush()` loop
+         never ran — every OTHER leg's already-buffered checks, passed or
+         not, were silently discarded, not just the throwing leg's own.
+         Fix: each worker now wraps its `await legs[i](...)` in its own
+         try/catch; a throw records one extra FAIL check on that leg's
+         own buffered context ("leg \<i\> threw: \<message\>"), appended
+         after whatever checks that leg already made, and every other leg
+         still runs to completion and flushes normally in array order.
+         `runLegs`' return type changed from `R[]` to `(R | undefined)[]`
+         — a thrown leg's own result slot is `undefined`, since it never
+         produced one. Self-test: three legs, A ok / B throws / C ok →
+         checks observed in order ['A ok', 'leg 1 threw: boom', 'C ok'],
+         only the middle one FAIL, results `['A', undefined, 'C']`.
+         Mutation: reverting the try/catch turns the self-test into an
+         *uncaught* `Error: boom` (not just a failed check) — restored
+         and reconfirmed green.
+       - **`runPathAsync`'s `overflowed` flag was set but never read.**
+         Once stdout/stderr passed `maxBuffer`, new data stopped being
+         appended, but `close` still resolved with whatever had
+         accumulated so far — silent truncation, not the "cannot
+         complete this call" signal sync's own `spawnSync` gives via
+         `r.error` → `status: null` + `missing`. Fix: `overflowed` now
+         also kills the child (matching `test/run-all.ts`'s own
+         `runAsync`, which already does this for its own pool), and
+         `close` checks it first: `{ status: null, stdout: '', stderr:
+         '', missing: 'spawn failed: maxBuffer exceeded (...)' }`, the
+         same shape `T.exit`'s `result.missing` branch already expects.
+         `RunOpts` gained `maxBuffer?: number` (async only, default 32
+         MiB, same as sync) so a test can trigger this deterministically
+         without generating tens of megabytes of real output. Self-test:
+         `runPathAsync(NJ, ['--help'], { maxBuffer: 1 })` →
+         `status === null`, `missing` set, `stdout`/`stderr` both `''`.
+         Mutation: reverting the `close` branch leaves `missing` unset
+         and `stdout` non-empty (status still happens to read `null`,
+         since `kill()` alone already produces a `SIGTERM`-signalled
+         close — the `missing` check is what actually catches the
+         regression) — restored and reconfirmed green.
+       - **The self-test's own concurrency proof used a wall-time ratio,
+         which flaked under load** (measured 3/15 FAIL at ratio 2.5
+         running 15 parallel copies): "two concurrent calls take closer
+         to one call's time than the sum of both" stops holding once the
+         machine is loaded enough that even genuinely-concurrent calls
+         both run slow — the ratio check cannot tell "both slow because
+         concurrent-and-loaded" apart from "slow because serialized".
+         Fix: dropped the ratio; added `RunOpts.onSpawn` (async only), a
+         callback fired on the child's own 'spawn' event — a
+         load-independent structural signal of when the OS process
+         itself actually starts. The self-test now asserts call 2's own
+         `spawn` event fires before call 1's `close` resolves, proved via
+         plain event ORDER, not elapsed time. Mutation: lowering
+         `RUN_NJ_ASYNC_CONCURRENCY` to 1 (forcing the two calls to
+         actually serialize through the semaphore) turns this exact
+         check red, with the event log read back as `["spawn1", "close1",
+         "spawn2", "close2"]` — restored and reconfirmed green. The
+         existing concurrency-cap self-test (max-in-flight via a
+         synchronous counter around a synthetic delay) was already
+         structural, not timing-based, and needed no change.
+       - ac-17 reconfirmed unaffected by any of the above: still 848
+         checks, M0/mutant logs byte-identical to the pre-fix run
+         (`/tmp/team/recipes/` check-log comparison).
+
+211. **The severity table lists every § 7 code; the two layout errors are
+     refused in `problems.ignore`** (2026-10-18, TSK-022; Lead).
+     - The bug: `SEVERITY` in `src/core/constants.ts` had no entry for
+       `backlog:status_stale`, `backlog:tags_stale`,
+       `backlog:legacy_layout` or `backlog:ids_layout_mismatch`. `doctor`
+       pushes these four with literal severities, so its own report was
+       right. But `problems.ignore` checks a code against `SEVERITY`, and a
+       code it doesn't find there is `config:unknown_code`. So the two
+       stale warnings could not be silenced, although § 7 lists them as
+       warnings and § 5 promises that every warning can be.
+     - The choice: `SEVERITY` now mirrors § 7 for all four. For the two
+       warnings that is the fix asked for. For the two errors it is a
+       behaviour change: listing either used to draw the
+       `config:unknown_code` warning with exit 0. It is now
+       `invalid_config` (exit 1; `doctor` reports `config:invalid`,
+       exit 2). § 7 is clear on this: only a code outside its table is
+       unknown, and a known code that is not warning-severity is misuse.
+       Keeping the old answer would have meant a second, unwritten list of
+       codes that are "known, but unknown to `ignore`".
+     - Not changed: `BACKLOG_LEVEL`. That set only filters an element's
+       own problem set. The four codes never enter it; `doctor` adds them
+       to the backlog-level findings directly, as it does for
+       `backlog:claims_unignored`.
+     - § 7: the closed list of warning-severity codes now names both
+       stale codes. The validity paragraph now says "any known code that
+       is not warning-severity (an error code, or a `—` code such as every
+       `incomplete:*` code)", the same general wording that § 5 and § 15
+       use since TSK-010. It used to name only error and `incomplete:*`
+       codes.
+     - Audit: every code literal under `src/` was compared with `SEVERITY`
+       and with § 7's table. These four were the only gaps. No code has
+       different severities in the two places, and no code is built at
+       runtime (`misplacedCode` and parse.ts's frontmatter codes return
+       literals).
+     - Tests: `test/edge/severity-vocabulary.ts`, a single file of about
+       11 s. Its oracle is § 7's table, read from
+       `docs/SPECIFICATION.md` at test time, so a new row is covered
+       without editing the test.
+       - (A) Every row goes through `problems.ignore` on its own. A warning
+         must be accepted with no `config:unknown_code` naming it; an
+         error or `—` code must be `invalid_config`. A code outside § 7
+         is the control and must still be `config:unknown_code`.
+       - (B) A backlog built by `init` + `new`, with `STATUS.md` and
+         `TAGS.md` then deleted, reports both stale warnings without
+         `ignore`, and nothing at all with both codes ignored.
+       - (C) Static checks. Every quoted `word:word` literal under `src/`
+         has a § 7 row, except § 9's `refused:*` failure codes, which are
+         listed as the one exclusion. Every prefix among those literals
+         has at least one row. § 7's closed warning list equals the
+         table's warning rows. The scan does not take its prefixes from
+         the table (the Scout's find): if it did, a parser that dropped a
+         whole prefix group would drop it from the scan too, and nothing
+         would notice. A code without a colon (`duplicate_id`) still
+         escapes (C), but (A) covers it once it has a row.
+     - Recorded red: against the binary and SPEC of 29ebb11, 273db5c and
+       9445086, 8 checks fail. Those are both (A) checks for each of the
+       two errors, the (A) `config:unknown_code` check for each of the two
+       warnings, (B)'s suppression check, and (C)'s closed-list check. The
+       fixed tree passes all 103.
+     - Mutants of the test's own table parser, skipping every row of one
+       prefix:
+       - `backlog:*` fails 3 checks in (C): the prefix guard, the literal
+         check and the closed list. Before the prefix change, only the
+         closed list caught it, and only because that list happens to
+         contain `backlog:` warnings.
+       - `depends_on:*`, which has no warning rows, fails the prefix
+         guard and the literal check. Before the prefix change it passed
+         silently.
 
 ## Known gaps, stated plainly
 

@@ -17,7 +17,7 @@
 import fs from 'fs';
 import path from 'path';
 import crypto from 'crypto';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +48,13 @@ export interface RunOpts {
   input?: string;
   timeout?: number;
   unsetEnv?: string[];
+  /** Async only (runPathAsync/runNjAsync); default 32 MiB, same as sync. */
+  maxBuffer?: number;
+  /** Async only: called the instant the child's OS process actually starts
+   * (Node's own 'spawn' event) -- a load-independent concurrency signal,
+   * used by the harness's own self-test instead of a wall-time ratio
+   * (DECISIONS 210). */
+  onSpawn?: () => void;
 }
 
 export interface RunResult {
@@ -656,10 +663,108 @@ function describeRun(r: RunResult): string {
 }
 function runNj(args: string[], opts?: RunOpts): RunResult { return runPath(NJ, args, opts); }
 
+/** A simple counting semaphore -- `acquire()` resolves once fewer than
+ * `limit` holders are active, `release()` wakes the next waiter, FIFO.
+ * Used by `runNjAsync` so a test file with many concurrent legs (see
+ * `runLegs` above) does not spawn an unbounded number of `nanojira`
+ * processes at once (DECISIONS 210) -- `runLegs`' own `concurrency` caps
+ * how many legs run at a time; this caps spawns specifically, which
+ * matters when a single leg itself issues more than one. */
+function makeSemaphore(limit: number): { acquire(): Promise<void>; release(): void } {
+  let active = 0;
+  const waiters: Array<() => void> = [];
+  return {
+    acquire(): Promise<void> {
+      if (active < limit) { active++; return Promise.resolve(); }
+      return new Promise((resolve) => waiters.push(resolve));
+    },
+    release(): void {
+      const next = waiters.shift();
+      if (next) next();
+      else active--;
+    },
+  };
+}
+const RUN_NJ_ASYNC_CONCURRENCY = 4;
+const runNjAsyncSemaphore = makeSemaphore(RUN_NJ_ASYNC_CONCURRENCY);
+
+/**
+ * The async twin of `runPath`/`runNj` above -- same env handling (fixed
+ * `NJ_NOW`, the `NJ_ON_CHANGE`/hook envs scrubbed before `opts.env`/
+ * `unsetEnv` apply), same `njCommand` resolution, same `RunResult` shape,
+ * same default 60 s timeout and 32 MiB output cap -- but via `spawn`
+ * (non-blocking) instead of `spawnSync`, so independent legs' spawns can
+ * actually overlap in wall time instead of each blocking the whole
+ * process (the entire point of `runLegs`, DECISIONS 210). Capped by
+ * `runNjAsyncSemaphore` so unbounded concurrent legs do not fork an
+ * unbounded number of `nanojira` processes.
+ */
+async function runPathAsync(njPath: string | null, args: string[], opts?: RunOpts): Promise<RunResult> {
+  const o = opts || {};
+  if (!njPath) return abortNoImplementation('no nanojira path given (pass it as argv[2] or set NJ)');
+  if (!fs.existsSync(njPath)) return abortNoImplementation('nanojira not found at ' + njPath);
+  const env = Object.assign({}, process.env, { NJ_NOW: FIXED_NOW });
+  for (const k of ['NJ_ON_CHANGE', 'NJ_ON_CHANGE_TIMEOUT', 'NJ_HOOK_COMMAND', 'NJ_HOOK_IDS']) delete env[k];
+  Object.assign(env, o.env || {});
+  for (const k of o.unsetEnv || []) delete env[k];
+  const inv = njCommand(njPath, args);
+  const maxBuffer = o.maxBuffer || 32 * 1024 * 1024;
+  const timeoutMs = o.timeout || 60000;
+
+  await runNjAsyncSemaphore.acquire();
+  const t0 = Date.now();
+  try {
+    return await new Promise<RunResult>((resolve) => {
+      const child = spawn(inv.cmd, inv.args, { cwd: o.cwd, env });
+      if (o.onSpawn) child.on('spawn', o.onSpawn);
+      let stdout = '', stderr = '', overflowed = false;
+      let settled = false;
+      const kill = () => { try { child.kill('SIGTERM'); } catch { /* already gone */ } };
+      const timer = setTimeout(kill, timeoutMs);
+      const finish = (result: RunResult) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      child.on('error', (err) => {
+        finish({ status: null, stdout: '', stderr: String(err.message), missing: 'spawn failed: ' + err.message, signal: null, ms: Date.now() - t0 });
+      });
+      child.stdout.on('data', (d) => { if (!overflowed) { stdout += d; if (stdout.length > maxBuffer) { overflowed = true; kill(); } } });
+      child.stderr.on('data', (d) => { if (!overflowed) { stderr += d; if (stderr.length > maxBuffer) { overflowed = true; kill(); } } });
+      if (o.input !== undefined) child.stdin.end(o.input); else child.stdin.end();
+      child.on('close', (status, signal) => {
+        /* Same shape as a genuine spawn error (sync runPath's own r.error
+         * branch): overflow must surface as status:null + `missing`, never
+         * as silently truncated output (D210). */
+        if (overflowed) {
+          finish({ status: null, stdout: '', stderr: '', missing: 'spawn failed: maxBuffer exceeded (' + maxBuffer + ' bytes)', signal, ms: Date.now() - t0 });
+          return;
+        }
+        finish({ status, stdout, stderr, signal, ms: Date.now() - t0 });
+      });
+    });
+  } finally {
+    runNjAsyncSemaphore.release();
+  }
+}
+
+/** The async twin of `runNj` -- see `runPathAsync` (DECISIONS 210). */
+function runNjAsync(args: string[], opts?: RunOpts): Promise<RunResult> { return runPathAsync(NJ, args, opts); }
+
 /** Run nanojira and parse stdout as JSON, asserting the exit code is as expected. */
 function runJson(args: string[], opts?: RunOpts): JsonRunResult {
   const o = opts || {};
   const r = runNj(args.concat(['--json']), o);
+  let json: any = null, parseError: string | null = null;
+  try { json = JSON.parse(r.stdout); } catch (e) { parseError = (e as Error).message; }
+  return Object.assign({}, r, { json, parseError });
+}
+
+/** The async twin of `runJson` -- see `runNjAsync` (DECISIONS 210). */
+async function runJsonAsync(args: string[], opts?: RunOpts): Promise<JsonRunResult> {
+  const o = opts || {};
+  const r = await runNjAsync(args.concat(['--json']), o);
   let json: any = null, parseError: string | null = null;
   try { json = JSON.parse(r.stdout); } catch (e) { parseError = (e as Error).message; }
   return Object.assign({}, r, { json, parseError });
@@ -694,6 +799,103 @@ export interface TestContext {
   finish(): void;
 }
 
+/** Everything `TestContext` offers above its own bookkeeping
+ * (`_failures`/`_checks`/`_name`/`finish`) — built ONCE, on top of
+ * whatever `checkFn`/`notCoveredFn` the caller supplies, so the real `T`
+ * and a buffered per-leg context (`createBufferedContext` below) share
+ * the exact same comparison/formatting logic and can never drift apart
+ * (DECISIONS 210). `T` wires `checkFn`/`notCoveredFn` straight into its own
+ * `_failures`/`_checks`/`_notCovered`; a buffered context wires them into
+ * a local array instead, replayed into the real `T` later, in the test
+ * file's own leg order. */
+type CheckAssertions = Pick<TestContext, 'eq' | 'goldenEq' | 'exit' | 'contains' | 'sameSet'>;
+function makeCheckAssertions(checkFn: TestContext['check']): CheckAssertions {
+  return {
+    eq(desc, actual, expected) {
+      const a = typeof actual === 'string' ? actual : JSON.stringify(actual);
+      const e = typeof expected === 'string' ? expected : JSON.stringify(expected);
+      return checkFn(desc, a === e, 'expected ' + JSON.stringify(e) + '\n     got      ' + JSON.stringify(a));
+    },
+
+    /** Byte-exact file comparison against a golden fixture. */
+    goldenEq(desc, actualPath, goldenName) {
+      let actual: string;
+      try { actual = fs.readFileSync(actualPath, 'utf8'); }
+      catch (e) { return checkFn(desc, false, 'cannot read ' + actualPath + ': ' + (e as Error).message); }
+      const want = golden(goldenName);
+      if (actual === want) return checkFn(desc, true);
+      return checkFn(desc, false,
+        'file differs from golden/' + goldenName + '\n' + firstDiff(actual, want));
+    },
+
+    /**
+     * Assert the exit code against a single expected value.
+     *
+     * `expected` must not be an array. An array reads as the honest form of
+     * "the spec does not pin the code", but it is indistinguishable from
+     * quietly accepting a bug (AMBIGUITIES.md 23: an either/or here once let a
+     * wrong-but-in-set exit code through for a whole round). Derive one value
+     * from the spec instead — if it comes back red, that is a finding to
+     * escalate, not a reason to widen the assertion.
+     */
+    exit(desc, result, expected) {
+      if (Array.isArray(expected)) {
+        throw new Error('T.exit(' + JSON.stringify(desc) + ', …): expected must be a single ' +
+          'exit code, not an array — derive one value from the spec (AMBIGUITIES.md 23) ' +
+          'instead of tolerating a set of them');
+      }
+      if (result.missing) {
+        return checkFn(desc, false, 'CANNOT RUN: ' + result.missing +
+          '\n     (the implementation does not exist yet — the oracle is built first)');
+      }
+      const ok = result.status === expected;
+      return checkFn(desc, ok,
+        'expected exit ' + expected + ', got ' + result.status +
+        (result.stderr ? '\n     stderr: ' + trunc(result.stderr) : ''));
+    },
+
+    /** A substring assertion that prints surrounding context on failure. */
+    contains(desc, haystack, needle) {
+      return checkFn(desc, String(haystack).includes(needle),
+        'expected to contain ' + JSON.stringify(needle) + '\n     in  ' + JSON.stringify(trunc(haystack)));
+    },
+
+    /**
+     * Assert that two collections hold EXACTLY the same items — nothing
+     * missing and, crucially, nothing extra.
+     *
+     * WHY THIS EXISTS. The oracle's doctor assertions were written as
+     * containment (`found.includes(code)`, `problems.some(p => …)`), and a
+     * containment check cannot see an *additional* item by construction. A
+     * blindness matrix over one-part mutants of `nj` measured the cost: a
+     * mutant that appends one spurious `title:h1_mismatch` WARNING whenever
+     * real findings already exist left 19 suites green and was caught by none
+     * of them. On *clean* backlogs five suites catch it, via
+     * `problems.length === 0` — but the moment a genuine finding exists, an
+     * extra misclassification became invisible across the whole oracle.
+     *
+     * So the oracle was good at catching what goes MISSING and blind to what
+     * gets ADDED. `sameSet` closes that half: the expected set is derived from
+     * § 7's problem-code table — which condition produces which code at which
+     * severity — and anything beyond it is a failure, not a tolerated extra.
+     *
+     * Order-insensitive on purpose: § 9 pins doctor's problem *shape*, and the
+     * ordering question belongs to `edge/order-doctor-problems-severity.ts`.
+     */
+    sameSet(desc, actual, expected) {
+      const a = [...actual].map(String).sort();
+      const e = [...expected].map(String).sort();
+      if (a.length === e.length && a.every((v, i) => v === e[i])) return checkFn(desc, true);
+      const missing = e.filter(v => !a.includes(v));
+      const extra = a.filter(v => !e.includes(v));
+      return checkFn(desc, false,
+        (missing.length ? 'MISSING    ' + JSON.stringify(missing) + '\n     ' : '') +
+        (extra.length ? 'UNEXPECTED ' + JSON.stringify(extra) + '\n     ' : '') +
+        'expected ' + JSON.stringify(e) + '\n     got      ' + JSON.stringify(a));
+    },
+  };
+}
+
 const T: TestContext = {
   _failures: [],
   _notCovered: [],
@@ -709,88 +911,7 @@ const T: TestContext = {
     return !!cond;
   },
 
-  eq(desc, actual, expected) {
-    const a = typeof actual === 'string' ? actual : JSON.stringify(actual);
-    const e = typeof expected === 'string' ? expected : JSON.stringify(expected);
-    return this.check(desc, a === e, 'expected ' + JSON.stringify(e) + '\n     got      ' + JSON.stringify(a));
-  },
-
-  /** Byte-exact file comparison against a golden fixture. */
-  goldenEq(desc, actualPath, goldenName) {
-    let actual: string;
-    try { actual = fs.readFileSync(actualPath, 'utf8'); }
-    catch (e) { return this.check(desc, false, 'cannot read ' + actualPath + ': ' + (e as Error).message); }
-    const want = golden(goldenName);
-    if (actual === want) return this.check(desc, true);
-    return this.check(desc, false,
-      'file differs from golden/' + goldenName + '\n' + firstDiff(actual, want));
-  },
-
-  /**
-   * Assert the exit code against a single expected value.
-   *
-   * `expected` must not be an array. An array reads as the honest form of
-   * "the spec does not pin the code", but it is indistinguishable from
-   * quietly accepting a bug (AMBIGUITIES.md 23: an either/or here once let a
-   * wrong-but-in-set exit code through for a whole round). Derive one value
-   * from the spec instead — if it comes back red, that is a finding to
-   * escalate, not a reason to widen the assertion.
-   */
-  exit(desc, result, expected) {
-    if (Array.isArray(expected)) {
-      throw new Error('T.exit(' + JSON.stringify(desc) + ', …): expected must be a single ' +
-        'exit code, not an array — derive one value from the spec (AMBIGUITIES.md 23) ' +
-        'instead of tolerating a set of them');
-    }
-    if (result.missing) {
-      return this.check(desc, false, 'CANNOT RUN: ' + result.missing +
-        '\n     (the implementation does not exist yet — the oracle is built first)');
-    }
-    const ok = result.status === expected;
-    return this.check(desc, ok,
-      'expected exit ' + expected + ', got ' + result.status +
-      (result.stderr ? '\n     stderr: ' + trunc(result.stderr) : ''));
-  },
-
-  /** A substring assertion that prints surrounding context on failure. */
-  contains(desc, haystack, needle) {
-    return this.check(desc, String(haystack).includes(needle),
-      'expected to contain ' + JSON.stringify(needle) + '\n     in  ' + JSON.stringify(trunc(haystack)));
-  },
-
-  /**
-   * Assert that two collections hold EXACTLY the same items — nothing
-   * missing and, crucially, nothing extra.
-   *
-   * WHY THIS EXISTS. The oracle's doctor assertions were written as
-   * containment (`found.includes(code)`, `problems.some(p => …)`), and a
-   * containment check cannot see an *additional* item by construction. A
-   * blindness matrix over one-part mutants of `nj` measured the cost: a
-   * mutant that appends one spurious `title:h1_mismatch` WARNING whenever
-   * real findings already exist left 19 suites green and was caught by none
-   * of them. On *clean* backlogs five suites catch it, via
-   * `problems.length === 0` — but the moment a genuine finding exists, an
-   * extra misclassification became invisible across the whole oracle.
-   *
-   * So the oracle was good at catching what goes MISSING and blind to what
-   * gets ADDED. `sameSet` closes that half: the expected set is derived from
-   * § 7's problem-code table — which condition produces which code at which
-   * severity — and anything beyond it is a failure, not a tolerated extra.
-   *
-   * Order-insensitive on purpose: § 9 pins doctor's problem *shape*, and the
-   * ordering question belongs to `edge/order-doctor-problems-severity.ts`.
-   */
-  sameSet(desc, actual, expected) {
-    const a = [...actual].map(String).sort();
-    const e = [...expected].map(String).sort();
-    if (a.length === e.length && a.every((v, i) => v === e[i])) return this.check(desc, true);
-    const missing = e.filter(v => !a.includes(v));
-    const extra = a.filter(v => !e.includes(v));
-    return this.check(desc, false,
-      (missing.length ? 'MISSING    ' + JSON.stringify(missing) + '\n     ' : '') +
-      (extra.length ? 'UNEXPECTED ' + JSON.stringify(extra) + '\n     ' : '') +
-      'expected ' + JSON.stringify(e) + '\n     got      ' + JSON.stringify(a));
-  },
+  ...makeCheckAssertions((desc, cond, detail) => T.check(desc, cond, detail)),
 
   /**
    * Record a leg that cannot be exercised in THIS environment because a
@@ -832,6 +953,97 @@ const T: TestContext = {
     process.exit(1);
   },
 };
+
+/** Everything a leg (see `leg()` below) can assert with, minus `finish()`
+ * (only the top-level `T` ever prints a summary or exits) and `_failures`/
+ * `_checks`/`_notCovered`/`_name` (a leg has no bookkeeping of its own to
+ * expose — it has a `flush()` instead, below). */
+export type BufferedContext = Omit<TestContext, '_failures' | '_notCovered' | '_checks' | '_name' | 'finish'>;
+
+interface BufferedCall {
+  kind: 'check' | 'notCovered';
+  args: [string, unknown, unknown?] | [string, string];
+}
+
+/** A `BufferedContext` that records every call instead of touching the
+ * real `T`, plus the `flush()` that replays them, in call order, into `T`
+ * — the ONLY way a leg's checks ever reach the real summary (DECISIONS
+ * 210). Two legs started together race on their own async work (spawns,
+ * timers, whatever `fn` awaits), but never on `T` itself: nothing inside
+ * `fn` can touch `_failures`/`_checks` until its own `flush()` runs, and
+ * `leg()` below only ever calls `flush()`s in the test file's own
+ * declared order, never completion order. Within one leg, ordering was
+ * never actually at risk — `fn`'s own checks already run in plain,
+ * single-threaded call order no matter what it awaits in between; only
+ * the ordering BETWEEN legs needed solving. */
+function createBufferedContext(): BufferedContext & { flush(): void } {
+  const calls: BufferedCall[] = [];
+  const check: TestContext['check'] = (desc, cond, detail) => {
+    calls.push({ kind: 'check', args: [desc, cond, detail] });
+    return !!cond;
+  };
+  const notCovered: TestContext['notCovered'] = (desc, reason) => {
+    calls.push({ kind: 'notCovered', args: [desc, reason] });
+  };
+  return {
+    check,
+    notCovered,
+    ...makeCheckAssertions(check),
+    flush() {
+      for (const c of calls) {
+        if (c.kind === 'check') T.check(...(c.args as [string, unknown, unknown?]));
+        else T.notCovered(...(c.args as [string, string]));
+      }
+    },
+  };
+}
+
+/**
+ * Runs `legs` (each an async function given its own `BufferedContext`)
+ * concurrently, then replays every leg's buffered checks into the real
+ * `T`, strictly in `legs`' own array order — never completion order,
+ * which `Promise.all` alone would leave nondeterministic (DECISIONS 210).
+ * `concurrency` caps how many legs' `fn`s are IN FLIGHT at once (default
+ * 4): `runNjAsync` below already caps concurrent `nanojira` spawns
+ * globally, so this is about not starting hundreds of legs' worth of
+ * other async work (timers, fs, whatever a leg awaits) all at once, not
+ * about the spawn count specifically.
+ *
+ * A leg that throws does not take the others down with it: every leg
+ * still runs to completion and flushes, and the throwing leg's own
+ * position gets one extra FAIL check ("leg <i> threw: <message>"),
+ * appended after whatever checks that leg already made before throwing
+ * (DECISIONS 210) -- `Promise.all` alone would reject on the first
+ * rejection and skip the `flush()` loop entirely, silently discarding
+ * every other leg's already-buffered checks, passed or not.
+ *
+ * Returns each leg's own return value, in array order, once every leg has
+ * both finished AND been flushed — a caller that needs a leg's result
+ * (not just its checks) can still read it, after `runLegs` resolves. A
+ * throwing leg's own slot is `undefined`.
+ */
+export async function runLegs<R>(legs: Array<(t: BufferedContext) => Promise<R>>, opts?: { concurrency?: number }): Promise<(R | undefined)[]> {
+  const concurrency = Math.max(1, (opts || {}).concurrency || 4);
+  const contexts = legs.map(() => createBufferedContext());
+  const results: (R | undefined)[] = new Array(legs.length);
+  let next = 0;
+  async function worker(): Promise<void> {
+    for (;;) {
+      const i = next++;
+      if (i >= legs.length) return;
+      try {
+        results[i] = await legs[i](contexts[i]);
+      } catch (e) {
+        const err = e as Error;
+        contexts[i].check('leg ' + i + ' threw: ' + (err && err.message || String(e)),
+          false, (err && err.stack) || String(e));
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, legs.length) }, worker));
+  for (const c of contexts) c.flush();
+  return results;
+}
 
 function trunc(s: unknown, n?: number): string {
   const str = String(s);
@@ -1020,5 +1232,6 @@ export {
   sha256, golden, goldenPath,
   runNj, runPath, runJson, describeRun,
   runJson as fetchJson,
+  runNjAsync, runJsonAsync, runPathAsync,
   faultReady,
 };

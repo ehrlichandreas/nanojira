@@ -1,4 +1,3 @@
-/* @slow: one of the longest files, ~130-210 s (NJ_TEST_TIMES, 2026-10-18); start it first (run-all.ts, test/README.md) */
 /* AC-63 -- NJ_ON_CHANGE, the optional change hook (§ 9 "`NJ_ON_CHANGE`",
  * DECISIONS 200; scans feedback TSK-011). Two acceptance criteria:
  *
@@ -93,10 +92,14 @@ function snapshot(d: string): string[] {
   return out.sort();
 }
 
-/* The fixture: built WITHOUT the hook, through the real binary. */
-function fixture(label: string): { d: string; cap: string; bl: string } {
-  const d = H.freshDir('ac63-' + label);
-  const cap = H.freshDir('ac63cap-' + label);
+/* The fixture: built WITHOUT the hook, through the real binary -- once,
+ * into a template that every fixture() then copies. The backlog stores no
+ * absolute path (and NJ_NOW is pinned), so a copy is byte-identical to a
+ * fresh build; five spawns per fixture were most of this file's wall time. */
+let template: string | null = null;
+function fixtureTemplate(): string {
+  if (template) return template;
+  const d = H.freshDir('ac63-template');
   const steps: string[][] = [
     ['init'],
     ['new', '--type=epic', '--title=Auth', '--description=Login.', '--acceptance=- [ ] works'],
@@ -106,9 +109,17 @@ function fixture(label: string): { d: string; cap: string; bl: string } {
   ];
   for (const s of steps) {
     const r = plain(d, s);
-    if (r.status !== 0) throw new Error('fixture ' + label + ': ' + s.join(' ') + ' -> ' + H.describeRun(r));
+    if (r.status !== 0) throw new Error('fixture template: ' + s.join(' ') + ' -> ' + H.describeRun(r));
   }
-  return { d, cap, bl: path.join(d, 'backlog') };
+  return (template = path.join(d, 'backlog'));
+}
+function fixture(label: string): { d: string; cap: string; bl: string } {
+  const src = fixtureTemplate();
+  const d = H.freshDir('ac63-' + label);
+  const cap = H.freshDir('ac63cap-' + label);
+  const bl = path.join(d, 'backlog');
+  fs.cpSync(src, bl, { recursive: true });
+  return { d, cap, bl };
 }
 function pre(d: string, steps: string[][]) {
   for (const s of steps) {

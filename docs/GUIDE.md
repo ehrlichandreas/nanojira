@@ -532,7 +532,10 @@ without touching the underlying condition itself (an ignored
 `--ready`; only the reporting goes quiet). An **unrecognised** key or
 code anywhere in the configuration (`problems` included) is itself just
 another warning (`config:unknown_key`/`config:unknown_code`), never a
-hard failure — a typo stays visible without stopping work.
+hard failure — a typo stays visible without stopping work. Any *known*
+code that is not warning-severity in § 7 of the spec is refused instead:
+until it is removed, every command but `doctor` fails with
+`invalid_config`, and `doctor` reports the configuration as invalid.
 
 **No rollout order needed for this one:** a `nanojira` older than 3.7 already
 silently ignores an unrecognised *top-level* config key (confirmed
@@ -1113,7 +1116,8 @@ it would otherwise appear:
 ```
 
 Any warning-severity code from `docs/SPECIFICATION.md` § 7 can be listed
-this way (§ 10 above); an error code or an `incomplete:*` code cannot.
+this way (§ 10 above); any other code in § 7 cannot (the configuration is
+then invalid).
 
 ## 24. Tags: `TAGS.md`, `nanojira tags`, and healing drift
 
@@ -1339,6 +1343,30 @@ Things to know:
 - Without `--json`, you get the real call's prose plus a summary:
   `Dry run: nothing written. The real call would change 2 paths:`
   followed by one `  modify  tasks/TSK-009.md`-style line per path.
+  It stays paths-only on purpose: two diff tools can show the same change
+  differently, so a diff is not a stable output. To see what would change
+  inside one file, save the JSON and diff that path's `before` and
+  `after` (bash; `jq` is optional, `node` does the same):
+
+  ```sh
+  dry=$(mktemp)
+  nanojira set --id=TSK-009 --status=doing --dry-run --json > "$dry"
+  jq -r '.changes[].path' "$dry"          # the paths it would touch
+  f=tasks/TSK-009.md
+  side() { jq -j --arg f "$f" ".changes[]|select(.path==\$f)|.$1 // \"\"" "$dry"; }
+  diff -u <(side before) <(side after)
+  rm "$dry"
+  ```
+
+  Without `jq`, define `side` with `node` instead (and skip the `jq -r`
+  listing line):
+
+  ```sh
+  side() { node -e 'const [p, f, k] = process.argv.slice(1);
+    const c = JSON.parse(require("fs").readFileSync(p, "utf8"))
+      .changes.find((c) => c.path === f);
+    process.stdout.write((c && c[k]) || "")' "$dry" "$f" "$1"; }
+  ```
 - Read-only commands (`list`, `show`, …) reject `--dry-run` as
   `unknown_field`; plain `doctor` rejects it as `invalid_value`, since
   only `doctor --fix` writes.

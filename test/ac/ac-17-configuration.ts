@@ -78,12 +78,14 @@ function changedFiles(before: Record<string, string>, after: Record<string, stri
 
 /* D100 + Verifier T3: under config:invalid nj renders no overview. The
  * harness writes none into such a fixture (H.statusFor is null), so here an
- * appearing STATUS.md can only be nj creating one. */
-function noOverviewCreated(desc: string, d: string) {
+ * appearing STATUS.md can only be nj creating one. `t` is a leg's own
+ * BufferedContext (DECISIONS 210) -- every caller below runs inside a
+ * runLegs leg. */
+async function noOverviewCreated(t: H.BufferedContext, desc: string, d: string) {
   const p = path.join(d, 'backlog', 'STATUS.md');
-  const fix = H.runJson(['doctor', '--fix'], { cwd: d });
-  T.exit(desc + ': doctor --fix exits 2', fix, 2);
-  T.check(desc + ': no STATUS.md is created under config:invalid (D100)', !fs.existsSync(p),
+  const fix = await H.runJsonAsync(['doctor', '--fix'], { cwd: d });
+  t.exit(desc + ': doctor --fix exits 2', fix, 2);
+  t.check(desc + ': no STATUS.md is created under config:invalid (D100)', !fs.existsSync(p),
     JSON.stringify(H.readOrNull(p)));
 }
 
@@ -128,7 +130,13 @@ function taskFixture(id: string, title: string, status: string, parent?: string)
   }, '# ' + title + '\n\n## Description\nSomething.\n\n## Acceptance Criteria\n- [ ] It works\n');
 }
 
-for (const bad of INVALID) {
+/* Each `bad` case builds its own isolated fixture and asserts only on it --
+ * the 5 iterations share no state, so they run as independent runLegs legs
+ * (DECISIONS 210) instead of a serial loop. Check content/order within one
+ * leg is unchanged from the original serial body; runLegs flushes legs in
+ * their declared (array) order, so the overall check sequence this produces
+ * is byte-identical to the old serial loop's. */
+await H.runLegs(INVALID.map((bad) => async (t: H.BufferedContext) => {
   const d = H.mkBacklog({
     label: 'ac17-' + bad.label.replace(/[^a-z0-9]+/gi, '-'),
     config: config(bad.statuses),
@@ -145,27 +153,27 @@ for (const bad of INVALID) {
   const before = snapshot(path.join(d, 'backlog'));
 
   for (const [name, args] of COMMANDS) {
-    const r = H.runNj(args, { cwd: d });
-    T.exit(name + ' fails with exit 1 on an invalid config (' + bad.label + ')', r, 1);
-    T.contains(name + ' points at nj doctor (' + bad.label + ')', out(r), 'doctor');
+    const r = await H.runNjAsync(args, { cwd: d });
+    t.exit(name + ' fails with exit 1 on an invalid config (' + bad.label + ')', r, 1);
+    t.contains(name + ' points at nj doctor (' + bad.label + ')', out(r), 'doctor');
   }
 
   const after = snapshot(path.join(d, 'backlog'));
   const changed = changedFiles(before, after);
-  T.check('a failing command writes nothing (' + bad.label + ')',
+  t.check('a failing command writes nothing (' + bad.label + ')',
     changed.length === 0, 'changed: ' + changed.join(', '));
-  T.check('no element was created (' + bad.label + ')',
+  t.check('no element was created (' + bad.label + ')',
     H.listFiles(d, 'tasks').length === 1, J(H.listFiles(d, 'tasks')));
 
-  const rh = H.runNj(['doctor'], { cwd: d });
-  T.exit('doctor exits 2 on an invalid config (' + bad.label + ')', rh, 2);
+  const rh = await H.runNjAsync(['doctor'], { cwd: d });
+  t.exit('doctor exits 2 on an invalid config (' + bad.label + ')', rh, 2);
 
-  const rj = H.runJson(['doctor'], { cwd: d });
-  T.exit('doctor --json exits 2 on an invalid config (' + bad.label + ')', rj, 2);
+  const rj = await H.runJsonAsync(['doctor'], { cwd: d });
+  t.exit('doctor --json exits 2 on an invalid config (' + bad.label + ')', rj, 2);
   const j = rj.json || {};
   const problems = Array.isArray(j.problems) ? j.problems : [];
   const invalid = problems.filter((p: any) => p.code === 'config:invalid');
-  T.check('doctor reports config:invalid (' + bad.label + ')', invalid.length >= 1,
+  t.check('doctor reports config:invalid (' + bad.label + ')', invalid.length >= 1,
     /* CODE-set equality: every one of these fixtures breaks § 5 and nothing
      * else, so `config:invalid` must be the ONLY code reported. The count is
      * left open on purpose — § 5 lists several rules and does not say whether
@@ -174,16 +182,17 @@ for (const bad of INVALID) {
      * is not. This is what closes the blindness: containment could not see a
      * spurious extra finding of a different code. */
     (rj.parseError || J(problems)).slice(0, 400));
-  T.sameSet('config:invalid is the only code reported (' + bad.label + ')',
+  t.sameSet('config:invalid is the only code reported (' + bad.label + ')',
     [...new Set(H.doctorSet(rj) || ['<no problems array>'])], ['config:invalid:error']);
-  T.check('config:invalid is an error finding (' + bad.label + ')',
+  t.check('config:invalid is an error finding (' + bad.label + ')',
     invalid.length >= 1 && invalid[0].severity === 'error', J(invalid[0] || null));
-  T.check('config:invalid is backlog-level: it carries no element (§ 9)',
+  t.check('config:invalid is backlog-level: it carries no element (§ 9)',
     invalid.length >= 1 && !invalid[0].element, J(invalid[0] || null));
-  T.check('doctor ok is false (' + bad.label + ')', j.ok === false,
+  t.check('doctor ok is false (' + bad.label + ')', j.ok === false,
     J(j).slice(0, 300));
-  noOverviewCreated('config ' + bad.label, d);
-}
+  await noOverviewCreated(t, 'config ' + bad.label, d);
+  return null;
+}));
 
 /* ---- v3: the layout block (§ 5) ------------------------------------------ */
 
@@ -245,29 +254,33 @@ function fixtureWith(label: string, cfg: string) {
   });
 }
 
-for (const bad of INVALID_LAYOUT) {
+/* Same independence argument as the INVALID legs above: each `bad` case
+ * owns its own fixture, so the 17 iterations convert to runLegs legs too
+ * (DECISIONS 210). */
+await H.runLegs(INVALID_LAYOUT.map((bad) => async (t: H.BufferedContext) => {
   const d = fixtureWith(bad.label, layoutConfig(bad.layout));
   const before = snapshot(path.join(d, 'backlog'));
 
   for (const [name, args] of COMMANDS) {
-    const r = H.runNj(args, { cwd: d });
-    T.exit('layout: ' + name + ' fails with exit 1 (' + bad.label + ')', r, 1);
-    T.contains('layout: ' + name + ' points at nj doctor (' + bad.label + ')', out(r), 'doctor');
+    const r = await H.runNjAsync(args, { cwd: d });
+    t.exit('layout: ' + name + ' fails with exit 1 (' + bad.label + ')', r, 1);
+    t.contains('layout: ' + name + ' points at nj doctor (' + bad.label + ')', out(r), 'doctor');
   }
   const changed = changedFiles(before, snapshot(path.join(d, 'backlog')));
-  T.check('layout: a failing command writes nothing (' + bad.label + ')',
+  t.check('layout: a failing command writes nothing (' + bad.label + ')',
     changed.length === 0, 'changed: ' + changed.join(', '));
 
-  const rj = H.runJson(['doctor'], { cwd: d });
-  T.exit('layout: doctor --json exits 2 (' + bad.label + ')', rj, 2);
-  T.sameSet('layout: config:invalid is the only code reported (' + bad.label + ')',
+  const rj = await H.runJsonAsync(['doctor'], { cwd: d });
+  t.exit('layout: doctor --json exits 2 (' + bad.label + ')', rj, 2);
+  t.sameSet('layout: config:invalid is the only code reported (' + bad.label + ')',
     [...new Set(H.doctorSet(rj) || ['<no problems array>'])], ['config:invalid:error']);
   const inv = ((rj.json && rj.json.problems) || []).filter((p: any) => p.code === 'config:invalid');
-  T.check('layout: config:invalid is backlog-level (' + bad.label + ')',
+  t.check('layout: config:invalid is backlog-level (' + bad.label + ')',
     inv.length >= 1 && !inv[0].element, J(inv[0] || null));
-  T.exit('layout: doctor (human) exits 2 (' + bad.label + ')', H.runNj(['doctor'], { cwd: d }), 2);
-  noOverviewCreated('layout: ' + bad.label, d);
-}
+  t.exit('layout: doctor (human) exits 2 (' + bad.label + ')', await H.runNjAsync(['doctor'], { cwd: d }), 2);
+  await noOverviewCreated(t, 'layout: ' + bad.label, d);
+  return null;
+}));
 
 /* An unknown key INSIDE `layout`/`layout.folders` (DECISIONS 166, amending
  * the original pre-v3.7 behaviour, where these two cases lived in

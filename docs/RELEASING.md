@@ -2,9 +2,9 @@
 
 The maintainer's procedure for cutting `vX.Y.Z`, from a clean `main` to an
 exported skill folder. `tools/release.ts` wraps git-release-squash
-(git-history-tools); why it behaves the way it does is DECISIONS 190–194 and
-202. Nothing here pushes: **pushing is the owner's call, never part of a
-release.**
+(git-history-tools); why it behaves the way it does is DECISIONS 190–194,
+202 and 208. Nothing here pushes: **pushing is the owner's call, never part
+of a release.**
 
 ## 0. Before you start
 
@@ -12,9 +12,42 @@ release.**
 - **No other local branch.** `git branch` lists `main` only, `git worktree
   list` the main checkout only. `release.ts --apply` refuses otherwise and
   names them: git-release-squash verifies the signature of every commit on
-  every branch *after* it has rewritten `main`, so one unsigned WIP branch
-  turns that verify red when it is too late to stop. Merge or abandon each
-  one, then `git worktree remove <path>` and `git branch -D <branch>`.
+  every branch *after* it has rewritten `main` (§ 4), so one unsigned WIP
+  branch turns that verify red when it is too late to stop. Merge or abandon
+  each one, then `git worktree remove <path>` and `git branch -D <branch>`.
+- **No tag of any kind after the last release.** `tail` squashes the commits
+  after the newest *tagged* commit, and any tag counts: a lightweight or
+  annotated helper tag (a test baseline, a bookmark) on a commit after
+  `vPREV` silently shrinks the release to the commits after that tag. This
+  must print the previous release tag and nothing else:
+
+  ```sh
+  git tag --contains vPREV
+  ```
+
+- **`node_modules` matches the lock.** `release.ts` runs
+  `node_modules/.bin/git-release-squash` from this checkout, so the release
+  is cut with whatever git-history-tools is installed there, not with the
+  commit the lock names. Run `npm ci` in the release checkout, then compare
+  the installed commit with the locked one; the two lines must be
+  identical. The version number alone proves nothing: two different
+  commits can both call themselves `0.3.1`.
+
+  ```sh
+  npm ci
+  for f in node_modules/.package-lock.json package-lock.json; do
+    node -p "require('./$f').packages['node_modules/git-history-tools'].resolved"
+  done
+  ```
+
+  If other clones or worktrees symlink this `node_modules`, `npm ci`
+  rewrites it under them too: run it only while nothing runs there.
+- **Rehearsals and suites keep their scratch files off the disk.** The
+  `--dry-run` sandboxes, git-history-tools' signer and a few tests write to
+  `$TMPDIR` (`os.tmpdir()`); the test harness's own fixtures go to
+  `$NJ_TEST_ROOT`, or `/tmp` without it. Point both at a tmpfs for every
+  rehearsal or suite run, e.g. `export TMPDIR=/tmp/<dir>`, and put throwaway
+  clones under `/tmp` too.
 
 ## 1. Bump the version — four places
 
@@ -108,6 +141,25 @@ verify: signatures: OK
 Exit status 0. Anything else: **roll back** (below) — by the time verify
 runs, `main` and the tag are already rewritten.
 
+**`verify: signatures` covers the whole history, not just the release.** It
+runs `git verify-commit` on every commit reachable from any local branch or
+tag (`git rev-list --branches --tags`), then `git verify-tag` on every
+annotated tag. Every one of them must carry a good signature from a key in
+the local keyring. So a leftover branch, an old commit or an old tag signed
+with a key that no longer verifies turns it red, however clean the new
+release commit is. Until the whole-history re-sign of 2026-10-18 (`main`
+38e8252), commits and tags signed with an earlier key did exactly that.
+Since then every commit and tag carries the current key and the verify is
+green. Before an old signing key stops verifying, re-sign the history
+(*Signing key change*, below).
+
+**No working time in the release objects.** `tail` gives the squashed commit
+and its tag anonymous dates, and signs both at a pinned time
+(`gpg --faked-system-time`). The same tree, parent, message and key
+therefore give the same commit and tag ids, and neither carries the moment
+of the release. The bump/CHANGES commit (§ 2) still has
+real dates, but the squash replaces it, so it never reaches the remote.
+
 ## 5. Verify and export
 
 ```sh
@@ -124,6 +176,56 @@ ls <dest>                            # SKILL.md bin/ dist/ LICENSE references/
 The squash rewrote `main`: any remote that already has the individual
 commits since the last tag needs a force-push. Ask first; never push as
 part of the release itself.
+
+## Signing key change
+
+`verify: signatures` (§ 4) only needs a good signature from a key in the
+local keyring. As long as the old public key stays there, valid and not
+revoked, the release stays green without a re-sign. It turns red once the
+old key no longer verifies: removed from the keyring (as the key before the
+current one was in 2026-10), expired or revoked. `git-sign check` is
+stricter: it accepts only the policy key and flags every old signature at
+once. So re-sign the history with git-history-tools' `git-sign` **before**
+the old key stops verifying, and before the next release, on `main` with no
+other branch (§ 0). Identity and key come from git-sign's policy file
+(`--policy=<file>` if given, else
+`$XDG_CONFIG_HOME/git-history-tools/policy.json`, else
+`~/.config/git-history-tools/policy.json`), never
+from git config: put the new `signingKey` there first. The release commits
+carry anonymous dates from 1970, so the policy needs `"anonymousBefore"`
+(e.g. `"1971-01-01T00:00:00Z"`) for `check` to accept them as anonymous.
+Every writing step is a dry run until `--apply`:
+
+```sh
+# dry run: "root-inclusive: <N> commits", one "would be re-signed" line each
+npx git-sign resign-commits . main --from-root
+npx git-sign resign-commits . main --from-root --map-out=/tmp/resign-map.txt --apply
+# dry run: every tag not validly signed by the policy key
+npx git-sign resign-tags .
+npx git-sign resign-tags . --apply
+# "check: 0 violation(s) across <N> commit(s) and <M> tag(s)", exit 0
+npx git-sign check . HEAD --tags
+```
+
+- `resign-commits` changes nothing but the signature: tree, parents (mapped),
+  author, committer and message stay byte-identical. It writes a backup
+  bundle first, then moves `main` and every affected tag in one atomic
+  transaction. It refuses a commit whose author or committer is not the
+  policy identity: a key change is not an identity change.
+- `resign-tags` re-signs annotated tags only. Lightweight tags carry no
+  signature and are reported as skipped.
+- `<rev> --from-root` re-signs the root and every descendant of it, i.e.
+  the whole history; a bare `<rev>` without `--from-root` is refused.
+- `check` with a single revision checks every commit from the root, plus all
+  tags with `--tags`.
+- The new public key must be in the keyring of everyone who verifies.
+- Every commit and tag id changes, so the remote needs a force-push of
+  `main` and of every moved tag (git-sign prints one
+  `git push --force-with-lease=…` line per ref). That push is the owner's
+  call (§ 6).
+
+Then release as usual. The release itself uses the identity from the
+`GIT_CONFIG_*` variables (§ 4), so they must name the same new key.
 
 ## Rollback
 

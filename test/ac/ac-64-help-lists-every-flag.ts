@@ -39,7 +39,7 @@ const COMMANDS = ['status', 'init', 'new', 'set', 'note', 'check', 'show', 'log'
   'tags', 'rm', 'archive', 'unarchive', 'claim', 'release', 'next', 'doctor'];
 
 // What each command accepts, in the parser's own spelling (`depends_on`).
-// Pinned from the pre-fix build (bfd25ed) by the same probe: this fix
+// Pinned from the pre-fix build by the same probe (DECISIONS 205): this fix
 // changes only what --help shows, never what a command accepts.
 const OUT = ['json', 'quiet', 'fields'];
 const SECTIONS = ['description', 'description-file', 'acceptance', 'acceptance-file'];

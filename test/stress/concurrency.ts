@@ -24,18 +24,25 @@ const COUNT = 100;
 
 type NjOpts = { cwd?: string; env?: Record<string, string> };
 
-/** Run one nj command; never rejects — a non-zero exit is data. */
+/** Run one nj command; never rejects — a non-zero exit is data. The env
+ * and the 60 s limit are H.runPath's: a shell's NJ_ON_CHANGE (or a stray
+ * NJ_HOOK_COMMAND) must not reach these hundreds of writes. */
 function nj(args: string[], opts?: NjOpts): Promise<RunResult> {
   const o = opts || {};
   return new Promise(resolve => {
-    const env = Object.assign({}, process.env, { NJ_NOW: H.FIXED_NOW }, o.env || {});
+    const env: Record<string, string | undefined> = Object.assign({}, process.env, { NJ_NOW: H.FIXED_NOW });
+    for (const k of ['NJ_ON_CHANGE', 'NJ_ON_CHANGE_TIMEOUT', 'NJ_HOOK_COMMAND', 'NJ_HOOK_IDS']) delete env[k];
+    Object.assign(env, o.env || {});
     const inv = H.njCommand(H.NJ as string, args);
-    const child = spawn(inv.cmd, inv.args, { cwd: o.cwd, env });
+    const t0 = Date.now();
+    const child = spawn(inv.cmd, inv.args, { cwd: o.cwd, env, timeout: 60000 });
     let out = '', err = '';
     child.stdout.on('data', d => { out += d; });
     child.stderr.on('data', d => { err += d; });
-    child.on('error', e => resolve({ status: null, stdout: '', stderr: String(e.message) }));
-    child.on('close', code => resolve({ status: code, stdout: out, stderr: err }));
+    // signal and ms as H.runPath reports them, so H.describeRun can name
+    // a kill or the timeout instead of a bare "exit null".
+    child.on('error', e => resolve({ status: null, stdout: '', stderr: String(e.message), missing: 'spawn failed: ' + e.message, signal: null, ms: Date.now() - t0 }));
+    child.on('close', (code, signal) => resolve({ status: code, stdout: out, stderr: err, signal, ms: Date.now() - t0 }));
   });
 }
 
@@ -67,7 +74,7 @@ async function main() {
 
   const failed = results.filter(r => r.status !== 0);
   T.check('all ' + COUNT + ' creators exit 0', failed.length === 0,
-    failed.slice(0, 3).map(r => 'exit ' + r.status + ' ' + r.stderr.trim()).join('\n'));
+    failed.slice(0, 3).map(r => H.describeRun(r)).join('\n'));
 
   // 100 files: exactly the tasks folder, no half-written strays.
   let files: string[] = [];
@@ -90,11 +97,15 @@ async function main() {
     'tombstones ' + tombs.length + ' (expected ' + (COUNT + 1) + ' incl. the epic)');
 
   // No file is unreadable: every task must load with an empty _problems.
-  const bad: string[] = [];
-  for (const f of files) {
-    const r = H.runJson(['show', '--id=' + f.replace(/\.md$/, '')], { cwd: dir });
-    if (r.json === null) bad.push(f);
-  }
+  // Read-only, so the shows run PARALLEL-wide like the creators; the parse
+  // rule is H.runJson's (stdout that is not JSON, or JSON null, is bad).
+  const shown = await pool(files, PARALLEL, (f: string) =>
+    nj(['show', '--id=' + f.replace(/\.md$/, ''), '--json'], { cwd: dir }));
+  const bad = files.filter((_, i) => {
+    let json: unknown = null;
+    try { json = JSON.parse(shown[i].stdout); } catch (e) { /* not JSON: bad */ }
+    return json === null;
+  });
   T.check('every created file parses', bad.length === 0, bad.slice(0, 3).join(', '));
 
   // AC-19: a backlog of freshly created elements is doctor-clean.
@@ -129,6 +140,13 @@ async function main() {
   const wide = Array.from({ length: 300 }, (_, i) => 'W' + i);
   const wr = await pool(wide, 300, (t: string) =>
     nj(['new', '--type=task', '--parent=EPIC-001', '--title=' + t], { cwd: dir2 }));
+
+  /* A creator that was killed or ran into the 60 s limit (status null)
+   * says nothing about the allocator either way; it must not pass
+   * silently. Exit 0 and 1 are judged below exactly as before. */
+  const killed = wr.filter(r => r.status === null);
+  T.check('retry leg: no creator was killed or timed out (status null)', killed.length === 0,
+    killed.length + ' of ' + wr.length + ': ' + killed.slice(0, 3).map(r => H.describeRun(r)).join('\n'));
 
   const aborted = wr.filter(r => r.status === 1);
   if (aborted.length === 0) {

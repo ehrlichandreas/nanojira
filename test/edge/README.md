@@ -43,6 +43,8 @@ is the reason they exist.
 | § 4 `.njrc` ownership and the D96 odd files/lexing AC-21 lacks (FIFO, ELOOP, non-leading BOM, lone `\r`), § 14 `--fix` writes nothing while `config:invalid` holds, § 9 `io_error` incl. unsearchable ancestor (DECISIONS 93 F1/F3/F4, 96, 98) | `hardening-v3-1.ts` |
 | § 4 `.njrc` ownership: a foreign-owned symlink (needs root; otherwise CANNOT RUN) | `hardening-njrc-foreign-link.ts` |
 | the v3 coverage gaps, one section per clause ID of `../COVERAGE-v3.md` | `coverage-v3-gaps.ts` |
+| § 5 `problems.ignore`: every example in the shipped docs (SKILL.md, references/, README, GUIDE, AGENT-INSTRUCTIONS) is a code nanojira accepts (4.1.0's SKILL.md named `incomplete:acceptance`) | `docs-ignore-examples.ts` |
+| § 7 closed severity vocabulary — every table row through `problems.ignore`, the stale warnings really suppressed, every code literal in `src/` has a row, the closed warning list matches the table (DECISIONS 211) | `severity-vocabulary.ts` |
 
 ## Why these are separate from the AC files
 

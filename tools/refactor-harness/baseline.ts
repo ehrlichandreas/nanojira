@@ -305,6 +305,10 @@ const VERDICT_ONLY_SUITES = new Map([
   ['edge/stdout-epipe.mjs', 'timing-dependent'],
   ['ac/ac-15-no-dependencies.mjs', 'copies the nj under test alone; the shim cannot run alone'],
   ['edge/hardening-v3-1.mjs', "the shim's own process.cwd() call throws in its deleted/unsearchable-CWD legs, before the real nj runs"],
+  // Split out of hardening-v3-1 (verdict-only, above) so that only it runs
+  // serially; its race was never in the corpus, and its 500 racing calls
+  // (accepted or refused, as the swap falls) could not be replayed.
+  ['edge/hardening-v3-1-t1-race.mjs', 'races a swapper by design; split from hardening-v3-1, verdict-only like it'],
 ]);
 
 // Environment-conditional suites (expected-gaps.ts). Verdict-only too: their

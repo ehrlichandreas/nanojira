@@ -14,11 +14,11 @@
  * or any count. An optional problems.ignore config list of
  * warning-severity codes suppresses them everywhere they're reported --
  * doctor, _problems, write feedback, doctor's own warning tally -- but
- * never the readiness computation itself. A known error or incomplete:*
- * code in that list is invalid_config; an unknown one is the warning
- * config:unknown_code and is skipped (DECISIONS 166). An unrecognised
- * top-level config key, or one inside layout/layout.folders/claims/
- * problems, is the warning config:unknown_key, not invalid_config
+ * never the readiness computation itself. Any known code in that list
+ * that is not warning-severity in § 7 is invalid_config; an unknown one is
+ * the warning config:unknown_code and is skipped (DECISIONS 166). An
+ * unrecognised top-level config key, or one inside layout/layout.folders/
+ * claims/problems, is the warning config:unknown_key, not invalid_config
  * (DECISIONS 166, correcting 165's own premise). An optional
  * minVersion: 'X.Y.Z' fails every command, including doctor, with
  * needs_newer_nj (naming both versions) when the running nj compares

@@ -469,8 +469,9 @@ Rules:
   (§ 7) to suppress from every place a code is reported. Default, when the
   key or the whole `problems` block is absent: the empty list — nothing is
   suppressed, exactly today's behaviour. Only a code whose § 7 Doctor
-  severity is **warning** may be listed; a **known error**-severity code or
-  any `incomplete:*` code (severity `—`) is still `invalid_config`, naming
+  severity is **warning** may be listed; **any known code that is not
+  warning-severity in § 7** (an error code, or a code with severity `—`
+  such as every `incomplete:*` code) is still `invalid_config`, naming
   the offending code — that is misuse, not version skew, and it would mean
   a real defect, or the ready rule itself, could be silenced by
   configuration. A code that is **not in § 7's closed vocabulary at all**
@@ -899,16 +900,18 @@ codes — the only ones ever eligible — is: `missing:status`,
 `missing:created`, `missing:updated`, `id:derived`, `type:derived`,
 `parent:orphaned`, `unknown:status`, `unknown:priority`,
 `done:open_children`, `title:h1_mismatch`, `id:no_tombstone`,
-`backlog:stray_tmp`, `claim:mismatch`, `claim:orphaned`, `claim:stale`,
+`backlog:stray_tmp`, `backlog:status_stale`, `backlog:tags_stale`,
+`claim:mismatch`, `claim:orphaned`, `claim:stale`,
 `backlog:claims_unignored`, `acceptance:no_checkbox`,
 `done:no_acceptance`, `done:open_acceptance`, `config:unknown_key`, and `config:unknown_code`
 themselves (DECISIONS 166 — both are warnings, so both are eligible to
 be silenced the same way any other warning is; nothing about being part
-of this very mechanism exempts them). A **known error**-severity code, or any
-`incomplete:*` code (severity `—`, and the one axis this feature must
-never touch — § 7's own "never blocking" promise for E/F would mean
-nothing if the thing one rung up, `incomplete:acceptance`, could be
-silenced), is still `invalid_config`, naming the offending code — that
+of this very mechanism exempts them). **Any known code that is not
+warning-severity** (an error code, or a `—` code such as every
+`incomplete:*` code, the one axis this feature must never touch: § 7's
+own "never blocking" promise for E/F would mean nothing if the thing one
+rung up, `incomplete:acceptance`, could be silenced) is still
+`invalid_config`, naming the offending code — that
 is misuse, not version skew, so it stays a hard failure. A code **not in
 § 7's closed vocabulary at all** (a typo, a retired code, or one a
 *future* revision defines that this build doesn't know yet) is instead
@@ -4671,8 +4674,8 @@ reported, not guessed at.
     `doctor`, `_problems`, write feedback and `doctor`'s own warning
     tally — everywhere a code is reported, but never the readiness
     computation itself: an ignored `unknown:status` still keeps its
-    element out of `--ready`, only the reporting goes quiet. A known
-    error code, or an `incomplete:*` code, is `invalid_config`; a code
+    element out of `--ready`, only the reporting goes quiet. Any known
+    code that is not warning-severity in § 7 is `invalid_config`; a code
     outside § 7's closed vocabulary is instead the warning
     `config:unknown_code` and is skipped (DECISIONS 166 amends this one
     sub-case). Default (key or block absent): empty, nothing suppressed.

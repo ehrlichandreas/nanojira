@@ -5,6 +5,60 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nanojira --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 4.1.1
+
+One fix to `problems.ignore` (the first entry below), breaking for a
+configuration that lists `backlog:legacy_layout` or
+`backlog:ids_layout_mismatch`; everything else is docs and tooling only.
+
+- **Fix (breaking for configs that list one of these two error codes):
+  `problems.ignore` knows the four codes 4.1.0 left out of its severity
+  table.** `backlog:status_stale` and `backlog:tags_stale` are warnings
+  in `docs/SPECIFICATION.md` § 7, but 4.1.0 treated them as unknown
+  codes: listing them in `problems.ignore` drew `config:unknown_code`
+  and the stale warning was still reported. They are now accepted and
+  suppress the warning like any other warning code.
+  `backlog:legacy_layout` and `backlog:ids_layout_mismatch` are errors in
+  § 7. Listing either used to draw only the `config:unknown_code`
+  warning and changed nothing else; it is now `invalid_config` (exit 1;
+  `doctor` reports `config:invalid`, exit 2). Remove the code from
+  `problems.ignore` — it never had any effect. § 7's closed list of
+  warning-severity codes now names both stale codes, and its validity
+  paragraph says that any known code that is not warning-severity is
+  refused. A new test checks every § 7 code against the binary.
+  (DECISIONS 211, TSK-022)
+
+- **Fix (docs): `SKILL.md`'s `problems.ignore` example.** 4.1.0's
+  `SKILL.md` named `incomplete:acceptance` as a warning to silence with
+  `"problems": {"ignore": [...]}`. That code cannot be listed — only
+  warning-severity codes can — and a configuration that lists it makes
+  every command but `doctor` fail with `invalid_config` (`doctor` reports
+  `config:invalid` and exits 2). The example is now
+  `done:open_acceptance`, and `docs/GUIDE.md` § 10 and § 23 and
+  `docs/SPECIFICATION.md` § 5 and § 15 now say that any known code that
+  is not warning-severity is refused — the old wording named only error
+  and `incomplete:*` codes. (scans-team, TSK-010)
+
+- The dev-time dependency git-history-tools is pinned to its signed
+  release tag `v0.4.0` instead of a commit hash that its re-signed history
+  no longer contains, and `tools/release.ts` passes every value flag to
+  `git-release-squash` as `--flag=value`, so a release title that starts
+  with `--` still works under v0.4.0's stricter flag parser.
+
+- Building from source only: the test suite is faster. Fixtures that
+  were built identically many times are built once and copied
+  (DECISIONS 209; alone, ac-63 123 s → 37 s, ac-26 174 s → 76 s, ac-27
+  94 s → 19 s, ac-25 42 s → 25 s). Independent legs run concurrently:
+  ac-17 through the new test helper `runLegs` (DECISIONS 210, ~105 s →
+  ~33 s alone), the refactor-harness scratch cleanup's probes (97 s →
+  34 s), ac-07's read-only shows and ac-27's claim-timeout legs.
+  `edge/hardening-v3-1` now runs in the pool except the one leg that
+  races a file swap. Each sped-up file keeps every check it had
+  (DECISIONS 209, 210). The final 4.1.1 run took 294 s at 8 jobs under
+  heavy load (load average ~23), 15 s of it serial (ac-07's stress
+  run). A new test checks every `problems.ignore` example in the
+  shipped docs against nanojira itself.
+
 ## 4.1.0
 
 Additive, except two breaks: `new --input=… --dry-run` returns a new

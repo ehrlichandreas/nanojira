@@ -1,4 +1,3 @@
-/* @slow: one of the longest pooled files, ~109 s at 8 jobs (NJ_TEST_TIMES, 2026-10-18); start it first (run-all.ts, test/README.md) */
 /* AC-27 — `nj claim` / `nj release`, docs/SPECIFICATION.md § 9 "The acting
  * name", § 12 "Claims", § 12a, § 11a's claims paragraph, § 14 step 7a, § 7
  * (DECISIONS 110, 114, 115, 117, commit b7ffad6).
@@ -93,16 +92,40 @@ function ok(r: RunResult, what: string) {
 }
 
 /* EPIC-001 with TSK-001 and TSK-002, both todo and complete (ready-eligible,
- * so --ready / condition 5 has something to show either way). */
+ * so --ready / condition 5 has something to show either way). Built ONCE
+ * through the real binary (a real `nj init`, so C7 still checks the
+ * .gitignore init writes) into a template that every model() copies: the
+ * backlog stores no absolute path and NJ_NOW is pinned, so a copy is
+ * byte-identical to a fresh build; four spawns per leg were most of this
+ * file's wall time (DECISIONS 209, the same pattern as ac-63 and ac-26). */
+let modelTemplate: string | null = null;
 function model(label: string): Fixture {
+  if (!modelTemplate) {
+    const dir = H.freshDir('ac27-template');
+    const body = ['--description=Something.', '--acceptance=- [x] It works'];
+    ok(run(['init'], { cwd: dir }), 'nj init');
+    ok(run(['new', '--type=epic', '--title=Epic', '--description=The epic.'], { cwd: dir, env: at(NOW) }), 'new epic');
+    ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=Task one'].concat(body), { cwd: dir, env: at(NOW) }), 'new TSK-001');
+    ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=Task two'].concat(body), { cwd: dir, env: at(NOW) }), 'new TSK-002');
+    modelTemplate = dir;
+  }
+  return copyOf(modelTemplate, label);
+}
+/* model() with TSK-001 already claimed by alice (`nj claim`, NJ_NOW=LATER)
+ * -- the first step of about two dozen legs, built once the same way. */
+let claimedTemplate: string | null = null;
+function modelClaimedByAlice(label: string): Fixture {
+  if (!claimedTemplate) {
+    const t = model('ac27-template-claimed');
+    ok(claim(t, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim TSK-001 (template)');
+    claimedTemplate = t.dir;
+  }
+  return copyOf(claimedTemplate, label);
+}
+function copyOf(template: string, label: string): Fixture {
   const dir = H.freshDir(label);
-  const bl = path.join(dir, 'backlog');
-  const body = ['--description=Something.', '--acceptance=- [x] It works'];
-  ok(run(['init'], { cwd: dir }), 'nj init');
-  ok(run(['new', '--type=epic', '--title=Epic', '--description=The epic.'], { cwd: dir, env: at(NOW) }), 'new epic');
-  ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=Task one'].concat(body), { cwd: dir, env: at(NOW) }), 'new TSK-001');
-  ok(run(['new', '--type=task', '--parent=EPIC-001', '--title=Task two'].concat(body), { cwd: dir, env: at(NOW) }), 'new TSK-002');
-  return { dir, bl };
+  fs.cpSync(template, dir, { recursive: true });
+  return { dir, bl: path.join(dir, 'backlog') };
 }
 
 function taskPath(id: string) {
@@ -185,6 +208,39 @@ function refused(desc: string, x: Fixture, cmd: string, args: string[], code: st
   sameTree(desc + ': no byte of the backlog changed', before, snapshot(x.dir));
   return rj;
 }
+
+/* The two NJ_FAULT=before-compare legs of C4 (below): started here, run
+ * concurrently with everything else, asserted at the end of the sync part. */
+/* 30 s around the hook's fixed 10 s wait: a 5 s margin is node start plus
+ * rollback on an idle machine, not on a loaded one (run-all's parallel
+ * pool, DECISIONS 199). The env is exactly H.runJson's (runPath). */
+function claimTimeout(x: Fixture, id: string, authorEnv?: Env): Promise<RunResult & { json: any }> {
+  const env: Env = Object.assign({}, process.env, { NJ_NOW: NOW });
+  for (const k of ['NJ_ON_CHANGE', 'NJ_ON_CHANGE_TIMEOUT', 'NJ_HOOK_COMMAND', 'NJ_HOOK_IDS']) delete env[k];
+  Object.assign(env, { HOME, NJ_NOW: LATER, NJ_FAULT: 'before-compare' }, authorEnv || {});
+  delete env.NJ_BACKLOG;
+  const inv = H.njCommand(H.NJ as string, ['claim', '--id=' + id, '--json']);
+  return new Promise(resolve => {
+    const child = spawn(inv.cmd, inv.args, { cwd: x.dir, env, timeout: 30000 });
+    let out = '', err = '';
+    child.stdout.on('data', d => { out += d; });
+    child.stderr.on('data', d => { err += d; });
+    child.on('error', er => resolve({ status: null, stdout: '', stderr: String(er.message), json: null }));
+    child.on('close', (code, signal) => {
+      let json: any = null;
+      try { json = JSON.parse(out); } catch (e) { /* json stays null, as in H.runJson */ }
+      resolve({ status: code, stdout: out, stderr: err, signal, json });
+    });
+  });
+}
+const compareLegs = (() => {
+  const plain = model('ac27-c4-compare-plain');
+  const reassert = modelClaimedByAlice('ac27-c4-compare-reassert');
+  return {
+    plain: { x: plain, run: claimTimeout(plain, 'TSK-001', { NJ_AUTHOR: 'alice' }) },
+    reassert: { x: reassert, run: claimTimeout(reassert, 'TSK-001', { NJ_AUTHOR: 'alice' }) },
+  };
+})();
 
 /* ===================================================================== */
 /* C1 — claim, re-assert, steal, release: the state machine (§ 12a)       */
@@ -315,8 +371,7 @@ for (const bad of ['', ' ', '\t', 'a\nb', 'a:b']) {
   T.check('C2 claim --as=' + J(bad) + ': nothing written', J(snapshot(x.dir)) === J(before), 'changed');
 }
 for (const bad of ['', ' ', '\t', 'a\nb', 'a:b']) {
-  const x = model('ac27-c2-invalid-as-release');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim TSK-001');
+  const x = modelClaimedByAlice('ac27-c2-invalid-as-release');
   const before = snapshot(x.dir);
   const r = runJ(['release', '--id=TSK-001', '--as=' + bad], { cwd: x.dir, env: later() });
   T.exit('C2 release --as=' + J(bad) + ': exit 1', r, 1);
@@ -375,8 +430,7 @@ for (const bad of ['', ' ', '\t', 'a\nb', 'a:b']) {
   T.exit('C4 … and a later claim by someone else succeeds', after, 0);
 }
 {
-  const x = model('ac27-c4-reassert');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'initial claim');
+  const x = modelClaimedByAlice('ac27-c4-reassert');
   const r = claim(x, 'TSK-001', { NJ_AUTHOR: 'alice', NJ_FAULT: 'before-rename' });
   T.exit('C4 re-assertion, mirror write fails: exit 1', r, 1);
   T.eq('C4 re-assertion, mirror write fails: fault:before-rename', r.json && r.json.error, 'fault:before-rename');
@@ -387,8 +441,7 @@ for (const bad of ['', ' ', '\t', 'a\nb', 'a:b']) {
   T.eq('C4 re-assertion rollback: the claim is kept (assignee still alice)', assigneeOf(x, 'TSK-001'), 'alice');
 }
 {
-  const x = model('ac27-c4-steal');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'initial claim');
+  const x = modelClaimedByAlice('ac27-c4-steal');
   const r = claim(x, ['--id=TSK-001', '--steal=alice'], { NJ_AUTHOR: 'bob', NJ_FAULT: 'before-rename' });
   T.exit('C4 a landed steal, mirror write fails: exit 1', r, 1);
   T.eq('C4 landed steal, mirror write fails: fault:before-rename', r.json && r.json.error, 'fault:before-rename');
@@ -404,16 +457,13 @@ for (const bad of ['', ' ', '\t', 'a\nb', 'a:b']) {
  * than before-rename's immediate abort — the mirror write's guard is the
  * same compare-before-write (§ 12) either way, so the rollback outcome is
  * identical: a plain claim ends released, a re-assertion keeps claimed N. */
-/* 30 s around the hook's fixed 10 s wait: a 5 s margin is node start plus
- * rollback on an idle machine, not on a loaded one (run-all's parallel
- * pool, DECISIONS 199). */
-function claimTimeout(x: Fixture, id: string, authorEnv?: Env) {
-  const env = Object.assign({ HOME, NJ_NOW: LATER, NJ_FAULT: 'before-compare' }, authorEnv || {});
-  return H.runJson(['claim', '--id=' + id], { cwd: x.dir, env, unsetEnv: ['NJ_BACKLOG'], timeout: 30000 });
-}
+/* Each of the two legs holds its process for the full 10 s, so both are
+ * STARTED before C1 (compareLegs, above) and asserted here, in their
+ * original order, once the rest of the sync part has run. */
+async function assertCompareLegs() {
 {
-  const x = model('ac27-c4-compare-plain');
-  const r = claimTimeout(x, 'TSK-001', { NJ_AUTHOR: 'alice' });
+  const x = compareLegs.plain.x;
+  const r = await compareLegs.plain.run;
   T.exit('C4 (before-compare timeout) plain claim, mirror write never confirmed: exit 1', r, 1);
   T.eq('C4 (before-compare timeout): fault:before-compare', r.json && r.json.error, 'fault:before-compare');
   T.eq('C4 (before-compare timeout) plain claim rollback: two entries (claimed, then released)',
@@ -424,9 +474,8 @@ function claimTimeout(x: Fixture, id: string, authorEnv?: Env) {
   T.exit('C4 (before-compare timeout) … and a later claim by someone else succeeds', after, 0);
 }
 {
-  const x = model('ac27-c4-compare-reassert');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'initial claim');
-  const r = claimTimeout(x, 'TSK-001', { NJ_AUTHOR: 'alice' });
+  const x = compareLegs.reassert.x;
+  const r = await compareLegs.reassert.run;
   T.exit('C4 (before-compare timeout) re-assertion, mirror write never confirmed: exit 1', r, 1);
   T.eq('C4 (before-compare timeout) re-assertion: fault:before-compare', r.json && r.json.error, 'fault:before-compare');
   T.eq('C4 (before-compare timeout) re-assertion rollback: three entries', genNums(x, 'TSK-001'), [1, 2, 3]);
@@ -435,6 +484,7 @@ function claimTimeout(x: Fixture, id: string, authorEnv?: Env) {
     J([1, 2, 3].map(g => readGen(x, 'TSK-001', g))));
   T.eq('C4 (before-compare timeout) re-assertion rollback: the claim is kept (assignee still alice)',
     assigneeOf(x, 'TSK-001'), 'alice');
+}
 }
 
 /* ===================================================================== */
@@ -479,8 +529,7 @@ function stripClaimsLine(x: Fixture) {
   fs.writeFileSync(p, (H.readOrNull(p) || '').split('\n').filter(l => l.trim() !== '.nanojira/claims/').join('\n'));
 }
 {
-  const x = model('ac27-c7-unignored');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim TSK-001');
+  const x = modelClaimedByAlice('ac27-c7-unignored');
   stripClaimsLine(x);
   const d = runJ(['doctor'], { cwd: x.dir });
   T.check('C7 doctor reports backlog:claims_unignored', (H.doctorSet(d) || []).includes('backlog:claims_unignored:warning'), J(d.json && d.json.problems));
@@ -500,16 +549,14 @@ for (const [name, content, expected] of [
   ['no trailing newline', 'node_modules/', 'node_modules/\n.nanojira/claims/\n'],
   ['empty file', '', '.nanojira/claims/\n'],
 ]) {
-  const x = model('ac27-c7-fix-' + name.replace(/[^a-z]/gi, ''));
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim TSK-001');
+  const x = modelClaimedByAlice('ac27-c7-fix-' + name.replace(/[^a-z]/gi, ''));
   fs.writeFileSync(path.join(x.bl, '.gitignore'), content);
   const r = runJ(['doctor', '--fix'], { cwd: x.dir });
   T.exit('C7 --fix (' + name + '): exit 0', r, 0);
   T.eq('C7 --fix (' + name + '): appends the line correctly', H.readOrNull(path.join(x.bl, '.gitignore')), expected);
 }
 {
-  const x = model('ac27-c7-nogi');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim TSK-001');
+  const x = modelClaimedByAlice('ac27-c7-nogi');
   fs.rmSync(path.join(x.bl, '.gitignore'));
   const r = runJ(['doctor', '--fix'], { cwd: x.dir });
   T.exit('C7 no .gitignore at all: --fix exit 0', r, 0);
@@ -521,8 +568,7 @@ for (const [name, content, expected] of [
 /* C8 — archive/rm/unarchive remove claim directories (§ 12a, § 11a)      */
 /* ===================================================================== */
 {
-  const x = model('ac27-c8-archive');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim TSK-001');
+  const x = modelClaimedByAlice('ac27-c8-archive');
   T.check('C8 fixture: the claim directory exists', fs.existsSync(claimsDir(x, 'TSK-001')), '');
   ok(run(['set', '--id=TSK-001', '--status=done'], { cwd: x.dir, env: at(NOW) }), 'set done');
   const r = run(['archive', '--id=TSK-001'], { cwd: x.dir, env: later() });
@@ -530,15 +576,13 @@ for (const [name, content, expected] of [
   T.check('C8 archive removes the claim directory', !fs.existsSync(claimsDir(x, 'TSK-001')), '');
 }
 {
-  const x = model('ac27-c8-rm');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim TSK-001');
+  const x = modelClaimedByAlice('ac27-c8-rm');
   const r = run(['rm', '--id=TSK-001'], { cwd: x.dir, env: later() });
   T.exit('C8 rm a claimed element: exit 0', r, 0);
   T.check('C8 rm removes the claim directory', !fs.existsSync(claimsDir(x, 'TSK-001')), '');
 }
 {
-  const x = model('ac27-c8-unarchive');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim TSK-001');
+  const x = modelClaimedByAlice('ac27-c8-unarchive');
   ok(run(['set', '--id=TSK-001', '--status=done'], { cwd: x.dir, env: at(NOW) }), 'set done');
   ok(run(['archive', '--id=TSK-001'], { cwd: x.dir, env: later() }), 'archive');
   T.check('C8 fixture: claim dir gone after archive', !fs.existsSync(claimsDir(x, 'TSK-001')), '');
@@ -569,8 +613,7 @@ for (const [name, content, expected] of [
 /* auto-resolved (§ 12a, § 14 step 7a)                                    */
 /* ===================================================================== */
 {
-  const x = model('ac27-c9-done');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim TSK-001');
+  const x = modelClaimedByAlice('ac27-c9-done');
   ok(run(['set', '--id=TSK-001', '--status=done'], { cwd: x.dir, env: at(NOW) }), 'set done');
   const r = runJ(['doctor', '--fix'], { cwd: x.dir });
   T.exit('C9 doctor --fix on a done-but-live claimed element: exit 0', r, 0);
@@ -599,8 +642,7 @@ for (const [name, content, expected] of [
   T.check('C9 --fix removes it', !fs.existsSync(claimsDir(x, 'TSK-001')), '');
 }
 {
-  const x = model('ac27-c9-live-entries');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim');
+  const x = modelClaimedByAlice('ac27-c9-live-entries');
   ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 're-assert');
   const before = genNums(x, 'TSK-001').map(g => readGen(x, 'TSK-001', g));
   const r = runJ(['doctor', '--fix'], { cwd: x.dir });
@@ -609,8 +651,7 @@ for (const [name, content, expected] of [
   T.eq('C9 --fix never prunes a live claim\'s entries', after, before);
 }
 {
-  const x = model('ac27-c9-mismatch');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim');
+  const x = modelClaimedByAlice('ac27-c9-mismatch');
   const p = elementFile(x, 'TSK-001');
   fs.writeFileSync(p, (H.readOrNull(p) || '').replace(/^assignee: alice$/m, 'assignee: someone-else'));
   const d1 = runJ(['doctor'], { cwd: x.dir });
@@ -626,8 +667,7 @@ for (const [name, content, expected] of [
 /* C10 — non-numeric entries in a claims directory (§ 12 "Claims")        */
 /* ===================================================================== */
 {
-  const x = model('ac27-c10-stray-tmp');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim');
+  const x = modelClaimedByAlice('ac27-c10-stray-tmp');
   fs.mkdirSync(claimsDir(x, 'TSK-001'), { recursive: true });
   fs.writeFileSync(path.join(claimsDir(x, 'TSK-001'), '.nj-tmp-12345-abcde'), 'claimed\nghost\n' + LATER + '\n');
   const show = runJ(['show', '--id=TSK-001'], { cwd: x.dir });
@@ -648,8 +688,7 @@ for (const [name, content, expected] of [
   /* AMBIGUITIES.md 84: a third kind of file (neither a generation nor a
    * .nj-tmp-* temp file) is unpinned. Asserted here only as "must not
    * crash a read" — nothing stronger. */
-  const x = model('ac27-c10-junk');
-  ok(claim(x, 'TSK-001', { NJ_AUTHOR: 'alice' }), 'claim');
+  const x = modelClaimedByAlice('ac27-c10-junk');
   fs.mkdirSync(claimsDir(x, 'TSK-001'), { recursive: true });
   fs.writeFileSync(path.join(claimsDir(x, 'TSK-001'), 'README'), 'not a generation\n');
   const show = runJ(['show', '--id=TSK-001'], { cwd: x.dir });
@@ -701,6 +740,7 @@ function parseJsonStdout(r: RunResult) {
 }
 
 (async () => {
+  await assertCompareLegs();
   {
     const x = model('ac27-c5-claim');
     const N = 20;

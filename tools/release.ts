@@ -180,8 +180,11 @@ if (apply) {
 const bin = path.join(ROOT, 'node_modules', '.bin', 'git-release-squash');
 if (!fs.existsSync(bin)) usageError(`git-release-squash not found at ${bin} -- npm install first`);
 
-const squashArgs = ['tail', ROOT, '--name', NAME, '--tag', tag]
-  .concat(message !== undefined ? ['--message', message] : ['--message-file', messageFile as string])
+// Every value flag as --flag=value: from git-history-tools v0.4.0 on (its
+// D17), a space-separated value starting with `--` is "missing value", so
+// `--message --x` would refuse a title that starts with `--`.
+const squashArgs = ['tail', ROOT, '--name=' + NAME, '--tag=' + tag]
+  .concat(message !== undefined ? ['--message=' + message] : ['--message-file=' + (messageFile as string)])
   .concat(apply ? ['--apply'] : []);
 
 const r = spawnSync(bin, squashArgs, { cwd: ROOT, env: process.env, stdio: 'inherit' });

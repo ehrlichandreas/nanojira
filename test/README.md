@@ -113,7 +113,9 @@ mark a file:
 - a rendezvous instead of a sleep.
 
 Use the marker only when the race itself cannot be removed from the test
-side.
+side, and keep what it holds back small: split the leg that needs it into
+its own file (`edge/hardening-v3-1-t1-race.ts` holds the one serial leg of
+`edge/hardening-v3-1.ts`, which runs in the pool).
 
 The `NJ_FAULT=before-compare` legs used to be the usual case. They slept
 1 s and assumed nj had reached the hold by then; a late nj on a loaded
@@ -135,10 +137,15 @@ files are dispatched first, so a long file does not start late and become
 the last one running. Only the start order changes; output order and
 verdicts do not, and `--jobs=1` ignores the marker.
 
-Mark roughly the `--jobs` longest pooled files. To find them, set
-`NJ_TEST_TIMES=<file>`: `run-all.ts` writes every file's wall time there
-(TSV, slowest first, with its phase and start offset). Stdout is
-unchanged. Re-check the list when a file's runtime changes a lot.
+Mark only clear outliers: files several times longer than a typical
+pooled file (on 2026-10-18: over ~60 s at 8 jobs, against a mean of
+~14 s). The pool now ends at about its summed time / `--jobs`, so start
+order barely matters any more (DECISIONS 209); the files ranked just
+below the outliers sit in a band that reshuffles from run to run and
+are not marked. To find the outliers, set `NJ_TEST_TIMES=<file>`:
+`run-all.ts` writes every file's wall time there (TSV, slowest first,
+with its phase and start offset). Stdout is unchanged. Re-check the
+marks when a file's runtime changes a lot.
 
 Every file must also stay **isolated**:
 

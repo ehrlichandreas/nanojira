@@ -78,6 +78,31 @@ function gitIn(dir: string, args: string[], env?: Record<string, string>) {
   return spawnSync('git', args, { cwd: dir, encoding: 'utf8', env: Object.assign({}, process.env, env || {}) });
 }
 
+/* git-release-squash has nothing to squash when HEAD is itself a release
+ * tag (main right after a release): a dry run exits 1 before it prints a
+ * plan, and an --apply would stop there too, hiding whether it was refused
+ * first. A scratch clone whose HEAD is tagged therefore gets one empty
+ * commit on top -- fixed date, throwaway identity, unsigned, in the clone
+ * only -- so every leg runs the same either way. ISOLATED_GIT keeps the
+ * machine's global and system config out of it: --no-verify skips only
+ * the pre-commit and commit-msg hooks, and a global core.hooksPath
+ * would still run post-commit. */
+const UNTAG_ENV = Object.assign({
+  GIT_AUTHOR_NAME: 'tmp', GIT_AUTHOR_EMAIL: 'tmp@invalid', GIT_AUTHOR_DATE: '2026-01-03T12:00:00Z',
+  GIT_COMMITTER_NAME: 'tmp', GIT_COMMITTER_EMAIL: 'tmp@invalid', GIT_COMMITTER_DATE: '2026-01-03T12:00:00Z',
+}, ISOLATED_GIT);
+function untagHead(label: string, dir: string): void {
+  const tagsAtHead = () => gitIn(dir, ['tag', '--points-at', 'HEAD']).stdout.trim();
+  let detail = '';
+  if (tagsAtHead() !== '') {
+    const c = gitIn(dir, ['commit', '--quiet', '--allow-empty', '--no-gpg-sign', '--no-verify',
+      '-m', 'release-regression: HEAD was a release tag'], UNTAG_ENV);
+    detail = c.stderr;
+  }
+  T.check(label + ' fixture: the clone\'s HEAD carries no tag (git-release-squash has a commit to squash)',
+    tagsAtHead() === '', detail || tagsAtHead());
+}
+
 /* A scratch clone of this repo with the working tree's own release.ts
  * copied over the committed one and node_modules symlinked in (so
  * git-release-squash is genuinely installed), its package.json version
@@ -86,6 +111,7 @@ function scratchClone(label: string): { dir: string; version: string } {
   const dir = H.freshDir(label);
   const clone = spawnSync('git', ['clone', '--quiet', ROOT, dir], { encoding: 'utf8', timeout: 60000 });
   T.check(label + ' fixture: git clone of this repo into a scratch dir', clone.status === 0, clone.stderr);
+  untagHead(label, dir);
   fs.mkdirSync(path.join(dir, 'tools'), { recursive: true });
   fs.copyFileSync(RELEASE, path.join(dir, 'tools', 'release.ts'));
   fs.symlinkSync(path.join(ROOT, 'node_modules'), path.join(dir, 'node_modules'));
@@ -201,6 +227,7 @@ function pickUntaggedVersion(repoDir: string): string {
   const scratch = H.freshDir('release-ac2');
   const clone = spawnSync('git', ['clone', '--quiet', ROOT, scratch], { encoding: 'utf8', timeout: 60000 });
   T.check('AC2 fixture: git clone of this repo into a scratch dir', clone.status === 0, clone.stderr);
+  untagHead('AC2', scratch);
 
   fs.mkdirSync(path.join(scratch, 'tools'), { recursive: true });
   fs.copyFileSync(RELEASE, path.join(scratch, 'tools', 'release.ts'));
@@ -457,6 +484,7 @@ function assertFatFingerIsSafe(label: string, fatFingerArgs: string[]): void {
   const scratch = H.freshDir('release-fatfinger-repo');
   const clone = spawnSync('git', ['clone', '--quiet', ROOT, scratch], { encoding: 'utf8', timeout: 60000 });
   T.check(label + ' fixture: git clone of this repo into a scratch dir', clone.status === 0, clone.stderr);
+  untagHead(label, scratch);
   fs.mkdirSync(path.join(scratch, 'tools'), { recursive: true });
   fs.copyFileSync(RELEASE, path.join(scratch, 'tools', 'release.ts'));
   // Without this, release.ts's own node_modules/.bin/git-release-squash
@@ -493,5 +521,54 @@ function assertFatFingerIsSafe(label: string, fatFingerArgs: string[]): void {
 
 assertFatFingerIsSafe('AC4 fat-finger (--message --apply)', ['--message', '--apply']);
 assertFatFingerIsSafe('AC4 fat-finger (--message-file --apply)', ['--message-file', '--apply']);
+
+/* ---------------------------------------------------------------- */
+/* 6. Every value flag reaches git-release-squash as --flag=value.  */
+/* From git-history-tools v0.4.0 on (its D17), a space-separated    */
+/* value that starts with `--` is "missing value for --flag", so    */
+/* `--message --x` would refuse a title starting with `--`. A fake  */
+/* git-release-squash records its argv, one per line, so the exact  */
+/* contract is checked whichever ght version is installed.          */
+/* ---------------------------------------------------------------- */
+function argvProbe(label: string): { dir: string; version: string; argvFile: string } {
+  const dir = H.freshDir(label);
+  const clone = spawnSync('git', ['clone', '--quiet', ROOT, dir], { encoding: 'utf8', timeout: 60000 });
+  T.check(label + ' fixture: git clone of this repo into a scratch dir', clone.status === 0, clone.stderr);
+  fs.mkdirSync(path.join(dir, 'tools'), { recursive: true });
+  fs.copyFileSync(RELEASE, path.join(dir, 'tools', 'release.ts'));
+  const argvFile = path.join(H.freshDir(label + '-argv'), 'argv.txt');
+  const binDir = path.join(dir, 'node_modules', '.bin');
+  fs.mkdirSync(binDir, { recursive: true });
+  fs.writeFileSync(path.join(binDir, 'git-release-squash'),
+    '#!/bin/sh\nfor a in "$@"; do printf \'%s\\n\' "$a"; done > ' + JSON.stringify(argvFile) + '\n', { mode: 0o755 });
+  const version = pickUntaggedVersion(dir);
+  fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify(Object.assign({}, ROOT_PKG, { version })));
+  return { dir, version, argvFile };
+}
+
+{
+  const p = argvProbe('release-argv-message');
+  const title = '--leading dashes title';
+  const r = runRelease(path.join(p.dir, 'tools', 'release.ts'), p.dir,
+    [p.version, '--message', title], { RELEASE_TEST_CMD: 'false' });
+  T.check('AC10 --message dry run: exit 0', r.status === 0, 'exit ' + r.status + '\n' + r.stderr + r.stdout);
+  const argv = fs.existsSync(p.argvFile) ? fs.readFileSync(p.argvFile, 'utf8').split('\n').slice(0, -1) : [];
+  T.eq('AC10 --message: git-release-squash gets every value flag as --flag=value (a title starting with -- included)',
+    JSON.stringify(argv),
+    JSON.stringify(['tail', p.dir, '--name=' + NAME, '--tag=v' + p.version, '--message=' + title]));
+}
+
+{
+  const p = argvProbe('release-argv-message-file');
+  const msgFile = path.join(H.freshDir('release-argv-msgfile'), 'msg.txt');
+  fs.writeFileSync(msgFile, 'a file title\n\nbody\n');
+  const r = runRelease(path.join(p.dir, 'tools', 'release.ts'), p.dir,
+    [p.version, '--message-file', msgFile], { RELEASE_TEST_CMD: 'false' });
+  T.check('AC10 --message-file dry run: exit 0', r.status === 0, 'exit ' + r.status + '\n' + r.stderr + r.stdout);
+  const argv = fs.existsSync(p.argvFile) ? fs.readFileSync(p.argvFile, 'utf8').split('\n').slice(0, -1) : [];
+  T.eq('AC10 --message-file: git-release-squash gets --message-file=<path>',
+    JSON.stringify(argv),
+    JSON.stringify(['tail', p.dir, '--name=' + NAME, '--tag=v' + p.version, '--message-file=' + msgFile]));
+}
 
 T.finish();

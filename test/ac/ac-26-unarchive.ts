@@ -1,4 +1,3 @@
-/* @slow: one of the longest pooled files, ~142 s at 8 jobs (NJ_TEST_TIMES, 2026-10-18); start it first (run-all.ts, test/README.md) */
 /* AC-26 — `nj unarchive`, docs/SPECIFICATION.md § 11a (v3.1 proposal § B,
  * promoted: DECISIONS 110/112).
  *
@@ -25,7 +24,8 @@
  * command time; the D90/D94 merge on the way back; emptied ID-shaped archive
  * folders removed; `status` kept; order and atomicity as `archive` (DECISIONS
  * 91 B16) and a second unarchive completing a crashed one; the § 9
- * read-only amendment; the known flags; the output shape.
+ * read-only amendment; the known flags; the output shape; and `list`'s
+ * `counts` with archived elements (DECISIONS 26, TSK-021: U7).
  *
  * LAYOUT-NEUTRAL: backlogs come from `nj init`, elements from `nj new`; the
  * one bookkeeping edit (a `layout` block) goes to the config where init put
@@ -143,8 +143,15 @@ const OTHERS = ['EPIC-002', 'TSK-003'];
  *          └─ TSK-002
  * EPIC-002 ── TSK-003                   (active, todo: must never be touched)
  */
-function model(label: string, layout?: any): Model {
-  const dir = H.freshDir(label);
+/* Built through the real binary once per layout, then copied: the backlog
+ * stores no absolute path and NJ_NOW is pinned, so every copy is
+ * byte-identical to a fresh build (mtimes kept from the template; DECISIONS 209). */
+const templates = new Map<string, string>();
+function template(layout?: any): string {
+  const key = J(layout || null);
+  const have = templates.get(key);
+  if (have) return have;
+  const dir = H.freshDir('ac26-template');
   const bl = path.join(dir, 'backlog');
   ok(run(['init'], { cwd: dir }), 'nj init');
   if (layout) setLayout(bl, layout);
@@ -159,7 +166,14 @@ function model(label: string, layout?: any): Model {
   for (const id of ['SUB-001', 'TSK-001', 'TSK-002', 'EPIC-001']) {
     ok(run(['set', '--id=' + id, '--status=done'], { cwd: dir, env: at(NOW) }), 'set ' + id + ' done');
   }
-  return { dir, bl };
+  templates.set(key, dir);
+  return dir;
+}
+function model(label: string, layout?: any): Model {
+  const src = template(layout);
+  const dir = H.freshDir(label);
+  fs.cpSync(src, dir, { recursive: true, preserveTimestamps: true });
+  return { dir, bl: path.join(dir, 'backlog') };
 }
 function archive(x: Model, id: string): JsonRunResult { return ok(runJ(['archive', '--id=' + id], { cwd: x.dir, env: at(ARCHIVED_AT) }), 'archive ' + id); }
 function unarchive(x: Model, args: string | string[], env?: Record<string, string>): JsonRunResult {
@@ -187,7 +201,8 @@ function returned(tag: string, x: Model, before: Record<string, PlaceState>, r: 
     T.check(tag + ' ' + id + ': the archived key is gone (B-3)', !/^archived:/m.test(after[id].bytes || ''), J(after[id].bytes));
     T.check(tag + ' ' + id + ': status is kept (done)', /^status: done$/m.test(after[id].bytes || ''), J(after[id].bytes));
   }
-  T.check(tag + ' list shows the subtree again without --all', SUBTREE.every(id => listIds(x).includes(id)), J(listIds(x)));
+  const listed = listIds(x);
+  T.check(tag + ' list shows the subtree again without --all', SUBTREE.every(id => listed.includes(id)), J(listed));
   /* output shape (§ 11a "Output"): archive's, changed ["unarchived"] */
   const j = r.json || {};
   T.check(tag + ' --json: {ok:true, changed:["unarchived"]}', j.ok === true && J(j.changed) === J(['unarchived']), J(j).slice(0, 300));
@@ -565,6 +580,40 @@ for (const [name, layout, archRel, want] of [
 }
 
 /* ===================================================================== */
+/* U7 — `list` counts with archived elements: `counts` describes the      */
+/* backlog scope, archived elements included only with --all, never the   */
+/* filtered result (DECISIONS 26; TSK-021)                                */
+/* ===================================================================== */
+function listed(x: Model, args: string[]): { counts: any; ids: string[] } {
+  const r = runJ(['list'].concat(args), { cwd: x.dir });
+  return { counts: r.json ? r.json.counts : null, ids: r.json && Array.isArray(r.json.entries) ? r.json.entries.map((e: any) => e.id).sort() : [] };
+}
+for (const [name, layout] of [['type', null], ['hierarchy', { group: 'hierarchy' }]] as [string, any][]) {
+  const tag = 'U7 [' + name + ']';
+  const ALL = { total: SUBTREE.length + OTHERS.length, errors: 0, incomplete: 0 };
+  const ACTIVE = { total: OTHERS.length, errors: 0, incomplete: 0 };
+  const x = model('ac26-counts', layout);
+  T.eq(tag + ' fixture: before the archive, list counts all six elements', listed(x, []).counts, ALL);
+  archive(x, 'EPIC-001');
+  const plain = listed(x, []);
+  T.eq(tag + ' list --json after archiving EPIC-001: counts leave the archived subtree out', plain.counts, ACTIVE);
+  T.eq(tag + ' list --json after archiving EPIC-001: entries are the active elements', plain.ids, OTHERS.slice().sort());
+  const all = listed(x, ['--all']);
+  T.eq(tag + ' list --all --json: counts include the archived subtree', all.counts, ALL);
+  T.eq(tag + ' list --all --json: entries are every element', all.ids, SUBTREE.concat(OTHERS).sort());
+  const done = listed(x, ['--status=done']);
+  T.eq(tag + ' list --status=done --json: no entry (the done ones are archived)', done.ids, []);
+  T.eq(tag + ' list --status=done --json: counts describe the scope, not the filtered result', done.counts, ACTIVE);
+  const doneAll = listed(x, ['--all', '--status=done']);
+  T.eq(tag + ' list --all --status=done --json: entries are the archived subtree', doneAll.ids, SUBTREE.slice().sort());
+  T.eq(tag + ' list --all --status=done --json: counts describe the --all scope', doneAll.counts, ALL);
+  T.eq(tag + ' list --ready --json: counts leave the archived subtree out', listed(x, ['--ready']).counts, ACTIVE);
+  T.eq(tag + ' list --ready --all --json: counts include the archived subtree', listed(x, ['--ready', '--all']).counts, ALL);
+  T.exit(tag + ' unarchive EPIC-001', unarchive(x, 'EPIC-001'), 0);
+  T.eq(tag + ' list --json after the unarchive: counts include the subtree again', listed(x, []).counts, ALL);
+}
+
+/* ===================================================================== */
 /* U6 — order and atomicity (§ 11a, DECISIONS 91 B16; § 12 hooks)          */
 /* ===================================================================== */
 for (const [name, layout] of [['type', null], ['hierarchy', { group: 'hierarchy' }]] as [string, any][]) {
@@ -595,7 +644,8 @@ for (const [name, layout] of [['type', null], ['hierarchy', { group: 'hierarchy'
   const d = runJ(['doctor'], { cwd: x.dir });
   T.check(tag + ': the half-done state is no finding for the subtree (archived by location)',
     !(d.json && Array.isArray(d.json.problems) ? d.json.problems : []).some((p: any) => SUBTREE.includes(p.element)), J(d.json && d.json.problems).slice(0, 300));
-  T.check(tag + ': … and the files are still archived (not listed without --all)', !SUBTREE.some(id => listIds(x).includes(id)), J(listIds(x)));
+  const listed = listIds(x);
+  T.check(tag + ': … and the files are still archived (not listed without --all)', !SUBTREE.some(id => listed.includes(id)), J(listed));
   const r = unarchive(x, 'EPIC-001');
   returned(tag + ', completed by a second unarchive', x, before, r);
 }

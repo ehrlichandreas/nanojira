@@ -102,7 +102,11 @@ var SEVERITY = {
   "id:no_tombstone": "warning",
   "backlog:stray_tmp": "warning",
   "backlog:ids_missing": "error",
+  "backlog:ids_layout_mismatch": "error",
+  "backlog:legacy_layout": "error",
   "backlog:unreadable_dir": "error",
+  "backlog:status_stale": "warning",
+  "backlog:tags_stale": "warning",
   "config:invalid": "error",
   "claim:mismatch": "warning",
   "claim:orphaned": "warning",
@@ -1761,7 +1765,7 @@ import * as os2 from "node:os";
 import * as path4 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.1.0";
+var VERSION = "4.1.1";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;

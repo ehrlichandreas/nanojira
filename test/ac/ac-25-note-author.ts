@@ -1,4 +1,3 @@
-/* @slow: one of the longest pooled files, ~66 s at 8 jobs (NJ_TEST_TIMES, 2026-10-18); start it first (run-all.ts, test/README.md) */
 /* AC-25 — Note author (`NJ_AUTHOR`, `--as`), docs/SPECIFICATION.md § 9 "The
  * acting name" and § 10 (v3.1 proposal § 0/§ A, promoted: DECISIONS 110/112,
  * then generalized to cover `--as` by § C's promotion, DECISIONS 117/b7ffad6
@@ -73,10 +72,16 @@ function places(bl: string): Record<string, string> {
   })(bl, '');
   return out;
 }
-/* A backlog with EPIC-001 and TSK-001; `assignee` optional. */
-function backlog(label: string, assignee?: string | null): { dir: string; bl: string } {
-  const dir = H.freshDir(label);
-  const bl = path.join(dir, 'backlog');
+/* A backlog with EPIC-001 and TSK-001; `assignee` optional. Built through
+ * the real binary once per assignee, then copied: the backlog stores no
+ * absolute path and NJ_NOW is pinned, so every copy is byte-identical to a
+ * fresh build (mtimes kept from the template; DECISIONS 209). */
+const templates = new Map<string, string>();
+function template(assignee?: string | null): string {
+  const key = J(assignee || null);
+  const have = templates.get(key);
+  if (have) return have;
+  const dir = H.freshDir('ac25-template');
   const steps = [
     ['init'],
     ['new', '--type=epic', '--title=Epic', '--description=Something.'],
@@ -87,7 +92,14 @@ function backlog(label: string, assignee?: string | null): { dir: string; bl: st
     const r = run(s, { cwd: dir });
     if (r.missing || r.status !== 0) T.check('fixture: nj ' + s.join(' '), false, r.status + ' ' + J(r.stderr));
   }
-  return { dir, bl };
+  templates.set(key, dir);
+  return dir;
+}
+function backlog(label: string, assignee?: string | null): { dir: string; bl: string } {
+  const src = template(assignee);
+  const dir = H.freshDir(label);
+  fs.cpSync(src, dir, { recursive: true, preserveTimestamps: true });
+  return { dir, bl: path.join(dir, 'backlog') };
 }
 function taskFile(x: { bl: string }) { return path.join(x.bl, places(x.bl)['TSK-001'] || '<no TSK-001>'); }
 function bytes(p: string) { return H.readOrNull(p); }
