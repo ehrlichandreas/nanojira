@@ -23,6 +23,11 @@ function nowIso(): string {
   return new Date().toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
+/** The same clock as `nowIso()` (NJ_NOW when set, else the wall clock), as epoch ms — for `claim:stale`'s age arithmetic (§ 12 "Claims"). */
+function nowMs(): number {
+  return Date.parse(nowIso());
+}
+
 function mtimeIso(file: string) {
   try {
     return new Date(fs.statSync(file).mtime).toISOString().replace(/\.\d{3}Z$/, 'Z');
@@ -159,7 +164,11 @@ function atomicReplace(target: string, content: string) {
 // NJ_FAULT=before-compare covers all three.
 // `hint` is caller-specific: `archive` takes no `--force`, so pointing at it
 // there would name a flag the command rejects as unknown_field.
-function compareGuard(el: Element, force: boolean, backlog?: string, hint?: string) {
+// `catchable`: a batch write (§ 9 "Batch writes") needs the before-compare
+// timeout to fail only that one ID and be spent (D135, D137) -- the same
+// reason mirrorWrite exists alongside atomicWrite. A single-ID command
+// (the default) keeps the exact hard-exit behaviour it always had.
+function compareGuard(el: Element, force: boolean, backlog?: string, hint?: string, catchable?: boolean) {
   // Fault hook: hold between the first read and the compare re-read so a test
   // can deterministically change the target underneath us (§ 12).
   if (process.env.NJ_FAULT === 'before-compare' && backlog) {
@@ -167,7 +176,9 @@ function compareGuard(el: Element, force: boolean, backlog?: string, hint?: stri
     const deadline = Date.now() + 10000;
     while (!fs.existsSync(marker)) {
       if (Date.now() >= deadline) {
-        hardExit('fault:before-compare', 'nj: before-compare timed out after 10s waiting for .nj-fault-go');
+        const msg = 'nj: before-compare timed out after 10s waiting for .nj-fault-go';
+        if (catchable) fail('fault:before-compare', msg);
+        hardExit('fault:before-compare', msg);
       }
       sleepMs(50);
     }
@@ -184,6 +195,18 @@ function compareGuard(el: Element, force: boolean, backlog?: string, hint?: stri
 function guardedWrite(el: Element, content: string, force: boolean, backlog?: string) {
   compareGuard(el, force, backlog);
   atomicWrite(el.file, content);
+}
+
+/**
+ * Identical to guardedWrite, except the write goes through mirrorWrite
+ * instead of atomicWrite: a batch write (§ 9 "Batch writes") needs its
+ * `NJ_FAULT` hook catchable, the same reason `nj claim`'s own mirror write
+ * already needs it -- a single-ID command keeps calling guardedWrite
+ * unchanged, so `NJ_FAULT` still aborts it outright (D135).
+ */
+function guardedWriteCatchable(el: Element, content: string, force: boolean, backlog?: string) {
+  compareGuard(el, force, backlog, undefined, true);
+  mirrorWrite(el.file, content);
 }
 
 // -------------------------------------------------------------------- moves
@@ -258,4 +281,4 @@ function renderElement(el: Element, fieldOverrides: Map<string, string | string[
   return serialize(fields, order, bodyOverride === undefined ? el.body : bodyOverride);
 }
 
-export { nowIso, mtimeIso, readTombstones, allocateId, atomicWrite, mirrorWrite, atomicReplace, compareGuard, guardedWrite, planMove, runMove, renderElement };
+export { nowIso, nowMs, mtimeIso, readTombstones, allocateId, atomicWrite, mirrorWrite, atomicReplace, compareGuard, guardedWrite, guardedWriteCatchable, planMove, runMove, renderElement, sleepMs };

@@ -20,7 +20,7 @@ function cmdStatus(flags: Flags) {
   if (flags.has('json')) {
     out(JSON.stringify({
       backlog: ctx.backlog, counts,
-      ready: ready.map((e) => entryJson(e, ctx.backlog)), incomplete: incomplete.map((e) => entryJson(e, ctx.backlog)),
+      ready: ready.map((e) => entryJson(e, ctx.backlog, ctx.cfg)), incomplete: incomplete.map((e) => entryJson(e, ctx.backlog, ctx.cfg)),
     }, null, 2));
     return 0;
   }

@@ -47,7 +47,7 @@ function cmdRm(flags: Flags) {
     .filter((e: Element) => !victimIds.has(e.id) && e.depends_on.some((d: string) => victimIds.has(d)))
     .sort(compareElements);
 
-  const entries: EntryJson[] = victims.map((v) => entryJson(v, ctx.backlog));
+  const entries: EntryJson[] = victims.map((v) => entryJson(v, ctx.backlog, ctx.cfg));
   // Children first, so an interrupted cascade never leaves an orphan behind.
   // Under `hierarchy` an epic's or task's own folder goes too, but only once
   // it is empty — never a recursive delete of whatever else it holds (§ 12).

@@ -129,4 +129,75 @@ for (const [desc, args] of [['list', ['list']], ['init', ['init']]]) {
   if (desc === 'init') T.check(d + ': no ./backlog created', !fs.existsSync(path.join(work, 'backlog')), path.join(work, 'backlog'));
 }
 
-T.finish();
+/* ===================================================================== */
+/* E.1 (D138, § 4) — NJ_FAULT=njrc-swap: the SAME foreign-link scenario   */
+/* above, made deterministic instead of a chance race. `nj` is paused in  */
+/* the window between the ownership `lstat` and the `open()`; while it    */
+/* waits, `.njrc` is swapped from a benign, self-owned target to the      */
+/* foreign-owned link, then released. A hit here proves the ownership     */
+/* check runs against what the fd actually opens — the post-swap target — */
+/* not a decision cached from the pre-swap `lstat`.                       */
+/* ===================================================================== */
+(async () => {
+  const { spawn } = require('child_process');
+  function startNj(args, o) {
+    const env = Object.assign({}, process.env, o.env || {});
+    delete env.NJ_BACKLOG;
+    const child = spawn(H.NODE, [H.NJ].concat(args), { cwd: o.cwd, env });
+    let out = '', err = '';
+    child.stdout.on('data', d => { out += d; });
+    child.stderr.on('data', d => { err += d; });
+    return new Promise(resolve => {
+      child.on('error', e => resolve({ status: null, stdout: '', stderr: String(e.message) }));
+      child.on('close', code => resolve({ status: code, stdout: out, stderr: err }));
+    });
+  }
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  const tag = 'E.1 [NJ_FAULT=njrc-swap, deterministic]';
+  const root2 = H.freshDir('fl-swap');
+  const proj2 = path.join(root2, 'proj');
+  const work2 = path.join(proj2, 'work');
+  fs.mkdirSync(work2, { recursive: true });
+  const rc2 = path.join(proj2, '.njrc');
+  const bl2 = path.join(root2, 'backlog');
+
+  /* The initial, benign .njrc: self-owned, resolves to a real backlog —
+   * what the pre-swap `lstat` sees, and what a buggy pre-open-only check
+   * would keep trusting. */
+  {
+    const i = H.runNj(['init', '--backlog=' + bl2], { cwd: root2, env: { HOME }, unsetEnv: ['NJ_BACKLOG'] });
+    T.check(tag + ' fixture: nj init builds the backlog above', i.status === 0, J(i.stderr));
+    fs.writeFileSync(rc2, 'backlog = ' + bl2 + '\n');
+  }
+  /* Sanity: that benign .njrc, alone, is accepted (no swap in play). */
+  {
+    const solo = H.runNj(['list'], { cwd: work2, env: { HOME }, unsetEnv: ['NJ_BACKLOG'] });
+    T.check(tag + ' fixture: the benign .njrc alone is accepted', solo.status === 0, J(solo.stderr));
+  }
+
+  const donePromise = startNj(['list', '--json'],
+    { cwd: work2, env: { HOME, NJ_FAULT: 'njrc-swap' } });
+  await sleep(1000);                                  // let nj finish its lstat, enter the wait
+  fs.unlinkSync(rc2);
+  if (ME === 0) {
+    fs.symlinkSync(target, rc2);
+    try { fs.lchownSync(rc2, 1, 0); } catch (e) { T.check(tag + ' fixture: lchown for the swap', false, e.message); }
+  } else {
+    fs.linkSync(foreignLink, rc2);                    // the same foreign link used above
+  }
+  fs.writeFileSync(path.join(proj2, '.nj-fault-go'), '');   // release nj — the swap is already in place
+  const r = await donePromise;
+
+  T.exit(tag + ': exit 1 (the post-swap, foreign-owned target wins)', r, 1);
+  let json = null; try { json = JSON.parse(r.stdout); } catch (e) { /* reported below */ }
+  T.check(tag + ': --json still parses (no crash)', !!json, 'stdout: ' + J(r.stdout) + ' stderr: ' + J(r.stderr));
+  T.eq(tag + ': error is invalid_njrc, not fault:njrc-swap — the timeout never happened, the marker did', json && json.error, 'invalid_njrc');
+  const m = OWNED_RE.exec(r.stderr || '');
+  T.check(tag + ': stderr names the foreign uid (proves the fd-based check saw the post-swap target)',
+    !!m && m[2] === String(linkUid), 'stderr = ' + J(r.stderr) + ', expected uid ' + linkUid);
+  T.check(tag + ': no ./backlog created under work2 (the read never proceeded)',
+    !fs.existsSync(path.join(work2, 'backlog')), path.join(work2, 'backlog'));
+
+  T.finish();
+})();

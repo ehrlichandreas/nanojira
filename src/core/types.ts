@@ -110,6 +110,8 @@ export interface Config {
   statuses: string[];
   sections: { description: string[]; acceptance: string[] };
   layout: Layout;
+  /** § 5 `claims`: not written by `init`; 0 disables `claim:stale` (§ 7, § 12 "Claims"). */
+  claims: { staleAfterHours: number };
 }
 
 /** One walk over the backlog (layout.ts `scanBacklog`). */

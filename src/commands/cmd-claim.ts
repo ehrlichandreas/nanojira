@@ -2,14 +2,15 @@
 
 // `nj claim` (§ 12 "Claims", § 12a).
 
-import type { Flags, Element } from '../core/types.ts';
+import type { Flags, Element, Context } from '../core/types.ts';
 
 import { resolveActingName } from '../core/actor.ts';
 import { checkFlags, flagString } from '../core/args.ts';
 import type { Entry } from '../core/claims.ts';
 import { rollback, transition } from '../core/claims.ts';
-import { context, requireTargetFlagSyntax, resolveTarget, requireWritable, requireActive } from '../core/context.ts';
-import { entryJson, elementProblems } from '../core/derive.ts';
+import { parseBatchIds, runBatch } from '../core/batch.ts';
+import { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireActive } from '../core/context.ts';
+import { entryJson } from '../core/derive.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, out } from '../core/output.ts';
 import { refreshStatus } from '../core/status.ts';
@@ -17,26 +18,8 @@ import { compareGuard, mirrorWrite, nowIso, renderElement } from '../core/store.
 
 const STABLE_HINT = 'the element changed in parallel — nj claim takes no --force; retry once it is stable';
 
-function cmdClaim(flags: Flags) {
-  checkFlags(flags, ['status'], new Set(['json', 'id', 'file', 'as', 'steal']), true);
-  const json = flags.has('json');
-  const ctx = context(flags);
-
-  requireTargetFlagSyntax(flags);
-  const name = resolveActingName(flags, true) as string;
-
-  const el = resolveTarget(ctx, flags, true);
-  requireWritable(el);
-  requireActive(el, 'claim');
-
-  const status = flagString(flags, 'status');
-  if (status !== undefined && !ctx.cfg.statuses.includes(status)) {
-    fail('invalid_value', `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(', ')}`);
-  }
-
-  const steal = flagString(flags, 'steal');
-  const ts = nowIso();
-
+/** The claim CAS loop, mirror write and rollback for one element — already catchable (mirrorWrite), so the single and batch paths share it unchanged. */
+function claimOne(ctx: Context, el: Element, name: string, status: string | undefined, steal: string | undefined, ts: string) {
   const decide = (h: Entry | null) => {
     const held = h && h.kind === 'claimed' ? h.name : null;
     if (steal !== undefined) {
@@ -71,7 +54,7 @@ function cmdClaim(flags: Flags) {
   if (status !== undefined) overrides.set('status', status);
 
   try {
-    compareGuard(el, false, ctx.backlog, STABLE_HINT);
+    compareGuard(el, false, ctx.backlog, STABLE_HINT, true);
     mirrorWrite(el.file, renderElement(el, overrides, undefined));
   } catch (e) {
     // A landed steal is never rolled back (§ 12a): reported as
@@ -86,19 +69,67 @@ function cmdClaim(flags: Flags) {
 
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
   deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+  const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
+  const claim = { by: name, since: ts };
+  return Object.assign(
+    { ok: true, changed, entry, _problems: entry._problems, claim },
+    stolenFrom !== undefined ? { stolen_from: stolenFrom } : {},
+    previousAssignee !== undefined ? { previous_assignee: previousAssignee } : {},
+  );
+}
+
+function cmdClaim(flags: Flags) {
+  checkFlags(flags, ['status'], new Set(['json', 'id', 'file', 'as', 'steal']), true);
+  const json = flags.has('json');
+  const ctx = context(flags);
+
+  requireTargetFlagSyntax(flags);
+  const name = resolveActingName(flags, true) as string;
+
+  const status = flagString(flags, 'status');
+  if (status !== undefined && !ctx.cfg.statuses.includes(status)) {
+    fail('invalid_value', `unknown status '${status}'`, `Known statuses: ${ctx.cfg.statuses.join(', ')}`);
+  }
+  const steal = flagString(flags, 'steal');
+
+  // Batch writes (§ 9): --id=A,B,C, two or more. A single --id is
+  // unaffected and falls through to the unchanged path below.
+  const batchIds = parseBatchIds(flags);
+  if (batchIds !== null) {
+    const result = runBatch<Element, object>(
+      batchIds,
+      (id) => {
+        const el = resolveById(ctx, id, true);
+        requireWritable(el);
+        requireActive(el, 'claim');
+        return el;
+      },
+      (el) => claimOne(ctx, el, name, status, steal, nowIso()),
+    );
+    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    const wrapper = { ok: result.ok, results: result.results };
+    if (json) out(JSON.stringify(wrapper, null, 2));
+    else for (const r of result.results as any[]) out(r.ok ? `${r.id} claimed by ${name}` : `${r.id}: Error: ${r.error}`);
+    return result.ok ? 0 : 1;
+  }
+
+  const el = resolveTarget(ctx, flags, true);
+  requireWritable(el);
+  requireActive(el, 'claim');
+
+  const ts = nowIso();
+  const single = claimOne(ctx, el, name, status, steal, ts);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
 
-  const claim = { by: name, since: ts };
   if (json) {
-    const entry = entryJson(fresh, ctx.backlog);
-    out(JSON.stringify(Object.assign(
-      { ok: true, id: fresh.id, changed, entry, _problems: entry._problems, claim },
-      stolenFrom !== undefined ? { stolen_from: stolenFrom } : {},
-      previousAssignee !== undefined ? { previous_assignee: previousAssignee } : {},
-    ), null, 2));
+    // Field order: `ok` then `id`, matching every other single-ID JSON
+    // shape (rm, set, note, check) — Object.assign keeps a key already in
+    // the target at its target position, so pre-seeding both here (not
+    // just `id`) is what keeps `ok` first.
+    out(JSON.stringify(Object.assign({ ok: (single as any).ok, id: el.id }, single), null, 2));
   } else {
-    out(`${fresh.id} claimed by ${name}${status !== undefined ? ` (status: ${status})` : ''}`);
-    for (const code of elementProblems(fresh)) out(`⚠ ${fresh.id}: ${code}`);
+    out(`${el.id} claimed by ${name}${status !== undefined ? ` (status: ${status})` : ''}`);
+    for (const code of (single as any)._problems as string[]) out(`⚠ ${el.id}: ${code}`);
   }
   return 0;
 }

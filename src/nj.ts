@@ -12,7 +12,9 @@
 // module.exports boundary this replaced.
 import { parseArgs } from './core/args.ts';
 import { cmdArchive } from './commands/cmd-archive.ts';
+import { cmdCheck } from './commands/cmd-check.ts';
 import { cmdClaim } from './commands/cmd-claim.ts';
+import { cmdFind } from './commands/cmd-find.ts';
 import { cmdDoctor } from './commands/cmd-doctor.ts';
 import { cmdInit } from './commands/cmd-init.ts';
 import { cmdList } from './commands/cmd-list.ts';
@@ -43,8 +45,10 @@ function main(argv: string[]) {
     case 'new': return cmdNew(flags);
     case 'set': return cmdSet(flags);
     case 'note': return cmdNote(flags, positional);
+    case 'check': return cmdCheck(flags);
     case 'show': return cmdShow(flags);
     case 'list': return cmdList(flags);
+    case 'find': return cmdFind(flags, positional);
     case 'tree': return cmdTree(flags);
     case 'rm': return cmdRm(flags);
     case 'archive': return cmdArchive(flags);

@@ -1,10 +1,10 @@
 {
-  "njSha256": "37a7ece6bcdd6a75d6fc85d2b9901879c64a405731175a0438ac1da59650431f",
-  "njPath": "../../../../../../../../../var/folders/xg/9sw6yt791zsf3rsmffcg8w2m0000gp/T/tmp.u4BbP9QUcR/projects/nanojira/dist/nj",
+  "njSha256": "4444cd04fd23361abacb676212b337ea9d89c58a9f1619883ac267dc455aaa0c",
+  "njPath": "../../../tmp/c7-dist-nj",
   "node": "v24.21.0",
   "platform": "darwin-arm64",
-  "recordedAt": "2026-10-03T21:21:28.666Z",
-  "calls": 6313,
+  "recordedAt": "2026-10-09T21:50:40.452Z",
+  "calls": 7086,
   "parts": [
     {
       "name": "fixtures",
@@ -13,8 +13,8 @@
     },
     {
       "name": "oracle",
-      "calls": 4200,
-      "detail": "passed 74/75, failed 0, cannot run 1"
+      "calls": 4973,
+      "detail": "passed 79/80, failed 0, cannot run 1"
     },
     {
       "name": "scratch",
@@ -50,6 +50,10 @@
     "ac/ac-25-note-author.js",
     "ac/ac-26-unarchive.js",
     "ac/ac-27-claim.js",
+    "ac/ac-28-check.js",
+    "ac/ac-29-stale-claims.js",
+    "ac/ac-30-find.js",
+    "ac/ac-31-batch.js",
     "fault/det-fence-heading.js",
     "fault/det-id-retry.js",
     "fault/fault-hook-json.js",
@@ -82,6 +86,7 @@
     "edge/fix-mtime-snapshot.js",
     "edge/frontmatter-grammar.js",
     "edge/hardening-njrc-foreign-link.js",
+    "edge/hardening-njrc-swap.js",
     "edge/hardening-v3-1.js",
     "edge/norm-tag-assignee-typos.js",
     "edge/norm-title-nfc-nfd.js",
@@ -99,7 +104,7 @@
     "edge/v3-2-regressions.js",
     "edge/write-encoding.js"
   ],
-  "testDigest": "67731e5362198f9a04eb17e7ffebc6c166a112687d90db40d3786a36bd8d0c43",
+  "testDigest": "5b1c4e0cf033527dd8fdfb5f6c3dba487a2e66bc24bcb4cbc61d9cc8db4be76a",
   "testDigestScope": [
     "test/ac/",
     "test/edge/",
@@ -127,5 +132,5 @@
     "edge/hardening-njrc-foreign-link.js: needs root, or a symlink owned by another non-root uid on the scratch filesystem, to prove a foreign-owned .njrc link is refused (DECISIONS 98); a normal user account on this machine has neither (718c230)"
   ],
   "note": "Comparison key excludes per-file raw sha; nsha (normalised content) is normative.",
-  "corpusSha256": "9d4c8561d9fadea5b3bc6afac09c099dbf4d9faf1e197eb2d32e507aa63409f3"
+  "corpusSha256": "dc7b7294e4a560d53e8052f44f108708d6bf8888ad09303dabaf223a486f0304"
 }

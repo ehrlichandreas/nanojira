@@ -71,6 +71,8 @@ const TABLE = [
   'claim:mismatch',
   'claim:orphaned',
   'backlog:claims_unignored',
+  /* spec v3.2 § B, promoted 8822e95: stale claims */
+  'claim:stale',
 ];
 
 /* Codes whose Doctor column is "—": workflow state that never becomes a doctor

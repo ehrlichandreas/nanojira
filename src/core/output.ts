@@ -70,9 +70,9 @@ function writeFeedback(el: Element, cfg: Config, headline: string) {
   }
 }
 
-function emitWriteResult(json: boolean, el: Element, changed: string[], backlog: string, extra?: object) {
+function emitWriteResult(json: boolean, el: Element, changed: string[], backlog: string, cfg: Config, extra?: object) {
   if (!json) return;
-  const entry = entryJson(el, backlog);
+  const entry = entryJson(el, backlog, cfg);
   // The top-level `_problems` mirrors entry._problems so an agent can branch on
   // one well-known place regardless of the command (§ 9).
   const res = Object.assign({ ok: true, id: el.id, changed, entry, _problems: entry._problems }, extra || {});

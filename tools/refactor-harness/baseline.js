@@ -579,15 +579,38 @@ function readRecords(p) {
 const CONCURRENT_SUITES = new Set([
   'oracle:ac/ac-07-concurrency.js',
   'oracle:edge/tombstone-partial-loss.js',
-  // C5 (§ 12a): real spawned parallel processes racing for a claim/steal/
-  // release — which one wins, and so the exact bytes of the claim sequence
-  // and the mirror write, is nondeterministic by design, the same reason
-  // AC-7 is here.
-  'oracle:ac/ac-27-claim.js',
+]);
+
+/**
+ * Finer than CONCURRENT_SUITES: some suites mix racy and deterministic
+ * scratch backlogs in one file, and `rec.label` is assigned per SUITE FILE
+ * (test/.../baseline.js's suite runner), not per scenario — so a whole-suite
+ * exclusion would also blind the diff to every deterministic backlog the
+ * same file happens to create. Keyed by suite label, each value a list of
+ * `backlogLabel` PREFIXES (nj-shim, H.freshDir's naming) that are racy within
+ * that suite; everything else in the same file stays in the strict compare.
+ *
+ * ac-27-claim.js's C5 block (§ 12a) spawns real concurrent child processes
+ * for claim/steal/release races — which one wins, and so the exact bytes of
+ * the claim sequence and mirror write, is nondeterministic by design, the
+ * same reason AC-7 is in CONCURRENT_SUITES above. Its other ~58 backlogs
+ * (C1-C4, C6-C10) use a fixed NJ_NOW and no concurrency, so they compare
+ * strictly like any other suite.
+ *
+ * The list is explicit rather than pattern-matched, same reasoning as
+ * CONCURRENT_SUITES: a NEW racy backlog in this suite is not silently
+ * tolerated, it shows up as a red diff and has to be entered here
+ * deliberately.
+ */
+const CONCURRENT_BACKLOG_PREFIXES = new Map([
+  ['oracle:ac/ac-27-claim.js', ['ac27-c5-claim', 'ac27-c5-steal', 'ac27-c5-release-steal']],
 ]);
 
 function isConcurrentProbe(rec) {
-  return CONCURRENT_SUITES.has(rec.label);
+  if (CONCURRENT_SUITES.has(rec.label)) return true;
+  const prefixes = CONCURRENT_BACKLOG_PREFIXES.get(rec.label);
+  if (!prefixes || !rec.backlogLabel) return false;
+  return prefixes.some((p) => rec.backlogLabel.startsWith(p));
 }
 
 /**
@@ -832,7 +855,7 @@ const excluded = markNondeterministic(oldRecs).filter(Boolean).length;
 process.stdout.write(`\nbaseline: ${oldRecs.length} calls, nj sha256 ${header.njSha256}\n`);
 const code = codeSha();
 process.stdout.write(`current : ${newRecs.length} calls, current code sha256 (${code.label}, ${code.files} files) ${code.sha}\n`);
-process.stdout.write(`compared: ${oldRecs.length - excluded} calls (${excluded} excluded as nondeterministic by design — AC-7 concurrency)\n`);
+process.stdout.write(`compared: ${oldRecs.length - excluded} calls (${excluded} excluded as nondeterministic by design — concurrency)\n`);
 
 if (!process.env.HARNESS_KEEP) {
   fs.rmSync(SCRATCH, { recursive: true, force: true });

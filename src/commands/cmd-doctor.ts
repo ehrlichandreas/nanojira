@@ -7,7 +7,7 @@ import type { Flags, Element, Context, Finding } from '../core/types.ts';
 import * as fs from 'fs';
 import * as path from 'path';
 import { checkFlags } from '../core/args.ts';
-import { allClaimDirs, claimsRootDir, highestEntry, removeClaimDirWholesale } from '../core/claims.ts';
+import { allClaimDirs, claimsRootDir, highestEntry, isClaimStale, removeClaimDirWholesale } from '../core/claims.ts';
 import {
   PREFIX_TYPE, PARENT_TYPE, SEVERITY,
   V3_DIR_REL, V3_CONFIG_REL, V3_IDS_REL, V3_INDEX_REL, LEGACY_CONFIG_REL, LEGACY_IDS_REL, LEGACY_INDEX_REL,
@@ -20,7 +20,7 @@ import { out } from '../core/output.ts';
 import { syncH1 } from '../core/parse.ts';
 import { V2_README, V3_README } from '../core/readme-texts.ts';
 import { statusIsFresh, refreshStatus } from '../core/status.ts';
-import { nowIso, mtimeIso, readTombstones, atomicWrite, planMove, runMove, renderElement } from '../core/store.ts';
+import { nowIso, nowMs, mtimeIso, readTombstones, atomicWrite, planMove, runMove, renderElement } from '../core/store.ts';
 
 // ------------------------------------------------------------------- doctor
 
@@ -132,6 +132,13 @@ function collectClaimFindings(ctx: Context): Finding[] {
     if (h && h.kind === 'claimed' && h.name !== el.assignee) {
       findings.push({ code: 'claim:mismatch', severity: 'warning', element: el.id, file: el.file,
         message: `claimed by '${h.name}' but assignee is '${el.assignee || '(empty)'}'` });
+    }
+    // claim:stale (§ 7, § 12 "Claims"): advisory only, reported here exactly
+    // as list/show report it (core/derive.ts entryJson) — never repaired by
+    // --fix (§ 14).
+    if (h && h.kind === 'claimed' && isClaimStale(h.time, ctx.cfg.claims.staleAfterHours, nowMs())) {
+      findings.push({ code: 'claim:stale', severity: 'warning', element: el.id, file: el.file,
+        message: `claimed by '${h.name}' since ${h.time}, past the ${ctx.cfg.claims.staleAfterHours}h staleness threshold` });
     }
   }
   return findings;
@@ -327,6 +334,26 @@ function fixStep0(ctx: Context, fc: FixShared) {
   const legacyIndex = path.join(backlog, LEGACY_INDEX_REL);
   if (fs.existsSync(legacyIndex)) fs.unlinkSync(legacyIndex);
   fc.actions.push(`migrated the legacy layout: ${LEGACY_CONFIG_REL} → ${V3_CONFIG_REL}, ${LEGACY_IDS_REL}/ → ${V3_IDS_REL}/`);
+}
+
+// 0 (continued). A backlog that is already v3 (not `backlog:legacy_layout`)
+// can still carry a stray top-level `.ids/` — the half of a crash between
+// step 0's two renames that left `.ids/` → `.nanojira/ids/` incomplete while
+// `.nanojira.json` → `.nanojira/config.json` finished (DECISIONS 108 G1).
+// Removed only when every tombstone name in it is already present in
+// `.nanojira/ids/` — never discard a tombstone that exists nowhere else,
+// since "never reuse" (§ 8) is the one invariant `--fix` cannot compromise
+// on. A note only, no new problem code: harmless one-time migration
+// residue, not a current defect for `doctor` to name.
+function fixStrayIds(ctx: Context, fc: FixShared) {
+  const backlog = ctx.backlog;
+  const strayDir = path.join(backlog, LEGACY_IDS_REL);
+  if (!fs.existsSync(strayDir)) return;
+  const stray = readTombstones(strayDir);
+  const real = readTombstones(path.join(backlog, V3_IDS_REL));
+  for (const id of stray) if (!real.has(id)) return;
+  fs.rmSync(strayDir, { recursive: true, force: true });
+  fc.notes.push(`removed the stray top-level ${LEGACY_IDS_REL}/ (every tombstone in it was already in ${V3_IDS_REL}/, § 14 step 0)`);
 }
 
 // The ONE verbatim line, replaced in place; a trailing `\r` is line-end
@@ -660,6 +687,12 @@ function doctorFix(flags: Flags, json: boolean) {
   // computes from it.
   if (start.legacy) {
     fixStep0(start, fc0);
+    start = fc0.reload();
+  } else {
+    // Still step 0 (§ 14): a plain v3 backlog can carry a stray top-level
+    // `.ids/` left by an earlier crash. Exempt from the config/legacy gate
+    // below, the same reason the migration rename above is.
+    fixStrayIds(start, fc0);
     start = fc0.reload();
   }
   // Nothing else is repaired against a legacy layout still standing
