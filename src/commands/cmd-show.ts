@@ -18,7 +18,14 @@ function cmdShow(flags: Flags) {
   // Reads show every file claiming the id, each marked duplicate_id (§ 9).
   const shown = flags.has('file') ? [el] : ctx.elements.filter((e: Element) => e.id === el.id).sort(compareElements);
   if (flags.has('json')) {
-    out(JSON.stringify({ backlog: ctx.backlog, counts: countsOf(scope.filter((e: Element) => !e.archived)), entries: shown.map((e) => entryJson(e, ctx.backlog, ctx.cfg)) }, null, 2));
+    const entries = shown.map((e) => entryJson(e, ctx.backlog, ctx.cfg));
+    // `entry` (DECISIONS 171 C, § 9): additive, identical to entries[0],
+    // present exactly when `entries` has exactly one element -- never for a
+    // duplicate_id target (two entries). `list`/`find` never carry it.
+    out(JSON.stringify(Object.assign(
+      { backlog: ctx.backlog, counts: countsOf(scope.filter((e: Element) => !e.archived)), entries },
+      entries.length === 1 ? { entry: entries[0] } : {},
+    ), null, 2));
     return 0;
   }
   if (shown.length > 1) {

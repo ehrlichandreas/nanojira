@@ -1,11 +1,11 @@
-# V3.1-A verification — `NJ_AUTHOR` signs `nj note` (`99db42f`, TSK-030)
+# V3.1-A verification — `NJ_AUTHOR` signs `nj note` (`d14c2cc`, TSK-030)
 
 Verifier, 2026-10-03. I didn't write any of this code — it is assigned by
 the Lead for independent review (DECISIONS 110: "C is promoted only after
 an independent review of its concurrency protocol passes"; A has no
 concurrency protocol, but every step gets independent verification before
 acceptance). Work ran in `/tmp/verifier-nj-author` (a detached worktree at
-`99db42f`) plus a throwaway scratch backlog at `/tmp/verifier-nj-author-probe`;
+`d14c2cc`) plus a throwaway scratch backlog at `/tmp/verifier-nj-author-probe`;
 the main tree was never switched or written except to add this file. Runtime
 Node v24.21.0. Read: `docs/SPECIFICATION.md` § 9, § 10, the failure-code
 tables; `src/commands/cmd-note.ts`, `src/core/args.ts`, `src/core/context.ts`;
@@ -39,8 +39,8 @@ contradicts anything § 10 or § 9 states outright.
 |---|---|
 | AC-25 213/213 | ✓ exact — `node test/ac/ac-25-note-author.js dist/nj` |
 | run-all 72/73 pass, 0 failed, 1 expected cannot-run | ✓ exact (ran directly: 71/73 + ac-15 cannot-run too, because my worktree isn't nested 4 levels under a runtime dir per v3-preflight.md A2 — purely a path-depth artifact of where I put the worktree, not of the commit; `gate.js`'s own throwaway worktree, built at the required depth, reproduced the commit's exact 72/73 + 1) |
-| `gate.js --step=99db42f --frozen=c4-baseline` | ✓ exit 0: replay unchanged, oracle 72/73 (1 expected gap, `hardening-njrc-foreign-link.js`, needs root), gate exit 0 |
-| `dist/nj` matches `src/commands/cmd-note.ts` | ✓ `git show 99db42f -- dist/nj` is the same control flow, 1:1, esbuild-mechanical (no behavioural drift between the TS and the bundle) |
+| `gate.js --step=d14c2cc --frozen=c4-baseline` | ✓ exit 0: replay unchanged, oracle 72/73 (1 expected gap, `hardening-njrc-foreign-link.js`, needs root), gate exit 0 |
+| `dist/nj` matches `src/commands/cmd-note.ts` | ✓ `git show d14c2cc -- dist/nj` is the same control flow, 1:1, esbuild-mechanical (no behavioural drift between the TS and the bundle) |
 
 ## § 10 requirements checked one by one
 
@@ -130,38 +130,38 @@ unchanged v3 behaviour (§ 10's rules predate this commit; `cmd-note.ts`'s
 diff touches only the signer and the two new functions). AC-17/18/21-24 and
 the rest of the oracle cover that ground already and are unaffected here
 (confirmed green above); I did not re-derive it independently since it is
-not what `99db42f` changed.
+not what `d14c2cc` changed.
 
 ## Scope not yet promoted
 
 § 0's acting-name precedence (`--as` > `NJ_AUTHOR` > none) is proposal-only
 until `C` (`claim`/`release`) is promoted; this commit correctly implements
 only the `NJ_AUTHOR`-alone case and AC-25/DECISIONS 110 agree `--as` must
-stay `unknown_field` until then. Nothing in `99db42f` anticipates or
+stay `unknown_field` until then. Nothing in `d14c2cc` anticipates or
 hard-codes a future `--as` in a way that would need undoing later — the
 signer logic is `author !== null ? author : assignee-or-?`, with no `--as`
 branch to retrofit around.
 
-## D111 delta — `invalid_target` ranked with argument parsing (`b028694`, `f7e91ad`)
+## D111 delta — `invalid_target` ranked with argument parsing (`88fb382`, `77a8ac2`)
 
-Checked in a fresh worktree at `f7e91ad` (`/tmp/verifier-nj-author-d111`),
+Checked in a fresh worktree at `77a8ac2` (`/tmp/verifier-nj-author-d111`),
 plus a throwaway scratch backlog (`/tmp/verifier-nj-author-d111-probe`);
-the `99db42f` worktree and probe dir from the first pass were removed
+the `d14c2cc` worktree and probe dir from the first pass were removed
 first. **VERDICT: accept — the finding is closed, A can be accepted.**
 
-- `docs/SPECIFICATION.md` § 10 (`b028694`) now names `invalid_target`
+- `docs/SPECIFICATION.md` § 10 (`88fb382`) now names `invalid_target`
   ("`--id` and `--file` given together") inside the argument-parsing
   bucket, ranked with "neither given," and states that the wrong-type-
   `--parent` reading of `invalid_target` doesn't apply to `note` (no
   `--parent` flag exists on it) — this reads unambiguously now; nothing
   else in § 10 changed.
-- `src/commands/cmd-note.ts` (`f7e91ad`): `requireTargetFlagSyntax()` gained
+- `src/commands/cmd-note.ts` (`77a8ac2`): `requireTargetFlagSyntax()` gained
   one line, `if (file !== undefined && id !== undefined) fail('invalid_target', ...)`,
   ahead of the existing "neither given" check and the `NJ_AUTHOR` check
-  below it. `git diff 99db42f f7e91ad -- dist/nj src/` is exactly that one
+  below it. `git diff d14c2cc 77a8ac2 -- dist/nj src/` is exactly that one
   line (plus its mirror in `dist/nj` and an updated comment) — confirmed
   directly; nothing else in the command changed.
-- **The finding's own repro, re-run against `f7e91ad`'s `dist/nj`:**
+- **The finding's own repro, re-run against `77a8ac2`'s `dist/nj`:**
   `NJ_AUTHOR='bad:name' nj note --id=TSK-001 --file=TSK-001.md "hi" --json`
   now returns `{"ok":false,"error":"invalid_target"}` (was `invalid_env`),
   exit 1, nothing written. A **valid** `NJ_AUTHOR` under the same `--id`/
@@ -180,7 +180,7 @@ first. **VERDICT: accept — the finding is closed, A can be accepted.**
   `ac-15-no-dependencies.js` — a path-depth artifact of my worktree not
   being nested where v3-preflight.md A2 expects the runtime, same as in
   the first pass, not a defect). `node tools/refactor-harness/gate.js
-  --step=f7e91ad --frozen=c4-baseline`, which builds its own correctly-
+  --step=77a8ac2 --frozen=c4-baseline`, which builds its own correctly-
   nested worktree: **exit 0** — replay unchanged, oracle 72/73 (the one
   expected gap), gate green. Both runs show `ac-25-note-author.js (219
   checks)`.

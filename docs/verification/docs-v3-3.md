@@ -1,7 +1,7 @@
-# Docs check — README.md, GUIDE.md, ARCHITECTURE.md vs. behaviour (`ea2c5c8`/`de65c3f`)
+# Docs check — README.md, GUIDE.md, ARCHITECTURE.md vs. behaviour (`8b6bd81`/`aeceb10`)
 
 Verifier, 2026-10-04. Proportionate docs check, read-only, assigned by
-the Lead. Work in `/tmp/verifier-docs` (detached worktree at `de65c3f`)
+the Lead. Work in `/tmp/verifier-docs` (detached worktree at `aeceb10`)
 and `/tmp/verifier-docs-probe`/`-probe2` (scratch backlogs). All removed
 before writing this. Ran every command example GUIDE.md shows for the
 sections new since v3 (§ 3, § 10–§ 16) against `dist/nj`/`dist/nj-mcp`
@@ -106,7 +106,7 @@ this exact text.
    `SPECIFICATION.md`". Actual count: **84** files
    (`test/ac` 34 + `test/edge` 43 + `test/fault` 6 + `test/stress` 1 —
    confirmed by direct `find`). Stale by a wide margin, not an
-   off-by-one — this line isn't covered by `de65c3f`'s own "mechanical
+   off-by-one — this line isn't covered by `aeceb10`'s own "mechanical
    recount," which its commit message scopes to § 2's import-count
    table specifically, not this separate prose figure in § 5.
 
@@ -118,7 +118,7 @@ this exact text.
     stale.
 
 **Spot-checked § 2's "imported by" counts mechanically, matching the
-exact method `de65c3f`'s own commit message describes** (grepping every
+exact method `aeceb10`'s own commit message describes** (grepping every
 `from '....ts'` import line under `src/`, deduplicated per file): picked
 four rows spanning different layers —
 
@@ -178,10 +178,10 @@ does exactly what SPECIFICATION.md says, confirmed live in every case):
 README.md: no mismatch found. ARCHITECTURE.md § 2's import-count table:
 spot-checked 4 rows, all exact — the recount claim holds.
 
-## Re-check — `a4a6c96`
+## Re-check — `b430f30`
 
 Verifier, 2026-10-04. Same scope, read-only, assigned by the Lead:
-re-check only the ten points above against `a4a6c96`. Work in `/tmp/
+re-check only the ten points above against `b430f30`. Work in `/tmp/
 verifier-docs2` (detached worktree) and `/tmp/verifier-docs2-probe`
 (scratch backlog, `NJ_NOW` pinned to the same two fixed timestamps the
 oracle fixtures use, `2026-09-21T18:00:00Z`/`...19:30:00Z`). Both

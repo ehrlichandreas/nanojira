@@ -1,11 +1,11 @@
-# V3.1-B verification — `nj unarchive` (`cd33d3a`, § 11a, AC-26, TSK-031)
+# V3.1-B verification — `nj unarchive` (`e1f8ce7`, § 11a, AC-26, TSK-031)
 
 Verifier, 2026-10-03. I didn't write any of this code — independent review
 assigned by the Lead (every v3.1 step gets independent verification before
 acceptance; D113 additionally asks the Verifier to confirm the replay-diff
 class independently, not just read the commit's own claim). Work ran in
 three throwaway worktrees, none touching the main tree except to add this
-file: `/tmp/verifier-v31b-unarchive` (detached at `cd33d3a`, for AC-26/
+file: `/tmp/verifier-v31b-unarchive` (detached at `e1f8ce7`, for AC-26/
 run-all/probes), `/tmp/verifier-v31b-nested/projects/nanojira` (a second
 detached worktree, laid out `<tmp>/projects/nanojira` +
 `<tmp>/runtime/darwin-arm64` → symlink to the real runtime, matching
@@ -13,14 +13,14 @@ detached worktree, laid out `<tmp>/projects/nanojira` +
 runtime, so a direct `baseline.js verify` run wouldn't suppress its diff
 listing behind a coverage gap), and `/tmp/verifier-v31b-probe` (scratch
 backlogs for my own probes). All removed before writing this file. Runtime
-Node v24.21.0. Read: § 11a (`b5790c2`), the touched § 4/§ 9/§ 12 lines,
-DECISIONS 104 (75, 78–81), D113 (`17026d8`); `src/commands/cmd-unarchive.ts`,
+Node v24.21.0. Read: § 11a (`e49d46a`), the touched § 4/§ 9/§ 12 lines,
+DECISIONS 104 (75, 78–81), D113 (`24c2b71`); `src/commands/cmd-unarchive.ts`,
 the `cmd-doctor.ts`/`core/layout.ts`/`core/help.ts`/`nj.ts` diff;
 `src/core/store.ts` (`planMove`/`runMove`, reused unchanged);
 `test/ac/ac-26-unarchive.js`.
 
 **VERDICT: accept.** AC-26 711/711, run-all and `gate.js
---step=cd33d3a --frozen=c4-baseline` both reproduce exactly. I independently
+--step=e1f8ce7 --frozen=c4-baseline` both reproduce exactly. I independently
 confirmed, byte-for-byte and not just from the gate's own summary, that the
 replay's 6 differing calls are exactly the D113 class (the single added
 help line) and nothing else. The helper move (`removeEmptiedIdFolders`,
@@ -39,7 +39,7 @@ round trip) found no deviation from § 11a. No finding to report.
   pass, 0 failed, 2 cannot-run (`ac-15-no-dependencies.js` — a worktree-
   path-depth artifact, same as in my prior two reports, not a defect;
   `hardening-njrc-foreign-link.js` — needs root, pre-existing D98 gap).
-- `node tools/refactor-harness/gate.js --step=cd33d3a --frozen=c4-baseline`
+- `node tools/refactor-harness/gate.js --step=e1f8ce7 --frozen=c4-baseline`
   (its own correctly-nested throwaway worktree): **oracle 73/74** (the one
   gap is the same root-needing suite), **replay exit 1 — CHANGED**, gate
   exit 1 ("every diff above must be a named class"). This matches D113's
@@ -81,7 +81,7 @@ full, unclipped `was`/`now` strings by hand: every one of the six is
 byte-identical except for one inserted line, `  nj unarchive --id=EPIC-001
 \n`, appearing between the existing `  nj archive --id=EPIC-001` and
 `  nj doctor [--fix]` lines — precisely `core/help.ts`'s one-line diff
-(confirmed against `git show cd33d3a -- src/core/help.ts`). Nothing else in
+(confirmed against `git show e1f8ce7 -- src/core/help.ts`). Nothing else in
 either string differs: not whitespace, not another command's line, not the
 exit-code or `--json`-shape prose at the end. `baseline: 4829 calls ...
 current: 4829 calls ... compared: 4318 calls (511 excluded ...)` — same

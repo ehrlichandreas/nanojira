@@ -211,5 +211,39 @@ function removeClaimDirWholesale(backlog: string, id: string): void {
   try { fs.rmdirSync(dir); } catch { /* not empty: left for doctor */ }
 }
 
-export { claimsRootDir, claimsDir, allClaimDirs, highestEntry, allEntriesAscending, readClaim, isClaimStale, transition, rollback, removeClaimDirWholesale };
+/**
+ * Final status releases the claim (§ 12a, DECISIONS 171 B): whoever
+ * currently holds the claim, unconditionally -- not `nj release`'s own
+ * ownership check. Used by a write that sets `status` to the last
+ * configured status, whether that write is `set`'s own or the mirror write
+ * `claim`/`next --status=<last>` just made for itself. Unclaimed is a
+ * harmless no-op (`undefined`), not an error.
+ */
+function releaseUnconditional(backlog: string, id: string, time: string): { gen: number; holder: string } | undefined {
+  const decide = (h: Entry | null) => {
+    const held = h && h.kind === 'claimed' ? h.name : null;
+    if (held === null) return { terminal: true as const }; // unclaimed: nothing to release
+    return { append: { kind: 'released' as const, name: held } };
+  };
+  const t = transition(backlog, id, time, decide);
+  return t.ok ? { gen: t.gen, holder: (t.base as Entry).name } : undefined;
+}
+
+/**
+ * Undoes `releaseUnconditional` after a failed guarded write (§ 12a): the
+ * generation to retry from is always re-read fresh, never the one
+ * `releaseUnconditional` itself returned -- `claim --status=<last>` chains
+ * a `claimed` append and a `released` append in the same call, so by the
+ * time a rollback runs here the claim's own rollback (a second, separate
+ * append) may already have moved the generation on. `rollback` itself
+ * still abandons on EEXIST (a still-newer holder is the holder), same as
+ * every other rollback in this module.
+ */
+function undoRelease(backlog: string, id: string, holder: string, time: string): void {
+  const dir = claimsDir(backlog, id);
+  const h = highestEntry(dir);
+  rollback(backlog, id, h ? h.gen : 0, 'claimed', holder, time);
+}
+
+export { claimsRootDir, claimsDir, allClaimDirs, highestEntry, allEntriesAscending, readClaim, isClaimStale, transition, rollback, removeClaimDirWholesale, releaseUnconditional, undoRelease };
 export type { Entry };

@@ -1,14 +1,14 @@
-# V3.7 A/B/C/D verification — `rm --help`, `--add-tags`/`--remove-tags`, release docs (HEAD `55e46dd`, D163 A-D)
+# V3.7 A/B/C/D verification — `rm --help`, `--add-tags`/`--remove-tags`, release docs (HEAD `a307ef6`, D163 A-D)
 
 Verifier, 2026-10-07. Independent verification, assigned by the Lead.
-Work in `/tmp/verif-v37ab` (worktree at HEAD `55e46dd`, built via `npm ci`
+Work in `/tmp/verif-v37ab` (worktree at HEAD `a307ef6`, built via `npm ci`
 + `tools/bundle.js`), `/tmp/verif-v37ab-nested` (nested, `test/` swapped
 to `oracle-frozen-12`, for the replay). Both removed before writing this.
 Read: DECISIONS 163 A-D in full, SPECIFICATION.md § 9 ("Rules",
 "Failure codes — spec-named paths"), § 10a-adjacent `--add-tags`/
 `--remove-tags` prose, § 15 item 48, GUIDE § 8's new section; the full
-diffs of `4be291e`/`a66a2c4` (spec+tests), `9abb59d` (the Oracle's own
-B8 vacuous-check fix), `2d6493c` (C/D docs), `34c1fd2` (implementation);
+diffs of `8adba8f`/`64eb967` (spec+tests), `0a857fe` (the Oracle's own
+B8 vacuous-check fix), `6f098f5` (C/D docs), `c4f52b6` (implementation);
 `test/ac/ac-46-per-command-help.js` P7 and `test/ac/ac-48-tags-add-remove.js`
 in full.
 
@@ -141,7 +141,7 @@ tools/refactor-harness/scratch/verify.js "$(pwd)/dist/nj"`, absolute
 path required — it spawns `nj` from fixture directories with varying
 `cwd`): `36 declared, 40 in § 7… missing: acceptance:no_checkbox,
 done:no_acceptance`. Both codes were added to § 7's table in commit
-`2665747` ("D165: problems.ignore") as part of the **next** round
+`6f12ca1` ("D165: problems.ignore") as part of the **next** round
 (DECISIONS 163 E/F, the acceptance-quality warnings) — confirmed absent
 from `src/` entirely (`grep` for either string returns nothing) and
 confirmed `test/ac/ac-49-acceptance-quality.js` (which exercises them)
@@ -197,7 +197,7 @@ override), cross-checked each against its row in the new table:
   one call site. Worth a one-line addition.
 
 `docs/AGENT-INSTRUCTIONS.md` confirmed pointing at the "Override flag"
-column by name. Confirmed via `git show --stat 2d6493c` that C/D touch
+column by name. Confirmed via `git show --stat 6f098f5` that C/D touch
 only `docs/GUIDE.md`, `docs/SPECIFICATION.md`, `docs/AGENT-INSTRUCTIONS.md`
 — no `src/`/`dist/` changes, so the `--json` shape claim ("unchanged")
 holds trivially.

@@ -1,12 +1,12 @@
-# V3.6 batch 1 verification — global flags, multi-line notes, `next`/assignee, leaf rule (`cd94258`, D158, AC-42..45)
+# V3.6 batch 1 verification — global flags, multi-line notes, `next`/assignee, leaf rule (`33b0ab5`, D158, AC-42..45)
 
 Verifier, 2026-10-06. Independent verification, assigned by the Lead.
-Work in `/tmp/verif-v36b1` (worktree at `cd94258`, built via `npm ci` +
+Work in `/tmp/verif-v36b1` (worktree at `33b0ab5`, built via `npm ci` +
 `tools/bundle.js`), `/tmp/verif-v36b1-nested` (nested, `test/` swapped to
 `oracle-frozen-12`, for the replay). Both removed before writing this.
 Read: SPECIFICATION.md § 9 (global flags), § 10/§ 10a/§ 12c (multi-line
 notes), § 12b (next/assignee), § 9 leaf rule, DECISIONS 158 (EV-6, EV-7,
-PA-5, EV-4) in full, the full `cd94258` diff, `test/ac/ac-42-global-flags.js`,
+PA-5, EV-4) in full, the full `33b0ab5` diff, `test/ac/ac-42-global-flags.js`,
 `ac-43-multiline-notes.js`, `ac-44-next-assignee.js`, `ac-45-ready-leaf.js`
 in full.
 
@@ -19,9 +19,9 @@ reported tally exactly — and every one of them is confirmed to be either
 the new leaf rule changing a `ready[]`/status-probe listing (189 calls,
 all differing in `stdout` only, never exit code or `stderr`) or the HELP
 text acquiring lines for commands/flags (`--version`, `log`, `next`)
-that already existed in `cd94258` but postdate `oracle-frozen-12`'s
+that already existed in `33b0ab5` but postdate `oracle-frozen-12`'s
 freeze point (6 calls). No call outside that classification was found.
-One pre-existing test-coverage gap (not a defect in `cd94258`, carried
+One pre-existing test-coverage gap (not a defect in `33b0ab5`, carried
 over from AC-42's own design) is noted below.
 
 ## 1. Diff review
@@ -111,48 +111,48 @@ fixture, by coincidence of the specific flags chosen after `--bogus` in
 that fixture, not because the test actually checks that the scan
 stopped where it should have. This is a test-coverage gap in G5's own
 assertions, worth a follow-up AC addition, but does not indicate a
-defect in `cd94258`'s `splitCommand`, which was independently confirmed
+defect in `33b0ab5`'s `splitCommand`, which was independently confirmed
 correct by the diff review in § 1 and by targeted live repro in § 2.
 
-## 4. Sanity suite run (`run-all.js`) — 4 failures investigated, 0 are defects in `cd94258`
+## 4. Sanity suite run (`run-all.js`) — 4 failures investigated, 0 are defects in `33b0ab5`
 
-A full `run-all.js` run in `/tmp/verif-v36b1` (cd94258) showed 86/92
+A full `run-all.js` run in `/tmp/verif-v36b1` (33b0ab5) showed 86/92
 passed, 4 failed, 2 cannot-run (the usual environment-conditional
 suites). Each failure was individually traced via `git log`/`git
 merge-base` rather than assumed benign:
 
 - **`ac/ac-46-per-command-help.js`**, **`ac/ac-47-did-you-mean.js`** —
   both exercise per-command `--help`/did-you-mean, a feature added in
-  commit `6d9964e` ("TSK-047: per-command --help, allowed values,
-  did-you-mean"), which does not exist yet in `cd94258`. Confirmed via
-  `git merge-base --is-ancestor cd94258 6d9964e` → true: `cd94258`
-  chronologically precedes `6d9964e`. These are pre-written red tests
+  commit `335a0df` ("TSK-047: per-command --help, allowed values,
+  did-you-mean"), which does not exist yet in `33b0ab5`. Confirmed via
+  `git merge-base --is-ancestor 33b0ab5 335a0df` → true: `33b0ab5`
+  chronologically precedes `335a0df`. These are pre-written red tests
   for a not-yet-landed feature, per this project's own convention
-  ("written before the fix lands"), not a regression in `cd94258`.
+  ("written before the fix lands"), not a regression in `33b0ab5`.
 - **`edge/doctor-fix-surface.js`** — its fixture's `ready[]` assertion
   predates the leaf rule (it expected `EPIC-001` in `ready[]` despite
   `EPIC-001` having an open child, `TSK-009`). Confirmed stale, and
-  confirmed already fixed downstream by commit `148697c` ("Fix AC-40
+  confirmed already fixed downstream by commit `34c7db3` ("Fix AC-40
   N3 (stale vs PA-5) + make test fixtures immune to an ancestor
-  backlog") via `git log --oneline cd94258..62777f9 -- test/edge/
+  backlog") via `git log --oneline 33b0ab5..62777f9 -- test/edge/
   doctor-fix-surface.js`.
 - **`ac/ac-40-next.js` (N3)** — asserted `--assignee=carol` with
   `--as=alice` would still hand out an element pre-assigned to carol
   (pre-PA-5 behaviour). Under PA-5 this is structurally `none_ready`
-  (§ 1 above). Also already fixed by the same `148697c` commit.
+  (§ 1 above). Also already fixed by the same `34c7db3` commit.
 
 All four are accounted for; none is evidence of a defect introduced by
-`cd94258` itself. This is included here as due-diligence evidence, not
+`33b0ab5` itself. This is included here as due-diligence evidence, not
 as a finding against the commit.
 
 ## 5. Replay vs `oracle-frozen-12`
 
-Nested worktree at `cd94258`, `test/` swapped to the `oracle-frozen-12`
+Nested worktree at `33b0ab5`, `test/` swapped to the `oracle-frozen-12`
 tag, digest confirmed matching current/pinned before running `verify`.
 Run with `TMPDIR` pointed at a dedicated clean directory with no
 `backlog/` anywhere in its ancestor chain (the default `$TMPDIR` on
 this machine has a real `backlog/` as an ancestor, which corrupts
-`findBacklog`'s upward search — unrelated to `cd94258`, a harness/
+`findBacklog`'s upward search — unrelated to `33b0ab5`, a harness/
 environment issue the Oracle is fixing separately; not committed here).
 
 ```
@@ -188,17 +188,17 @@ harness's default cap separately):
   the full JSON diff (identical in every field except the missing
   `EPIC-001` entry).
 - **6 help calls** (`nj help`, `nj help --json`, `nj --help`, each
-  appearing twice across two fixtures): the HELP text in `cd94258`
+  appearing twice across two fixtures): the HELP text in `33b0ab5`
   includes a `--version` line and `nj log`/`nj next` usage lines that
   `oracle-frozen-12`'s frozen baseline (predating those features) does
   not have. These features (`--version`, `log`, `next`) already exist
-  in `cd94258` — landed in earlier, already-verified batches — so this
-  is expected baseline drift in the HELP text, not something `cd94258`
+  in `33b0ab5` — landed in earlier, already-verified batches — so this
+  is expected baseline drift in the HELP text, not something `33b0ab5`
   changed about help itself.
 
 Every one of the 195 differing calls is accounted for by the leaf rule
 or by already-landed-and-verified HELP content; none indicates a
-regression introduced by `cd94258`.
+regression introduced by `33b0ab5`.
 
 ## 6. Dogfooding
 

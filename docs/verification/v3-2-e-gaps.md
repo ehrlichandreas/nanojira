@@ -1,14 +1,14 @@
-# V3.2-E verification — njrc-swap + stray `.ids/` (`2c6fa33`) + D141 fixes (`56d86bd`, `f30c2a3`)
+# V3.2-E verification — njrc-swap + stray `.ids/` (`3538ef8`) + D141 fixes (`e881e8e`, `dd3ddd2`)
 
 Verifier, 2026-10-04. Independent verification, assigned by the Lead.
-Work in `/tmp/verifier-v32e` (detached at `f30c2a3`), `/tmp/verifier-v32e-
+Work in `/tmp/verifier-v32e` (detached at `dd3ddd2`), `/tmp/verifier-v32e-
 nested/projects/nanojira` (for `gate.js`), `/tmp/verifier-v32e-unclip/
 projects/nanojira` (nested, throwaway-patched `baseline.js`, for the
 byte-exact diff), `/tmp/verifier-v32e-probe` (scratch, explicit paths,
 D134). All removed before writing this. Read: SPECIFICATION.md § 4
-(`.njrc`/`NJ_FAULT=njrc-swap`) and § 14 step 0 as of `8a9915c`, D139/D140/
+(`.njrc`/`NJ_FAULT=njrc-swap`) and § 14 step 0 as of `f3761d7`, D139/D140/
 D141 in full, `docs/review/v3.2-proposal.md`'s E.1/E.2 reasoning,
-`2c6fa33`'s/`56d86bd`'s/`f30c2a3`'s full diffs, `test/edge/hardening-
+`3538ef8`'s/`e881e8e`'s/`dd3ddd2`'s full diffs, `test/edge/hardening-
 njrc-swap.js`.
 
 **VERDICT: accept, one confirmed gap worth a decision.** D141's two fixes
@@ -128,11 +128,11 @@ claim.js`'s C4: both run clean (719 and 273 checks respectively).
 
 ## 3. D141 — key-order fix and `backlogLabel` basename-only
 
-**`56d86bd` (claim/release key order), confirmed live.** `Object.assign
+**`e881e8e` (claim/release key order), confirmed live.** `Object.assign
 ({ok: (single as any).ok, id: el.id}, single)` pre-seeds both `ok` and
 `id` in the target so `Object.assign` keeps them at their *target*
 position (it only appends genuinely new source keys) — same fix shape as
-`d54322b`'s `_problems`/`_claim` reorder. Live:
+`fd4444c`'s `_problems`/`_claim` reorder. Live:
 ```
 $ nj claim --id=TSK-001 --as=alice --json | head -3
 {
@@ -145,21 +145,21 @@ $ nj release --id=TSK-001 --as=alice --json | head -3
 ```
 `ok` first, matching `rm`/`set`/`note`/`check`'s established convention.
 
-**`f30c2a3` (`backlogLabel` basename-only), confirmed both in the diff
+**`dd3ddd2` (`backlogLabel` basename-only), confirmed both in the diff
 and empirically.** The walk-every-ancestor loop is replaced by a single
 `path.basename(cwd)` check — a strict narrowing, so it cannot introduce a
 new false *positive* (fewer paths checked, same regex), only risks a new
 false *negative* if some real call's cwd were a non-basename ancestor
 match. Decompressed the re-recorded corpus: **6313 calls** (unchanged),
-**no `'gate'` label anywhere** (the exact false positive my own `a21f195`
+**no `'gate'` label anywhere** (the exact false positive my own `aee6539`
 audit found is now gone), and the same **623 excluded** as before,
 confirming — as the commit message claims — the fix changed no real
 `backlogLabel` value, only removed the latent ancestor-walk risk.
 
 ## 4. The gate — exactly the help class, byte-confirmed
 
-`gate.js --step=f30c2a3 --frozen=oracle-frozen-11` (which resolves to the
-same commit, `978c7a8`, as `c6-baseline` — still the pre-batch-writes
+`gate.js --step=dd3ddd2 --frozen=oracle-frozen-11` (which resolves to the
+same commit, `1c7a0a3`, as `c6-baseline` — still the pre-batch-writes
 baseline, deliberately, per this task):
 
 ```
@@ -199,9 +199,9 @@ needs a ruling (accept as a narrower reading of "removed outright," or
 fix with a second lstat at the ENOENT point) before `c7-baseline` is cut,
 so the new frozen point doesn't inherit an open question.
 
-## D142 delta — `86952ba` (spec), `28efe2f` (tests), `c8eeac3` (code)
+## D142 delta — `8dfbb5d` (spec), `30edcc7` (tests), `63efa0f` (code)
 
-Same worktree discipline: `/tmp/verifier-d142` (detached at `c8eeac3`),
+Same worktree discipline: `/tmp/verifier-d142` (detached at `63efa0f`),
 `/tmp/verifier-d142-nested/projects/nanojira` (for `gate.js`), `/tmp/
 verifier-d142-probe` (scratch, explicit paths). All removed before
 writing this. This closes the one open item from § 1 above.
@@ -211,13 +211,13 @@ moment of the failure, instead of trusting the pre-pause `lstat` taken
 before the hook fired. If the fresh `lstat` also fails (nothing there at
 all) or finds a non-symlink, it's absent — § 4's search continues. Only
 if the fresh `lstat` finds a *symlink still there* (target missing) does
-it stay `invalid_njrc`. Confirmed `c8eeac3` itself touches only `src/
+it stay `invalid_njrc`. Confirmed `63efa0f` itself touches only `src/
 core/config.ts` (+`dist/nj`) — nothing else, exactly `readNjrc`'s `ENOENT`
-branch, as the task described (the earlier `56d86bd` claim/release fix is
+branch, as the task described (the earlier `e881e8e` claim/release fix is
 a different, already-verified commit in the same range, not part of this
 delta).
 
-**Re-ran my own exact repro from `0785c14`**, live, scratch backlog under
+**Re-ran my own exact repro from `6c65a50`**, live, scratch backlog under
 `/tmp/verifier-d142-probe`:
 
 - **Symlinked `.njrc`, the link itself unlinked during the pause** (my
@@ -232,7 +232,7 @@ delta).
   is a dangling symlink` — no regression.
 
 All three match exactly what the task asked me to re-confirm, and all
-three match `86952ba`'s spec clarification ("for a symlinked `.njrc`,
+three match `8dfbb5d`'s spec clarification ("for a symlinked `.njrc`,
 ‘removed outright' means the *link itself* is gone... a dangling symlink
 ... is a different case and stays `invalid_njrc`") word for word.
 
@@ -241,7 +241,7 @@ three match `86952ba`'s spec clarification ("for a symlinked `.njrc`,
 .njrc, TARGET removed → dangling, invalid_njrc") cases are exactly the
 two legs I just re-confirmed by hand, now covered by the suite itself.
 
-**`gate.js --step=c8eeac3 --frozen=oracle-frozen-11`**:
+**`gate.js --step=63efa0f --frozen=oracle-frozen-11`**:
 ```
 baseline: 6313 calls, nj sha256 37a7ece6...
 current : 6313 calls, current code sha256 ... 83dc6b5e...

@@ -1,13 +1,13 @@
-# V3.5-A verification — `nj next` (`ae22343`, § 12b, D154/D156, AC-40)
+# V3.5-A verification — `nj next` (`596172c`, § 12b, D154/D156, AC-40)
 
 Verifier, 2026-10-05. Independent verification, assigned by the Lead.
-Work in `/tmp/verif-next` (worktree at `ae22343`, built via `npm ci` +
-`tools/bundle.js`), `/tmp/verif-next-old` (detached at `aa560f9`, the
+Work in `/tmp/verif-next` (worktree at `596172c`, built via `npm ci` +
+`tools/bundle.js`), `/tmp/verif-next-old` (detached at `c6d428b`, the
 immediately-preceding commit, for the byte-identity check), `/tmp/
 verif-next-nested` (nested, for the replay), `/tmp/verif-next-race`
 (scratch, the large concurrency repro). All removed before writing
 this. Read: SPECIFICATION.md § 12b in full (as amended by D156),
-DECISIONS 154/156 in full, the full `ae22343` diff
+DECISIONS 154/156 in full, the full `596172c` diff
 (`cmd-next.ts`/`cmd-claim.ts`/`cmd-list.ts`/`flag-table.ts`/
 `help.ts`/`nj.ts`/`nj-mcp.ts`), `test/ac/ac-40-next.js` in full.
 
@@ -209,7 +209,7 @@ is **88/88** (§ 1-3 above).
 
 ## 5. `list --ready` and bare `nj` — byte-unchanged
 
-**Confirmed by construction**: `git diff aa560f9 ae22343 -- src/
+**Confirmed by construction**: `git diff c6d428b 596172c -- src/
 commands/cmd-list.ts` is a one-line export-list addition
 (`availableToActor`); `src/core/derive.ts` has no diff at all.
 
@@ -217,7 +217,7 @@ commands/cmd-list.ts` is a one-line export-list addition
 exercise the difference D156 says stays unchanged** (an epic with its
 own open task — exactly the case `next` now treats specially but
 `list`/bare `nj` must not): built the identical fixture against both
-the immediately-preceding commit (`aa560f9`) and `ae22343`, diffed
+the immediately-preceding commit (`c6d428b`) and `596172c`, diffed
 `list --ready --json`, `list --ready` (human), and bare `nj`:
 ```
 JSON: IDENTICAL

@@ -1,4 +1,4 @@
-# Gate instrument audit — Toolsmith commits `1513c37`, `279cb5a`
+# Gate instrument audit — Toolsmith commits `e0ead0c`, `02e977d`
 
 Verifier, 2026-09-28. Scope:
 - `tools/refactor-harness/gate.js`
@@ -24,7 +24,7 @@ in copies of `dist/nj`.
 
 ## Setup
 
-- **Audit worktree** `/tmp/nj-audit` at `efd4b69` (the harness at `279cb5a`
+- **Audit worktree** `/tmp/nj-audit` at `efd4b69` (the harness at `02e977d`
   plus later non-tools commits). Every unmodified gate ran from there.
 - **Why not the main tree:** it carried the Implementer's uncommitted work,
   and other agents were writing to it, so nothing that happens to it can be
@@ -32,7 +32,7 @@ in copies of `dist/nj`.
 - **Fingerprint** of the audit worktree, taken before the first run and after
   the last: sha256 over every file, over `git status --porcelain=v2
   --untracked-files=all`, over the worktree's index file, and `HEAD`.
-- **Mutants:** copies of `d517837:dist/nj` (`/tmp/nj-audit-mut/`). Harness
+- **Mutants:** copies of `e5e5e3b:dist/nj` (`/tmp/nj-audit-mut/`). Harness
   mutations lived in separate worktrees `/tmp/nj-audit-{e,g,h}`, where the gate
   correctly printed "harness from efd4b69 + uncommitted changes".
 - **Runtime:** Node v24.21.0.
@@ -52,13 +52,13 @@ in copies of `dist/nj`.
 
 ## 2. Verdict gating, mutation-tested
 
-Every row is one full `gate.js --step=d517837 --frozen=oracle-frozen-7` run.
+Every row is one full `gate.js --step=e5e5e3b --frozen=oracle-frozen-7` run.
 Unless stated otherwise, the 19 named V3-1 diffs are present in each, which
 also tests that exit 1 can't mask a red.
 
 | Case | Mutation | Expected | Gate result |
 |---|---|---|---|
-| reference (task item 5) | none | 1, the 19 named diffs | **exit 1**; 19 diffs, the list *and every diff body* identical to my own `d517837` replay (`v3-1.md`); replay oracle 64/64 (the frozen AC-15 finds the runtime through the `projects/` layout), run-all 65/65, `verify.js` 123/123 |
+| reference (task item 5) | none | 1, the 19 named diffs | **exit 1**; 19 diffs, the list *and every diff body* identical to my own `e5e5e3b` replay (`v3-1.md`); replay oracle 64/64 (the frozen AC-15 finds the runtime through the `projects/` layout), run-all 65/65, `verify.js` 123/123 |
 | (a) red verdict-only suite | `nj`: `err.code === "EPIPE"` → `"EPIPE_DISABLED"` | 8 | **exit 8**: RED VERDICTS lists `edge/stdout-epipe.js`, **the 19 diffs still printed**, run-all failed 1. 8 wins over 1 ✓ |
 | (b) one byte in a recorded stdout | `nj`: `(empty backlog)` → `(empty Backlog)` (1 byte; in 16 corpus calls, asserted by no suite) | 1, exactly that diff | **exit 1, 35 diffs = the 19 + 16 new.** Each of the 16 differs only in stdout, and only by that byte (checked mechanically on the diff bodies). No other change. |
 | (c) nj crashes on one command | `nj`: `tree --json` throws a TypeError → `internal_error` | 4 or 8 | **exit 8**: 5 replay suites + 6 run-all suites red; **also 2 coverage gaps in the same run** (`r3.js`, and `verify.js` crashing on it), so 8 wins over 4 ✓ |
@@ -73,7 +73,7 @@ run-all fails; else 4 on any gap; else the replay's code.
 
 ## 3. Frozen `test/` is byte-identical to the tag
 
-I recreated `useTests()` in a scratch worktree at `d517837`. The file list is
+I recreated `useTests()` in a scratch worktree at `e5e5e3b`. The file list is
 compared by path, mode and `git hash-object` blob against
 `git ls-tree -r <tag> -- test`:
 
@@ -81,7 +81,7 @@ compared by path, mode and `git hash-object` blob against
 |---|---|
 | `git checkout oracle-frozen-7 -- test` alone (the old way) | **differs**: `test/ac/ac-21-backlog-location.js` survives |
 | `gate.js`'s way: `rm -rf test`, checkout, `git diff --quiet` | **identical**, 92 files |
-| back to the step (`d517837`) | **identical**, 93 files |
+| back to the step (`e5e5e3b`) | **identical**, 93 files |
 
 The self-check `git diff --quiet <rev> -- test` does **not** notice an
 untracked extra file (checked: exit 0 with `test/ac/zz-extra.js` added). The
@@ -136,7 +136,7 @@ overstates that check (I6).
 - Demonstrated for SIGHUP and for an exception inside the output handler.
   Worktree and temp root stay, stay registered in `git worktree list`, and
   the child keeps running.
-- Earlier today there were several `nj-gate-*` worktrees at `d517837` of
+- Earlier today there were several `nj-gate-*` worktrees at `e5e5e3b` of
   unclear origin, and after killed runs two `nj-s0-scratch-<pid>`
   directories were left whose owning process no longer existed.
   `baseline.js` removes its scratch only on a normal end.
@@ -153,10 +153,10 @@ overstates that check (I6).
 - The comment calibrates it on "up to 5.6%" (one pre-flight run). Later
   interleaved runs of builds with no perf-relevant change, in
   `docs/verification/v3-1.md`, went beyond it:
-  - v2 vs `d517837`, 9 rounds: `tree` **+11.1%**. The very next 11-round
+  - v2 vs `e5e5e3b`, 9 rounds: `tree` **+11.1%**. The very next 11-round
     run showed −0.7% for the same pair.
-  - v2 vs `1e85263`: `list` −13%.
-  - In this audit, v2 vs `1e85263`, 3 rounds: `doctor` +8.5%.
+  - v2 vs `a10b671`: `list` −13%.
+  - In this audit, v2 vs `a10b671`, 3 rounds: `doctor` +8.5%.
 - So a real no-regression step can go REGRESSION on noise alone, and per the
   README a red means "roll back".
 - **Fix, any one of:**
@@ -193,12 +193,12 @@ resolve through `PATH`; `/usr/bin/…` would be more robust.
 **I9 — info.** A red oracle masks a stale replay: replay 6 + run-all red →
 gate 8. That's acceptable, since red is red, and the replay line still says 6.
 
-## Addendum — `90a8347` (AC-15 verdict-only), `aa584b1`, the c3 recording
+## Addendum — `c252ab5` (AC-15 verdict-only), `dd35227`, the c3 recording
 
-Run from a fresh audit worktree at `05b0bf4` (harness = HEAD). Its
+Run from a fresh audit worktree at `a1d33e0` (harness = HEAD). Its
 fingerprint was unchanged afterwards.
 
-**`90a8347` can't mask a real AC-15 failure.**
+**`c252ab5` can't mask a real AC-15 failure.**
 
 - *Which `nj` is judged.* The verdict-only path runs the suite **directly
   against the real `nj`** (`spawnSync(node, [suite, NJ_ABS])`), not through
@@ -209,11 +209,11 @@ fingerprint was unchanged afterwards.
   `abortNoImplementation` (no `nj` at all) and AC-15's own "no runtime Node
   found" (shown with `NJ_NODE=/nonexistent`). A failing check always prints
   `FAIL … — n of m checks failed`, which is red.
-- *Live proof.* Mutant `nj-f-notalone` is `1e85263:dist/nj` with one line
+- *Live proof.* Mutant `nj-f-notalone` is `a10b671:dist/nj` with one line
   that throws unless `../package.json` exists beside it. It runs in place,
   so every shim-recorded call is unchanged, but it can't run as a lone copy,
   which is exactly AC-15's property.
-  `gate.js --step=1e85263 --frozen=oracle-frozen-8 --nj=nj-f-notalone` →
+  `gate.js --step=a10b671 --frozen=oracle-frozen-8 --nj=nj-f-notalone` →
   **replay 0 diffs / 3075 compared, exit 8**, RED VERDICTS
   `ac/ac-15-no-dependencies.js`. run-all also fails AC-15 (4 of 22), and the
   gate exits **8**. Without the verdict gate this would have been a clean 0.
@@ -221,26 +221,26 @@ fingerprint was unchanged afterwards.
   always set (`process.env.NJ_NODE || NODE`), so AC-15 can only say CANNOT
   RUN there if that Node doesn't exist.
 
-**The c3 recording (`a7624d4`) is consistent**, checked against git
+**The c3 recording (`9277ea6`) is consistent**, checked against git
 independently:
 
 | Header field | Value | Independent value |
 |---|---|---|
-| `njSha256` | `e5138d56…` | sha256 of `c3-baseline:dist/nj` (= `1e85263`) ✓ |
-| `testDigest` | `c582855a…` | digest of `oracle-frozen-8:test/` (= `3b563e8`) ✓ |
+| `njSha256` | `e5138d56…` | sha256 of `c3-baseline:dist/nj` (= `a10b671`) ✓ |
+| `testDigest` | `c582855a…` | digest of `oracle-frozen-8:test/` (= `5a43aeb`) ✓ |
 | `oracleSuites` | 65 | exactly the `ac/`, `fault/`, `edge/` suites of `oracle-frozen-8` ✓ |
 | `corpusSha256` | `fb0a4e88…` | sha256 of the committed `corpus.ndjson.gz` ✓ |
 | `calls` | 3586 | lines in the corpus ✓ |
-| parts | oracle 65/65, cannot run 0; AC-15, det-id-retry, stdout-epipe and verify.js (123/123) under `notRecorded` | consistent with `90a8347` |
+| parts | oracle 65/65, cannot run 0; AC-15, det-id-retry, stdout-epipe and verify.js (123/123) under `notRecorded` | consistent with `c252ab5` |
 
 **Determinism of the new corpus:** a self-replay,
-`gate.js --step=1e85263 --frozen=oracle-frozen-8`, gives **0 diffs / 3075
+`gate.js --step=a10b671 --frozen=oracle-frozen-8`, gives **0 diffs / 3075
 compared, gate exit 0**. run-all 65/65, AC-15 22 checks.
 
-**`aa584b1`** (a `--frozen` that doesn't fit the corpus):
-- `--step=1e85263 --frozen=oracle-frozen-7` → **exit 2 after 1 s**, "does
+**`dd35227`** (a `--frozen` that doesn't fit the corpus):
+- `--step=a10b671 --frozen=oracle-frozen-7` → **exit 2 after 1 s**, "does
   not belong to this harness's corpus … Use --frozen=oracle-frozen-8", with
-  the worktree cleaned up. This replaces my pre-`aa584b1` case (d) result
+  the worktree cleaned up. This replaces my pre-`dd35227` case (d) result
   of exit 6: the harness now catches a wrong call before the replay, and
   exit 6 is left for a genuinely stale corpus.
 - Consequence, worth a line in the README: since the harness copy carries
@@ -250,9 +250,9 @@ compared, gate exit 0**. run-all 65/65, AC-15 22 checks.
   frozen oracle is legal (re-running an old gate)" at the top of `gate.js` no
   longer holds as written.
 
-## Addendum — `8ed1c52`: `hardening-v3-1.js` verdict-only, `ac-15`'s gap documented
+## Addendum — `659f2bd`: `hardening-v3-1.js` verdict-only, `ac-15`'s gap documented
 
-Verified in a throwaway worktree at `8ed1c52`.
+Verified in a throwaway worktree at `659f2bd`.
 
 **hardening-v3-1.js joining `VERDICT_ONLY_SUITES` cannot mask a real failure.**
 Mutated `dist/nj` globally: `io_error` → `io_errorX` (two occurrences). Run
@@ -291,9 +291,9 @@ for this specific cause (worth keeping the entry itself as a documented
 fallback, in case `ac-15` ever fails to find a runtime for some other
 reason — the mechanism costs nothing when it never fires).
 
-**A separate, pre-existing instrument oddity, found while checking this — not caused by `8ed1c52`.** `gate.js`'s own `run-all.js` step (not the
+**A separate, pre-existing instrument oddity, found while checking this — not caused by `659f2bd`.** `gate.js`'s own `run-all.js` step (not the
 replay) never printed a final "passed/failed" summary in any of my runs
-this session, including a **clean, unmutated `a287d3a` run from the earlier
+this session, including a **clean, unmutated `b34666e` run from the earlier
 V3-4 round** (`oracle: no summary, exit 1`). All three runs I have logs for
 (one clean, two with the `io_error` mutant) cut off `run-all.js`'s output
 at the **same logical point** — mid-check inside `ac-26-unarchive.js`
@@ -309,7 +309,7 @@ construction, per DECISIONS 107), which fires regardless of whether
 replay happens to always be red for a V3-4-era step. For a future
 suite-adding step whose replay is clean, this same truncation would mean
 `gate.js` has to fall back to a `run-all.js` summary that never arrives —
-worth the Toolsmith's attention as a follow-up, separate from `8ed1c52`'s
+worth the Toolsmith's attention as a follow-up, separate from `659f2bd`'s
 own scope, which is otherwise sound.
 
 ## What was not tested

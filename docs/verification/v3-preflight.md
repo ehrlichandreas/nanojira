@@ -6,9 +6,9 @@ Verifier, 2026-09-28. Independent of the Oracle (AC-21) and the Implementer
 
 - **Part A** reruns the DECISIONS 84 gate on `5b666a0` (the last v2
   `dist/nj`). It is the baseline V3-1 gets compared against.
-- **Part B** reviews spec v3 at HEAD `7f48bd3`, read together with
-  DECISIONS 86–88. While I worked, HEAD moved on to `664d4c2` (DECISIONS 89,
-  AC-21, `b69aa5a` for AC-15). Findings those commits already rule are marked
+- **Part B** reviews spec v3 at HEAD `57186c9`, read together with
+  DECISIONS 86–88. While I worked, HEAD moved on to `96c9374` (DECISIONS 89,
+  AC-21, `c9aa73f` for AC-15). Findings those commits already rule are marked
   **ruled** and listed only so nobody reopens them.
 
 ---
@@ -37,7 +37,7 @@ node -v   # v24.21.0
 | oracle, in `/tmp/nj-v2-ref` | `node test/run-all.js dist/nj` | **63/64, exit 1**: AC-15 fails, 15 of 21 checks (see A2) |
 | oracle, same, `NJ_NODE` pinned | `NJ_NODE=$(which node) node test/run-all.js dist/nj` | **63/64**: AC-15 still fails, 5 of 21 checks: its lone-copy leg ignores `NJ_NODE` (A2) |
 | oracle, layout the old AC-15 expects | worktree at `/tmp/nj-ac15/projects/nanojira`, `/tmp/nj-ac15/runtime/darwin-arm64` → symlink to the real runtime | **64/64, 2556 checks, exit 0** |
-| oracle, AC-15 from `b69aa5a` | that one file checked out in the worktree, `NJ_NODE` set | PASS, 22 checks; without `NJ_NODE` from `/tmp`: exit 1, with a clear "Set NJ_NODE" message |
+| oracle, AC-15 from `c9aa73f` | that one file checked out in the worktree, `NJ_NODE` set | PASS, 22 checks; without `NJ_NODE` from `/tmp`: exit 1, with a clear "Set NJ_NODE" message |
 | corpus replay | `node tools/refactor-harness/baseline.js verify --nj=/tmp/nj-v2-ref/dist/nj` (NJ_NODE set) | **exit 0, BEHAVIOUR UNCHANGED**: 3454 calls, **0 diffs / 2943 compared** (511 excluded, AC-7 concurrency). Corpus parts: fixtures 1878, oracle 1341, scratch 235. Test digest `4ede7689…490d` = header. Took 7 min 03 s. Note: this was with AC-15 red (A3). |
 | white-box probe | `NJ=… node tools/refactor-harness/scratch/verify.js dist/nj` | **122/123**, exit 0. The one ✗, "no backlog at all → no_backlog", is environmental (A4). |
 | lone `dist/nj`, no network | `sandbox-exec -p '(version 1)(allow default)(deny network*)' node <empty dir>/nj …`, `env -i` | `init`, `new --type=epic`, `list --json`, `doctor`: exit 0, stderr 0 bytes each. A `net.connect` inside the same sandbox gets `EPERM`, so the block really applies. Only `backlog/` and `nj` in the directory afterwards. |
@@ -79,7 +79,7 @@ fs.rmSync(dir,{recursive:true,force:true});
   `workspace/nanojira`, which gives `/Users/…/Downloads/runtime/…`, a path
   that doesn't exist. So AC-15 was red **in the main tree as well**, not just
   in `/tmp`. The lone-copy leg spawned that path directly, so `NJ_NODE` didn't
-  help. `b69aa5a` fixes this: it walks upward for `runtime/` or
+  help. `c9aa73f` fixes this: it walks upward for `runtime/` or
   `portable/runtime/`, a missing runtime becomes CANNOT RUN, and `NJ_NODE`
   governs every spawn. Verified above.
 - **A3. `baseline.js verify` does not gate on the oracle's verdict.** With AC-15
@@ -117,7 +117,7 @@ fs.rmSync(dir,{recursive:true,force:true});
 ## Part B — spec v3 review
 
 Ranked by how much each finding blocks V3-1 and then the later steps. "Open"
-means not ruled as of `664d4c2`.
+means not ruled as of `96c9374`.
 
 ### Blocks V3-1 — gate procedure, not spec text
 
@@ -126,7 +126,7 @@ as it is.** "Replay 0 diffs + new AC-21 suite" collides with the harness's
 own guards:
 
 - `test/` at HEAD has digest `3596ed52…` (AC-21 added, AC-15 changed in
-  `b69aa5a`). The baseline says `4ede7689…`, so `verify` **aborts with exit 6**
+  `c9aa73f`). The baseline says `4ede7689…`, so `verify` **aborts with exit 6**
   ("stale baseline") before comparing a single call.
 - Re-recording doesn't help. D85 says to record against `c2-baseline:dist/nj`,
   but that is v2 and fails AC-21, so `record` **aborts with exit 5**.
@@ -215,7 +215,7 @@ same commit, or record the expected ✗ as the V3-1 reference (2 ✗: A4 + this)
   `.nanojira.json` (D88/49). Binding errors use one form with the `Error: `
   prefix (D88). Nearest `backlog/` wins strictly (D88). `--backlog` is in
   every "Known flags:" line (D88). `invalid_backlog_env` is no longer reserved
-  (`c473e75`). Repeated key → line of the repetition, empty key → unknown key,
+  (`8daff04`). Repeated key → line of the repetition, empty key → unknown key,
   `init` never looks at `backlog/`, `--backlog=` → `missing_value`, empty
   `NJ_BACKLOG` = unset, `~/` expanded only in `.njrc`, empty directory =
   `exists` (D89). A `.njrc` without `backlog` next to a `backlog/` → `backlog/`

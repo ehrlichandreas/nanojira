@@ -8,6 +8,7 @@ import { checkFlags, flagString, parseListFlag, readSectionFlags } from '../core
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { PRIORITIES } from '../core/constants.ts';
 import { cliFieldNames } from '../core/flag-table.ts';
+import { readInputText, parseInputJson } from '../core/input.ts';
 import { context, resolveTarget, resolveById, requireWritable, requireNoUnreadableDirs, requireActive } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
@@ -16,6 +17,44 @@ import { syncH1, normalizeTitle, applySections } from '../core/parse.ts';
 import { refreshStatus } from '../core/status.ts';
 import { valueHint } from '../core/suggest.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement } from '../core/store.ts';
+import { releaseUnconditional, undoRelease } from '../core/claims.ts';
+
+/**
+ * `set --input=` (§ 9, DECISIONS 171 A, 172): exactly one JSON object, keys
+ * are `set`'s own settable fields only — never `id`/`file` (addressing stays
+ * on the CLI), never an array (no plan form for `set`, D172 item 1). Built
+ * into a synthetic `Flags` map so the rest of `set` (`collectSetOverrides`,
+ * `validateFieldValues`) runs completely unchanged for either source.
+ */
+function buildSetInputFlags(inputValue: string): Flags {
+  const raw = readInputText(inputValue);
+  const parsed = parseInputJson(raw);
+  if (Array.isArray(parsed)) fail('invalid_value', 'set --input= takes exactly one object, not an array — set has no plan form');
+  if (parsed === null || typeof parsed !== 'object') fail('invalid_value', '--input must be a JSON object');
+  const allowed = cliFieldNames('set').filter((f) => f !== 'id' && f !== 'file');
+  const synFlags: Flags = new Map();
+  for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+    if (!allowed.includes(key)) {
+      fail('unknown_field', `unknown field '${key}' in --input. Nothing written.`, `Known fields: ${allowed.join(', ')}`);
+    }
+    if (key === 'acceptance' && Array.isArray(value)) {
+      // Each string becomes one `- [ ] …` checkbox line, in order (DECISIONS
+      // 172 item 6) — formatted here, then carried through readSectionFlags
+      // exactly like any other inline acceptance text.
+      for (const line of value) if (typeof line !== 'string') fail('invalid_value', `--input: 'acceptance' array items must be strings`);
+      synFlags.set(key, (value as string[]).map((s) => `- [ ] ${s}`).join('\n'));
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) if (typeof item !== 'string') fail('invalid_value', `--input: '${key}' array items must be strings`);
+      synFlags.set(key, (value as string[]).join(','));
+      continue;
+    }
+    if (typeof value !== 'string') fail('invalid_value', `--input: '${key}' must be a string${key === 'acceptance' ? ' or an array of strings' : ''}`);
+    synFlags.set(key, value);
+  }
+  return synFlags;
+}
 
 type SectionRole = 'description' | 'acceptance';
 // The two field namespaces `nj set` can touch: real Element properties, and
@@ -24,16 +63,36 @@ type SetField = keyof Element | SectionRole;
 
 interface SetItem { el: Element; overrides: Map<string, string | string[] | undefined>; changed: SetField[]; newBody: string | undefined }
 
+/** This write sets `status` to the last configured status (§ 12a, DECISIONS 171 B) -- the trigger for releasing an existing claim. */
+function setsFinalStatus(ctx: Context, overrides: Map<string, string | string[] | undefined>): boolean {
+  return overrides.get('status') === ctx.cfg.statuses[ctx.cfg.statuses.length - 1];
+}
+
 function cmdSet(flags: Flags) {
   // `id`/`file` stay out of the "Known fields:" list (as before this was
   // moved onto the shared table): they are the addressing mechanism, not
   // a settable field, and the original error text never named them here.
   checkFlags(flags, cliFieldNames('set').filter((f) => f !== 'id' && f !== 'file'),
-    new Set(['json', 'force', 'allow-open-children', 'id', 'file']), true);
+    new Set(['json', 'force', 'allow-open-children', 'id', 'file', 'input']), true);
   const json = flags.has('json');
   const force = flags.has('force');
   const allowOpen = flags.has('allow-open-children');
   const ctx = context(flags);
+
+  // `--input` and field flags are mutually exclusive (§ 9, DECISIONS 171 A):
+  // two different sources for the same values. `sourceFlags` is what every
+  // field read below (`validateFieldValues`, `collectSetOverrides`) actually
+  // consults — the field flags straight from argv, or the synthetic map
+  // built from the JSON object — so neither of those two functions needs to
+  // know which source it is reading from.
+  const inputValue = flagString(flags, 'input');
+  let sourceFlags = flags;
+  if (inputValue !== undefined) {
+    for (const f of cliFieldNames('set').filter((x) => x !== 'id' && x !== 'file')) {
+      if (flags.has(f)) fail('invalid_value', '--input cannot be combined with field flags');
+    }
+    sourceFlags = buildSetInputFlags(inputValue);
+  }
 
   // Batch writes (§ 9): --id=A,B,C, two or more. A single --id is
   // unaffected and falls through to the unchanged path below.
@@ -43,14 +102,14 @@ function cmdSet(flags: Flags) {
     // "An invalid flag value" is a batch-wide argument error (DECISIONS
     // 136b), not a per-ID one: checked once, before any ID's own preflight,
     // the same value checks `collectSetOverrides` repeats harmlessly per ID.
-    validateFieldValues(ctx, flags);
+    validateFieldValues(ctx, sourceFlags);
     const result = runBatch<SetItem, object>(
       batchIds,
       (id) => {
         const el = resolveById(ctx, id, true);
         requireWritable(el);
         requireActive(el, 'set');
-        const { overrides, changed, newBody } = collectSetOverrides(ctx, el, flags, allowOpen);
+        const { overrides, changed, newBody } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
         return { el, overrides, changed, newBody };
       },
       (item) => {
@@ -58,12 +117,25 @@ function cmdSet(flags: Flags) {
           const entry = entryJson(item.el, ctx.backlog, ctx.cfg);
           return { ok: true, changed: [], entry, _problems: entry._problems };
         }
-        item.overrides.set('updated', nowIso());
-        guardedWriteCatchable(item.el, renderElement(item.el, item.overrides, item.newBody), force, ctx.backlog);
+        const ts = nowIso();
+        item.overrides.set('updated', ts);
+        // Final status releases the claim (§ 12a, DECISIONS 171 B): attempted
+        // before the guarded write, rolled back if that write fails.
+        const isFinal = setsFinalStatus(ctx, item.overrides);
+        const released = isFinal ? releaseUnconditional(ctx.backlog, item.el.id, ts) : undefined;
+        try {
+          guardedWriteCatchable(item.el, renderElement(item.el, item.overrides, item.newBody), force, ctx.backlog);
+        } catch (e) {
+          if (released !== undefined) undoRelease(ctx.backlog, item.el.id, released.holder, ts);
+          throw e;
+        }
         const fresh = loadElement(item.el.file, ctx.backlog, ctx.cfg);
         deriveGraph(ctx.elements.map((e: Element) => (e.file === item.el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
         const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
-        return { ok: true, changed: item.changed, entry, _problems: entry._problems };
+        return Object.assign(
+          { ok: true, changed: item.changed, entry, _problems: entry._problems },
+          released !== undefined ? { released: released.holder } : {},
+        );
       },
     );
     if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
@@ -77,7 +149,7 @@ function cmdSet(flags: Flags) {
   requireWritable(el);
   requireActive(el, 'set');
 
-  const { overrides, changed, newBody } = collectSetOverrides(ctx, el, flags, allowOpen);
+  const { overrides, changed, newBody } = collectSetOverrides(ctx, el, sourceFlags, allowOpen);
 
   if (changed.length === 0) {
     if (json) emitWriteResult(true, el, [], ctx.backlog, ctx.cfg);
@@ -85,13 +157,30 @@ function cmdSet(flags: Flags) {
     return 0;
   }
 
-  overrides.set('updated', nowIso());
-  guardedWrite(el, renderElement(el, overrides, newBody), force, ctx.backlog);
+  const ts = nowIso();
+  overrides.set('updated', ts);
+
+  // Final status releases the claim (§ 12a, DECISIONS 171 B): attempted
+  // before the guarded write, rolled back if that write fails. Only a
+  // final-status write needs the catchable (mirror) write -- an ordinary
+  // write keeps guardedWrite's existing D135 behavior unchanged.
+  const isFinal = setsFinalStatus(ctx, overrides);
+  const released = isFinal ? releaseUnconditional(ctx.backlog, el.id, ts) : undefined;
+  if (isFinal) {
+    try {
+      guardedWriteCatchable(el, renderElement(el, overrides, newBody), force, ctx.backlog);
+    } catch (e) {
+      if (released !== undefined) undoRelease(ctx.backlog, el.id, released.holder, ts);
+      throw e;
+    }
+  } else {
+    guardedWrite(el, renderElement(el, overrides, newBody), force, ctx.backlog);
+  }
 
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
   deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-  if (json) emitWriteResult(true, fresh, changed, ctx.backlog, ctx.cfg);
+  if (json) emitWriteResult(true, fresh, changed, ctx.backlog, ctx.cfg, released !== undefined ? { released: released.holder } : undefined);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} → ${changed.map((c: SetField) => `${c}=${describeField(fresh, c)}`).join(', ')}`);
   return 0;
 }

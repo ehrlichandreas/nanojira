@@ -27,17 +27,35 @@ and subtasks, one Markdown file per element, committed alongside the code.
   never to the author of the thing being reviewed, so `next` keeps it out
   of the author's own hands automatically.
 - Read before you write: `nj show --id=<id> --json` to see the current
-  state, then `nj set --id=<id> --status=... [--title=... --priority=...
+  state (resolving exactly one id? read `.entry` off the result directly
+  — identical to `entries[0]`, absent only for a `duplicate_id` target),
+  then `nj set --id=<id> --status=... [--title=... --priority=...
   --tags=... --assignee=... --depends-on=... --description=...
   --acceptance=...]` to change only the fields you intend to.
+- Anything multi-line, or more than one field flag's worth of structure —
+  a description with embedded newlines, a whole epic/task/subtask tree —
+  reach for `--input=-` with a heredoc instead of threading it through
+  field flags: `nj new --input=- --json <<'EOF' ... EOF`. `new --input=`
+  additionally takes a whole plan (an object, or an array, with `children`
+  nesting — parent implied by the nesting) in one call; `set --input=`
+  takes the same field map as its own flags, just as JSON. `acceptance`
+  may be a JSON array of strings there (and only there) — each one
+  becomes a `- [ ] …` line, so you never have to remember the checkbox
+  syntax by hand. A `depends_on` entry starting with `@` resolves against
+  a `ref` declared *earlier* in the same plan; a forward reference is
+  rejected, not silently wrong. `docs/GUIDE.md` § 21 has a full worked
+  example and how to recover from a mid-plan failure.
 - To change *just one* tag without re-listing every other one: `nj set
   --id=<id> --add-tags=<a,b>` / `--remove-tags=<c,d>` instead of
   `--tags=`, which replaces the whole list. Never combine `--tags=` with
   either in the same call (rejected) — pick one or the other.
 - When you're done with a claimed element, mark it `nj set --id=<id>
-  --status=done`; if you're stopping without finishing, give the claim up
-  with `nj release --id=<id> --as=<your-name>` so someone else can claim
-  it.
+  --status=done` (or `nj claim --id=<id> --as=<your-name>
+  --status=done` in one call) — reaching the last configured status
+  releases your own claim automatically, reported as `released:
+  "<your-name>"`; there's no separate `nj release` to remember afterward.
+  If you're stopping *without* finishing, release explicitly instead:
+  `nj release --id=<id> --as=<your-name>`, so someone else can claim it.
 - Never hand-edit files under `backlog/` — always go through `nj`.
 - Tick acceptance criteria with `nj check --id=<id> --text="<substring>"`,
   never by editing the checkbox text yourself.

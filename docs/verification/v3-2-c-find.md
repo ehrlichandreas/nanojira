@@ -1,17 +1,17 @@
-# V3.2-C verification — `nj find` (`4dbc6fc`, § 9a, AC-30, TSK-036)
+# V3.2-C verification — `nj find` (`3c09b79`, § 9a, AC-30, TSK-036)
 
 Verifier, 2026-10-04. I didn't write any of this code — independent
 verification assigned by the Lead. Work in `/tmp/verifier-v32c-find`
-(detached worktree at `4dbc6fc`), `/tmp/verifier-v32c-nested/projects/
+(detached worktree at `3c09b79`), `/tmp/verifier-v32c-nested/projects/
 nanojira` (nested under its own `runtime/darwin-arm64` symlink, for
 `gate.js`'s own AC-15 check and a second, unclipped `baseline.js` run), and
 `/tmp/verifier-v32c-probe` (scratch backlogs). All removed before writing
-this file. Runtime Node v24.21.0. Read: § 9a as of `c2b84e2` (incl. D132),
+this file. Runtime Node v24.21.0. Read: § 9a as of `95bc3f2` (incl. D132),
 the § 9 command-list/JSON-shape rows; `src/commands/cmd-find.ts`,
 `cmd-list.ts`'s diff, `src/nj.ts`, `src/core/help.ts`; `test/ac/ac-30-find.js`
-(`de0bca2`).
+(`99cf76e`).
 
-**VERDICT: accept.** AC-30 34/34, run-all and `gate.js --step=4dbc6fc
+**VERDICT: accept.** AC-30 34/34, run-all and `gate.js --step=3c09b79
 --frozen=c6-baseline` all reproduce exactly — the 6-call tally confirmed
 byte-for-byte to be exactly two cumulative help lines (`check`'s, already
 accepted in V3.2-A, plus `find`'s, new here), nothing else. `list`'s own
@@ -29,7 +29,7 @@ read.
 - `node test/ac/ac-30-find.js dist/nj`: **34/34**, exact.
 - `node test/run-all.js dist/nj`: 76/78 pass, 0 failed, 2 cannot-run (the
   usual two expected gaps).
-- `gate.js --step=4dbc6fc --frozen=c6-baseline`: `BEHAVIOUR CHANGED — 6
+- `gate.js --step=3c09b79 --frozen=c6-baseline`: `BEHAVIOUR CHANGED — 6
   differing call(s): help 4, --help 2`, `replay: exit 1`, `oracle: passed
   77, failed 0, cannot run 1 (1 expected)`, `gate: exit 1, replay CHANGED,
   oracle green`.
@@ -38,7 +38,7 @@ read.
 worktree, `test/` at `c6-baseline`, digest-confirmed; throwaway clip
 removal, never committed, same technique as every prior report): the
 "was" (`c6-baseline`) help text carries neither a `check` nor a `find`
-line; the "now" (`4dbc6fc`) text carries **both** — `check`'s (already
+line; the "now" (`3c09b79`) text carries **both** — `check`'s (already
 accepted, unrelated to this round) and the new `nj find "<text>"
 [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…] [--all]
 [--case-sensitive]` line — and nothing else differs anywhere in either

@@ -1,21 +1,21 @@
-# V3.2-B verification — stale claims (`6e3507a`, `d54322b`, § 5/7/12/14, AC-29, TSK-035)
+# V3.2-B verification — stale claims (`815d697`, `fd4444c`, § 5/7/12/14, AC-29, TSK-035)
 
 Verifier, 2026-10-04. I didn't write any of this code — independent
 verification assigned by the Lead. Work in `/tmp/verifier-v32b-claims`
-(detached worktree at `d54322b`), `/tmp/verifier-v32b-nested/projects/
+(detached worktree at `fd4444c`), `/tmp/verifier-v32b-nested/projects/
 nanojira` (nested under its own `runtime/darwin-arm64` symlink, for
 `gate.js`'s own AC-15 check and a second, unclipped `baseline.js` run), and
 `/tmp/verifier-v32b-probe` (scratch backlogs). All removed before writing
-this file. Runtime Node v24.21.0. Read: § 5/7/12/14 as of `896432b`;
+this file. Runtime Node v24.21.0. Read: § 5/7/12/14 as of `1ccc209`;
 `src/core/claims.ts`, `core/config.ts`, `core/constants.ts`, `core/derive.ts`,
 `core/store.ts`, `core/types.ts`, `core/output.ts`, and every touched
-`src/commands/*.ts`; `test/ac/ac-29-stale-claims.js` (`9cb4df6`).
+`src/commands/*.ts`; `test/ac/ac-29-stale-claims.js` (`e8bac6d`).
 
 **VERDICT: accept, with one text-precision finding worth a ruling.** AC-29
-43/43, run-all and `gate.js --step=d54322b --frozen=c6-baseline` all
+43/43, run-all and `gate.js --step=fd4444c --frozen=c6-baseline` all
 reproduce exactly (6 calls, same help-text class as V3.2-A, confirmed
 byte-for-byte across the full, unclipped corpus — the `_problems`/`_claim`
-key-order fix in `d54322b` is complete: zero diffs anywhere else in 5,366
+key-order fix in `fd4444c` is complete: zero diffs anywhere else in 5,366
 compared calls, not just a sample). The code review found no unintended
 behaviour change beyond `claim:stale` in the 13-file diff. My own probes
 (16 scenarios) all matched spec. **The one real finding:** `claim:stale`
@@ -35,7 +35,7 @@ and AC-29 only tests the three commands the text happens to name.
 - `node test/ac/ac-29-stale-claims.js dist/nj`: **43/43**, exact.
 - `node test/run-all.js dist/nj`: 75/77 pass, 0 failed, 2 cannot-run (the
   usual two expected gaps).
-- `gate.js --step=d54322b --frozen=c6-baseline`: `BEHAVIOUR CHANGED — 6
+- `gate.js --step=fd4444c --frozen=c6-baseline`: `BEHAVIOUR CHANGED — 6
   differing call(s): help 4, --help 2`, `replay: exit 1`, `oracle: passed
   76, failed 0, cannot run 1 (1 expected)`, `gate: exit 1, replay CHANGED,
   oracle green` — the same tally and shape as V3.2-A's own accepted
@@ -51,7 +51,7 @@ holdover from the prior round; nothing about `claim:stale` or `claims.`
 anywhere in any of the 6 diffs). Critically, **`compared: 5366 calls`
 include every `list`/`show`/`set`/`note`/`claim` call in the whole
 corpus** — the exact population that would have shown the 1,533-call
-key-order regression `d54322b`'s own commit message describes, had the fix
+key-order regression `fd4444c`'s own commit message describes, had the fix
 not been complete. Zero diffs outside the 6 help-text calls means the fix
 is clean across the entire corpus, not just the cases `gate.js`'s own
 40-call cap happened to show. **No existing call gained `claim:stale`**
@@ -61,7 +61,7 @@ recent relative to its own fixture's pinned `NJ_NOW`).
 
 ## 2. The 13-file diff — reviewed for unintended changes beyond `claim:stale`
 
-Read every file `6e3507a` touches:
+Read every file `815d697` touches:
 
 - **`core/claims.ts`**: adds `isClaimStale(since, staleAfterHours, nowMs)`
   only — a pure function, `staleAfterHours <= 0` short-circuits `false`
@@ -78,7 +78,7 @@ Read every file `6e3507a` touches:
   `claim:stale` into `_problems`, sorted — the only semantic change in the
   file. `_claim` itself (the `{by, since}` object) is untouched — confirmed
   both by reading (the `readClaim` call and its assignment to `e._claim`
-  are unmoved apart from the `d54322b` field-order fix) and empirically
+  are unmoved apart from the `fd4444c` field-order fix) and empirically
   (§ 7's "E7 `_claim` is exactly `{by, since}`" case, and my own probes
   below).
 - **`core/store.ts`**: adds `nowMs()` as `Date.parse(nowIso())` — reuses
@@ -156,7 +156,7 @@ Read every file `6e3507a` touches:
   claim directory, clean it up"). Not a defect; worth being aware of if
   the noise ever becomes a usability concern, not something I'd block
   acceptance over.
-- **The claims-root cache (`908ce87`'s `claimsRootExists`): no new
+- **The claims-root cache (`a6bd4e4`'s `claimsRootExists`): no new
   interaction.** `isClaimStale` is a pure function over `(since,
   threshold, now)` — it never touches the cache. `entryJson`'s own guard
   (`if (claim && isClaimStale(...))`) means the cache's already-disclosed,

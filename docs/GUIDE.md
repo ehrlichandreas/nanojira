@@ -291,7 +291,11 @@ $ nj set --id=EPIC-001 --priority=hgih --json
 ```
 
 **For agents: add `--json` to every call.** Reads return `{backlog, counts,
-entries}`, writes `{ok, id, changed, entry, _problems}`, and **every** failure
+entries}` — `nj show --json` on a single id additionally carries `entry`,
+identical to `entries[0]`, so a script resolving exactly one element can
+read `.entry` directly instead of indexing into `entries`; it's absent for
+a `duplicate_id` target (two entries) and never appears on `list`/`find`.
+Writes return `{ok, id, changed, entry, _problems}`, and **every** failure
 returns `{"ok": false, "error": "<code>", "hint": "…"}` on stdout with exit 1
 (the prose goes to stderr as well). Branch on `error` and on the codes in
 `_problems`, never on prose. Exit codes: `0` success, `1` failed, `2` only
@@ -573,6 +577,22 @@ changed hands, not to whom it previously belonged.
   Nothing is ever auto-released or auto-stolen — it's a signal for a human
   or agent to act on with `--steal`, never something `nj` acts on itself.
 - **History.** These claim events feed into `nj log` (§ 15, below).
+- **A write that reaches the last configured status releases the claim
+  on its own** — `nj set --status=done`, `nj claim --status=done`, `nj
+  next --status=done` alike, whoever holds it, in the same call:
+
+  ```sh
+  $ nj claim --id=TSK-001 --as=alice
+  TSK-001 claimed by alice
+  $ nj set --id=TSK-001 --status=done --json
+  { "ok": true, "id": "TSK-001", "changed": ["status"], "...": "...",
+    "released": "alice" }
+  ```
+
+  No more separate `nj release` after finishing — `released` is simply
+  absent from the result when nothing was claimed. A write refused for
+  another reason (`refused:children_open` without
+  `--allow-open-children`, for one) releases nothing; the claim survives.
 
 ## 14. `nj next`
 
@@ -826,3 +846,111 @@ Element problems arrive in `_problems` on every entry — branch on the codes
 (`incomplete:acceptance`, `depends_on:dangling`, `layout:misplaced`,
 `claim:stale`, `claim:mismatch`, `claim:orphaned`, …); the full closed
 table is § 7 of the spec.
+
+## 21. Creating a whole plan with `--input`
+
+Field flags build one element per call. For an epic with several tasks
+and subtasks, cross-referencing each other via `depends_on`, `nj new
+--input=<file|->` takes the whole thing as one JSON plan instead — an
+object, or an array of objects, each of which may nest its own `children`
+(the parent is implied by the nesting, never given alongside it). `nj set
+--input=` takes the same field map `set` already accepts via flags, just
+sourced from JSON — addressing (`--id=`/`--file=`) stays on the CLI either
+way, so there's no plan form for `set`.
+
+**A real run** — an epic, one task, an implementation subtask and a
+review that `depends_on` it via `ref` (a call-scoped local name, never
+written to any file):
+
+```sh
+$ cat plan.json
+{
+  "type": "epic", "title": "Login", "description": "Users can sign in.",
+  "children": [
+    { "type": "task", "title": "Login route",
+      "description": "POST /login returns a session.",
+      "acceptance": ["200 with a valid password", "401 otherwise"],
+      "children": [
+        { "type": "subtask", "ref": "@impl", "title": "Implement POST /login",
+          "description": "Wire the route to the session store.",
+          "acceptance": ["Route registered", "Session cookie set on success"] },
+        { "type": "subtask", "title": "Review: POST /login", "assignee": "bob",
+          "depends_on": ["@impl"],
+          "description": "Review the implementation above.",
+          "acceptance": ["Code reviewed", "Tests reviewed"] }
+      ] }
+  ] }
+$ nj new --input=plan.json --json
+{
+  "ok": true,
+  "ids": ["EPIC-001", "TSK-001", "SUB-001", "SUB-002"],
+  "entries": [ "...", "...", "...",
+    { "id": "SUB-002", "parent": "TSK-001", "title": "Review: POST /login",
+      "assignee": "bob", "depends_on": ["SUB-001"], "...": "..." } ],
+  "refs": { "@impl": "SUB-001" },
+  "_problems": []
+}
+```
+
+Piping a heredoc through stdin works the same way and avoids a stray
+`plan.json` in the working tree:
+
+```sh
+$ nj new --input=- --json <<'EOF'
+{ "type": "subtask", "parent": "TSK-001", "title": "Hotfix",
+  "description": "D.", "acceptance": ["Covered by a regression test"] }
+EOF
+```
+
+- **`ref`/`depends_on`**: `ref` always starts with `@`; a `depends_on`
+  entry starting with `@` resolves only against this plan's own `ref`s
+  (`not_found` if none matches), one that doesn't resolves only against
+  real, already-existing ids, exactly as it does today. A ref must be
+  **declared earlier** in the plan than wherever it's used — the same
+  depth-first, pre-order sequence the plan is written in. A forward
+  reference, or an object referencing itself, is `invalid_value`, the
+  failure naming the *referencing* object and hinting to move the
+  referenced one earlier. `parent` is never ref-aware: a new element's
+  parent being *another new element in the same plan* is said through
+  `children` nesting, not through `parent` plus a `ref`.
+- **`acceptance` as a JSON array** (either command): each string becomes
+  one `- [ ] …` line, in order — content supplied this way can never
+  accidentally trigger `acceptance:no_checkbox`. A plain string still
+  works unchanged.
+- **`--dry-run`** (`new --input=` only): runs the full validation pass and
+  writes nothing — no id, no file, no `refs`, a `children` entry's implied
+  parent shown as a JSON path (`"[0]"`) instead of a real id, since none
+  was ever assigned. Use it to check a plan before committing to it:
+
+  ```sh
+  $ nj new --input=plan.json --dry-run --json
+  { "ok": true, "dry_run": true,
+    "entries": [
+      { "type": "epic", "title": "Login", "_problems": [] },
+      { "type": "task", "parent": "[0]", "title": "Login route", "_problems": [] }
+    ] }
+  ```
+
+**Recovering from a mid-plan failure.** A failure's JSON always carries
+`failed_at` — the one object at fault, named by its own `ref` if it
+declared one, else a JSON path like `[0].children[1]` (the top level is
+always 0-indexed, even for a single bare object). If the plan failed
+*validation*, nothing was written at all (`created`/`refs` both absent);
+if an object further in failed to *write* (a concurrent change, a
+filesystem error), `created` lists every id actually written so far, in
+order, and `refs` lists every `ref` resolved by then — nothing before the
+failure point is rolled back, there is no transaction across a whole
+plan:
+
+```json
+{ "ok": false, "error": "invalid_value",
+  "hint": "move the object that declares this ref earlier in the plan, before this one",
+  "failed_at": "[0]" }
+```
+
+To retry after a mid-plan write failure: fix the one object `failed_at`
+names, drop everything `created` already lists from the plan (those
+elements exist now — re-running the same plan unmodified would create
+duplicates, not pick up where it left off), and re-run with what remains,
+using `refs` to recover which real id each already-written `ref` resolved
+to if a dropped element is still depended on by one that's left.

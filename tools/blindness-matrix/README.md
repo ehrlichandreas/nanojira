@@ -13,7 +13,7 @@ probe into the file it changed, and runs every suite under `test/ac`,
 `test/fault` and `test/edge` against the copy. The repo's own code is never
 touched.
 
-Since the module split (`ceb5dac`) `nj` is a 64-line entry point and the code
+Since the module split (`c5c5ad6`) `nj` is a 64-line entry point and the code
 lives in 22 modules, so a mutant has to be a directory: a lone mutated `nj`
 dies on its first `require('./commands/…')`/`require('./core/…')`. The needle
 is looked up in `nj` and in every module, and mutated where it is found. **A

@@ -1065,7 +1065,7 @@ value", and whether an empty `NJ_BACKLOG` counts as set (then
 expansion only to `.njrc` values.
 
 **54. `invalid_backlog_env` is both spec-named and "reserved". — RULED
-(DECISIONS 88, `c473e75`):** § 9's reserved list no longer names it.
+(DECISIONS 88, `8daff04`):** § 9's reserved list no longer names it.
 *Was:* § 9's
 spec-named table maps "`NJ_BACKLOG` names a place without a backlog" to
 `invalid_backlog_env`, but the paragraph below the table still lists
@@ -1305,7 +1305,7 @@ A CRLF `.gitignore` line (`.nanojira-index.json\r\n`): is that "verbatim"?
 ## 75–83. Proposal v3.1 § 0/§ A/§ B — note author and unarchive (AC-25, AC-26)
 
 Raised while writing `ac/ac-25-note-author.js` and `ac/ac-26-unarchive.js`
-from `docs/proposals/v3.1.md` (5d1c83d) and the lead's rulings A-1, B-1, B-2
+from `docs/proposals/v3.1.md` (5d30259) and the lead's rulings A-1, B-1, B-2
 and B-3, before v3.1 exists. **75–81 are ruled in DECISIONS 104** and
 asserted (AC-25 N1/N4/N7, AC-26 U3/U4/U6 and the `ids` checks). 82 and 83
 arose from those rulings and are open.

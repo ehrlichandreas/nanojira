@@ -1,9 +1,9 @@
-# V3-3 test batch audit — weakened assertions? (`5f73e93`, `cc3f35e`, `7dee4a7`, plus `90a0c7d`)
+# V3-3 test batch audit — weakened assertions? (`5e22caa`, `baabc38`, `708213c`, plus `f847d11`)
 
 Verifier, 2026-09-28.
-- **Scope:** every hunk of `git diff 8736bf0..7dee4a7 -- test/`, i.e. ten
+- **Scope:** every hunk of `git diff b685a49..708213c -- test/`, i.e. ten
   files, among them `test/lib/harness.js`.
-- **Added:** `90a0c7d`, which edits the two batch suites
+- **Added:** `f847d11`, which edits the two batch suites
   `archive-rm-byte-identity` and `exit-doctor-fix` again after the named
   commits.
 - **Rulings used:** DECISIONS 91 (scan bounds) and DECISIONS 100 (batch
@@ -29,14 +29,14 @@ a coverage gap for V3-3, not a loosening of anything existing.
 |---|---|---|
 | `ac/ac-13-json-contract.js` | the closed `TABLE` gains `layout:misplaced`, `backlog:unreadable_dir`, `backlog:legacy_layout`, `backlog:status_stale` | Required by D100 and § 7. `TABLE` is used only as the membership set (`SEEN − TABLE` must be empty, line 489); no count assertion changed. Effect, intended: a pre-v3 build that emitted one of these codes is no longer flagged by *this* suite (mutant m3: 3 → 2 failures). |
 | `ac/ac-14-determinism.js` | +1 block, +2 checks: an unknown priority sorts with weight 2 (D100 70) | stricter |
-| `ac/ac-22-layout.js` | `mkLayoutBacklog` writes a fresh overview; `mdFiles` excludes `STATUS.md` **at the top level only** (`r !== 'STATUS.md'` on the relative path; a nested `x/STATUS.md` still counts, as D91 B12 wants); `H.writeStatus` before the pinned "only `<code>` findings" doctor set of each migration, and in the chmod-000 case | Neutral: the pinned sets stay exact. **But see T1:** `7dee4a7` replaced the expectation "after a layout change the overview is stale (`backlog:status_stale` in the set)" with a refresh, and no other suite took that expectation over. |
+| `ac/ac-22-layout.js` | `mkLayoutBacklog` writes a fresh overview; `mdFiles` excludes `STATUS.md` **at the top level only** (`r !== 'STATUS.md'` on the relative path; a nested `x/STATUS.md` still counts, as D91 B12 wants); `H.writeStatus` before the pinned "only `<code>` findings" doctor set of each migration, and in the chmod-000 case | Neutral: the pinned sets stay exact. **But see T1:** `708213c` replaced the expectation "after a layout change the overview is stale (`backlog:status_stale` in the set)" with a refresh, and no other suite took that expectation over. |
 | `ac/ac-23-status-overview.js` | the local `renderStatus` moves to `H.renderStatus` (logic identical; default statuses from `DEFAULT_CONFIG` = the same five); new C0 checks `H.statusFor` against the C3/C4 goldens; new C3b (unknown priority, lines spelled out, not rendered) | stricter; nothing removed except the renderer's local copy and the "Not asserted" note |
 | `edge/archive-rm-byte-identity.js` | `checksumAll` skips `r === 'STATUS.md'` | **Relaxation 1**, exactly as narrow as D100: only the top-level file (the relative path must equal `STATUS.md`), skipped before the stat. Every other file, a nested `STATUS.md` included, is still hashed, so a stray or extra file anywhere is still caught (mutant m1, below). |
 | `edge/fix-duplicate-mtimes.js`, `edge/unreadable-stub-refusals.js` | `H.writeStatus(d)` after the hand edits, before the pinned doctor set | neutral: the sets stay exact; a wrong renderer can only make them fail, never pass (mutants m2/m3 caught before and after) |
 | `stress/concurrency.js` | "problems[] is empty" → "every problem is `backlog:status_stale` with severity `warning`" | **Relaxation 2**, as D100 rules ("no error finding; `status_stale` the one tolerated warning"); `doctor` exit 0 and `ok=true` are still asserted separately. Nit T2: it tolerates *any number* of `status_stale` entries, where a backlog-level code can appear only once. |
 | `lib/harness.js` | `renderStatus`, `statusFields`, `statusFor`, `writeStatus`; `mkBacklog` writes a fresh `STATUS.md` into every fixture | see the next section; T3 |
-| `90a0c7d` `archive-rm-byte-identity` | walk, archived-file reads and list reads made null-safe | Strict: a missing file becomes `'<file missing>'` and an unreadable one `'<unreadable>'`, so both *fail* the comparison instead of throwing. |
-| `90a0c7d` `exit-doctor-fix` | `fixed[]` count = the expected steps + 1 iff `STATUS.md`'s bytes changed; one biconditional check per scenario | Exact for every non-overview step, as before. For step 9 it is **one-sided** (T1). |
+| `f847d11` `archive-rm-byte-identity` | walk, archived-file reads and list reads made null-safe | Strict: a missing file becomes `'<file missing>'` and an unreadable one `'<unreadable>'`, so both *fail* the comparison instead of throwing. |
+| `f847d11` `exit-doctor-fix` | `fixed[]` count = the expected steps + 1 iff `STATUS.md`'s bytes changed; one biconditional check per scenario | Exact for every non-overview step, as before. For step 9 it is **one-sided** (T1). |
 
 ## `H.statusFor`: independent, and faithful to D91
 
@@ -70,8 +70,8 @@ a coverage gap for V3-3, not a loosening of anything existing.
 
 ## Mutation check
 
-`c3-baseline:dist/nj` (`1e85263`) and three mutants, each suite run in its
-pre-batch (`8736bf0`) and post-batch (`7dee4a7`) version (`FAILn/m` = failed
+`c3-baseline:dist/nj` (`a10b671`) and three mutants, each suite run in its
+pre-batch (`b685a49`) and post-batch (`708213c`) version (`FAILn/m` = failed
 checks/total):
 
 | Suite | c3 | m1: `rm` leaves `<id>.removed` beside each removed file | m2: `doctor` emits an extra `backlog:stray_tmp` warning | m3: `doctor` emits an extra `backlog:status_stale` warning |
@@ -95,10 +95,10 @@ mutant.
 
 | nj | test/ | passed / failed / cannot run | non-green suites (failed/total checks) |
 |---|---|---|---|
-| c3 `1e85263` | pre `8736bf0` | 64 / 5 / 1 | ac-17 399/579, ac-22 374/775, ac-23 44/162, ac-24 240/448, hardening-v3-1 229/578; hardening-njrc-foreign-link CANNOT RUN |
-| c3 `1e85263` | post `7dee4a7` | 64 / 5 / 1 | the same, except **ac-23 45/170** |
-| V3-2 `76db3b2` | pre | 66 / 3 / 1 | ac-23 41/162, ac-24 240/448, hardening-v3-1 214/578; foreign-link CANNOT RUN |
-| V3-2 `76db3b2` | post | 66 / 3 / 1 | the same, except **ac-23 42/170** |
+| c3 `a10b671` | pre `b685a49` | 64 / 5 / 1 | ac-17 399/579, ac-22 374/775, ac-23 44/162, ac-24 240/448, hardening-v3-1 229/578; hardening-njrc-foreign-link CANNOT RUN |
+| c3 `a10b671` | post `708213c` | 64 / 5 / 1 | the same, except **ac-23 45/170** |
+| V3-2 `448b7a8` | pre | 66 / 3 / 1 | ac-23 41/162, ac-24 240/448, hardening-v3-1 214/578; foreign-link CANNOT RUN |
+| V3-2 `448b7a8` | post | 66 / 3 / 1 | the same, except **ac-23 42/170** |
 
 - Per suite and per failing check name, pre and post are identical on both
   builds except for one new failing check: `ac-23 C3b`. It fails because
@@ -116,13 +116,13 @@ mutant.
 - **What D100 rules.** Step 9 is in `fixed[]` exactly when it changes
   `STATUS.md`: missing, stale before `--fix`, *or made stale by an earlier
   step's move or rename*.
-- **Why the check can't fail.** `exit-doctor-fix.js` (90a0c7d) derives its
+- **Why the check can't fail.** `exit-doctor-fix.js` (f847d11) derives its
   expectation from the observed bytes. So a V3-3 whose `--fix` moves a file
   and **forgets to regenerate** passes every check: the bytes don't change,
   `fixed[]` correctly doesn't name the file, and the only later check is
   `doctor`'s exit code, which a `status_stale` warning doesn't change.
 - **Nothing else covers it.** AC-23 C5 covers hand-edited, deleted and
-  conflicted overviews, but no move. `7dee4a7` removed the one
+  conflicted overviews, but no move. `708213c` removed the one
   layout-change-makes-it-stale expectation from `ac-22`. Nothing in
   `coverage-v3-gaps.js` covers it.
 - **Demonstrated** against `c3-baseline`, which behaves exactly like "V3-3
@@ -170,7 +170,7 @@ also accept duplicates, which would be a doctor bug. Add
 
 ## Cleanup
 
-The worktrees for `8736bf0`, `7dee4a7` and HEAD are removed. The mutants
+The worktrees for `b685a49`, `708213c` and HEAD are removed. The mutants
 (`/tmp/nj-audit-mut/nj-m1-rm-extra`, `nj-m2-doctor-warn`,
 `nj-m3-doctor-stale`), the matrix script and the logs stay in
 `/tmp/nj-audit-mut/`.

@@ -1,14 +1,14 @@
-# V3.6 batch 2 verification — per-command `--help`, did-you-mean, D160, release docs (`78947f0`, D158 D, D160, AC-46/47)
+# V3.6 batch 2 verification — per-command `--help`, did-you-mean, D160, release docs (`6837504`, D158 D, D160, AC-46/47)
 
 Verifier, 2026-10-07. Independent verification, assigned by the Lead.
-Work in `/tmp/verif-v36b2` (worktree at `78947f0`, built via `npm ci` +
+Work in `/tmp/verif-v36b2` (worktree at `6837504`, built via `npm ci` +
 `tools/bundle.js`), `/tmp/verif-v36b2-nested` (nested, `test/` swapped to
 `oracle-frozen-12`, for the replay), `/tmp/verif-v36b2-parallel` (scratch,
 for the run-all concurrency check). All removed before writing this.
 Read: SPECIFICATION.md § 9 "`--help` (per-command)" and "Did-you-mean" in
 full, DECISIONS 158 D and 160 (+ addendum) in full, the full diffs of
-`6d9964e` (per-command help/did-you-mean), `a3fb45a` (D160 tightening),
-and `78947f0` (release docs), `test/ac/ac-46-per-command-help.js` and
+`335a0df` (per-command help/did-you-mean), `628a618` (D160 tightening),
+and `6837504` (release docs), `test/ac/ac-46-per-command-help.js` and
 `ac-47-did-you-mean.js` in full, `docs/CHANGES.md` and the relevant
 `docs/GUIDE.md` sections in full.
 
@@ -140,7 +140,7 @@ unclipped, uncapped — no local, throwaway harness edit was needed this
 time (batch 1 required one; it was never committed, per that round's
 own report).
 
-Nested worktree at `78947f0`, `test/` swapped to `oracle-frozen-12`,
+Nested worktree at `6837504`, `test/` swapped to `oracle-frozen-12`,
 digest confirmed matching. Run with `TMPDIR` pointed at the same
 dedicated clean directory batch 1 used (no `backlog/` in its ancestor
 chain):
@@ -162,7 +162,7 @@ labels, same before/after content throughout. `edge/doctor-fix-surface.js`
 is the same pre-existing, already-explained stale fixture from batch 1's
 report (§ 4 there); nothing new.
 
-**Why zero hint diffs, though 6d9964e had 12 (the task's own question).**
+**Why zero hint diffs, though 335a0df had 12 (the task's own question).**
 Searched the full `oracle-frozen-12` corpus (`grep -rnoE -- "--priority=
 [a-zA-Z]+|--status=[a-zA-Z]+|--type=[a-zA-Z]+"`) for every closed-vocab
 value used anywhere in it: the only ones that aren't themselves valid
@@ -176,11 +176,11 @@ exit-fault-vocabulary.js` is the corpus's own source of this: `{ name:
 'invalid value', args: ['set', '--id=TSK-001', '--priority=nope', …] }`
 and `{ name: 'invalid list filter', args: ['list', '--status=nope', …]
 }` — this is literally the DECISIONS 160 motivating example, frozen
-into the corpus from before the tightening. At `6d9964e` (flat ≤2 rule,
+into the corpus from before the tightening. At `335a0df` (flat ≤2 rule,
 plain Levenshtein), `nope`→`done` at distance 2 **was** hinted, which is
 exactly the noise DECISIONS 160 exists to remove — producing a diff
 against `oracle-frozen-12`'s pre-hint-feature plain message. At
-`a3fb45a`/`78947f0` (length-dependent ≤1 for `nope`'s 4 characters), that
+`628a618`/`6837504` (length-dependent ≤1 for `nope`'s 4 characters), that
 same call now gets **no** hint, reverting its output to byte-identical
 with the original baseline — hence zero diff, not a lost feature.
 Confirmed directly: `grep -c "did you mean" /tmp/replay-v36b2-diffout.txt`

@@ -8,7 +8,7 @@ import { resolveActingName } from '../core/actor.ts';
 import { checkFlags, flagString } from '../core/args.ts';
 import { cliFieldNames } from '../core/flag-table.ts';
 import type { Entry } from '../core/claims.ts';
-import { rollback, transition } from '../core/claims.ts';
+import { rollback, transition, releaseUnconditional, undoRelease, highestEntry, claimsDir } from '../core/claims.ts';
 import { parseBatchIds, runBatch } from '../core/batch.ts';
 import { context, requireTargetFlagSyntax, resolveTarget, resolveById, requireWritable, requireActive } from '../core/context.ts';
 import { entryJson } from '../core/derive.ts';
@@ -55,16 +55,25 @@ function claimOne(ctx: Context, el: Element, name: string, status: string | unde
   const overrides = new Map<string, string | string[] | undefined>([['assignee', name], ['updated', ts]]);
   if (status !== undefined) overrides.set('status', status);
 
+  // Final status releases the claim (§ 12a, DECISIONS 171 B): `claim`/`next
+  // --status=<last>` release the very claim this call just made, in the
+  // same call -- attempted before the guarded write, same order as the
+  // claim transition itself.
+  const isFinalStatus = status !== undefined && status === ctx.cfg.statuses[ctx.cfg.statuses.length - 1];
+  const released = isFinalStatus ? releaseUnconditional(ctx.backlog, el.id, ts) : undefined;
+
   try {
     compareGuard(el, false, ctx.backlog, STABLE_HINT, true);
     mirrorWrite(el.file, renderElement(el, overrides, undefined));
   } catch (e) {
+    if (released !== undefined) undoRelease(ctx.backlog, el.id, released.holder, ts);
     // A landed steal is never rolled back (§ 12a): reported as
     // claim:mismatch by `doctor`, not undone. A plain claim or a
     // re-assertion restores what this invocation read.
     if (!landedSteal) {
+      const h = highestEntry(claimsDir(ctx.backlog, el.id));
       const restore = reassert ? { kind: 'claimed' as const, name } : { kind: 'released' as const, name };
-      rollback(ctx.backlog, el.id, t.gen, restore.kind, restore.name, ts);
+      rollback(ctx.backlog, el.id, h ? h.gen : 0, restore.kind, restore.name, ts);
     }
     throw e;
   }
@@ -72,11 +81,12 @@ function claimOne(ctx: Context, el: Element, name: string, status: string | unde
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
   deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
   const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
-  const claim = { by: name, since: ts };
+  const claim = released !== undefined ? null : { by: name, since: ts };
   return Object.assign(
     { ok: true, changed, entry, _problems: entry._problems, claim },
     stolenFrom !== undefined ? { stolen_from: stolenFrom } : {},
     previousAssignee !== undefined ? { previous_assignee: previousAssignee } : {},
+    released !== undefined ? { released: released.holder } : {},
   );
 }
 

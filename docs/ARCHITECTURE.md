@@ -6,8 +6,8 @@ by" count in § 2 re-walked mechanically again for v3.3 (DECISIONS 148,
 exports, import edges, commands) — not recalled from memory or from the
 task history that produced this code.
 
-It describes the code as built, which implements spec **v3 through v3.7**
-(DECISIONS 86–167): V3-1, the backlog location (`--backlog`, `NJ_BACKLOG`,
+It describes the code as built, which implements spec **v3 through v3.8**
+(DECISIONS 86–173): V3-1, the backlog location (`--backlog`, `NJ_BACKLOG`,
 `.njrc`, in `core/config.ts`); V3-2, the layout (groups `type`, `hierarchy`
 and `flat`, configurable folder names, the recursive element scan,
 `layout:misplaced`, and moves in `archive`, `rm` and `doctor --fix`; in
@@ -104,6 +104,38 @@ round, again no new commands:
   two new warning codes the same way it already reports every other
   backlog-level one.
 
+**v3.8** (DECISIONS 171–173) is one new module plus additions to two
+existing ones, again no new commands:
+
+- **JSON plans for `new`/`set`** (171 A, 172, 173): `core/input.ts` is new
+  and deliberately tiny — `readInputText` (stdin-or-file, the same
+  convention `--description-file` already has) and `parseInputJson`, no
+  plan logic at all. The whole plan engine lives in `cmd-new.ts`:
+  `flattenPlan` walks an array/`children` tree into one pre-order list
+  (`FlatNode[]`, each carrying its own JSON-path label), `validatePlanNode`
+  checks one flattened node against the hierarchy, `ref`/`depends_on`
+  rules and every ordinary `new` rule, and `emitPlanFailure` builds the
+  `{ok:false, failed_at, created?, refs?}` shape. DECISIONS 173's
+  forward/self-ref rule is enforced in `validatePlanNode` by checking a
+  `depends_on` target's ref against `declaredSoFar` (refs seen strictly
+  before this node in the same pre-order walk) rather than against the
+  whole plan's ref index — the bug it fixes (live at d50b3fa) was exactly
+  that the first version checked existence only, against the whole-plan
+  index, so a later-declared ref still resolved. `cmd-set.ts` reuses
+  `core/input.ts` for its own single-object field-map form; neither
+  module gained a plan-of-its-own, by design (§ 9 "`--input`").
+- **Final status releases the claim** (171 B, § 12a): `core/claims.ts`
+  gains `releaseUnconditional` (and its rollback mirror, `undoRelease`) —
+  called from `cmd-set.ts` and `cmd-claim.ts` (and, through `cmd-claim.ts`'s
+  own `claimOne`, from `cmd-next.ts` too) whenever a guarded write's target
+  status is the last configured one, regardless of who holds the claim;
+  rolled back the same way `claim`'s own mirror write already was if the
+  guarded write that follows fails.
+- **`show --json` carries `entry`** (171 C, § 9): `cmd-show.ts` adds one
+  field to its existing result, `entries.length === 1 ? { entry:
+  entries[0] } : {}` — no new module, no change to `list`/`find`, which
+  never spread this object in.
+
 ## 1. Build
 
 ```
@@ -148,7 +180,7 @@ while `tsc` reported zero errors). Keeping every real declaration in
 `types.ts` sidesteps the whole class of bug.
 
 Every module otherwise only *defines* — functions, constants, nothing runs
-until a command calls into it — except `core/output.ts` (TSK-018, `5ea3701`):
+until a command calls into it — except `core/output.ts` (TSK-018, `36dd9dc`):
 importing it registers a `process.stdout.on('error', …)` handler immediately,
 since it is the one module every command's output already flows through and
 the handler has to be in place before the first line is printed (§ 4's EPIPE
@@ -186,10 +218,11 @@ would actually reach for, not every name; "imported by" is exact.
 | `core/store.ts` | Clock, tombstones (keyed by an explicit `idsDir` — `.nanojira/ids`, or a legacy backlog's `.ids`, never assumed), atomic file writes, the write-time compare guard, and the move planner that `archive` and `doctor --fix` share: every target is checked before the first `rename` (ENOENT only, not any other `lstat` failure); existing folders are merged into, a same-file (same dev+ino) target is no move, and existing files are never overwritten (DECISIONS 94, 105 F2, TSK-029 T2) | `nowIso`, `atomicWrite`, `atomicReplace`, `compareGuard`, `guardedWrite`, `planMove`, `runMove`, `renderElement` | 14 modules: `config`, `derive`, `load`, `status`, 10×`cmd-*` (v3.5 adds `cmd-next`) |
 | `core/load.ts` | `loadElement` (nine derivers), `deriveGraph` (eleven steps, `markPlaces` among them), `loadBacklog`. v3.7 (163 E/F, 167) adds `acceptance:no_checkbox`/`done:no_acceptance` to the same deriver that already computes `incomplete:acceptance` — both new codes skip archived elements entirely | `loadElement`, `deriveGraph`, `childMap`, `descendants`, `loadBacklog` | 11 modules: `context`, `status`, 9×`cmd-*` |
 | `core/status.ts` | The status overview `STATUS.md` (§ 4): the byte-exact renderer, the freshness check `doctor` reports as `backlog:status_stale`, and the post-write refresh — one full scan, an atomic replace without fault hooks, a failure only ever a `Warning:` on stderr | `renderStatus`, `statusIsFresh`, `refreshStatus` | `cmd-doctor`, `cmd-init`, `cmd-new`, `cmd-set`, `cmd-note`, `cmd-rm`, `cmd-archive`, `cmd-check`, `cmd-claim`, `cmd-unarchive`, `cmd-next` (v3.5 — `next`'s claim, and its optional `--status`, go through the same refresh every other write does; `cmd-log` never appears here, since it writes nothing) |
-| `core/readme-texts.ts` | The two `README.md` texts, kept in one place so they cannot drift apart: the v3 text `init` writes, and the exact v2 text (frozen at `5318888`) step 0 compares a legacy backlog's README against before replacing it — a user's own edit is left alone either way | `V2_README`, `V3_README` | `cmd-init`, `cmd-doctor` |
+| `core/readme-texts.ts` | The two `README.md` texts, kept in one place so they cannot drift apart: the v3 text `init` writes, and the exact v2 text (frozen at `b65aa5f`) step 0 compares a legacy backlog's README against before replacing it — a user's own edit is left alone either way | `V2_README`, `V3_README` | `cmd-init`, `cmd-doctor` |
 | `core/context.ts` | Per-command setup: backlog+config+elements (refusing a legacy backlog with `legacy_layout`, except for `doctor`'s own `lenient`), target resolution, the five `require*` guards | `context`, `resolveTarget`, `requireWritable`, `requireNoStubs`, `requireNoUnreadableDirs`, `requireActive` | every `cmd-*` module except `cmd-init` (which creates the backlog, so there is nothing yet to load a context from) |
 | `core/actor.ts` (v3.1, § 9 "The acting name") | Who is acting, for `note`/`claim`/`release`: `--as` outranks `NJ_AUTHOR`; a name is valid when non-empty after trimming spaces/tabs, one line, no `:` | `validActorName`, `resolveActingName`, `actingNameForRead` | `cmd-note`, `cmd-claim`, `cmd-release`, `cmd-list`, `cmd-next` (v3.6 PA-5 — `next`'s own candidate filter now also needs the acting name, to require an unassigned element or one assigned to it) |
-| `core/claims.ts` (v3.1, § 12 "Claims"/§ 12a) | The append-only CAS sequence behind `claim`/`release`: no live pruning, rollback only if this invocation appended, a landed steal is never rolled back; also computes `claim:stale` (v3.2, § 5 `claims.staleAfterHours`); `allEntriesAscending` (v3.5, § 12c) is the read-side sibling of `highestEntry` — same numeric-filename filter, but the whole ascending sequence instead of just the top, for `log` to classify generation-by-generation | `claimsRootDir`, `claimsDir`, `allClaimDirs`, `highestEntry`, `allEntriesAscending`, `readClaim`, `isClaimStale`, `transition`, `rollback`, `removeClaimDirWholesale` | `cmd-claim`, `cmd-release`, `cmd-rm`, `cmd-archive`, `cmd-doctor`, `cmd-unarchive`, `cmd-list`, `cmd-log` (v3.5), `core/derive.ts` |
+| `core/claims.ts` (v3.1, § 12 "Claims"/§ 12a) | The append-only CAS sequence behind `claim`/`release`: no live pruning, rollback only if this invocation appended, a landed steal is never rolled back; also computes `claim:stale` (v3.2, § 5 `claims.staleAfterHours`); `allEntriesAscending` (v3.5, § 12c) is the read-side sibling of `highestEntry` — same numeric-filename filter, but the whole ascending sequence instead of just the top, for `log` to classify generation-by-generation. v3.8 (171 B, § 12a) adds `releaseUnconditional`/`undoRelease` — an unconditional release (whoever holds it) fired from a guarded write reaching the last configured status, rolled back the same way `claim`'s own mirror write already was | `claimsRootDir`, `claimsDir`, `allClaimDirs`, `highestEntry`, `allEntriesAscending`, `readClaim`, `isClaimStale`, `transition`, `rollback`, `removeClaimDirWholesale`, `releaseUnconditional`, `undoRelease` | `cmd-claim`, `cmd-release`, `cmd-rm`, `cmd-archive`, `cmd-doctor`, `cmd-unarchive`, `cmd-list`, `cmd-log` (v3.5), `cmd-set` (v3.8), `core/derive.ts` |
+| `core/input.ts` (v3.8, § 9 "`--input`") | `--input=<file\|->`'s own text source and JSON parse, shared by `new`'s plan form and `set`'s single-object field map — deliberately tiny, no plan logic at all; the whole plan engine (`flattenPlan`/`validatePlanNode`/`emitPlanFailure`) lives in `cmd-new.ts` instead, since `set` never takes a plan | `readInputText`, `parseInputJson` | `cmd-new`, `cmd-set` |
 | `core/batch.ts` (v3.2, § 9 "Batch writes") | `--id=A,B,C` on `set`/`note`/`check`/`claim`/`release`: preflight every ID before any write, then write independently, `STATUS.md` once, `NJ_FAULT` spent after its first firing — one shared orchestration, each command supplies its own single-element logic as two callbacks | `parseBatchIds`, `runBatch` | `cmd-set`, `cmd-note`, `cmd-check`, `cmd-claim`, `cmd-release` |
 | `core/flag-table.ts` (v3.2 D144 C-2, v3.3 § 17, v3.5 `next`/`log`, v3.7 `rm`/tags) | The one per-command flag table both the CLI's own `checkFlags` and `nj-mcp`'s MCP schema generator read — the global `--backlog`/`--json` controls are a separate table, never part of a command's own, so a schema built from this table excludes `backlog` by construction (§ 17). `rm` gained an entry in v3.7 (163 A) purely for `commandHelp` to read — `nj-mcp.ts`'s own `TOOL_NAMES` still omits `rm` unconditionally, so this does not expose it as a tool; `set` gained `add-tags`/`remove-tags` (163 B) | `FLAG_TABLE`, `cliFieldNames`, `commandFields`, `commandFieldNames` | `nj-mcp.ts`, `core/help.ts` (v3.6 — `commandHelp` reuses this same table for each command's own flag list) and 16 `cmd-*` modules (every one except `cmd-init`, `cmd-status`, which take no settable fields; `cmd-rm`'s own entry, v3.7, is read only by `commandHelp`, never by `nj-mcp`) |
 | `core/suggest.ts` (v3.6, DECISIONS 158 EV-3/160) | Did-you-mean: a tiny fixed synonym table checked first, then an OSA (optimal-string-alignment — an adjacent transposition costs 1, not 2) distance against the allowed values, length-dependent threshold (≤ 1 for a ≤ 4-character value, ≤ 2 otherwise), feeding the hint on an `invalid_value` failure — never the message or the accepted vocabulary | `suggestValue`, `valueHint` | 5 modules: `cmd-claim`, `cmd-list`, `cmd-new`, `cmd-next`, `cmd-set` |
