@@ -208,10 +208,15 @@ for (const [label, value] of [
   T.exit(desc + ': note exit 1', r, 1);
   T.check(desc + ': the prose starts with "Error: " (DECISIONS 88)', /^Error: /.test(r.stderr || ''), J(r.stderr));
   T.check(desc + ': no stack trace', !/^\s+at\s+\S/m.test(r.stderr || ''), J(r.stderr));
+  /* DECISIONS 212 (TSK-025): the human output ends with a hint line naming
+   * the variable (the message itself may span lines: it quotes the value). */
+  const lastLine = (r.stderr || '').replace(/\n$/, '').split('\n').pop() || '';
+  T.check(desc + ': the last stderr line is a hint naming NJ_AUTHOR', !/^Error: /.test(lastLine) && /\bNJ_AUTHOR\b/.test(lastLine), J(r.stderr));
   const rj = runJ(['note', '--id=TSK-001', TEXT], { cwd: x.dir, env: later({ NJ_AUTHOR: value }) });
   T.exit(desc + ' --json: exit 1', rj, 1);
   T.check(desc + ' --json: {ok:false} (§ 9)', !!rj.json && rj.json.ok === false, J(rj.json || rj.stdout).slice(0, 200));
   T.eq(desc + ' --json: error is invalid_env', rj.json && rj.json.error, 'invalid_env');
+  T.eq(desc + ' --json: hint is the human hint line', rj.json && rj.json.hint, lastLine);
   T.check(desc + ': nothing written — the whole backlog byte- and mtime-identical', J(snapshot(x.dir)) === J(before),
     'changed');
 

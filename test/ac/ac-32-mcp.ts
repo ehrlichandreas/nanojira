@@ -446,6 +446,11 @@ function snapshotBacklog(bl: string): string[] {
         !r.error && r.result && r.result.isError === true, J(r));
       T.check('M13 bogus NJ_NOW: tools/call ' + name + ' carries the CLI\'s invalid_env',
         !!body && body.ok === false && body.error === 'invalid_env', J(body));
+      /* DECISIONS 212 (TSK-025): the server drops the child's stderr once
+       * stdout parses, so the body's hint is the only place an MCP client
+       * learns which variable is wrong. */
+      T.check('M13 bogus NJ_NOW: tools/call ' + name + ' carries a hint naming NJ_NOW',
+        !!body && typeof body.hint === 'string' && /\bNJ_NOW\b/.test(body.hint), J(body));
     }
   });
   T.eq('M13 bogus NJ_NOW: the backlog is byte-identical, .nanojira/ids included', snapshotBacklog(x.bl), before);

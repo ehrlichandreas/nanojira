@@ -17,6 +17,10 @@
  * do not begin late and stretch the pool (DECISIONS 201); this changes the
  * dispatch order only, never the print order. `--jobs=1` is the old strictly
  * serial loop: collected order, markers irrelevant, byte-identical output.
+ *
+ * One private run root per run, shared by every file, is each file's
+ * NJ_TEST_ROOT and TMPDIR; a run that leaves anything in it fails, listing
+ * what (the leak sweep below; a note only under NJ_KEEP=1).
  */
 import fs from 'fs';
 import os from 'os';
@@ -91,7 +95,34 @@ if (tests.length === 0) {
   process.exit(1);
 }
 
+/* Run root (SSD guard, leak sweep). One private mkdtemp directory per run,
+ * shared by every file, is each file's NJ_TEST_ROOT -- the harness's
+ * fixture root, H.TMP_ROOT -- and its TMPDIR, TEMP and TMP -- os.tmpdir()
+ * on every platform (a TMPDIR inherited from Git Bash would otherwise
+ * escape it on Windows): nanojira's --dry-run sandboxes, git, mktemp -- so
+ * nothing a run makes lands on the default TMPDIR, which may be on disk. It is made inside the root the harness would have used
+ * (NJ_TEST_ROOT, else /tmp), so fixtures stay on the same filesystem.
+ * Each file removes what it made, so whatever is still in the run root
+ * after the last file is a leak: a crash that skipped the cleanup, or a
+ * directory made outside the harness's tracking (ght's ac-49 left 546 on
+ * the SSD that way). The listing names what is left, not which file left
+ * it; the run root is shared. Nothing outside the run root is looked at, so
+ * another run in the same /tmp can neither cause nor hide a failure here.
+ * The run root is removed at the end -- except under NJ_KEEP=1, where the
+ * harness keeps its fixtures on purpose: then it stays, its path is
+ * printed, and what is in it is not a failure. */
+const RUN_ROOT = fs.mkdtempSync(path.join(fs.realpathSync(process.env.NJ_TEST_ROOT || '/tmp'), 'nj-run-'));
+const CHILD_ENV = Object.assign({}, process.env, { NJ_TEST_ROOT: RUN_ROOT, TMPDIR: RUN_ROOT, TEMP: RUN_ROOT, TMP: RUN_ROOT });
+
 const TIMEOUT_MS = 600000;
+/* A file still running TIMEOUT_MS after it started is a FAIL, whatever it
+ * exits with later (TSK-028): the pool sends SIGTERM, then SIGKILL after
+ * KILL_GRACE_MS; the serial path (spawnSync, which cannot escalate) kills
+ * with SIGKILL at once. The harness installs no signal handler, so for a
+ * harness file both end it at once anyway. */
+const KILL_GRACE_MS = 10000;
+const timedOutNote = (how: string) => 'run-all: timed out after ' + (TIMEOUT_MS / 1000) + ' s; killed (' + how + ')\n';
+const withNote = (text: string, note: string) => text + (text === '' || text.endsWith('\n') ? '' : '\n') + note;
 const MAX_BUFFER = 64 * 1024 * 1024;
 
 interface Result { status: number | null; out: string }
@@ -104,25 +135,34 @@ function argvFor(t: string): string[] {
 function runSync(t: string): Result {
   const r = spawnSync(NODE, argvFor(t), {
     encoding: 'utf8',
-    env: process.env,
+    env: CHILD_ENV,
     timeout: TIMEOUT_MS,
+    killSignal: 'SIGKILL',
     maxBuffer: MAX_BUFFER,
   });
-  return { status: r.status, out: (r.stdout || '') + (r.stderr || '') };
+  const out = (r.stdout || '') + (r.stderr || '');
+  if ((r.error as NodeJS.ErrnoException | undefined)?.code === 'ETIMEDOUT') return { status: null, out: withNote(out, timedOutNote('SIGKILL')) };
+  return { status: r.status, out };
 }
 
 /* The async twin of runSync(), kept to spawnSync's observable contract so a
  * file's verdict cannot depend on which phase ran it: stdin closed at once,
- * stdout then stderr (not interleaved), SIGTERM and a null status on the
- * timeout or once either stream passes MAX_BUFFER, and a spawn error is an
- * empty-output null status. */
+ * stdout then stderr (not interleaved), a null status once either stream
+ * passes MAX_BUFFER, and a spawn error is an empty-output null status. On
+ * the timeout both give a null status and a "timed out" line; runSync kills
+ * with SIGKILL, this one with SIGTERM, then SIGKILL after KILL_GRACE_MS. */
 function runAsync(t: string): Promise<Result> {
   return new Promise((resolve) => {
-    const child = spawn(NODE, argvFor(t), { env: process.env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(NODE, argvFor(t), { env: CHILD_ENV, stdio: ['pipe', 'pipe', 'pipe'] });
     const out: Buffer[] = [], err: Buffer[] = [];
-    let outLen = 0, errLen = 0, done = false;
-    const kill = () => { try { child.kill('SIGTERM'); } catch { /* already gone */ } };
-    const timer = setTimeout(kill, TIMEOUT_MS);
+    let outLen = 0, errLen = 0, done = false, timedOut = false;
+    let grace: NodeJS.Timeout | undefined;
+    const kill = (sig: NodeJS.Signals = 'SIGTERM') => { try { child.kill(sig); } catch { /* already gone */ } };
+    const timer = setTimeout(() => {
+      timedOut = true;
+      kill('SIGTERM');
+      grace = setTimeout(() => kill('SIGKILL'), KILL_GRACE_MS);
+    }, TIMEOUT_MS);
     child.stdin.on('error', () => { /* child exited before reading stdin */ });
     child.stdin.end();
     child.stdout.on('data', (b: Buffer) => { outLen += b.length; if (outLen > MAX_BUFFER) kill(); else out.push(b); });
@@ -131,12 +171,15 @@ function runAsync(t: string): Promise<Result> {
       if (done) return;
       done = true;
       clearTimeout(timer);
+      if (grace) clearTimeout(grace);
       resolve({ status, out: text });
     };
     child.on('error', () => finish(null, ''));
     child.on('close', (code, signal) => {
       const overflow = outLen > MAX_BUFFER || errLen > MAX_BUFFER;
-      finish(signal || overflow ? null : code, Buffer.concat(out).toString('utf8') + Buffer.concat(err).toString('utf8'));
+      const text = Buffer.concat(out).toString('utf8') + Buffer.concat(err).toString('utf8');
+      if (timedOut) finish(null, withNote(text, timedOutNote('SIGTERM, then SIGKILL after ' + (KILL_GRACE_MS / 1000) + ' s')));
+      else finish(signal || overflow ? null : code, text);
     });
   });
 }
@@ -222,6 +265,15 @@ if (cannotRun.length) {
   for (const f of cannotRun.slice(0, 5)) console.log('  ' + f);
   if (cannotRun.length > 5) console.log('  … and ' + (cannotRun.length - 5) + ' more');
 }
+const leftover = fs.readdirSync(RUN_ROOT).sort();
+const keep = process.env.NJ_KEEP === '1' && leftover.length > 0;
+if (leftover.length) {
+  console.log('\n' + (keep ? 'kept (NJ_KEEP=1, not a failure) ' + leftover.length + ' entr' + (leftover.length === 1 ? 'y' : 'ies') + ' in ' + RUN_ROOT + ':'
+    : 'leaked ' + leftover.length + ' entr' + (leftover.length === 1 ? 'y' : 'ies') + ' this run left in its run root (now removed):'));
+  for (const n of leftover.slice(0, 20)) console.log('  ' + n);
+  if (leftover.length > 20) console.log('  … and ' + (leftover.length - 20) + ' more');
+}
+if (!keep) fs.rmSync(RUN_ROOT, { recursive: true, force: true });
 console.log('\nFill AC-MATRIX.md from this run; record `not covered` wherever a\n' +
   'conditional leg did not execute.');
-process.exit(failed.length === 0 && cannotRun.length === 0 ? 0 : 1);
+process.exit(failed.length === 0 && cannotRun.length === 0 && (keep || leftover.length === 0) ? 0 : 1);

@@ -1105,36 +1105,27 @@ function requireNjMcp(): void {
   if (!fs.existsSync(NJ_MCP)) abortNoImplementation('nanojira-mcp not found at ' + NJ_MCP);
 }
 
+let _cleaned = false;
 function cleanup(): void {
-  if (process.env.NJ_KEEP === '1') return;
+  if (_cleaned || process.env.NJ_KEEP === '1') return;
+  _cleaned = true;
   for (const d of _tmpDirs) {
     try { fs.rmSync(d, { recursive: true, force: true }); } catch (e) { /* best effort */ }
   }
 }
 
-/* A test that crashes with an uncaught exception, or that a caller's own
- * timeout (test/run-all.ts's spawnSync, det-id-retry.ts's engaged() early
- * process.exit(1) abort) ends before T.finish() ever runs, still leaves
- * every freshDir() it created up to that point unless cleanup() also runs
- * from here — T.finish()'s own call is not reached in either case. Same
- * fix as D189 (tools/refactor-harness/scratch/lib/cleanup.ts): a
- * process-wide 'exit' handler, which node still runs after an uncaught
- * exception or an explicit process.exit() (both fire 'exit' before the
- * process truly dies), plus SIGTERM/SIGINT/SIGHUP handlers for the case a
- * caller's timeout kills the test outright — node's default disposition
- * for those three never fires 'exit' at all. Each signal handler cleans up,
- * drops itself, then re-raises the same signal against our own pid so the
- * parent still observes the test die BY that signal, exactly as it would
- * have with no handler installed. */
+/* A test that crashes with an uncaught exception, or ends early with a
+ * bare process.exit() (det-id-retry.ts's engaged() abort), never reaches
+ * T.finish()'s own cleanup(); node still fires 'exit' in both cases, so
+ * every freshDir() goes here too (DECISIONS 193). There is deliberately NO
+ * SIGTERM/SIGINT/SIGHUP handler (TSK-028): a JS signal listener only runs
+ * once the event loop is free, so a test busy in synchronous work (a
+ * spawnSync, a sync loop) held run-all's timeout SIGTERM until that work
+ * ended, then reached T.finish() and exited 0, and a test hung in a sync
+ * call could not be killed at all. With no listener the signal ends the
+ * process at once. What a killed test made stays behind: under run-all
+ * that is inside the run root, which the leak sweep reports and removes. */
 process.on('exit', cleanup);
-for (const name of ['SIGHUP', 'SIGINT', 'SIGTERM'] as const) {
-  const handler = () => {
-    cleanup();
-    process.removeListener(name, handler);
-    process.kill(process.pid, name);
-  };
-  process.on(name, handler);
-}
 
 export interface ShippedUnit {
   nj: string;

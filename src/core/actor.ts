@@ -37,7 +37,10 @@ function resolveActingName(flags: Flags, required: boolean): string | null {
   const envRaw = process.env.NJ_AUTHOR;
   if (envRaw !== undefined && envRaw !== '') {
     const name = validActorName(envRaw);
-    if (name === null) fail('invalid_env', `invalid NJ_AUTHOR '${envRaw}' (must be non-empty after trimming spaces/tabs, a single line, and contain no ':')`);
+    if (name === null) {
+      fail('invalid_env', `invalid NJ_AUTHOR '${envRaw}' (must be non-empty after trimming spaces/tabs, a single line, and contain no ':')`,
+        'fix NJ_AUTHOR, or pass --as=<name>, which outranks it');
+    }
     return name;
   }
   if (required) fail('missing_argument', 'an acting name is required: pass --as=<name> or set NJ_AUTHOR');

@@ -81,7 +81,7 @@ import * as os2 from "node:os";
 import * as path4 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.1.1";
+var VERSION = "4.1.2";
 
 // src/core/config.ts
 var SOURCE_CODE = { flag: "invalid_backlog_flag", env: "invalid_backlog_env", njrc: "invalid_backlog_njrc" };

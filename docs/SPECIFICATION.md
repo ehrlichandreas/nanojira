@@ -2616,6 +2616,18 @@ just makes it a lookup instead of a re-read of the hint every time:
 | `nanojira note`'s text given more than one way (positional, `--text`, `--text-file`) | `invalid_value` | § 10 | — |
 | `nanojira note --text-file` names a path that cannot be read | `not_found` | § 10 | — |
 | `NJ_ON_CHANGE_TIMEOUT` is not a whole number of seconds from 1 to 86400, while the hook is armed | `invalid_env` | § 9 "`NJ_ON_CHANGE`" | — (fix or unset the variable) |
+| `NJ_NOW` is set, non-empty and not a valid instant, on any command but `--version`, `--help` and `help` | `invalid_env` | § 12 "Clock pinning" | — (fix or unset the variable) |
+
+**`invalid_env` names its variable** (DECISIONS 212). Every `invalid_env`
+carries a `hint` that names the offending environment variable
+(`NJ_NOW`, `NJ_ON_CHANGE_TIMEOUT` or `NJ_AUTHOR`): in `--json` as the
+`hint` field, and on stderr as the last line, after the `Error:` message
+(both outputs; stderr is the same with or without `--json`). The error
+message names the variable too, but only on stderr, which a caller that
+reads `--json` alone never sees: a `nanojira-mcp` tool result is the
+child's parsed stdout, nothing else (§ 17 "Results and errors"). The
+variable's name in the hint is the contract; the rest of the hint text is
+prose and may change.
 
 Codes of the closed set that no passage above names —
 `id_allocation_failed`, `internal_error` — are
@@ -3316,8 +3328,10 @@ serializer defects (wrong format, missing `Z`).
 means set and non-empty, but not `YYYY-MM-DDTHH:MM:SSZ` or not a real
 instant; an empty value means unset. Such a value makes every command —
 reads and writes alike, `--dry-run` and bare `nanojira` included, and an
-unknown command word too — exit 1 with `invalid_env` and a single stderr
-line naming `NJ_NOW`. The check happens once, at dispatch:
+unknown command word too — exit 1 with `invalid_env`. stderr has the
+error, then the hint as the last line, both naming `NJ_NOW`; `--json`
+carries the same hint (§ 9 "`invalid_env` names its variable", DECISIONS
+212). The check happens once, at dispatch:
 
 - before the command's own argument checks;
 - before backlog resolution;
@@ -4797,7 +4811,7 @@ reported, not guessed at.
     disagrees with `package.json`. No symlinks anywhere, so the whole
     tree (or an exported folder, below) may be `cp -R`'d elsewhere and
     keeps working from the copy. Each `bin/` wrapper resolves its own
-    location with a plain `dirname "$0"`, never following a symlink,
+    location from the directory part of `$0`, never following a symlink,
     honours `NJ_NODE`, requires Node.js ≥ 24, unsets `NODE_OPTIONS`, and
     on any startup failure exits 127 with exactly one stderr line,
     prefixed `nanojira:`/`nanojira-mcp:`, naming the cause in words ("node not
@@ -5168,7 +5182,9 @@ touching this project's own history. Given `<tag>`:
 One template, parameterised only by its own filename (so both binaries
 share identical logic):
 
-- it resolves its own location via a plain `dirname "$0"` and is
+- it resolves its own location from the directory part of `$0` — the
+  directory `dirname "$0"` names, taken by shell parameter expansion, not a
+  `dirname` process (DECISIONS 213) — and is
   `CDPATH`-safe — **it does not follow symlinks**: since neither the
   repo nor an exported folder ever contains one (above), there is
   nothing to resolve, and a caller who does place a symlink elsewhere
@@ -5179,11 +5195,14 @@ share identical logic):
   `PATH`;
 - it confirms that binary exists (`command -v`) and runs `<node>
   --version`, parsing the major version number out of the printed
-  `vX.Y.Z` string — a plain text check, no JS evaluated inside the
-  probe — refusing anything below **Node.js 24** (§ 3 — the one
+  `vX.Y.Z` string — a plain text check in the shell itself, no JS
+  evaluated inside the probe — refusing anything below **Node.js 24** (§ 3 — the one
   runtime floor this project already states; unaffected by
   `workspace/bin/`'s removal, since it was never *where* the floor came
   from) the same way a missing binary is refused;
+- before the exec it starts no process other than one subshell (for
+  the directory) and the `--version` probe, and it writes nothing — no
+  temporary file either (DECISIONS 213);
 - it **unsets `NODE_OPTIONS`** before exec'ing node, so a caller's own
   `NODE_OPTIONS` (e.g. `--require`) cannot load foreign code into the
   tool;

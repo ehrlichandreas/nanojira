@@ -700,7 +700,11 @@ function pinnedNow() {
   const pinned = process.env.NJ_NOW;
   if (pinned === void 0 || pinned === "") return null;
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(pinned) || Number.isNaN(Date.parse(pinned))) {
-    fail("invalid_env", `invalid NJ_NOW '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`);
+    fail(
+      "invalid_env",
+      `invalid NJ_NOW '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`,
+      "fix NJ_NOW, or unset it for the system clock"
+    );
   }
   return pinned;
 }
@@ -1765,7 +1769,7 @@ import * as os2 from "node:os";
 import * as path4 from "node:path";
 
 // src/core/version.ts
-var VERSION = "4.1.1";
+var VERSION = "4.1.2";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -2811,7 +2815,7 @@ function hookTimeout() {
     fail(
       "invalid_env",
       `invalid NJ_ON_CHANGE_TIMEOUT '${raw}' (expected whole seconds, 1 to ${MAX_TIMEOUT_S})`,
-      "unset it for the 10-second default"
+      "fix NJ_ON_CHANGE_TIMEOUT, or unset it for the 10-second default"
     );
   }
   return n;
@@ -3448,7 +3452,13 @@ function resolveActingName(flags, required) {
   const envRaw = process.env.NJ_AUTHOR;
   if (envRaw !== void 0 && envRaw !== "") {
     const name = validActorName(envRaw);
-    if (name === null) fail("invalid_env", `invalid NJ_AUTHOR '${envRaw}' (must be non-empty after trimming spaces/tabs, a single line, and contain no ':')`);
+    if (name === null) {
+      fail(
+        "invalid_env",
+        `invalid NJ_AUTHOR '${envRaw}' (must be non-empty after trimming spaces/tabs, a single line, and contain no ':')`,
+        "fix NJ_AUTHOR, or pass --as=<name>, which outranks it"
+      );
+    }
     return name;
   }
   if (required) fail("missing_argument", "an acting name is required: pass --as=<name> or set NJ_AUTHOR");

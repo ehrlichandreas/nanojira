@@ -25,6 +25,28 @@ of a release.**
   git tag --contains vPREV
   ```
 
+- **No doc names a commit the squash removes.** `tail` replaces every
+  commit after `vPREV` with the one release commit, so a sha that this
+  release's docs changes name ("fixed in …", "against the binary of …")
+  points nowhere once the release is out. v4.1.1 shipped three such lines.
+  Every line this prints is a finding, except a "no commit here" for
+  something that is no nanojira commit (a digest, a fingerprint, a
+  git-history-tools sha):
+
+  ```sh
+  git diff -U0 vPREV HEAD -- docs | grep '^+[^+]' |
+    grep -oE '\b[0-9a-f]{7,40}\b' | sort -u | while read -r s; do
+      if c=$(git rev-parse -q --verify "$s^{commit}"); then
+        git tag --contains "$c" | grep -q . || echo "$s: in no release"
+      else
+        case $s in *[a-f]*) echo "$s: no commit here";; esac
+      fi
+    done
+  ```
+
+  Fix a finding by naming the release instead (`v4.1.0`), or no commit at
+  all.
+
 - **`node_modules` matches the lock.** `release.ts` runs
   `node_modules/.bin/git-release-squash` from this checkout, so the release
   is cut with whatever git-history-tools is installed there, not with the

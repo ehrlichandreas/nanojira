@@ -410,6 +410,12 @@ for (const w of WRITERS) {
     let j: any = null;
     try { j = JSON.parse(rb.stdout); } catch { /* */ }
     T.eq('F bad timeout ' + JSON.stringify(bad) + ': invalid_env', j && j.error, 'invalid_env');
+    /* DECISIONS 212 (TSK-025): the hint names the variable, in --json and
+     * as the last stderr line. */
+    T.check('F bad timeout ' + JSON.stringify(bad) + ': the --json hint names NJ_ON_CHANGE_TIMEOUT',
+      !!j && typeof j.hint === 'string' && /\bNJ_ON_CHANGE_TIMEOUT\b/.test(j.hint), JSON.stringify(j));
+    T.check('F bad timeout ' + JSON.stringify(bad) + ': stderr ends with that hint line',
+      !!j && typeof j.hint === 'string' && (rb.stderr || '').endsWith('\n' + j.hint + '\n'), JSON.stringify(rb.stderr));
     T.eq('F bad timeout ' + JSON.stringify(bad) + ': nothing written', snapshot(f.d), before);
     T.eq('F bad timeout ' + JSON.stringify(bad) + ': no call', calls(f.cap).length, 0);
     const read = hooked(f.d, f.cap, ['list', '--json'], { NJ_ON_CHANGE_TIMEOUT: bad });

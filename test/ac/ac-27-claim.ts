@@ -357,6 +357,13 @@ for (const bad of [' ', '\t', 'a\nb', 'a\rb', 'a:b']) {
   const r = claim(x, 'TSK-001', { NJ_AUTHOR: bad });
   T.exit('C2 NJ_AUTHOR=' + J(bad) + ': exit 1', r, 1);
   T.eq('C2 NJ_AUTHOR=' + J(bad) + ': invalid_env', r.json && r.json.error, 'invalid_env');
+  /* DECISIONS 212 (TSK-025): the hint names the variable, in --json and
+   * as the last stderr line; only the name is the contract (§ 9). */
+  const hint = r.json && r.json.hint;
+  T.check('C2 NJ_AUTHOR=' + J(bad) + ': the --json hint names NJ_AUTHOR',
+    typeof hint === 'string' && /\bNJ_AUTHOR\b/.test(hint), J(r.json));
+  T.check('C2 NJ_AUTHOR=' + J(bad) + ': stderr ends with that hint line',
+    typeof hint === 'string' && (r.stderr || '').endsWith('\n' + hint + '\n'), J(r.stderr));
   T.check('C2 NJ_AUTHOR=' + J(bad) + ': nothing written', J(snapshot(x.dir)) === J(before), 'changed');
 }
 /* An empty --as is NOT unset the way an empty NJ_AUTHOR is (§ 9, DECISIONS

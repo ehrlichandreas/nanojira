@@ -206,9 +206,22 @@ function scriptedRun(label: string, d: string): void {
       T.exit(tag + ': exit 1', r, 1);
       T.eq(tag + ': invalid_env', r.json && r.json.error, 'invalid_env');
       const errLines = (r.stderr || '').split('\n').filter((l) => l !== '');
-      T.check(tag + ': one stderr line naming NJ_NOW', errLines.length === 1 && /NJ_NOW/.test(errLines[0]), JSON.stringify(r.stderr));
+      /* DECISIONS 212 (TSK-025): the error line, then the hint line; both
+       * name NJ_NOW, and --json carries the same hint, so a caller that
+       * reads only stdout (nanojira-mcp, ac-32 M13) still sees the variable. */
+      T.check(tag + ': two stderr lines, the error then the hint, both naming NJ_NOW',
+        errLines.length === 2 && /^Error: .*\bNJ_NOW\b/.test(errLines[0]) && /\bNJ_NOW\b/.test(errLines[1]), JSON.stringify(r.stderr));
+      T.check(tag + ': --json hint is the stderr hint line',
+        !!r.json && typeof r.json.hint === 'string' && r.json.hint === errLines[1], JSON.stringify(r.json));
       T.eq(tag + ': nothing written', snapshotBacklog(d), before);
     }
+    /* The human output (no --json) shows the same two lines. */
+    const h = H.runNj(['list'], { cwd: plain, env: { NJ_NOW: bad } });
+    const hLines = (h.stderr || '').split('\n').filter((l) => l !== '');
+    T.exit('AC-62 leg 3 NJ_NOW=' + JSON.stringify(bad) + ' list (human): exit 1', h, 1);
+    T.check('AC-62 leg 3 NJ_NOW=' + JSON.stringify(bad) + ' list (human): the error then a hint naming NJ_NOW, stdout empty',
+      hLines.length === 2 && /^Error: .*\bNJ_NOW\b/.test(hLines[0]) && /\bNJ_NOW\b/.test(hLines[1]) && h.stdout === '',
+      JSON.stringify(h.stderr) + ' stdout=' + JSON.stringify(h.stdout));
   }
 
   /* Exempt: they read no backlog and no clock, and must work in any

@@ -905,7 +905,7 @@ With `--json`, `error` is one of a closed set. The ones an agent meets:
 | `unknown_field`, `unknown_command` | a typo | the hint lists the known flags |
 | `missing_argument`, `missing_value`, `invalid_value`, `invalid_target` | the call itself is wrong | fix the call |
 | `ambiguous_target` | `check --text` matches two or more checkboxes | narrow the text, or use `--item=<n>` |
-| `invalid_env` | `NJ_AUTHOR` is not a valid acting name | fix it, or use `--as` instead |
+| `invalid_env` | `NJ_AUTHOR`, `NJ_NOW` or `NJ_ON_CHANGE_TIMEOUT` holds an invalid value; the hint names which | fix or unset it; for `NJ_AUTHOR`, `--as` works too |
 | `not_found` | the `--id`, `--parent`, `--depends-on` or `--file` names nothing | check the ID |
 | `duplicate_id` | two files carry this ID | address one with `--file=<path>`, fix by hand |
 | `changed_in_parallel` | the file changed between read and write | re-read and retry; `--force` on `set`/`note`/`check` only if you mean to overwrite |

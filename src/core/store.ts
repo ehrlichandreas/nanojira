@@ -17,7 +17,8 @@ function pinnedNow(): string | null {
   const pinned = process.env.NJ_NOW;
   if (pinned === undefined || pinned === '') return null;
   if (!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/.test(pinned) || Number.isNaN(Date.parse(pinned))) {
-    fail('invalid_env', `invalid NJ_NOW '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`);
+    fail('invalid_env', `invalid NJ_NOW '${pinned}' (expected ISO-8601 UTC, e.g. 2026-09-21T18:02:44Z)`,
+      'fix NJ_NOW, or unset it for the system clock');
   }
   return pinned;
 }

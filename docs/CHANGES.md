@@ -5,6 +5,86 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nanojira --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 4.1.2
+
+Two changes to nanojira itself: `invalid_env` now names the offending
+environment variable in its `hint` (the first entry below), breaking only
+for a caller that counts `NJ_NOW`'s stderr lines, and the POSIX launcher
+starts each call faster with the same behaviour. Everything else is
+tests, test tooling and maintainer docs.
+
+- **Changed output (breaking only for anything that relies on `NJ_NOW`'s
+  documented single stderr line): `invalid_env` names its variable in the
+  `hint`.** `invalid_env` has three sources: `NJ_NOW`,
+  `NJ_ON_CHANGE_TIMEOUT` and `NJ_AUTHOR`. Until now only the `Error:`
+  message on stderr named the variable, so a `--json` caller, and every
+  `nanojira-mcp` client (a tool result is the child's parsed stdout,
+  nothing else), could tell that a variable was wrong but not which one.
+  Every `invalid_env` now carries a `hint` that names it: "fix NJ_NOW, or
+  unset it for the system clock", "fix NJ_ON_CHANGE_TIMEOUT, or unset it
+  for the 10-second default", "fix NJ_AUTHOR, or pass --as=<name>, which
+  outranks it". The variable's name is the contract; the rest of the
+  wording may change.
+  - `--json`: `hint` now appears for `NJ_NOW` and `NJ_AUTHOR`, which had
+    none. `hint` was already optional in the failure shape.
+  - stderr: the hint is a new last line after the `Error:` line. For
+    `NJ_NOW` this replaces 4.1.0's documented "a single stderr line"
+    (DECISIONS 207).
+  - `NJ_ON_CHANGE_TIMEOUT`'s hint, previously "unset it for the
+    10-second default", now names the variable.
+  - Unchanged: the code (`invalid_env`), the `Error:` messages, the exit
+    code, which check wins, and that nothing is written.
+  `docs/SPECIFICATION.md` § 9 (a new `NJ_NOW` row in the spec-named
+  paths table, and the rule) and § 12; `docs/GUIDE.md` § 20.
+  (DECISIONS 212, TSK-025)
+- **Faster start: `bin/nanojira` and `bin/nanojira-mcp` start each call
+  about 9.5 ms sooner** (measured on an idle Linux machine with dash as
+  `/bin/sh`; macOS and Git Bash are unmeasured). The launcher no longer
+  runs `basename`, `dirname` and `sed` before it starts node; plain shell
+  parameter expansion does the same work. Behaviour is unchanged: every
+  message, exit 127, `NJ_NODE`, `unset NODE_OPTIONS`, the Node.js >= 24
+  check and the resolution of a symlinked `bin/` directory. A differential
+  probe compared the old and new launcher under five shells, byte for
+  byte. The Windows `.cmd` launchers are untouched. `docs/SPECIFICATION.md`
+  § 18 says "the directory part of `$0`" instead of "`dirname "$0"`".
+  (DECISIONS 213, TSK-020)
+
+- Building from source only: a test run keeps its scratch files in one
+  run root, and a leak into it fails the run. `test/run-all.ts` makes one
+  private directory per run, `nj-run-XXXXXX` inside `$NJ_TEST_ROOT` (or
+  `/tmp`), and gives it to every test file as `NJ_TEST_ROOT` and `TMPDIR`
+  (and `TEMP`/`TMP`). Fixtures and `--dry-run` sandboxes therefore never
+  land on a `TMPDIR` that is on disk. Anything still in the run root after
+  the last file fails the run and is listed. Under `NJ_KEEP=1` the run
+  root stays and its path is printed instead. A new test,
+  `test/tools/run-all-leak-sweep.ts`, covers the sweep.
+- Building from source only: a test file still running at `run-all`'s
+  600 s per-file timeout counts as failed, whatever it exits with later.
+  Before, a file busy in synchronous work held the timeout's SIGTERM
+  until the work ended, then finished, exited 0 and counted as passed.
+  The test harness no longer installs signal handlers, so SIGTERM ends
+  a file at once. The pool sends SIGTERM, then SIGKILL after 10 s; the
+  serial path (`--jobs=1`) kills with SIGKILL. A new test,
+  `test/tools/run-all-timeout.ts`, covers both. (DECISIONS 193, TSK-028)
+- Building from source only: ac-22 runs its two largest independent
+  loops concurrently through `runLegs`, with the same 775 checks
+  (DECISIONS 210). Alone: ~80 s → ~28 s.
+- Building from source only: the `@slow` marks follow a fixed rule
+  (DECISIONS 209, `test/README.md`). One qualifying 8-job run is measured.
+  A file at 5.0× the pool mean or more is marked, a file below 4.0× is
+  not, and a file in between keeps its mark. On the measured run no file
+  reached 5.0×: ac-17, ac-22 and the refactor-harness scratch cleanup
+  dropped below 4.0× and lost the mark, so no file is marked.
+- Maintainers: `docs/RELEASING.md` § 0 adds a pre-cut check that no doc
+  names a commit the release squash removes. `docs/DECISIONS.md` 210 and
+  211 no longer name commits that the 4.1.1 squash removed or that were
+  never on main, and 208 marks its three git-history-tools commits as
+  outside that project's published history.
+- The dev-time dependency git-history-tools is pinned to its signed
+  release tag `v0.4.1`. Its `git-release-squash`, which `tools/release.ts`
+  runs, no longer leaves a temporary directory behind when writing its
+  gpg signing wrapper or a message file fails.
+
 ## 4.1.1
 
 One fix to `problems.ignore` (the first entry below), breaking for a

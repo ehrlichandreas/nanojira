@@ -85,8 +85,10 @@ NJ_TEST_JOBS=4 $NODE run-all.ts "$NJ"
 - `--jobs=1` ignores the marker and is byte-for-byte the old serial loop:
   same order, same output, same exit code.
 - Passed / failed / cannot-run are classified exactly as before. A file
-  killed by the 600 s per-file timeout, or by passing the 64 MiB output cap,
-  counts as failed in either mode.
+  still running at the 600 s per-file timeout counts as failed in either
+  mode, whatever it exits with later: the pool sends SIGTERM, then SIGKILL
+  after 10 s; the serial path kills with SIGKILL at once. A file passing the
+  64 MiB output cap counts as failed too.
 
 **The marker.** A file is `@serial` when a comment line in its header —
 before the first `import` — starts with `@serial`, followed by a one-line
@@ -137,15 +139,18 @@ files are dispatched first, so a long file does not start late and become
 the last one running. Only the start order changes; output order and
 verdicts do not, and `--jobs=1` ignores the marker.
 
-Mark only clear outliers: files several times longer than a typical
-pooled file (on 2026-10-18: over ~60 s at 8 jobs, against a mean of
-~14 s). The pool now ends at about its summed time / `--jobs`, so start
-order barely matters any more (DECISIONS 209); the files ranked just
-below the outliers sit in a band that reshuffles from run to run and
-are not marked. To find the outliers, set `NJ_TEST_TIMES=<file>`:
-`run-all.ts` writes every file's wall time there (TSV, slowest first,
-with its phase and start offset). Stdout is unchanged. Re-check the
-marks when a file's runtime changes a lot.
+Mark only clear outliers, by a fixed rule (DECISIONS 209). Take one full
+suite at 8 jobs with `NJ_TEST_TIMES=<file>`, started at a load average
+below 8 with no other suite running — if several runs qualify, the latest
+one: `run-all.ts` writes every file's wall time there (TSV, slowest first,
+with its phase and start offset; stdout is unchanged). A file's ratio is
+`(ms / mean).toFixed(1)`, where `ms` is its pooled time and `mean` the
+mean over all pooled files (the serial phase does not count). At
+**5.0× or more** a file is marked, **below 4.0×** it is not,
+and in between it keeps whatever it has, so files near the line do not
+flip from run to run. The pool ends at about its summed time / `--jobs`
+anyway, so start order matters little. On 2026-10-18 no file reached
+5.0× and none is marked. Re-check when a file's runtime changes a lot.
 
 Every file must also stay **isolated**:
 
@@ -158,6 +163,15 @@ Reading repo files, or cloning the repo into a fresh dir, is fine.
 
 Set `NJ_KEEP=1` to keep the scratch directories for inspection; otherwise each
 test cleans up after itself.
+
+`run-all.ts` makes one private run root per run, `nj-run-XXXXXX` inside
+`$NJ_TEST_ROOT` (or `/tmp`), and gives it to every file as `NJ_TEST_ROOT`
+and `TMPDIR` (and `TEMP`/`TMP`), so fixtures and `--dry-run` sandboxes
+never land on a `TMPDIR` that is on disk. Anything still in the run root
+after the last file is a leak: the run fails, lists what is left (not which
+file left it — the root is shared), and removes the run root. Under
+`NJ_KEEP=1` the run root stays and its path is printed instead
+(`test/tools/run-all-leak-sweep.ts`).
 
 **Until `nanojira` exists, every test fails** with `FAIL <file> — CANNOT RUN`. That is
 the correct signal: the oracle is complete and the implementation is not. It is

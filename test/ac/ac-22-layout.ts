@@ -1,4 +1,3 @@
-/* @slow: one of the longest pooled files, ~63 s at 8 jobs (NJ_TEST_TIMES, 2026-10-18); start it first (run-all.ts, test/README.md) */
 /* AC-22 — Layout (spec v3, V3-2).
  *
  * § 15 AC-22: "For each group (`type`, `hierarchy`, `flat`) and for renamed
@@ -188,6 +187,10 @@ function isDir(p: string): boolean { try { return fs.statSync(p).isDirectory(); 
 
 function run(args: string[], bl: string): RunResult { return H.runNj(args, { cwd: path.dirname(bl), unsetEnv: ['NJ_BACKLOG'] }); }
 function runJ(args: string[], bl: string): JsonRunResult { return H.runJson(args, { cwd: path.dirname(bl), unsetEnv: ['NJ_BACKLOG'] }); }
+/* Async twins, used only inside runLegs legs (DECISIONS 210) — the sync
+ * run/runJ above stay as they are for every loop that was not converted. */
+function runAsync(args: string[], bl: string): Promise<RunResult> { return H.runNjAsync(args, { cwd: path.dirname(bl), unsetEnv: ['NJ_BACKLOG'] }); }
+function runJAsync(args: string[], bl: string): Promise<JsonRunResult> { return H.runJsonAsync(args, { cwd: path.dirname(bl), unsetEnv: ['NJ_BACKLOG'] }); }
 
 function entriesById(json: any): Record<string, any> {
   const m: Record<string, any> = {};
@@ -195,10 +198,13 @@ function entriesById(json: any): Record<string, any> {
   return m;
 }
 
-function doctorClean(desc: string, bl: string): JsonRunResult {
-  const r = runJ(['doctor'], bl);
-  T.exit(desc + ': doctor exits 0', r, 0);
-  T.eq(desc + ': doctor reports no problem', H.doctorSet(r), []);
+/* `t` is a BufferedContext when called from inside a runLegs leg, or the
+ * real `T` (which satisfies the same shape) from every other call site
+ * (DECISIONS 210) — one implementation either way. */
+async function doctorClean(t: H.BufferedContext, desc: string, bl: string): Promise<JsonRunResult> {
+  const r = await runJAsync(['doctor'], bl);
+  t.exit(desc + ': doctor exits 0', r, 0);
+  t.eq(desc + ': doctor reports no problem', H.doctorSet(r), []);
   return r;
 }
 
@@ -206,9 +212,9 @@ function doctorClean(desc: string, bl: string): JsonRunResult {
  * changes. Under the pinned clock `updated` keeps its value, so every
  * archived file must be the fixture bytes with `archived:` in canonical
  * order (§ 7) — exactly what elementBytes() renders for an archived model. */
-function archivedBytes(desc: string, bl: string, L: Layout, model: ElModel, ids: string[]) {
+function archivedBytes(t: H.BufferedContext, desc: string, bl: string, L: Layout, model: ElModel, ids: string[]) {
   for (const id of ids) {
-    T.eq(desc + ': ' + id + ' is its old bytes plus archived: (§ 11)',
+    t.eq(desc + ': ' + id + ' is its old bytes plus archived: (§ 11)',
       H.readOrNull(path.join(bl, placeOf(L, model, id))), elementBytes(id, model[id]));
   }
 }
@@ -245,98 +251,104 @@ const VARIANTS = [
   { name: 'hierarchy, renamed archive', block: { group: 'hierarchy', folders: Object.assign({}, DEFAULT_FOLDERS, { archive: 'shelf' }) } },
 ];
 
-for (const V of VARIANTS) {
+/* Each V builds and only touches its own fixture — the 8 iterations share
+ * no state, so they run as independent runLegs legs (DECISIONS 210).
+ * Check content/order within one leg is unchanged from the old serial
+ * body; runLegs flushes legs in their declared (array) order, so the
+ * overall sequence this produces is byte-identical to the serial loop's. */
+await H.runLegs(VARIANTS.map((V) => async (t: H.BufferedContext) => {
   const tag = 'B1 [' + V.name + ']';
   const fx = mkLayoutBacklog('ac22-b1', V.block, baseModel());
   const { bl, L, model } = fx;
   const hier = L.group === 'hierarchy';
   const files = () => mdFiles(bl);
 
-  T.eq(tag + ' fixture: every file at its place', files(), expectedFiles(L, model));
-  doctorClean(tag + ' fixture as built', bl);
+  t.eq(tag + ' fixture: every file at its place', files(), expectedFiles(L, model));
+  await doctorClean(t, tag + ' fixture as built', bl);
 
   /* § 12: under hierarchy, an existing folder is reused by `new` */
   if (hier) writeFile(bl, 'EPIC-003/keep.txt', 'kept\n');
 
-  const ne = runJ(['new', '--type=epic', '--title=Third'], bl);
-  T.exit(tag + ' new epic: exit 0', ne, 0);
-  T.eq(tag + ' new epic: EPIC-003', ne.json && ne.json.id, 'EPIC-003');
+  const ne = await runJAsync(['new', '--type=epic', '--title=Third'], bl);
+  t.exit(tag + ' new epic: exit 0', ne, 0);
+  t.eq(tag + ' new epic: EPIC-003', ne.json && ne.json.id, 'EPIC-003');
   model['EPIC-003'] = el('epic', undefined, 'todo');
-  const nt = runJ(['new', '--type=task', '--parent=EPIC-003', '--title=Sixth'], bl);
-  T.exit(tag + ' new task: exit 0', nt, 0);
+  const nt = await runJAsync(['new', '--type=task', '--parent=EPIC-003', '--title=Sixth'], bl);
+  t.exit(tag + ' new task: exit 0', nt, 0);
   model['TSK-006'] = el('task', 'EPIC-003', 'todo');
-  const ns = runJ(['new', '--type=subtask', '--parent=TSK-006', '--title=Sixth sub'], bl);
-  T.exit(tag + ' new subtask: exit 0', ns, 0);
+  const ns = await runJAsync(['new', '--type=subtask', '--parent=TSK-006', '--title=Sixth sub'], bl);
+  t.exit(tag + ' new subtask: exit 0', ns, 0);
   model['SUB-006'] = el('subtask', 'TSK-006', 'todo');
-  T.eq(tag + ' new puts epic, task and subtask at their places', files(), expectedFiles(L, model));
+  t.eq(tag + ' new puts epic, task and subtask at their places', files(), expectedFiles(L, model));
   if (hier) {
-    T.eq(tag + ' new reused the existing EPIC-003/ folder', H.readOrNull(path.join(bl, 'EPIC-003', 'keep.txt')), 'kept\n');
+    t.eq(tag + ' new reused the existing EPIC-003/ folder', H.readOrNull(path.join(bl, 'EPIC-003', 'keep.txt')), 'kept\n');
   }
 
-  const r1 = runJ(['rm', '--id=SUB-006'], bl);
-  T.exit(tag + ' rm subtask: exit 0', r1, 0);
+  const r1 = await runJAsync(['rm', '--id=SUB-006'], bl);
+  t.exit(tag + ' rm subtask: exit 0', r1, 0);
   delete model['SUB-006'];
-  T.eq(tag + ' rm subtask removes exactly its file', files(), expectedFiles(L, model));
-  if (hier) T.check(tag + ' rm subtask keeps the task folder, which still holds TSK-006.md',
+  t.eq(tag + ' rm subtask removes exactly its file', files(), expectedFiles(L, model));
+  if (hier) t.check(tag + ' rm subtask keeps the task folder, which still holds TSK-006.md',
     isDir(path.join(bl, 'EPIC-003', 'TSK-006')), '');
 
-  const r2 = runJ(['rm', '--id=TSK-006'], bl);
-  T.exit(tag + ' rm task: exit 0', r2, 0);
+  const r2 = await runJAsync(['rm', '--id=TSK-006'], bl);
+  t.exit(tag + ' rm task: exit 0', r2, 0);
   delete model['TSK-006'];
-  T.eq(tag + ' rm task removes exactly its file', files(), expectedFiles(L, model));
-  if (hier) T.check(tag + ' rm task removes its folder once empty (§ 12)',
+  t.eq(tag + ' rm task removes exactly its file', files(), expectedFiles(L, model));
+  if (hier) t.check(tag + ' rm task removes its folder once empty (§ 12)',
     !fs.existsSync(path.join(bl, 'EPIC-003', 'TSK-006')), H.lsOrEmpty(path.join(bl, 'EPIC-003')).join(','));
 
-  runJ(['new', '--type=task', '--parent=EPIC-003', '--title=Seventh'], bl);
-  runJ(['new', '--type=subtask', '--parent=TSK-007', '--title=Seventh sub'], bl);
+  await runJAsync(['new', '--type=task', '--parent=EPIC-003', '--title=Seventh'], bl);
+  await runJAsync(['new', '--type=subtask', '--parent=TSK-007', '--title=Seventh sub'], bl);
   model['TSK-007'] = el('task', 'EPIC-003', 'todo');
   model['SUB-007'] = el('subtask', 'TSK-007', 'todo');
-  T.eq(tag + ' second subtree created at its places', files(), expectedFiles(L, model));
-  const rc = runJ(['rm', '--id=EPIC-003', '--cascade'], bl);
-  T.exit(tag + ' rm --cascade: exit 0', rc, 0);
+  t.eq(tag + ' second subtree created at its places', files(), expectedFiles(L, model));
+  const rc = await runJAsync(['rm', '--id=EPIC-003', '--cascade'], bl);
+  t.exit(tag + ' rm --cascade: exit 0', rc, 0);
   delete model['EPIC-003']; delete model['TSK-007']; delete model['SUB-007'];
-  T.eq(tag + ' rm --cascade removes exactly the subtree\'s files', files(), expectedFiles(L, model));
+  t.eq(tag + ' rm --cascade removes exactly the subtree\'s files', files(), expectedFiles(L, model));
   if (hier) {
-    T.check(tag + ' rm --cascade removes each emptied folder (§ 12)',
+    t.check(tag + ' rm --cascade removes each emptied folder (§ 12)',
       !fs.existsSync(path.join(bl, 'EPIC-003', 'TSK-007')), H.lsOrEmpty(path.join(bl, 'EPIC-003')).join(','));
-    T.eq(tag + ' rm --cascade never deletes what else a folder holds (§ 12)',
+    t.eq(tag + ' rm --cascade never deletes what else a folder holds (§ 12)',
       H.lsOrEmpty(path.join(bl, 'EPIC-003')), ['keep.txt']);
   }
 
   /* § 11: archive an epic subtree */
-  const ae = runJ(['archive', '--id=EPIC-002'], bl);
-  T.exit(tag + ' archive epic subtree: exit 0', ae, 0);
+  const ae = await runJAsync(['archive', '--id=EPIC-002'], bl);
+  t.exit(tag + ' archive epic subtree: exit 0', ae, 0);
   for (const id of ['EPIC-002', 'TSK-002', 'SUB-002']) model[id].archived = true;
-  T.eq(tag + ' archive moves the subtree to its archive places (§ 11)', files(), expectedFiles(L, model));
-  archivedBytes(tag + ' archive epic', bl, L, model, ['EPIC-002', 'TSK-002', 'SUB-002']);
-  if (hier) T.check(tag + ' archive moved the epic folder as a whole',
+  t.eq(tag + ' archive moves the subtree to its archive places (§ 11)', files(), expectedFiles(L, model));
+  archivedBytes(t, tag + ' archive epic', bl, L, model, ['EPIC-002', 'TSK-002', 'SUB-002']);
+  if (hier) t.check(tag + ' archive moved the epic folder as a whole',
     !fs.existsSync(path.join(bl, 'EPIC-002')), H.lsOrEmpty(bl).join(','));
 
   /* § 11: archive a task subtree whose epic stays active */
   if (hier) writeFile(bl, 'EPIC-001/TSK-005/keep2.txt', 'rides along\n');
-  const at = runJ(['archive', '--id=TSK-005'], bl);
-  T.exit(tag + ' archive task subtree: exit 0', at, 0);
+  const at = await runJAsync(['archive', '--id=TSK-005'], bl);
+  t.exit(tag + ' archive task subtree: exit 0', at, 0);
   for (const id of ['TSK-005', 'SUB-005']) model[id].archived = true;
-  T.eq(tag + ' archive moves the task subtree to its archive places (§ 11)', files(), expectedFiles(L, model));
-  archivedBytes(tag + ' archive task', bl, L, model, ['TSK-005', 'SUB-005']);
+  t.eq(tag + ' archive moves the task subtree to its archive places (§ 11)', files(), expectedFiles(L, model));
+  archivedBytes(t, tag + ' archive task', bl, L, model, ['TSK-005', 'SUB-005']);
   if (hier) {
     const a = L.folders.archive;
-    T.eq(tag + ' the task folder moved with one rename — its other content came along (§ 11, § 12)',
+    t.eq(tag + ' the task folder moved with one rename — its other content came along (§ 11, § 12)',
       H.readOrNull(path.join(bl, a, 'EPIC-001', 'TSK-005', 'keep2.txt')), 'rides along\n');
-    T.check(tag + ' the active task folder is gone', !fs.existsSync(path.join(bl, 'EPIC-001', 'TSK-005')), '');
-    T.eq(tag + ' the created ancestor archive folder holds no element file of its own (§ 11)',
+    t.check(tag + ' the active task folder is gone', !fs.existsSync(path.join(bl, 'EPIC-001', 'TSK-005')), '');
+    t.eq(tag + ' the created ancestor archive folder holds no element file of its own (§ 11)',
       H.lsOrEmpty(path.join(bl, a, 'EPIC-001')), ['TSK-005']);
   }
 
-  const act = runJ(['list'], bl);
-  const all = runJ(['list', '--all'], bl);
-  T.eq(tag + ' archived elements vanish from list',
+  const act = await runJAsync(['list'], bl);
+  const all = await runJAsync(['list', '--all'], bl);
+  t.eq(tag + ' archived elements vanish from list',
     Object.keys(entriesById(act.json)).sort(), ['EPIC-001', 'SUB-001', 'TSK-001']);
-  T.eq(tag + ' and appear with --all',
+  t.eq(tag + ' and appear with --all',
     Object.keys(entriesById(all.json)).sort(),
     ['EPIC-001', 'EPIC-002', 'SUB-001', 'SUB-002', 'SUB-005', 'TSK-001', 'TSK-002', 'TSK-005']);
-  doctorClean(tag + ' after every operation', bl);
-}
+  await doctorClean(t, tag + ' after every operation', bl);
+  return null;
+}));
 
 /* § 11 / DECISIONS 90, 94: under hierarchy an archive folder left by an
  * earlier archive of a descendant is a merge target, not an occupied path —
@@ -362,9 +374,9 @@ for (const block of [{ group: 'hierarchy' }, { group: 'hierarchy', folders: Obje
   T.exit(tag + ' then the epic: exit 0 — the ancestor folder is not "occupied"', ae, 0);
   model['EPIC-004'].archived = true; model['TSK-010'].archived = true;
   T.eq(tag + ' the epic subtree merged into the existing archive folder', mdFiles(bl), expectedFiles(L, model));
-  archivedBytes(tag, bl, L, model, Object.keys(model));
+  archivedBytes(T, tag, bl, L, model, Object.keys(model));
   T.check(tag + ' the emptied source folder is removed', !fs.existsSync(path.join(bl, 'EPIC-004')), H.lsOrEmpty(bl).join(','));
-  doctorClean(tag + ' after the three archives', bl);
+  await doctorClean(T, tag + ' after the three archives', bl);
 }
 
 /* DECISIONS 91 B16: archive writes archived:/updated in place first, then
@@ -536,12 +548,15 @@ const MIGRATIONS = [
     code: 'layout:misplaced', name: 'hierarchy, archive → shelf' },
 ];
 
-for (const M of MIGRATIONS) {
+/* Each M builds and only touches its own fixture — the 7 iterations share
+ * no state, so they run as independent runLegs legs (DECISIONS 210), same
+ * argument and order guarantee as the VARIANTS conversion above. */
+await H.runLegs(MIGRATIONS.map((M) => async (t: H.BufferedContext) => {
   const tag = 'B3 [' + M.name + ']';
   const other = M.code === 'type:folder' ? 'layout:misplaced' : 'type:folder';
   const fx = mkLayoutBacklog('ac22-b3', M.from, migrationModel());
   const { bl, model } = fx;
-  doctorClean(tag + ' before the change', bl);
+  await doctorClean(t, tag + ' before the change', bl);
   const oldL = fx.L;
 
   writeConfig(bl, M.to);
@@ -552,19 +567,19 @@ for (const M of MIGRATIONS) {
    * An archived file under type/flat stays at <archive>/<id>.md when only
    * the other folders or the type/flat choice change: it is not misplaced. */
   const moves = Object.keys(model).filter(id => placeOf(oldL, model, id) !== placeOf(newL, model, id));
-  T.check(tag + ' fixture: the change moves at least one element', moves.length > 0, '');
-  const all = runJ(['list', '--all'], bl);
-  T.exit(tag + ' list --all after the change: exit 0', all, 0);
+  t.check(tag + ' fixture: the change moves at least one element', moves.length > 0, '');
+  const all = await runJAsync(['list', '--all'], bl);
+  t.exit(tag + ' list --all after the change: exit 0', all, 0);
   const byId = entriesById(all.json);
   for (const id of Object.keys(model)) {
     const p = byId[id] ? byId[id]._problems || [] : null;
     if (moves.includes(id)) {
-      T.check(tag + ' ' + id + ' (moved by the change) reports ' + M.code, !!p && p.includes(M.code), J(p));
+      t.check(tag + ' ' + id + ' (moved by the change) reports ' + M.code, !!p && p.includes(M.code), J(p));
     } else {
-      T.check(tag + ' ' + id + ' (still at its place) reports no location code',
+      t.check(tag + ' ' + id + ' (still at its place) reports no location code',
         !!p && !p.includes(M.code), J(p));
     }
-    T.check(tag + ' ' + id + ' does not report ' + other + ' (§ 7: one code per group)',
+    t.check(tag + ' ' + id + ' does not report ' + other + ' (§ 7: one code per group)',
       !!p && !p.includes(other), J(p));
   }
   /* A layout change can change which files are archived (a renamed archive
@@ -573,9 +588,9 @@ for (const M of MIGRATIONS) {
    * holds before V3-3 and after it alike (DECISIONS 100). */
   H.writeStatus(bl);
   H.writeTags(bl);
-  const pre = runJ(['doctor'], bl);
-  T.exit(tag + ' doctor before --fix: exit 2', pre, 2);
-  T.sameSet(tag + ' doctor before --fix: only ' + M.code + ' findings',
+  const pre = await runJAsync(['doctor'], bl);
+  t.exit(tag + ' doctor before --fix: exit 2', pre, 2);
+  t.sameSet(tag + ' doctor before --fix: only ' + M.code + ' findings',
     [...new Set(H.doctorSet(pre) || ['<no problems array>'])], [M.code + ':error']);
 
   /* commands keep working */
@@ -583,24 +598,24 @@ for (const M of MIGRATIONS) {
    * file left below a renamed-away archive folder is ACTIVE (D92 Q2) */
   const belowArchive = (L: Layout, id: string) => placeOf(oldL, model, id).startsWith(L.folders.archive + '/');
   const activeNow = Object.keys(model).filter(id => !belowArchive(newL, id)).sort();
-  const ls = runJ(['list'], bl);
-  T.exit(tag + ' list keeps working', ls, 0);
-  T.eq(tag + ' list shows every element not below the (new) archive folder',
+  const ls = await runJAsync(['list'], bl);
+  t.exit(tag + ' list keeps working', ls, 0);
+  t.eq(tag + ' list shows every element not below the (new) archive folder',
     Object.keys(entriesById(ls.json)).sort(), activeNow);
-  T.exit(tag + ' tree keeps working', runJ(['tree'], bl), 0);
-  T.exit(tag + ' show keeps working', runJ(['show', '--id=SUB-001'], bl), 0);
-  const st = runJ(['set', '--id=TSK-002', '--status=doing'], bl);
-  T.exit(tag + ' set keeps working', st, 0);
+  t.exit(tag + ' tree keeps working', await runJAsync(['tree'], bl), 0);
+  t.exit(tag + ' show keeps working', await runJAsync(['show', '--id=SUB-001'], bl), 0);
+  const st = await runJAsync(['set', '--id=TSK-002', '--status=doing'], bl);
+  t.exit(tag + ' set keeps working', st, 0);
   model['TSK-002'].status = 'doing';
   /* AMBIGUOUS (AMBIGUITIES 62): set on a misplaced file writes it where it
    * lies; § 4 says files move only through archive, doctor --fix or by hand. */
-  T.eq(tag + ' set writes in place — only archive, doctor --fix or a hand move relocate (§ 4)',
+  t.eq(tag + ' set writes in place — only archive, doctor --fix or a hand move relocate (§ 4)',
     H.readOrNull(path.join(bl, placeOf(oldL, model, 'TSK-002'))) !== null, true);
-  const nw = runJ(['new', '--type=subtask', '--parent=TSK-001', '--title=Fresh'], bl);
-  T.exit(tag + ' new keeps working', nw, 0);
-  T.eq(tag + ' new: SUB-004', nw.json && nw.json.id, 'SUB-004');
+  const nw = await runJAsync(['new', '--type=subtask', '--parent=TSK-001', '--title=Fresh'], bl);
+  t.exit(tag + ' new keeps working', nw, 0);
+  t.eq(tag + ' new: SUB-004', nw.json && nw.json.id, 'SUB-004');
   model['SUB-004'] = el('subtask', 'TSK-001', 'todo');
-  T.check(tag + ' new puts the fresh element at its place in the new layout',
+  t.check(tag + ' new puts the fresh element at its place in the new layout',
     fs.existsSync(path.join(bl, placeOf(newL, model, 'SUB-004'))), J(mdFiles(bl)));
 
   /* bytes before the move, by id */
@@ -609,20 +624,20 @@ for (const M of MIGRATIONS) {
     const L = id === 'SUB-004' ? newL : oldL;
     before[id] = H.readOrNull(path.join(bl, placeOf(L, model, id)));
   }
-  T.check(tag + ' every element file was readable before the move',
+  t.check(tag + ' every element file was readable before the move',
     Object.values(before).every(b => b !== null), J(mdFiles(bl)));
 
   /* AMBIGUITIES 60: target folders that do not exist yet (renamed type
    * folders, hierarchy folders) are created by --fix — the criterion's own
    * scenario, a config edit followed by one --fix, requires it. */
-  const fix = runJ(['doctor', '--fix'], bl);
-  T.exit(tag + ' one doctor --fix: exit 0', fix, 0);
-  T.eq(tag + ' --fix moved everything to the new layout', mdFiles(bl), expectedFiles(newL, model));
-  T.eq(tag + ' after --fix, list shows exactly the elements without archived:',
-    Object.keys(entriesById(runJ(['list'], bl).json)).sort(),
+  const fix = await runJAsync(['doctor', '--fix'], bl);
+  t.exit(tag + ' one doctor --fix: exit 0', fix, 0);
+  t.eq(tag + ' --fix moved everything to the new layout', mdFiles(bl), expectedFiles(newL, model));
+  t.eq(tag + ' after --fix, list shows exactly the elements without archived:',
+    Object.keys(entriesById((await runJAsync(['list'], bl)).json)).sort(),
     Object.keys(model).filter(id => !model[id].archived).sort());
   for (const id of Object.keys(model)) {
-    T.check(tag + ' ' + id + ' is byte-identical after the move',
+    t.check(tag + ' ' + id + ' is byte-identical after the move',
       H.readOrNull(path.join(bl, placeOf(newL, model, id))) === before[id],
       J(H.readOrNull(path.join(bl, placeOf(newL, model, id)))).slice(0, 200));
   }
@@ -630,10 +645,11 @@ for (const M of MIGRATIONS) {
     /* DECISIONS 92: --fix removes the emptied hierarchy folders (ID-shaped) */
     const left = H.lsOrEmpty(bl).concat(H.lsOrEmpty(path.join(bl, newL.folders.archive)))
       .filter(n => /^(EPIC|TSK|SUB)-\d+$/.test(n));
-    T.eq(tag + ' the emptied hierarchy folders are removed', left, []);
+    t.eq(tag + ' the emptied hierarchy folders are removed', left, []);
   }
-  doctorClean(tag + ' after --fix', bl);
-}
+  await doctorClean(t, tag + ' after --fix', bl);
+  return null;
+}));
 
 /* DECISIONS 92 Q2, the other half: below the old archive folder WITHOUT
  * `archived:` a file belongs to its active place — --fix never archives. */
@@ -711,7 +727,7 @@ for (const M of MIGRATIONS) {
   T.exit(tag + ' doctor --fix: exit 0', runJ(['doctor', '--fix'], bl), 0);
   T.eq(tag + ' the file is in tasks/ again', mdFiles(bl), expectedFiles(fx.L, fx.model));
   T.eq(tag + ' byte-identical after the move', H.readOrNull(path.join(bl, 'tasks', 'TSK-002.md')), bytes);
-  doctorClean(tag + ' after --fix', bl);
+  await doctorClean(T, tag + ' after --fix', bl);
 }
 
 /* ===================================================================== */
@@ -730,7 +746,7 @@ for (const M of MIGRATIONS) {
   };
   const fx = mkLayoutBacklog('ac22-b4', { group: 'hierarchy' }, model);
   const { bl, L } = fx;
-  doctorClean(tag + ' before the edit', bl);
+  await doctorClean(T, tag + ' before the edit', bl);
 
   const oldFile = path.join(bl, 'EPIC-001', 'TSK-002', 'TSK-002.md');
   const edited = fs.readFileSync(oldFile, 'utf8').replace('parent: EPIC-001\n', 'parent: EPIC-002\n');
@@ -760,7 +776,7 @@ for (const M of MIGRATIONS) {
     H.readOrNull(path.join(bl, 'EPIC-002', 'TSK-002', 'TSK-002.md')), edited);
   T.eq(tag + ' SUB-002 is byte-identical',
     H.readOrNull(path.join(bl, 'EPIC-002', 'TSK-002', 'SUB-002.md')), subBytes);
-  doctorClean(tag + ' after --fix', bl);
+  await doctorClean(T, tag + ' after --fix', bl);
 }
 
 /* ===================================================================== */
@@ -858,7 +874,7 @@ for (const M of MIGRATIONS) {
   T.eq(tag + ' --fix moved it to tasks/, byte-identical',
     H.readOrNull(path.join(bl, 'tasks', 'TSK-009.md')), bytes);
   T.check(tag + ' the stray place is empty now', !fs.existsSync(path.join(bl, stray)), '');
-  doctorClean(tag + ' after --fix', bl);
+  await doctorClean(T, tag + ' after --fix', bl);
 }
 
 {
@@ -874,7 +890,7 @@ for (const M of MIGRATIONS) {
   T.exit(tag + ' doctor --fix: exit 0', runJ(['doctor', '--fix'], bl), 0);
   T.eq(tag + ' --fix moved it to the backlog top level, byte-identical',
     H.readOrNull(path.join(bl, 'TSK-009.md')), bytes);
-  doctorClean(tag + ' after --fix', bl);
+  await doctorClean(T, tag + ' after --fix', bl);
 }
 
 {

@@ -76,7 +76,7 @@ function hookTimeout(): number {
   const n = /^[1-9][0-9]*$/.test(raw) ? Number(raw) : NaN;
   if (!(n >= 1 && n <= MAX_TIMEOUT_S)) {
     fail('invalid_env', `invalid NJ_ON_CHANGE_TIMEOUT '${raw}' (expected whole seconds, 1 to ${MAX_TIMEOUT_S})`,
-      'unset it for the 10-second default');
+      'fix NJ_ON_CHANGE_TIMEOUT, or unset it for the 10-second default');
   }
   return n;
 }

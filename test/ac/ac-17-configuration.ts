@@ -1,4 +1,3 @@
-/* @slow: one of the longest pooled files, ~72 s at 8 jobs (NJ_TEST_TIMES, 2026-10-18); start it first (run-all.ts, test/README.md) */
 /* AC-17 — Configuration.
  *
  * § 15 AC-17: "Configuration. An invalid `.nanojira/config.json` (bad statuses, `done`

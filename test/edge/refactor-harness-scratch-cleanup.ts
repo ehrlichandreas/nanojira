@@ -1,4 +1,3 @@
-/* @slow: one of the longest pooled files, ~98 s at 8 jobs (NJ_TEST_TIMES, 2026-10-18); start it first (run-all.ts, test/README.md) */
 /* D189 (docs/DECISIONS.md 189, 2026-10-09) -- the white-box probes under
  * tools/refactor-harness/scratch/ (bc, r3, r3bc, r4, r4bc, r5, r6, r6bc,
  * r8, verify -- every file there that calls mkdtempSync, discovered below
@@ -48,9 +47,9 @@ function discoverProbes() {
 }
 
 /* Under H.TMP_ROOT (tmpfs /tmp), not os.tmpdir(): TMPDIR may be on disk,
- * and a base made by H.freshDir is removed by the harness's exit and
- * signal handlers too, so a run stopped mid-probe by SIGTERM, SIGINT or
- * SIGHUP leaves nothing behind (SIGKILL runs no handler). */
+ * and a base made by H.freshDir is removed by the harness's exit handler.
+ * A signal kills this file without cleanup (DECISIONS 193, TSK-028); under
+ * run-all the base is inside the run root, which the leak sweep removes. */
 function freshScratchBase(label: string) {
   return H.freshDir('d189-' + label);
 }

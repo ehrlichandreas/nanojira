@@ -2970,6 +2970,12 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      - a test shows that a probe run leaves no new entries under a fresh
        HARNESS_SCRATCH_BASE.
      This is tooling only: no nj behaviour, no version bump, no tag.
+     - Note (2026-10-18, TSK-028): the probes' own SIGHUP/SIGINT/SIGTERM
+       handlers have the limit D193's revision removed from the test
+       harness: during synchronous work they hold the signal until it
+       ends. Left as they are: the probes run as children of
+       test/edge/refactor-harness-scratch-cleanup.ts, under that file's
+       own probe timeout, which escalates to SIGKILL.
 
 190. **History squashed to tagged commits only** (2026-10-09, user
      request, modelled on ehrlichandreas/bosun: one signed commit per tag,
@@ -3047,6 +3053,19 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        a kill left fixture dirs behind (20 found). The Verifier gave PASS:
        mutation, signal legs, and a run-all of 100/102 with the 2 known
        env cannot-runs.
+     - Revised (2026-10-18, TSK-028): the signal handlers are gone; the
+       'exit' handler stays, guarded so finish() and exit clean up once.
+       A JS signal listener only runs once the event loop is free, so a
+       test busy in synchronous work held run-all's timeout SIGTERM until
+       the work ended, reached T.finish() and exited 0, and run-all
+       counted that as a pass; a test hung in a sync call could not be
+       killed at all. With no listener, SIGTERM ends the process at once.
+       What a killed test made stays behind; under run-all that is inside
+       the run root, which the leak sweep reports and removes. run-all
+       itself now counts a fired timeout as a failure whatever the exit
+       status, and kills: the pool with SIGTERM, then SIGKILL after 10 s;
+       the serial path, whose spawnSync cannot escalate, with SIGKILL.
+       Test: test/tools/run-all-timeout.ts (24 checks; red before this change).
      - The export also copies LICENSE, because consumers vendor the
        exported folder and need the licence text with it.
      - Tooling patch: no change to nj behaviour. Version 3.12.2.
@@ -3841,6 +3860,8 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
        Every case must exit 1 with `invalid_env`, write exactly one stderr
        line naming `NJ_NOW`, and leave the backlog snapshot byte-identical.
+       (Since DECISIONS 212: the error, then a hint naming `NJ_NOW` as
+       the last line.)
        Also checked: `--version`, `--help`, `help` and `list --help` still
        exit 0; a valid `NJ_NOW` gives exit 0 on every case.
      - Mutation: a bundle with the dispatch call removed (lazy again) fails
@@ -3851,7 +3872,8 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      its value flags as `--flag=value`** (2026-10-18, TSK-014; Lead).
      - The pin: `github:ehrlichandreas/git-history-tools#2282aed` named a
        commit that git-history-tools' whole-history re-sign orphaned. It
-       is the re-dated and re-signed twin of fa3529b: the same tree, but
+       is the re-dated and re-signed twin of fa3529b (neither commit is in
+       ght's published history): the same tree, but
        authored and committed at 20:10 instead of 21:30. Nothing references
        it any more, so GitHub may garbage-collect it, and `npm ci` from a
        clean clone would then fail. The pin is now the signed release tag
@@ -3887,6 +3909,12 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        `--message-file`, whichever git-history-tools version is installed.
        Mutation: putting `--tag` back in the space form fails both AC10
        checks.
+     - Re-pinned to `#v0.4.1` (TSK-026) by the same rules: the pin and the
+       regenerated lock land together once v0.4.1 is on GitHub, and
+       v0.4.1 is never moved. 0.4.1 changes no behaviour release.ts relies
+       on: only git-history-tools' failure paths, which no longer leave a
+       temporary directory behind when writing its gpg signing wrapper or
+       a message file fails.
 
 209. **A fixture the tests build identically many times is built once and
      copied** (2026-10-18, TestSpeed; ac-63, ac-26, ac-25; ac-27 by
@@ -3973,6 +4001,29 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        coverage-v3-gaps and ac-64 are not marked although they sometimes
        rank in the top 8. Ranks 5–12 form a 39–59 s band that reshuffles
        from run to run (ac-63: 29, 52, 87 and 59 s in four runs).
+     - The marks then follow a rule fixed before the measuring run
+       (TSK-027). The rule came first because the 4.1.1 pre-release
+       suite ran at load ~23, next to a ght suite. That squeezed the
+       ratios together, and a single cut-off applied inside the band
+       gave inconsistent marks.
+       - The rule: one full suite at 8 jobs with `NJ_TEST_TIMES`, load
+         average below 8 at the start, no other suite running; if several
+         runs qualify, the latest one. Ratio = `(ms / mean).toFixed(1)`,
+         with `ms` the file's pooled time and `mean` the mean over all
+         pooled files (serial phase excluded). ≥ 5.0× is marked, < 4.0×
+         is not, and 4.0–4.9× keeps its current mark.
+       - Why 5.0/4.0: three earlier runs at normal load each had a gap
+         between ~5.0× and ~4.3×, with 8–10 files below it reshuffling
+         between 3× and 4.5×.
+       - The run: the post-4.1.1 integration suite (v4.1.1 + the ac-22
+         `runLegs` conversion + the run-all run root), 118/118. Load at
+         the start was 5.8, rising to 11–17 from the suite itself. The
+         slot was held for the whole run, and no ght suite ran during it.
+         Pool mean 12.3 s.
+       - The result: nothing reaches 5.0× (ac-61 4.9, ac-63 4.6, ac-26
+         4.5, ac-31 4.4 stay unmarked). ac-22 (3.8× after its
+         conversion), ac-17 (3.2×) and refactor-harness-scratch-cleanup
+         (3.1×) fall below 4.0× and lose `@slow`, so no file is marked.
      - Rejected: pointing the tests at `dist/` instead of `bin/nanojira`
        (saves ~23 ms per spawn, measured, but changes what is tested; a leaner
        launcher is a separate proposal), and one shared fixture directory
@@ -4084,8 +4135,8 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        for a marginal gain over what ac-17 alone already delivers. Left as
        a candidate for a dedicated follow-up task rather than converted
        here.
-     - **Review findings on 15b5ab1/b6f8096, fixed on top of 26414c8**
-       (Reviewer-found):
+     - **Review findings on the first SUB-005/SUB-006 commits, fixed
+       before v4.1.1 shipped** (Reviewer-found):
        - **A throwing leg used to take every other leg down with it.**
          `runLegs` awaited each leg inside a bare `Promise.all`; a leg
          that threw rejected the whole `Promise.all`, so `runLegs` itself
@@ -4149,6 +4200,60 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        - ac-17 reconfirmed unaffected by any of the above: still 848
          checks, M0/mutant logs byte-identical to the pre-fix run
          (`/tmp/team/recipes/` check-log comparison).
+     - **ac-22 converted after all (SUB-007), partially.** The two biggest
+       independent-leg loops: `VARIANTS` (8 legs, B1 — placement per group,
+       new/rm/rm --cascade/archive) and `MIGRATIONS` (7 legs, B3 — changing
+       `group`/folder names on a populated backlog, each with its own
+       `doctor --fix`). Both build and only touch their own
+       `mkLayoutBacklog` fixture — no cross-iteration state — so both
+       convert mechanically to `H.runLegs(...)`, same shape as ac-17's
+       `INVALID`/`INVALID_LAYOUT` conversion: `run`/`runJ` gained async
+       twins (`runAsync`/`runJAsync`, built on `H.runNjAsync`/
+       `H.runJsonAsync`), and every `T.*` call inside either loop's body
+       became `t.*`. `doctorClean` and `archivedBytes` — both shared by
+       loops inside and outside the conversion — took a leading
+       `t: H.BufferedContext` parameter instead of touching `T` directly
+       (`doctorClean` also became `async`, since it now awaits
+       `runJAsync`); every call site outside the two converted loops now
+       passes the real `T` (which satisfies `BufferedContext`'s shape
+       structurally, being a superset) and awaits it.
+       - Left unconverted: the hierarchy-merge pair (2 legs), the
+         `NJ_FAULT=before-rename` pair (2 legs), the hierarchy
+         `refused:misplaced` pair (2 legs), and the B6 undeterminable-type
+         trio (3 legs) — each a handful of spawns total, same judgment
+         call as ac-17's smaller loops: the two converted loops already
+         account for the great majority of the file's own spawns.
+       - Proof (`/tmp/team/recipes/`, same recipe as ac-17): same check
+         count both ways (775); `M0` (unmutated) produces 0 failures,
+         byte-identical logs, on both the pre-conversion and
+         post-conversion file; two product mutants — `misplacedCode()`'s
+         `type:folder`/`layout:misplaced` ternary swapped, and
+         `placeOf()`'s `group === "flat"` branch disabled — each fail the
+         exact same 86 and 44 checks respectively on both files,
+         sorted-log-identical.
+       - Timing, alone (3 runs each, `/usr/bin/time -v`): sync
+         (pre-conversion) wall 97.6/87.6/54.5 s (avg ~80 s), user+sys
+         78.2/66.5/57.4 s (avg ~67 s); converted (`runLegs`, concurrency 4)
+         wall 29.6/28.8/25.9 s (avg ~28 s), user+sys 46.2/45.6/42.3 s (avg
+         ~45 s) — roughly a 3× wall reduction and a ~33% CPU (user+sys)
+         reduction, about twice ac-17's own (75 → 63 s user+sys, −16%,
+         Implementer3's measurement). The sync runs' wide spread (54-98 s
+         for identical work) most likely reflects other teammates'
+         concurrent suite runs on the same machine during the
+         measurement; the converted runs stayed tight (26-30 s) under the
+         same conditions. Per Lead's direction no pooled before/after full
+         suite was run (it would have doubled the load while several
+         suites were queued for the shared run slot), so the pooled gain
+         was not measured then: v4.1.1 shipped, and its release suite ran,
+         without this conversion. The next full suite, the first with it,
+         put ac-22 at 47 s pooled (next bullet).
+       - ac-22's `@slow` header (~63 s pooled, measured before this
+         conversion) stayed with the conversion: `@slow` changes only the
+         dispatch order, never a verdict, and whether ac-22 still belonged
+         among the pool's outliers (test/README.md) was left to that next
+         suite's `NJ_TEST_TIMES`, not to alone timings. That suite put
+         ac-22 at 3.8× the pooled mean (47 s), and it lost the mark
+         (DECISIONS 209, TSK-027).
 
 211. **The severity table lists every § 7 code; the two layout errors are
      refused in `problems.ignore`** (2026-10-18, TSK-022; Lead).
@@ -4204,11 +4309,11 @@ Written for adversarial review: if a line reads like a guess, challenge it.
          whole prefix group would drop it from the scan too, and nothing
          would notice. A code without a colon (`duplicate_id`) still
          escapes (C), but (A) covers it once it has a row.
-     - Recorded red: against the binary and SPEC of 29ebb11, 273db5c and
-       9445086, 8 checks fail. Those are both (A) checks for each of the
-       two errors, the (A) `config:unknown_code` check for each of the two
-       warnings, (B)'s suppression check, and (C)'s closed-list check. The
-       fixed tree passes all 103.
+     - Recorded red: against the binary and SPEC of v4.1.0, 8 checks fail.
+       Those are both (A) checks for each of the two errors, the (A)
+       `config:unknown_code` check for each of the two warnings, (B)'s
+       suppression check, and (C)'s closed-list check. The fixed tree
+       passes all 103.
      - Mutants of the test's own table parser, skipping every row of one
        prefix:
        - `backlog:*` fails 3 checks in (C): the prefix guard, the literal
@@ -4218,6 +4323,137 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        - `depends_on:*`, which has no warning rows, fails the prefix
          guard and the literal check. Before the prefix change it passed
          silently.
+
+212. **`invalid_env` names its variable in the hint** (2026-10-18,
+     TSK-025; the user).
+     - The gap: `invalid_env` has three sources, `NJ_NOW` (§ 12),
+       `NJ_ON_CHANGE_TIMEOUT` (§ 9 "`NJ_ON_CHANGE`") and `NJ_AUTHOR` (§ 9
+       "The acting name"). Each names its variable in the error message,
+       and the message goes to stderr only. `--json` carried
+       `{ok:false,error:"invalid_env"}` and, for `NJ_ON_CHANGE_TIMEOUT`
+       alone, the hint "unset it for the 10-second default", which says
+       what to do but not to what. A `nanojira-mcp` tool result is the
+       child's parsed stdout and nothing else (§ 17), so an MCP client
+       could tell that some variable in the server's environment
+       was wrong, but not which one.
+     - The choice: every `invalid_env` gets a hint, and each hint names
+       its variable: "fix NJ_NOW, or unset it for the system clock", "fix
+       NJ_ON_CHANGE_TIMEOUT, or unset it for the 10-second default", "fix
+       NJ_AUTHOR, or pass --as=<name>, which outranks it". The code stays
+       `invalid_env`; no new code and no new field. § 9 now says the
+       variable's name in the hint is the contract and the rest of the
+       wording is prose.
+     - Rejected: one code per variable (`invalid_env:NJ_NOW`). It renames
+       a code of the closed vocabulary, which § 9's additive-only rule
+       forbids. Also rejected: a new `variable` field. A field is a
+       contract every caller would have to learn, for a fact the hint
+       already carries in a sentence a person reads anyway.
+     - Visible changes:
+       - `--json`: `hint` appears on the two paths that had none, `NJ_NOW`
+         and `NJ_AUTHOR`. `hint` was already optional in the
+         failure shape (§ 9), so a caller that handles it for any other
+         code handles it here.
+       - stderr: one more line, the hint, after the `Error:` line. For
+         `NJ_NOW` this changes a documented output: § 12 said "a single
+         stderr line naming `NJ_NOW`" (DECISIONS 207) and now says the
+         error, then the hint as the last line, both naming it.
+       - `NJ_ON_CHANGE_TIMEOUT`'s existing hint text changes.
+     - Not changed: the `Error:` message of all three, the exit code, the
+       precedence of the checks (D207's dispatch order for `NJ_NOW`, § 9's
+       for the acting name), and what is written (nothing).
+     - § 9: the spec-named paths table gains the missing `NJ_NOW` row,
+       and a paragraph after the table states the rule. § 12's "single
+       stderr line" now says "the error, then the hint as the last line",
+       the same wording as § 9.
+     - Tests: each source pins the hint in `--json` and on stderr.
+       - ac-62 leg 3: every command and both bad values. stderr is
+         exactly two lines, `Error: …NJ_NOW…` and a hint naming `NJ_NOW`,
+         and `--json`'s `hint` equals that second line. One human-output
+         `list` per bad value.
+       - ac-63 F: each of the seven bad timeouts has a `--json` hint that
+         names `NJ_ON_CHANGE_TIMEOUT`, and stderr ends with it.
+       - ac-25 N4 (`note`, prose and `--json`) and ac-27 C2 (`claim`): the
+         hint names `NJ_AUTHOR`. Because the message quotes the value, a
+         multi-line `NJ_AUTHOR` makes a multi-line message, so these check
+         stderr's last line, not its second. They check only the
+         variable's name, not the rest of the hint (§ 9).
+       - ac-32 M13: both tool calls behind `nanojira-mcp` carry a hint
+         naming `NJ_NOW` in the structured result.
+     - Recorded red: against v4.1.1's binary, 93 of the new and changed
+       checks fail: ac-62 54 of 187, ac-25 20 of 254, ac-27 10 of 283,
+       ac-63 7 of 564 (only the name check: the old hint was already the
+       last stderr line), ac-32 2 of 51. With the hints, all five files
+       pass, as do the four other files that name `invalid_env`
+       (failure-vocabulary, exit-fault-vocabulary, coverage-v3-gaps,
+       det-id-retry).
+
+213. **The launcher starts no helper process: parameter expansion instead
+     of basename, dirname and sed** (2026-10-18, TSK-020; the user).
+     - The gap: `bin/nanojira` and `bin/nanojira-mcp` (rendered from
+       `tools/wrapper.sh`, § 18) ran `basename`, `dirname` and
+       `printf | sed` before the exec: three extra processes, each with
+       its own subshell, on every call. That cost about 9.5 ms per call
+       on an idle Linux machine with dash as /bin/sh, against 74 ms for
+       `node dist/nanojira.mjs --version` itself. Under load it is more.
+       Every test file and every real call pays it.
+     - The choice: `${0##*/}` and `${0%/*}` (a `case` for a `$0` without a
+       slash → `.`, and for `/name` → `/`) give the name and the
+       directory. A `for` loop over the lines of the `--version` output
+       (`set -f`, `IFS` = newline, both restored) reproduces sed's
+       per-line result exactly, quirks included: every line that starts
+       with `v<digits>.` contributes its digits, so multi-line output
+       still gives several numbers, as before. The only processes left
+       are the `cd -P` subshell and the `--version` probe. The probe stays:
+       it evaluates no JS, and it is what gives a Node < 24 the
+       launcher's message instead of a syntax error from the bundle.
+     - No here-document: the first draft read the lines with
+       `while read … <<EOV`. Under bash < 5.1 (macOS /bin/sh 3.2, RHEL 8,
+       Amazon Linux 2) and zsh a here-document is a temporary file, which
+       means a write on every call. With no writable temp dir it failed
+       as "node too old", exit 127 (the Scout's find). § 18 now states
+       that the wrapper writes nothing.
+     - Rejected:
+       - dropping the `--version` probe or checking the version inside
+         the bundle: an old Node must get the launcher's message, and the
+         ESM bundle has to parse before any check in it could run;
+       - caching the check in a stamp file: it writes state next to a
+         read-only tool, and invalidation (node updated in place) is
+         fragile;
+       - `node -p process.version`: evaluates JS and costs more;
+       - `#!/usr/bin/env node` on `dist/*.mjs`: loses `NJ_NODE`,
+         `unset NODE_OPTIONS` and the version message, all of § 18;
+       - pointing the tests at `dist/`: tests drive the shipped entry
+         point.
+     - Not changed: every message, exit 127, `NJ_NODE`,
+       `unset NODE_OPTIONS`, the >= 24 rule, the `dist/<name>.mjs`
+       lookup, the `cd -P` resolution of a symlinked `bin/` directory,
+       the `#!/bin/sh` shebang, and the `.cmd` launchers, which
+       `bundle.ts --check` keeps byte-identical.
+     - Proof of identical behaviour: a differential probe ran main's
+       launcher and the new one side by side under dash, bash,
+       `bash --posix`, busybox sh and `zsh --emulate sh`, and compared
+       exit code, stdout and stderr byte for byte. 41 cases (22
+       `--version` texts incl. empty, multi-line, CRLF, exit 1 and
+       stderr-only; `NJ_NODE` missing or empty; `NODE_OPTIONS`; an
+       unwritable `TMPDIR`/`TMPPREFIX`; 11 forms of `$0` incl. no slash,
+       `//`, a symlinked `bin/`, a renamed copy, a space, a deleted cwd)
+       × 5 shells: 205/205 identical. Recorded red: the here-document
+       draft fails the two unwritable-temp cases under zsh (203/205).
+       Not run on macOS; its /bin/sh (bash 3.2) runs only POSIX
+       constructs here.
+     - Measured, 2026-10-18:
+       - one full suite through a counting `NJ` wrapper: at least 6,938
+         launcher calls (7 files that derive `dist/` from `NJ`'s
+         directory could not run fully, so this is a lower bound). At
+         ~9.5 ms, that is ~66 s less summed process time per run, an
+         estimated (not measured) 8–15 s wall at 8 jobs on an idle machine;
+       - A1 B1 B2 A2 in one slot hold (A new, B old, same
+         `node_modules`, load 10–22): wall 190/209/200/178 s, a mean of
+         −20.5 s (−10 %); per-file sum 1357/1508/1439/1261 s, −165 s
+         (−11 %). Both B runs were slower than both A runs; the mean gap
+         is larger than the spread within each pair, the narrowest
+         separation (slowest A vs fastest B, 10 s) is not. 165 s / 6,938 calls ≈
+         24 ms per call, which matches the spawn timing under load.
 
 ## Known gaps, stated plainly
 
