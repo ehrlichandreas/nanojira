@@ -9,7 +9,7 @@ for a project's `AGENTS.md` in `docs/AGENT-INSTRUCTIONS.md`.
 Upgrading from an earlier nj release: `docs/CHANGES.md`.
 
 `dist/nj` (the CLI) and `dist/nj-mcp` (an MCP server exposing the same
-commands as tools over stdio, § 17) implement spec v3 through **v3.7**
+commands as tools over stdio, § 17) implement spec v3 through **v3.8**
 (`docs/SPECIFICATION.md`): backlog location via `--backlog`, `NJ_BACKLOG` or
 `.njrc`, accepted before the command word as well as after; configurable
 layout (`type`, `hierarchy`, `flat`, folder names); a generated `STATUS.md`
@@ -26,9 +26,19 @@ never-blocking `doctor` warnings flag acceptance-criteria quality, each
 switchable off per backlog via `"problems": {"ignore": [...]}`; an
 unrecognised config key is a warning too, not a hard failure, and an
 optional `"minVersion"` fails every command with a clear message on an
-`nj` too old to honour the rest of this paragraph. A v2 backlog is
-migrated once with `nj doctor --fix` (`docs/MIGRATION-v3.md`). Decisions
-behind it: `docs/DECISIONS.md` 86–167; independent verification reports:
+`nj` too old to honour the rest of this paragraph. **v3.8**: `nj new`/
+`nj set --input=<file|->` take a JSON plan (object, or for `new` an
+array with `children` nesting) instead of field flags — a whole epic →
+tasks → subtasks tree in one call, cross-references via `ref`/`depends_on`
+resolved before any write, `--dry-run` to preview one, `acceptance` as a
+JSON array of checkbox lines; a write that reaches the last configured
+status now releases the element's existing claim in the same call
+(`released: "<holder>"`); `nj show --json` on a single element carries an
+additive `entry` identical to `entries[0]`. See `docs/GUIDE.md` § on
+"Creating a whole plan with `--input`" and `docs/CHANGES.md` 3.8.0 for the
+how-to and the full write-up. A v2 backlog is migrated once with `nj
+doctor --fix` (`docs/MIGRATION-v3.md`). Decisions behind it:
+`docs/DECISIONS.md` 86–173; independent verification reports:
 `docs/verification/`.
 
 ## Layout
@@ -38,7 +48,7 @@ src/nj.ts       entry point: the CLI (real ES module)
 src/nj-mcp.ts   entry point: the MCP server (§ 17), stdio
 src/commands/   one module per verb (cmd-*.ts)
 src/core/       shared modules (args, config, load, output, claims, batch,
-                actor, flag-table, …)
+                actor, flag-table, input, …)
 dist/nj         built, single-file artefact — what ships, checked into git
 dist/nj-mcp     built, single-file artefact — the MCP server, checked into git
 docs/           SPECIFICATION.md, ARCHITECTURE.md, DECISIONS.md

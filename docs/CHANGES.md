@@ -5,6 +5,116 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nj --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 3.8.0
+
+JSON input for building a whole plan in one call, two gaps closed in
+`done`/`show`, reviewed against real plans by both outside leads:
+
+- **`nj new --input=<file|->` takes a JSON plan**: an object, or an array
+  of objects, each of which may nest its own `children` (parent implied by
+  the nesting, never given alongside it). `nj set --input=` takes exactly
+  one object — the field map `set` already accepts, just sourced from JSON
+  instead of flags; addressing (`--id=`/`--file=`) stays on the CLI either
+  way. A real run, an epic with one task and an implementation + review
+  subtask, the review `depends_on` its own implementation via `ref`:
+
+  ```json
+  { "type": "epic", "title": "Login", "description": "Users can sign in.",
+    "children": [
+      { "type": "task", "title": "Login route",
+        "description": "POST /login returns a session.",
+        "acceptance": ["200 with a valid password", "401 otherwise"],
+        "children": [
+          { "type": "subtask", "ref": "@impl", "title": "Implement POST /login",
+            "description": "Wire the route to the session store.",
+            "acceptance": ["Route registered", "Session cookie set on success"] },
+          { "type": "subtask", "title": "Review: POST /login", "assignee": "bob",
+            "depends_on": ["@impl"],
+            "description": "Review the implementation above.",
+            "acceptance": ["Code reviewed", "Tests reviewed"] }
+        ] }
+    ] }
+  ```
+
+  `nj new --input=plan.json --json` (`ids`/`entries` in write order,
+  `refs` mapping every `@name` to the real id it resolved to):
+
+  ```json
+  { "ok": true,
+    "ids": ["EPIC-001", "TSK-001", "SUB-001", "SUB-002"],
+    "entries": [ "...", "...", "...",
+      { "id": "SUB-002", "type": "subtask", "parent": "TSK-001",
+        "title": "Review: POST /login", "assignee": "bob",
+        "depends_on": ["SUB-001"], "...": "..." } ],
+    "refs": { "@impl": "SUB-001" },
+    "_problems": [] }
+  ```
+
+  `acceptance` may be a JSON array of strings, in either command — each
+  element becomes one `- [ ] …` line, so content supplied this way can
+  never accidentally trigger `acceptance:no_checkbox` (team-b-tests
+  TSK-011's own motivation). `--dry-run` (`new --input=` only) runs full
+  validation and writes nothing, reporting the would-be shape — no `id`,
+  `file`, or `refs`, since none of it exists yet.
+
+- **A `depends_on` ref must be declared *earlier* in the plan** — a
+  forward reference, or an object referencing itself, is `invalid_value`
+  before anything is written. Found live: a plan whose "Review" node named
+  `depends_on: ["@impl"]` while `@impl` was declared *later* passed an
+  earlier build's validation and silently wrote `depends_on:
+  ["undefined"]`. The failure names the *referencing* object and hints to
+  move the referenced one earlier:
+
+  ```json
+  { "ok": false, "error": "invalid_value",
+    "hint": "move the object that declares this ref earlier in the plan, before this one",
+    "failed_at": "[0]" }
+  ```
+
+  `parent` is never ref-aware either — give it a real, already-existing
+  id, or nest the child under its new parent's own `children` instead.
+
+- **A mid-plan failure names what happened so far.** On top of the usual
+  `{ok, error, hint}`, a failure partway through a plan additionally
+  carries `created` (every id actually written, in write order) and
+  `refs` (every `ref` resolved before the failure) — absent, not empty,
+  when the plan failed validation and nothing was attempted at all.
+  `failed_at` — the one object at fault, either its own `ref` or a JSON
+  path like `[0].children[1]` — is the one documented exception to every
+  other failure shape in this spec, on both a validation failure and a
+  mid-plan write failure.
+
+- **A write that reaches the last configured status releases the claim**,
+  whoever holds it, in the same call — `nj set --status=done`, `nj claim
+  --status=done`, `nj next --status=done` alike:
+
+  ```json
+  { "ok": true, "id": "TSK-001", "changed": ["status"], "...": "...",
+    "released": "alice" }
+  ```
+
+  Closes a real gap an outside team found: `claim:stale` turned up a
+  dozen stale claims, most of them on elements already `done` — claimed,
+  finished, never released, because release was a separate step agents
+  forgot. There is no more need for a follow-up `nj release` after a
+  final-status write; `released` is simply absent when nothing was
+  claimed. A write refused for another reason (`refused:children_open`
+  without `--allow-open-children`, for one) releases nothing — the claim
+  survives exactly as before. (team-b-tests TSK-013)
+
+- **`nj show --json` on a single element now carries `entry`**, identical
+  to `entries[0]` — the one place `show --json`'s existing `{backlog,
+  counts, entries}` shape differs from a bare object, which bit two of
+  our own AC scripts before (reading `entry.tags` off `undefined`,
+  silently comparing nothing). Present exactly when `entries` has one
+  element; absent for a `duplicate_id` target (two entries) and never on
+  `list`/`find`, which keep their existing shape unchanged.
+
+Both outside leads reviewed the `--input` draft against real plans of
+their own before any of the above shipped — the `@`-prefix rule for
+`ref`s, the `refs` map, `failed_at`, `--dry-run` and `acceptance` as an
+array all came out of that round. (team-a, team-b-tests)
+
 ## 3.7.0
 
 Fixes and discoverability, in response to a second round of feedback from

@@ -1,17 +1,17 @@
-# V3.4 verification — `--version` + onboarding docs (`6ca4830`, D151)
+# V3.4 verification — `--version` + onboarding docs (`e13efd0`, D151)
 
 Verifier, 2026-10-05. Independent verification, assigned by the Lead.
-Work in `/tmp/verifier-v34` (detached worktree at `6ca4830` — note: the
-task listed `e8bb695` alongside `6ca4830`, but `e8bb695` is actually an
-*ancestor* of `6ca4830` in git history, not a later commit; `6ca4830` is
+Work in `/tmp/verifier-v34` (detached worktree at `e13efd0` — note: the
+task listed `33b5b60` alongside `e13efd0`, but `33b5b60` is actually an
+*ancestor* of `e13efd0` in git history, not a later commit; `e13efd0` is
 main's current tip and carries both the code and the docs, so it's the
 one I verified against), `/tmp/verifier-v34-nested`/`-unclip` (for
 `gate.js`/the byte-exact diff), `/tmp/verifier-v34-empty`/`-bare`/
 `-install`/`-agent` (scratch, explicit paths). All removed before
 writing this. Read: DECISIONS 151 in full, SPECIFICATION.md § 9
 `--version`, § 17's `nj-mcp --version` paragraph and the updated
-`initialize` bullet (`5d038e2`), AC-39 in full (`49e6f72`/`268f4cf`),
-the full `6ca4830` diff, GUIDE.md's new § 1 "Install", `docs/
+`initialize` bullet (`5e0c6f2`), AC-39 in full (`28817b8`/`d0c5f2c`),
+the full `e13efd0` diff, GUIDE.md's new § 1 "Install", `docs/
 AGENT-INSTRUCTIONS.md` in full.
 
 **VERDICT: needs changes — one confirmed gap.** `nj --version` itself is
@@ -88,7 +88,7 @@ version — confirmed live, both eras:**
 server/discover -> _meta["io.modelcontextprotocol/serverInfo"].version = "3.4.0"
 initialize       -> serverInfo.version                                 = "3.4.0"
 ```
-Matches `5d038e2`'s spec update and `268f4cf`'s AC-39 V5 leg exactly.
+Matches `5e0c6f2`'s spec update and `d0c5f2c`'s AC-39 V5 leg exactly.
 
 ### Confirmed gap: `nj-mcp --version`'s combination rule is not enforced
 
@@ -149,7 +149,7 @@ all), and add the equivalent of AC-39's V6 leg for `nj-mcp`.
 
 ## 2. Gate replay
 
-`gate.js --step=6ca4830 --frozen=c7-baseline`:
+`gate.js --step=e13efd0 --frozen=c7-baseline`:
 ```
 replay: exit 1
 BEHAVIOUR CHANGED — 6 differing call(s): help 4, --help 2
@@ -252,11 +252,11 @@ leg. Recommend fixing `nj-mcp`'s version check to require exclusivity
 the same way `nj.ts` already does, adding the equivalent AC-39 leg, and
 clarifying `nj-mcp --version --json`'s intended shape while at it.
 
-## D152 delta — `dd1c248` (spec), `d6225f8` (tests), `9152bcd` (nj-mcp)
+## D152 delta — `e1e9992` (spec), `483d25b` (tests), `518583d` (nj-mcp)
 
 Verifier, 2026-10-05. Same scope, read-only, assigned by the Lead:
 check only the D152 delta. Work in `/tmp/verifier-d152` (detached
-worktree at `9152bcd`), `/tmp/verifier-d152-old` (detached at `6ca4830`,
+worktree at `518583d`), `/tmp/verifier-d152-old` (detached at `e13efd0`,
 the pre-fix build, for the discrimination check), `/tmp/
 verifier-d152-nested` (for `gate.js`), `/tmp/verifier-d152-probe`
 (scratch backlog). All removed before writing this.
@@ -304,8 +304,8 @@ original report flagged (what `--version --json` should do for
 
 **(2) AC-39's new legs genuinely discriminate — checked by running them
 against the pre-fix binary myself, not trusting the Oracle's own
-claim.** Built a second worktree at `6ca4830` (before D152) and ran
-`9152bcd`'s own `test/ac/ac-39-version.js` against *that* binary:
+claim.** Built a second worktree at `e13efd0` (before D152) and ran
+`518583d`'s own `test/ac/ac-39-version.js` against *that* binary:
 
 ```
 FAIL ac-39-version.js — 27 of 59 checks failed
@@ -321,12 +321,12 @@ implementation. They don't pass vacuously — confirmed directly.
 
 **(3) Diff scope, AC-39/32/38, and the gate — all confirmed:**
 
-- `git show 9152bcd --stat`: `dist/nj-mcp` and `src/nj-mcp.ts` only —
+- `git show 518583d --stat`: `dist/nj-mcp` and `src/nj-mcp.ts` only —
   nothing else touched.
 - `node test/ac/ac-39-version.js dist/nj`: **59/59**.
 - `node test/ac/ac-32-mcp.js dist/nj`: **36/36**; `node test/ac/
   ac-38-mcp-no-dependencies.js dist/nj`: **11/11**.
-- `gate.js --step=9152bcd --frozen=c7-baseline`: `replay: exit 1`,
+- `gate.js --step=518583d --frozen=c7-baseline`: `replay: exit 1`,
   `BEHAVIOUR CHANGED — 6 differing call(s): help 4, --help 2` (the same
   tally as every v3.4 round — the CLI's own `nj` binary is untouched by
   this commit, confirmed by the identical `nj sha256` in both this run's

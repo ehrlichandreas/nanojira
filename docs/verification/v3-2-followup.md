@@ -1,8 +1,8 @@
-# V3-2/TSK-029 follow-up verification (`cd12c4e` + `447132a`)
+# V3-2/TSK-029 follow-up verification (`e81edbe` + `cc99746`)
 
 Verifier, 2026-09-29/30. I didn't write any of this code (DECISIONS 86/87).
 Work ran in a throwaway worktree `/tmp/verifier-v32f` (checked out at
-`447132a`); the main tree was never switched or written except to add this
+`cc99746`); the main tree was never switched or written except to add this
 file. Runtime Node v24.21.0. Rulings read: D102, D105, D106; findings
 covered: `docs/verification/v3-2.md` F1–F10, `docs/verification/tsk-029.md`
 T1–T4.
@@ -22,14 +22,14 @@ code path.
 
 | Claim | Reproduced |
 |---|---|
-| typecheck 0, build:check | ✓ exit 0 / byte-identical, at `447132a` |
+| typecheck 0, build:check | ✓ exit 0 / byte-identical, at `cc99746` |
 | hardening-v3-1 628/628 | ✓ exact |
 | ac-17 680/680 | ✓ exact (D102's suppression confirmed working — see below) |
-| v3-2-regressions 166/166 | ✓ exact (the fixup's own claim; `cd12c4e` alone was 165/166, the one gap the Oracle's own mtime-counting helper, closed by `447132a`) |
-| run-all: no green→red | ✓. Totals: `cca6aa3` (pre) 67/6/1 → `447132a` (post) **69/4/1** (74 total). `ac-17` and `v3-2-regressions` went red→green. The remaining reds — `ac-24` (313/561), `ac-25` (71/213), `ac-26` (407/702), `coverage-v3-gaps` (8/119), `hardening-njrc-foreign-link` (CANNOT RUN) — have **identical failure counts, check for check**, to what I measured independently for `cca6aa3` in the V3-3 round: confirms V3-4 scope, untouched by this commit. |
-| gate vs oracle-frozen-8: V3-3's 4 classes minus ~1 call, name any new class | **Exactly V3-3's 4 classes, same total (1892), zero new class.** See "Replay classification" below. The "minus 1" in the Implementer's framing referred to `cd12c4e` alone (1893, one extra diff from the F5 filename-vs-identity bug) — `447132a`'s fixup brings it back to exactly `cca6aa3`'s 1892, not 1891. |
+| v3-2-regressions 166/166 | ✓ exact (the fixup's own claim; `e81edbe` alone was 165/166, the one gap the Oracle's own mtime-counting helper, closed by `cc99746`) |
+| run-all: no green→red | ✓. Totals: `42967cb` (pre) 67/6/1 → `cc99746` (post) **69/4/1** (74 total). `ac-17` and `v3-2-regressions` went red→green. The remaining reds — `ac-24` (313/561), `ac-25` (71/213), `ac-26` (407/702), `coverage-v3-gaps` (8/119), `hardening-njrc-foreign-link` (CANNOT RUN) — have **identical failure counts, check for check**, to what I measured independently for `42967cb` in the V3-3 round: confirms V3-4 scope, untouched by this commit. |
+| gate vs oracle-frozen-8: V3-3's 4 classes minus ~1 call, name any new class | **Exactly V3-3's 4 classes, same total (1892), zero new class.** See "Replay classification" below. The "minus 1" in the Implementer's framing referred to `e81edbe` alone (1893, one extra diff from the F5 filename-vs-identity bug) — `cc99746`'s fixup brings it back to exactly `42967cb`'s 1892, not 1891. |
 | gate exit code | **8, VERDICT RED** — the same 16 frozen suites named in the V3-3 round (`ac-03`, `ac-09`, `ac-11`, `ac-13`, `ac-18`, `ac-19`, `archive-rm-byte-identity`, `cycle-parent-archived`, `cycle-parent-shapes`, `exit-doctor-fix`, `exit-fault-vocabulary`, `fix-duplicate-mtimes`, `order-doctor-problems-severity`, `state-cycle-all-members`, `tombstone-partial-loss`, `unreadable-stub-refusals`), unchanged. This is DECISIONS 107's accepted gate shape for a behaviour-changing step — the step's own `test/` run (above) is what actually gates. |
-| perf `--gate=reads` vs `cca6aa3` | **Inconclusive, machine too loud to mean anything.** On battery, CPU load 500–860% from other work on the machine (including a 400%-CPU foreign process), A/A control itself hit 19.3% (above the tool's own 10% tolerance) and it said so plainly: `this session is too noisy for a green to mean much`. The measured numbers (reads −10.6%..+16.5%, mostly noise-sized) don't contradict the Implementer's claim of +0.5%..+2.4%, but I can't confirm it. Worth a quiet re-run before c4, not blocking on its own. |
+| perf `--gate=reads` vs `42967cb` | **Inconclusive, machine too loud to mean anything.** On battery, CPU load 500–860% from other work on the machine (including a 400%-CPU foreign process), A/A control itself hit 19.3% (above the tool's own 10% tolerance) and it said so plainly: `this session is too noisy for a green to mean much`. The measured numbers (reads −10.6%..+16.5%, mostly noise-sized) don't contradict the Implementer's claim of +0.5%..+2.4%, but I can't confirm it. Worth a quiet re-run before c4, not blocking on its own. |
 
 ## Replay classification — independently verified, zero unclassified
 
@@ -44,7 +44,7 @@ oracle-frozen-8 -- test`, confirmed `git diff --quiet` clean first).
   round (STATUS.md is the only file in `after`; `nj init`'s own diff;
   `status_stale`/"STATUS.md is missing or differs..." in stdout;
   "regenerated STATUS.md" in stdout): **1547 / 42 / 254 / 48**, identical to
-  what I measured for `cca6aa3` down to the number. **Zero diffs fell
+  what I measured for `42967cb` down to the number. **Zero diffs fell
   outside these four mechanisms.**
 - None of this commit's new behaviours (symlinked layout folders,
   case-insensitive matching, `refused:unreadable_dir`, the F5/F10/F6 guards)
@@ -91,7 +91,7 @@ fix result fixed[]: ["regenerated STATUS.md"]
 meeting-notes.md byte-identical: true
 .ids before/after: ["EPIC-001"] ["EPIC-001"]
 ```
-Confirmed, including the `447132a` fixup's own distinction (identity vs.
+Confirmed, including the `cc99746` fixup's own distinction (identity vs.
 current filename) — not separately re-tested with a misnamed-but-real
 element since the fixup's own commit message already demonstrates it via
 the replay (`fixcombo-fix` now matches baseline exactly).
@@ -175,7 +175,7 @@ case; the plain-file case races exactly as it did before the fix, just
 through a narrower window (two adjacent syscalls instead of three spread
 further apart).
 
-**Reproduced twice, independently, on `447132a:dist/nj`.** Same method as
+**Reproduced twice, independently, on `cc99746:dist/nj`.** Same method as
 the original T1 finding: a root-owned decoy (`/etc/hosts`, hardlinked, so
 anyone can place a copy of it) and a foreign-owned payload
 (`/Library/Preferences/com.apple.AssetCache.plist`, uid 235, hardlinked)
@@ -221,7 +221,7 @@ even with this gap open.
 Everything **except T1** is solid: numbers all reproduce, F2–F10/D102 hold
 under direct adversarial repro, the replay is clean with zero unexplained
 diffs. My recommendation: **fix T1 first, verify the one-line change, then
-record c4** at that revision rather than at `447132a`. The fix is small and
+record c4** at that revision rather than at `cc99746`. The fix is small and
 well-understood; recording now would bake a known, exploitable security gap
 into the reference baseline that every future replay compares against,
 making it harder (not easier) to tell "still the known gap" from "a new

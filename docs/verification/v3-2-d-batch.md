@@ -1,12 +1,12 @@
-# V3.2-D verification — batch writes `--id=A,B,C` (`05e8bfa`, § 9, AC-31, TSK-037)
+# V3.2-D verification — batch writes `--id=A,B,C` (`245bf6f`, § 9, AC-31, TSK-037)
 
 Verifier, 2026-10-04. I didn't write any of this code — independent
 verification assigned by the Lead. Work in `/tmp/verifier-v32d-batch`
-(detached worktree at `05e8bfa`), `/tmp/verifier-v32d-nested/projects/
+(detached worktree at `245bf6f`), `/tmp/verifier-v32d-nested/projects/
 nanojira` (nested, for `gate.js`), and `/tmp/verifier-v32d-probe1` (scratch
 backlog, explicit path, never cwd=repo — D134 rules). Read: DECISIONS
 134/135/136 in full, SPECIFICATION.md § 9 "Batch writes" and § 12's
-fault-injection paragraph, the full `05e8bfa` diff across all nine changed
+fault-injection paragraph, the full `245bf6f` diff across all nine changed
 `src/` files, `test/ac/ac-31-batch.js` in full.
 
 **VERDICT: needs changes.** The refactor itself is clean and the diff
@@ -234,7 +234,7 @@ already use.
 (the usual two expected gaps: `ac-15-no-dependencies.js`,
 `hardening-njrc-foreign-link.js`).
 
-`gate.js --step=05e8bfa --frozen=c6-baseline` (nested nanojira worktree,
+`gate.js --step=245bf6f --frozen=c6-baseline` (nested nanojira worktree,
 `tools/refactor-harness/gate.js`): the process stalled (no child process
 spawned, idle on kqueue, zero CPU progress for several minutes) and I
 killed it rather than let it hang further — did not get a completed
@@ -266,10 +266,10 @@ fault through the same catchable/non-catchable split `atomicWrite`/
 and make `cmd-release.ts`'s batch JSON output build the same explicit
 `{ok, results}` wrapper the other four commands use.
 
-## D137 delta — `aa4a4df` (code), `2a546b9` + `37f024e` (tests)
+## D137 delta — `415e43d` (code), `f2b07e4` + `5e0d8e6` (tests)
 
 Same worktree discipline: `/tmp/verifier-v32d2-batch` (detached at
-`37f024e`, main's tip — already past both fix commits), `/tmp/
+`5e0d8e6`, main's tip — already past both fix commits), `/tmp/
 verifier-v32d2-nested/projects/nanojira` (for `gate.js`), `/tmp/
 verifier-v32d2-unclip/projects/nanojira` (nested, throwaway-patched
 `baseline.js`, for the unclipped diff), `/tmp/verifier-v32d2-probe`
@@ -302,7 +302,7 @@ hard-exit. Confirmed live:
 ### (2) Single-ID `claim`'s `compareGuard` call is now also `catchable: true` — a genuine fix, not a regression
 
 `claimOne` (shared by both the single and batch paths, same function
-since `05e8bfa`) now calls `compareGuard(el, false, ctx.backlog,
+since `245bf6f`) now calls `compareGuard(el, false, ctx.backlog,
 STABLE_HINT, true)` — unconditionally `true`, for single-ID claim too.
 Before this fix, under `NJ_FAULT=before-compare`'s timeout specifically,
 **even a plain single `nj claim` hard-exited**, skipping `claimOne`'s own
@@ -353,7 +353,7 @@ unaffected by this fix; confirmed live, not assumed).
 
 Both sequences match § 12a and D115 exactly, mechanically the same
 rollback `claimOne` already had (the `try/catch`/`rollback()` call itself
-has zero diff lines in `aa4a4df` — only the `compareGuard` call gained a
+has zero diff lines in `415e43d` — only the `compareGuard` call gained a
 `true` argument, routing into the *existing*, already-correct catch
 block). **Conclusion: this is a fix of a latent, pre-existing spec
 violation, not an unwanted behaviour change.** It should be recorded as
@@ -371,13 +371,13 @@ Different from the earlier 68-vs-67 case (a genuine counting-convention
 difference) — this one is just two counts taken at two different points
 in the same commit sequence, both correct for their own snapshot:
 
-- At `2a546b9` (the Oracle's first D137 regression-test commit,
-  immediately before the Implementer's `aa4a4df` fix): 88 total
+- At `f2b07e4` (the Oracle's first D137 regression-test commit,
+  immediately before the Implementer's `415e43d` fix): 88 total
   `T.check`/`T.eq`/`T.exit` call sites, minus the same 2 conditional
   fixture guards as always = **86** — exactly the Implementer's reported
   "86/86" for the version of the test file that existed when they ran it.
-- At `37f024e` (current HEAD — the Oracle's *second* D137 commit, "AC-31
-  gains H18", landed **after** `aa4a4df`): 97 total call sites, minus the
+- At `5e0d8e6` (current HEAD — the Oracle's *second* D137 commit, "AC-31
+  gains H18", landed **after** `415e43d`): 97 total call sites, minus the
   same 2 guards = **95** — exactly the Oracle's current count, and
   exactly what `node test/ac/ac-31-batch.js dist/nj` reports right now:
   **`PASS ac-31-batch.js (95 checks)`**.
@@ -388,7 +388,7 @@ H18 (the before-compare-in-a-batch scenario from item 1 above), added
 
 ### (5) Byte-exact gate replay
 
-`gate.js --step=aa4a4df --frozen=c6-baseline`: ran clean this time (see
+`gate.js --step=415e43d --frozen=c6-baseline`: ran clean this time (see
 note below on the earlier stall) —
 
 ```
@@ -403,7 +403,7 @@ this series (the `help`/`help --json`/`--help` fixture's own three, plus
 `oracle:edge/coverage-v3-gaps.js`'s own duplicate three).
 
 **Confirmed byte-exact** via the established unclipped-`baseline.js`
-technique (nested worktree at `aa4a4df`, `test/` swapped to `c6-baseline`,
+technique (nested worktree at `415e43d`, `test/` swapped to `c6-baseline`,
 digest-confirmed match, `clip()`/`limit` raised in a throwaway, never-
 committed edit): across all 6 calls, the "was" and "now" strings — each
 ~1,300 characters — differ in **exactly one contiguous block**: the

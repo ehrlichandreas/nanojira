@@ -81,7 +81,7 @@ von „failed" und bricht bei jeder Lücke selbst ab. **Ein Durchlauf, der nicht
 geprüft hat, darf nie wie ein bestandener aussehen.**
 
 **Erwartete Lücken: `expected-gaps.js`.** Manche Suiten sind hier
-**absichtlich** CANNOT RUN — `edge/hardening-njrc-foreign-link.js` (`718c230`)
+**absichtlich** CANNOT RUN — `edge/hardening-njrc-foreign-link.js` (`400627f`)
 braucht root oder einen Symlink eines fremden uid, den ein normales Konto nicht
 hat. Eine dauerhafte, umgebungsbedingte Lücke darf nicht jedes Gate zu Exit 4
 machen — und nie stillschweigend übergangen werden. Deshalb eine explizite
@@ -136,11 +136,11 @@ Zwei ✗ gab es vorher, beide stehen nicht mehr: „no backlog at all" lief in
 frisches leeres Verzeichnis), und der Pin „NJ_BACKLOG at configless dir"
 prüft jetzt das v3-Verhalten `invalid_backlog_env` (DECISIONS 88/90). Gegen
 v2 (`5b666a0:dist/nj`) ist dieser Pin deshalb **korrekt rot**, 122/123; gegen
-V3-1 `d517837` 123/123.
+V3-1 `e5e5e3b` 123/123.
 
 Der Pin „SEVERITY has 30 distinct codes" war eine nackte Zahl. V3-2 fügte
 `layout:misplaced` und `backlog:unreadable_dir` gewollt hinzu (DECISIONS
-91/93), es wurden 32, und der Pin ein stehendes ✗ ohne Fehler — auf `9fa11d9`
+91/93), es wurden 32, und der Pin ein stehendes ✗ ohne Fehler — auf `ccbc951`
 das einzige Rot des Gates neben den erwarteten ac-23/ac-24. Jetzt prüft er
 gegen die Spec statt gegen eine Zahl: die Problemcode-Tabelle aus § 7 der
 `docs/SPECIFICATION.md` **des Schritts** ist das geschlossene Vokabular. Jeder
@@ -213,8 +213,8 @@ In einem Befehl:
 
 ```sh
 $NODE tools/refactor-harness/gate.js --step=<commit> --frozen=<letzter oracle-frozen-Tag>
-# z. B. V3-1, gegen den c2-Korpus (bis 90a8347):
-$NODE tools/refactor-harness/gate.js --step=d517837 --frozen=oracle-frozen-7
+# z. B. V3-1, gegen den c2-Korpus (bis c252ab5):
+$NODE tools/refactor-harness/gate.js --step=e5e5e3b --frozen=oracle-frozen-7
 ```
 
 `--frozen` muss zum Korpus passen, den der laufende Harness mitbringt (sein
@@ -245,7 +245,7 @@ wieder entfernt):
    vor DECISIONS 90 B2 würde sonst nicht auf Urteile gaten. Mit
    `--harness=<rev>` stattdessen der Harness von `<rev>`, samt seinem Korpus:
    so läuft ein **altes** Gate (V3-1 gegen `oracle-frozen-7`) erneut, mit einem
-   Commit, der den c2-Korpus noch trägt (etwa `aa584b1`). Der laufende Harness
+   Commit, der den c2-Korpus noch trägt (etwa `dd35227`). Der laufende Harness
    allein kann das nicht, er bringt den **aktuellen** Korpus mit.
 4. `baseline.js verify --nj=<worktree>/dist/nj` — der Replay.
 5. `test/` ebenso gegen `--tests=<rev>` getauscht (Standard: der Schritt
@@ -286,7 +286,7 @@ Replays (`0`, `1`, `6`, `7`). `2`: Aufruf- oder Einrichtungsfehler. `128+n`:
 durch Signal n angehalten, nach dem Aufräumen.
 **`1` ist für einen Schritt mit benannten Diffs das erwartete Ergebnis** —
 dann muss jeder gelistete Diff in eine benannte Klasse fallen (für V3-1: die
-19 aus der Commit-Message von `d517837`).
+19 aus der Commit-Message von `e5e5e3b`).
 
 Nach der Abnahme wird der Schritt die nächste `c`-Baseline und mit dem neuen
 `test/` unter einem neuen `oracle-frozen`-Tag aufgezeichnet (DECISIONS 85/90).
@@ -354,7 +354,7 @@ viel Ausgabe vor dem Schließen des Lesers ankommt, hängt vom Timing und lässt
 sich nicht byte-genau aufzeichnen. Das Urteil (bestanden/durchgefallen) zählt
 trotzdem zum Orakel-Gate.
 
-Seit `3b563e8` steht auch **`ac/ac-15-no-dependencies.js`** dort: sein
+Seit `5a43aeb` steht auch **`ac/ac-15-no-dependencies.js`** dort: sein
 Einzelkopie-Bein kopiert jetzt das nj unter Test statt `<project>/dist/nj` —
 unter dem Harness also `nj-shim`, der allein nicht läuft (er braucht
 `lib/record.js` neben sich). Durch den Shim rot, direkt grün; `record` lehnte
@@ -380,7 +380,7 @@ nj genommen.
 **Die verdict-only-Menge gehört zum Korpus.** Eine Suite in der Menge hat
 keine Aufrufe im Korpus, eine außerhalb hat welche. Wer mit einer anderen
 Menge verifiziert, verschiebt jeden späteren Aufruf — gefunden vom
-Implementer, als `gate.js` den Harness von `90a8347` (ac-15 verdict-only)
+Implementer, als `gate.js` den Harness von `c252ab5` (ac-15 verdict-only)
 gegen den c2-Korpus (ac-15 aufgezeichnet) laufen ließ: ab ac-15 war jeder
 Aufruf ein Label/argv-Versatz. Deshalb schreibt `record` die Menge als
 `verdictOnlySuites` in den Header, und `verify` nimmt **die des Headers**,
@@ -391,14 +391,14 @@ Mengen, mit denen sie aufgezeichnet wurden.
 
 ### Seit V3-1: `c3-baseline`
 
-V3-1 ist abgenommen (DECISIONS 93), also ist **`c3-baseline` = `1e85263`** die
+V3-1 ist abgenommen (DECISIONS 93), also ist **`c3-baseline` = `a10b671`** die
 Aufzeichnungsquelle, nach derselben Regel wie `c2-baseline` (DECISIONS 85/90).
 Aufgezeichnet in einem Wegwerf-Worktree, damit weder der Arbeitsbaum noch
 unfertiges `test/` anderer hineinspielt:
 
 ```sh
 # Worktree wie bei gate.js: <tmp>/projects/nanojira neben <tmp>/runtime/<platform>
-git worktree add --detach <tmp>/projects/nanojira 3b563e8   # test/: AC-21 drin, AC-22 noch nicht
+git worktree add --detach <tmp>/projects/nanojira 5a43aeb   # test/: AC-21 drin, AC-22 noch nicht
 git -C <tmp>/projects/nanojira checkout <harness-commit> -- tools/refactor-harness
 git show c3-baseline:dist/nj > /tmp/nj-c3-dist-nj
 NJ_NODE=$NODE $NODE tools/refactor-harness/baseline.js record --nj=/tmp/nj-c3-dist-nj   # im Worktree
@@ -407,7 +407,7 @@ NJ_NODE=$NODE $NODE tools/refactor-harness/baseline.js record --nj=/tmp/nj-c3-di
 Ergebnis: 3586 Aufrufe (fixtures 1878, oracle 1473, scratch 235), Orakel
 65/65, `verify.js` 123/123, nj `e5138d56…`, `test/`-Digest `c582855a…`; ein
 direkt anschließendes `verify` gegen dieselbe Kopie: 0 Diffs / 3075
-verglichen. **`oracle-frozen-8` = `3b563e8`**, das Commit, dessen `test/`
+verglichen. **`oracle-frozen-8` = `5a43aeb`**, das Commit, dessen `test/`
 aufgezeichnet ist — `gate.js --frozen=oracle-frozen-8` passt zu diesem
 Korpus, `oracle-frozen-7` nicht mehr (Exit 6).
 
@@ -493,7 +493,7 @@ das ist die Einstellung des Nutzers.
 ```sh
 $NODE tools/perf.js --ab=<nj A> --ab=<nj B> [--rounds=N] [--gate=all|reads]   # N Standard 7
 # z. B. v2 gegen V3-1:
-git show 5318888:dist/nj > /tmp/nj-A; git show d517837:dist/nj > /tmp/nj-B
+git show b65aa5f:dist/nj > /tmp/nj-A; git show e5e5e3b:dist/nj > /tmp/nj-B
 $NODE tools/perf.js --ab=/tmp/nj-A --ab=/tmp/nj-B
 ```
 

@@ -1,11 +1,11 @@
-# V3.5-B verification — `nj log` (`4eab453`, § 12c, D155, AC-41)
+# V3.5-B verification — `nj log` (`a5b9ad3`, § 12c, D155, AC-41)
 
 Verifier, 2026-10-06. Independent verification, assigned by the Lead.
-Work in `/tmp/verif-log` (worktree at `4eab453`, built via `npm ci` +
+Work in `/tmp/verif-log` (worktree at `a5b9ad3`, built via `npm ci` +
 `tools/bundle.js`), `/tmp/verif-log-nested` (nested, for the replay),
 `/tmp/verif-log-probe` (scratch, explicit paths). All removed before
 writing this. Read: SPECIFICATION.md § 12c in full, DECISIONS 155 in
-full, the full `4eab453` diff (`cmd-log.ts`/`claims.ts`/`parse.ts`/
+full, the full `a5b9ad3` diff (`cmd-log.ts`/`claims.ts`/`parse.ts`/
 `flag-table.ts`/`help.ts`/`nj.ts`/`nj-mcp.ts`), `test/ac/ac-41-log.js`
 in full. Also ran `log` read-only against the real project backlog
 (TSK-041/TSK-042, see § 5).

@@ -3,7 +3,7 @@
 Verifier, 2026-10-03. I wrote none of this proposal and none of
 `claim-model.mjs`'s original three variants (P0–P2, by a removed
 teammate); I read `docs/SPECIFICATION.md` § 8/§ 12 and
-`docs/proposals/v3.1.md` § C (commit `5d1c83d`) independently, ran and
+`docs/proposals/v3.1.md` § C (commit `5d30259`) independently, ran and
 extended the model, and reached my own conclusions below. No `src/` or
 `test/` files were touched. Work happened in `/tmp/verifier-claim-apfs-*`
 (APFS fact-checks only — the protocol review itself needed no fixture
@@ -400,7 +400,7 @@ open) before the version committed here.
 
 ---
 
-## Re-check of revised § C (`59a3a9a`, `2689db8`) against DECISIONS 114/115
+## Re-check of revised § C (`cc4bd64`, `99652e8`) against DECISIONS 114/115
 
 Verifier, 2026-10-03. I wrote none of this revision — the Oracle folded my
 § 5 into proposal § C (DECISIONS 114) and then corrected one point and
@@ -427,7 +427,7 @@ model (not a proposal defect), disclosed in § D.
 
 ### A. Do the seven § 5 fixes match what I meant?
 
-Checked each against the current (`2689db8`) text of § C, quoting the
+Checked each against the current (`99652e8`) text of § C, quoting the
 operative sentence:
 
 1. **No live pruning, drop the post-check.** "`doctor --fix`... It never
@@ -499,7 +499,7 @@ suite (`P3`, unmodified): every scenario's state count and verdict is
 byte-identical to my first report's table (S1–S11 hold, S12 shows only the
 already-disclosed `I3x`) — nothing shifted, because there was nothing to
 shift. **D115 point 1 is already correctly modelled; the text's correction
-of `59a3a9a`'s mistaken "released N" was a correction to the *prose*, not
+of `cc4bd64`'s mistaken "released N" was a correction to the *prose*, not
 to anything the model (or, by the same reasoning, a straightforward
 implementation of it) would have gotten wrong.**
 
@@ -587,7 +587,7 @@ textual addition, not a mechanism change: name this as a second path to
 ### C. Precision gaps for test-writing
 
 1. **"A straggler... is refused the same way" overstates what the
-   algorithm actually does.** `2689db8`'s unarchive paragraph: "A
+   algorithm actually does.** `99652e8`'s unarchive paragraph: "A
    straggler's own in-flight `link()`, racing this removal, meets `ENOENT`
    (above), retries, re-reads the now-archived element, and is refused the
    same way." But `refused:archived` is listed as step 1 of `claim` — "
@@ -644,7 +644,7 @@ collision with anything § 4 already names. Checked against § 11a as
 promoted (`docs/verification/v3-1-b-unarchive.md`, accepted): § 11a's own
 refusal order and "Touches" list already anticipate this (§ 11a's own text
 says nothing about claims yet, correctly deferred to C's promotion, per
-`59a3a9a`'s own Touches entry, "§ 11a gains one line on C's promotion").
+`cc4bd64`'s own Touches entry, "§ 11a gains one line on C's promotion").
 No inconsistency found.
 
 ### E. One bug in the model, found and fixed before reporting the above

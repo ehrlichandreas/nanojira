@@ -1153,7 +1153,10 @@ model `assignee` has (§ 6).
   not addresses, and carry no uniqueness requirement. References (in files and
   in `--parent`/`--depends-on`) are matched exactly; `doctor` reports anything
   that points nowhere.
-- **Duplicate IDs:** reads show both entries, marked `duplicate_id`. Writes
+- **Duplicate IDs:** reads show both entries, marked `duplicate_id` — and
+  `nj show --json`'s own additive `entry` (DECISIONS 171 C, § 9
+  "JSON shapes per command") is exactly the one case where it is absent:
+  two entries, not one. Writes
   refuse, naming the code `duplicate_id`, both absolute file paths and the
   exact manual repair step. Escape hatch: any write command accepts
   `--file=<path>` (absolute, or relative to the backlog) **instead of**
@@ -1435,6 +1438,450 @@ In both wrapper forms (2 and 3):
 phase has finished** — never once per ID — and only if at least one ID was
 actually written.
 
+### `--input` — JSON plans for `new`/`set` (DECISIONS 171 A, 172, 173)
+
+> Amended after both outside leads reviewed the original draft (ecea716)
+> against real plans of their own (DECISIONS 172). Settled, not a
+> proposal.
+
+`nj new --input=<file|->` and `nj set --input=<file|->` take a JSON
+**object** — or, for `new` only, an **array** of objects — whose keys are
+exactly that command's own flag names (the same per-command flag table
+`nj-mcp`'s tool schemas already read, § 17; `nj <command> --help`, § 9,
+lists them). A list-valued field (`tags`, `depends_on`) is a JSON array of
+strings, not a comma-joined string; a multi-line value (`description`,
+`acceptance`) is a plain JSON string, embedded newlines and all — no
+CLI-specific comma-splitting or quoting rules apply once a value is inside
+this JSON. An unknown key — anything not one of the command's own fields,
+and not `children`/`ref` below — is `unknown_field`, the same as an
+unknown `--flag` today.
+
+**Mutually exclusive with field flags.** `nj new --input=- --title=X` is
+rejected (`invalid_value`, nothing written): `--input` and the field flags
+are two different sources for the same values, and mixing them is never
+assumed to mean one or the other — the same discipline `--tags=` combined
+with `--add-tags=`/`--remove-tags=` already has (§ 9, DECISIONS 163 B).
+Control flags are unaffected and compose normally: `--backlog`/`--json`
+for both commands, `--force`/`--allow-open-children` for `set`. (Neither
+`new` nor `set` has an `--as` flag today, so there is nothing to carve out
+there specifically — if that ever changes, it composes with `--input` the
+same as any other control flag, untouched by this section.)
+
+**`--input=-` reads stdin; `--input=<path>` reads a file**, relative to
+the working directory — the same convention `--description-file`/
+`--acceptance-file` already have (§ 9). An unreadable path is `not_found`,
+matching `--<role>-file`. Text that does not parse as JSON, or that parses
+to something other than an object (or, for `new`, an array of objects), is
+`invalid_value`. If `--input` itself consumed stdin, a `description-file`/
+`acceptance-file` value of `-` **inside** that JSON is also `invalid_value`
+— the same single-consumption conflict § 9's own section-write rules
+already name for two roles both reading stdin in one call, just reached
+through JSON instead of two flags.
+
+**`set --input=` takes exactly one object — never an array.** The object's
+keys are `set`'s own settable fields only (`title`, `status`, `priority`,
+`assignee`, `tags`, `depends_on`, `description`(`-file`),
+`acceptance`(`-file`), `add-tags`, `remove-tags`) — **not** `id`/`file`:
+addressing stays exactly where it is today, on the CLI (`--id=<id>`,
+`--file=<path>`, or the existing `--id=A,B,C` batch, § 9 "Batch writes"),
+unchanged. `--input` only ever supplies the field map; it composes with
+`--id=A,B,C` exactly the way field flags already do — the same parsed
+object is applied to every named ID. **Decision, and why:** an array of
+self-addressing objects (each carrying its own `id`, updating several
+*different* elements with *different* field values in one call) was the
+other option and is deliberately **not** supported this round. It would be
+a second, more powerful batch mechanism existing alongside
+`--id=A,B,C` — a different problem (heterogeneous batch updates) nobody
+has asked for — and it would need its own failure-reporting shape
+distinct from both today's batch wrapper and `new`'s plan shape below.
+`set` stays a single-target command, exactly as every other rule in this
+spec already assumes; only its one field map now has a second source.
+
+**`new --input=` additionally accepts a plan: an array of objects, and
+nesting via `children`.** An array is a flat list of top-level elements —
+no implied relationship between them, though each may carry its own
+`children`. Inside an object, `children` is an array of objects in the
+same shape (type/title/.../`children`/`ref`), but with `parent` **implied
+by the nesting** rather than given: a `children` entry that also gives an
+explicit `parent` conflicts with its own position in the plan
+(`invalid_value`). The three-level hierarchy (§ 6) is enforced exactly as
+it already is for a single `new`: an epic's `children` must each be
+`type: "task"`; a task's `children` must each be `type: "subtask"`; a
+subtask may not have `children` at all (`invalid_target`, the same code
+an explicitly wrong `--parent` type already gets). Every other `new` rule
+is unchanged per node: `description` required for completeness-tracking
+purposes exactly as today (absence is not rejected, only incomplete, § 7),
+`--acceptance` likewise for task/subtask, `priority`/`status` validated
+against the config, a `parent` (explicit at the top level, or implied
+inside `children`) must be active and not an unreadable stub.
+
+**`parent` is never `ref`-aware** (DECISIONS 173, the second gap found
+alongside the forward-ref one above): unlike `depends_on`, `parent` names
+a real, already-existing element only — an explicit `"parent": "@x"` is
+`invalid_value`, not a lookup against this plan's declared `ref`s and not
+`not_found` either, since the `@`-prefix is reserved syntax (the same
+"decorated value" family as the rules above), not a shape that happens
+not to resolve. A new element's parent being *another new element in the
+same plan* is expressed by nesting it under that element's own `children`
+— there is no second way to say the same thing through `parent`+`ref`
+together, so none is offered.
+
+**`ref` — a local name for a same-plan sibling, resolved before any
+write.** `depends_on` may name either a real, already-existing ID (checked
+the normal way, `not_found` if it does not resolve) or a `ref` string
+declared on some **other** object **earlier in the plan's write order**
+(DECISIONS 173 — see "must be declared earlier" below) — resolved to
+that object's real, newly-assigned ID once IDs are allocated. A `ref` is
+call-scoped only: it is never written to any file.
+
+**A ref always starts with `@`; a real id never does — one shape rule,
+no shadowing to reason about** (DECISIONS 172, amending the original
+draft: both outside leads named the draft's "a ref shadows a real id"
+rule a silent wrong-dependency trap, and it is dropped entirely in favour
+of this one).
+
+- `ref`'s own value must start with `@` (`"ref": "@t1-impl"`) — given
+  without one, `invalid_value`.
+- A `depends_on` entry starting with `@` is looked up **only** among this
+  plan's declared `ref`s — `not_found` if none matches, the same code an
+  unresolvable real id already gets.
+- A `depends_on` entry **not** starting with `@` is looked up **only**
+  among the backlog's real, existing ids — exactly as today, `not_found`
+  if unresolvable. It is never checked against this plan's `ref`s, and
+  never needs to be: real ids are never `@`-shaped to begin with.
+- A `depends_on` entry (or a `ref` value) whose text, after stripping one
+  leading `@`, matches the real-id shape (`EPIC-NNN`/`TSK-NNN`/`SUB-NNN`)
+  is `invalid_value` regardless of whether that id exists — a decorated
+  real id is always a mistake, never a legitimate ref name, so this is a
+  pure shape check, not a collision check against the backlog's actual
+  contents (which is exactly what made the draft's shadowing rule a
+  trap: it depended on what else existed).
+- Two objects in the same plan declaring the same `ref` string is
+  `invalid_value` (ambiguous).
+- **A `depends_on` entry `@x` must refer to a `ref` declared EARLIER in
+  the plan's depth-first pre-order — the same order writes and id
+  assignment already follow, below** (DECISIONS 173, found live: a
+  plan whose "Review" node named `depends_on: ["@impl"]` while `@impl`
+  was declared *later* passed validation, wrote everything, and stored
+  `depends_on: ["undefined"]` — a silent wrong dependency, exactly what
+  the `@`-prefix rule above was supposed to rule out). A **forward**
+  reference — `@x` naming a `ref` that exists in the plan but is
+  declared at or after the referencing object's own position — is
+  `invalid_value`, `failed_at` naming the **referencing** object, with a
+  hint that says to move the referenced object earlier in the plan. A
+  **self-reference** (an object's own `ref`, in its own `depends_on`) is
+  the same case stated at its boundary: "declared earlier" never
+  includes "declared here", so it needs no separate rule, only a named
+  example of this one. This is why a `ref` cannot be resolved purely by
+  existing somewhere in the plan, the way the earlier draft had it: an
+  id is allocated at write time, in write order (below), so a `ref` only
+  ever *has* a real id to resolve to once its own object has already
+  been written — reserving ids for the whole plan up front, so a forward
+  reference could resolve too, was considered and rejected as needless
+  complexity for what "validated before the first write" already rules
+  out more simply by just being strict about order.
+
+**The whole plan is validated before the first write.** One pass checks
+every object — real fields against the command's own rules, `children`
+against the hierarchy, every `depends_on` against the union of "exists in
+the backlog already" and "is some object's declared `ref`, earlier in
+write order, in this same plan" — exactly the same "resolved and
+validated before anything is written" discipline `--id=A,B,C` batches
+already have (§ 9 "Batch writes"),
+extended from "one shared field map, many known IDs" to "many different
+objects, most not allocated an ID yet." Nothing this pass can determine
+from the already-loaded backlog is deferred to write time; a write can
+still fail for a reason no preflight could know in advance (a concurrent
+write landing the same instant, an exhausted ID-allocation retry, a
+filesystem error) — see "Failure mid-plan" below for exactly that case.
+
+**Write order is depth-first, pre-order — array order at every level,
+parent before its own `children`.** For an array input, that is simply
+each top-level object in the order given, each one's own `children`
+(recursively) immediately following it before the next top-level object.
+A single object with no `children` is the trivial one-element case of the
+same order. **ID assignment follows the same order**: each object's ID is
+allocated at the moment it is written (the same tombstone-claiming
+mechanism a single `nj new` already uses, never reserved in advance), so
+"ID order" and "write order" are one and the same fact stated twice, not
+two separate rules to keep in sync.
+
+**Failure mid-plan: the call stops, nothing already written is undone, and
+the result names what *was* created.** A plan's objects are not
+independent the way a `--id=A,B,C` batch's named IDs are — a later object
+may be a `children` entry of an earlier one, or `depends_on` an earlier
+one's `ref` — so a failure partway through cannot simply skip the one
+object and continue (DECISIONS 136b's "a batch member's bad luck never
+stops the others" does not apply here: the remaining objects' own
+validity may depend on the one that just failed). The failed object's own
+write never happened; every object before it in write order already did,
+and stays written — there is no transaction across a whole plan, the same
+"no rollback" property every other multi-file nj operation already has.
+The JSON failure result is § 9's ordinary single-write failure shape,
+`{ok: false, error: "<code>", hint: "…"}`, **plus** two additive fields
+(DECISIONS 172): `created` — the IDs actually written, in write order —
+whenever at least one object was written before the failure, and `refs` —
+the `ref` names resolved so far, mapped to their real ids, the same shape
+"Success", below, always carries:
+
+```json
+{ "ok": false, "error": "io_error", "hint": "…",
+  "created": ["EPIC-001", "TSK-001", "SUB-001"],
+  "refs": { "@t1-impl": "SUB-001" } }
+```
+
+`created`/`refs` are both **absent** (not empty) when the plan failed
+*validation* and nothing was attempted at all — a caller checking only
+`ok`/`error` sees nothing new; a caller that also wants "how far did it
+get" reads them when present. Both are additive onto the existing failure
+shape, not a new one.
+
+**`refs` lists exactly the written elements that declared a ref — never
+the failing element's own, even when it declared one** (DECISIONS 174,
+the same class of silent-wrong-answer bug D173 fixed: a `ref` in `refs`
+pointing at an id nothing was ever written to is exactly as misleading as
+a forward reference silently resolving to `undefined`). The example
+above is written exactly this way on purpose: `SUB-001` is both in
+`created` and the one `refs` entry, because `@t1-impl`'s own object is
+what succeeded; had `SUB-001`'s write itself been the failure, `refs`
+would be `{}` and `failed_at` would name `@t1-impl` instead — `refs` and
+`created` agree on which elements exist, always, the one declaring a ref
+included in `refs` if and only if its own id is also in `created`.
+
+**`failed_at` — which object the failure was about** (DECISIONS 172),
+on **both** a mid-plan write failure and a validation failure (the one
+case above where `created`/`refs` are absent — `failed_at` is not: a
+validation failure still names what it was validating). Its value is
+that object's own `ref`, if it declared one, else its position in the
+plan as a JSON path from the root — `[0]` for the first top-level object,
+`[0].children[1]` for the second child of the first top-level object, and
+so on, matching the plan's own literal array/`children` structure. **The
+top level is always addressed as a 0-indexed array for this purpose**,
+`[0]` being the (and only) top-level object even when the input was a
+single JSON object rather than literally wrapped in `[...]` — the single
+case is simply the one-element trivial case of the same numbering, the
+same way it already is for write order and ID order, above:
+
+```json
+{ "ok": false, "error": "invalid_target", "hint": "…",
+  "failed_at": "[0].children[1]" }
+```
+
+```json
+{ "ok": false, "error": "io_error", "hint": "…",
+  "created": ["EPIC-001", "TSK-001"], "refs": {},
+  "failed_at": "@t1-impl" }
+```
+
+**This is a deliberate, `--input`-scoped exception to the rule every
+other failure shape in this spec follows** — `{ok: false, error, hint}`
+and nothing else, stated explicitly and repeatedly throughout § 9. A
+plan can be large and deeply nested; naming the one object at fault,
+rather than leaving a caller to infer it from `error`/`hint` prose alone,
+is worth breaking that otherwise-universal rule for, and both outside
+leads asked for it independently. No other command's failure shape
+gains any field from this.
+
+**A crash is not a failure this mechanism can report on** (DECISIONS
+174, found adversarially by the Verifier: an `NJ_FAULT` hook mid-plan
+exits via the same `hardExit` a single `new` already uses, which prints
+`{ok: false, error: "fault:<hook>"}` and calls `process.exit` directly —
+there is no JS exception to catch, and so no `created`/`refs`/`failed_at`
+to attach, the same as a real process or machine crash at that instant.
+`failed_at`'s promise is about a write failure the process survives to
+report on; a crash is answered the way every other crash in this spec
+already is, by reading the backlog afterward — `nj doctor`/`nj list`
+show exactly what was written, the same as after a crash mid-archive or
+mid-cascade (§ 12).
+
+**Success — two shapes, depending on whether more than one object could
+ever result.** A **single object, no `children`** (the common, one-element
+case — including a `set --input=` call, which is always single-object)
+keeps today's exact single-write success shape: `{ok: true, id, changed,
+entry, _problems}`, unchanged. An **array, or an object with `children`**
+— anything that could create more than one element — uses a plural shape,
+all IDs created by the whole plan, in write order:
+
+```json
+{ "ok": true, "ids": ["EPIC-001", "TSK-001", "SUB-001", "SUB-002"],
+  "entries": [ { "...": "..." }, { "...": "..." }, { "...": "..." }, { "...": "..." } ],
+  "refs": { "@t1-impl": "SUB-001" },
+  "_problems": [] }
+```
+
+**`refs`** (DECISIONS 172) maps every `ref` declared anywhere in the plan
+to the real id it resolved to — present, possibly `{}`, in the plural
+shape only; the singular, single-object shape never carries it, since a
+`ref` on a solitary object (nothing else in the same call to reference
+it) has no plan-scoped meaning and the singular shape is otherwise
+unchanged on purpose. `entries[i]` is exactly that object's own single-write entry shape
+(including its **own** `_problems`); the top-level `_problems` is always
+`[]`, present only for structural parity with the single-object shape and
+every other JSON result in this spec — the same reason `rm --cascade`'s
+own top-level `_problems` is always `[]` too (§ 9's JSON-shapes table).
+There is no top-level `changed`: unlike `rm --cascade` (one action,
+`"deleted"`, identical for every victim), each created object has its
+**own** `changed` set (which fields it was given), and those genuinely
+differ object to object — a single fixed value here would claim a
+uniformity that is not real.
+
+**A realistic plan**, an epic with two tasks, each with an implementation
+subtask and a review subtask assigned to a reviewer, the review
+`depends_on` its own implementation subtask via `ref`:
+
+```json
+{
+  "type": "epic", "title": "Login",
+  "description": "Users can sign in.",
+  "children": [
+    {
+      "type": "task", "title": "Login route",
+      "description": "POST /login returns a session.",
+      "acceptance": "- [ ] 200 with a valid password\n- [ ] 401 otherwise",
+      "children": [
+        { "type": "subtask", "ref": "@t1-impl", "title": "Implement POST /login",
+          "description": "Wire the route to the session store.",
+          "acceptance": "- [ ] Route registered\n- [ ] Session cookie set on success" },
+        { "type": "subtask", "title": "Review: POST /login", "assignee": "bob",
+          "depends_on": ["@t1-impl"],
+          "description": "Review the implementation above.",
+          "acceptance": "- [ ] Code reviewed\n- [ ] Tests reviewed" }
+      ]
+    },
+    {
+      "type": "task", "title": "Logout route",
+      "description": "POST /logout clears the session.",
+      "acceptance": "- [ ] 200 and the session cookie is cleared",
+      "children": [
+        { "type": "subtask", "ref": "@t2-impl", "title": "Implement POST /logout",
+          "description": "Clear the session store entry and the cookie.",
+          "acceptance": "- [ ] Route registered\n- [ ] Cookie cleared" },
+        { "type": "subtask", "title": "Review: POST /logout", "assignee": "bob",
+          "depends_on": ["@t2-impl"],
+          "description": "Review the implementation above.",
+          "acceptance": "- [ ] Code reviewed\n- [ ] Tests reviewed" }
+      ]
+    }
+  ]
+}
+```
+
+`nj new --input=plan.json --json` (a single object with `children`, so the
+plural shape applies) — IDs in write order (epic, then each task
+immediately followed by its own two subtasks):
+
+```json
+{
+  "ok": true,
+  "ids": ["EPIC-001", "TSK-001", "SUB-001", "SUB-002", "TSK-002", "SUB-003", "SUB-004"],
+  "entries": [
+    { "id": "EPIC-001", "type": "epic", "title": "Login", "status": "todo",
+      "priority": "normal", "tags": [], "depends_on": [],
+      "created": "2026-10-07T19:00:00Z", "updated": "2026-10-07T19:00:00Z",
+      "file": "…/backlog/epics/EPIC-001.md", "_problems": [], "_claim": null },
+    { "id": "TSK-001", "type": "task", "parent": "EPIC-001", "title": "Login route",
+      "status": "todo", "priority": "normal", "tags": [], "depends_on": [],
+      "created": "2026-10-07T19:00:00Z", "updated": "2026-10-07T19:00:00Z",
+      "file": "…/backlog/tasks/TSK-001.md", "_problems": [], "_claim": null },
+    { "id": "SUB-001", "type": "subtask", "parent": "TSK-001",
+      "title": "Implement POST /login", "status": "todo", "priority": "normal",
+      "tags": [], "depends_on": [], "created": "2026-10-07T19:00:00Z",
+      "updated": "2026-10-07T19:00:00Z", "file": "…/backlog/subtasks/SUB-001.md",
+      "_problems": [], "_claim": null },
+    { "id": "SUB-002", "type": "subtask", "parent": "TSK-001",
+      "title": "Review: POST /login", "status": "todo", "priority": "normal",
+      "assignee": "bob", "tags": [], "depends_on": ["SUB-001"],
+      "created": "2026-10-07T19:00:00Z", "updated": "2026-10-07T19:00:00Z",
+      "file": "…/backlog/subtasks/SUB-002.md", "_problems": [], "_claim": null },
+    { "id": "TSK-002", "type": "task", "parent": "EPIC-001", "title": "Logout route",
+      "status": "todo", "priority": "normal", "tags": [], "depends_on": [],
+      "created": "2026-10-07T19:00:00Z", "updated": "2026-10-07T19:00:00Z",
+      "file": "…/backlog/tasks/TSK-002.md", "_problems": [], "_claim": null },
+    { "id": "SUB-003", "type": "subtask", "parent": "TSK-002",
+      "title": "Implement POST /logout", "status": "todo", "priority": "normal",
+      "tags": [], "depends_on": [], "created": "2026-10-07T19:00:00Z",
+      "updated": "2026-10-07T19:00:00Z", "file": "…/backlog/subtasks/SUB-003.md",
+      "_problems": [], "_claim": null },
+    { "id": "SUB-004", "type": "subtask", "parent": "TSK-002",
+      "title": "Review: POST /logout", "status": "todo", "priority": "normal",
+      "assignee": "bob", "tags": [], "depends_on": ["SUB-003"],
+      "created": "2026-10-07T19:00:00Z", "updated": "2026-10-07T19:00:00Z",
+      "file": "…/backlog/subtasks/SUB-004.md", "_problems": [], "_claim": null }
+  ],
+  "refs": { "@t1-impl": "SUB-001", "@t2-impl": "SUB-003" },
+  "_problems": []
+}
+```
+
+(`SUB-002`'s `depends_on` resolved from `["@t1-impl"]` in the input to
+`["SUB-001"]` in the result — the `ref` is call-scoped and never appears
+in the written file or this output; only the real ID does, and the
+`refs` map is the one place both the `@`-name and the real id appear
+together. Every `_problems` is empty here since every object was given
+both required
+sections in full — a plan that omitted one would show `incomplete:*`
+per entry exactly as a single `new` would.)
+
+**`acceptance` may be a JSON array of strings, in either command**
+(DECISIONS 172, team-b-tests TSK-011's own motivation): each string
+becomes one `- [ ] …` checkbox line, in array order —
+`["200 with a valid password", "401 otherwise"]` writes exactly the two
+lines the hand-written `"- [ ] 200 with a valid password\n- [ ] 401
+otherwise"` already would. A plain string is unchanged: written as-is,
+no checkbox syntax invented for it. This is why the array form exists at
+all: a checkbox is the one thing `acceptance:no_checkbox` (§ 7, DECISIONS
+163 E) checks for, so content supplied this way can never accidentally
+trigger it — each array element is a checkbox line by construction, not
+by the caller remembering `- [ ] ` syntax. An **empty array** (`[]`)
+writes an empty section — the same end state `--acceptance=` (empty
+string) already has today, so a task/subtask given `"acceptance": []`
+still shows `incomplete:acceptance` exactly as an empty string would;
+there is nothing special about reaching emptiness through an empty
+array rather than an empty string. `description` has no array form:
+there is no "one checkbox per array element" reading for it, and
+neither outside team asked for one.
+
+**`--dry-run` for `new --input=`** (DECISIONS 172, asked for by both
+outside leads independently): runs the **full** validation pass — every
+rule above, including every `ref`/`depends_on`/hierarchy check — and
+writes **nothing**: no file, no tombstone, no ID ever allocated. On
+success:
+
+```json
+{ "ok": true, "dry_run": true,
+  "entries": [
+    { "type": "epic", "title": "Login", "tags": [], "depends_on": [], "_problems": ["incomplete:description"] },
+    { "type": "task", "parent": "[0]", "title": "Login route", "tags": [], "depends_on": [], "_problems": [] }
+  ] }
+```
+
+Each `entries[i]` carries exactly the fields that object was given (the
+same "defaults never materialised" discipline § 6 already has for a real
+write) plus its **resolved** `parent` — a `children` entry's implied
+parent is shown as the **JSON path** of the parent object in the plan
+(`"[0]"` above: the first top-level object), since there is no real id
+yet for it to name — and its own `_problems`, computed from the given
+fields alone exactly as a real write's entry would carry them
+(`incomplete:description`/`incomplete:acceptance`/
+`acceptance:no_checkbox`, as applicable), so a dry run answers "would
+this be complete" as well as "would this be valid". **What a dry run
+never carries, because none of it exists yet:** `id`, `file`, `created`,
+`updated`, `_claim`, `ids`, `refs` — a `ref` stays exactly the `@`-name
+it was given in `depends_on`, never resolved to anything, since nothing
+was assigned an id to resolve it to. A dry run that fails validation
+uses the ordinary failure shape (`{ok: false, error, hint, failed_at}`,
+above) exactly as a real attempt would — only a **successful**
+validation looks different (`dry_run: true`, no write).
+
+`--dry-run` requires `--input`: given to `new` without it (field flags
+only, or no flags at all), it is `invalid_value` — there is no
+"validate only" reading for a plain `--title=…`/`--type=…` call, since
+nothing about that call is deferred or batched the way a plan's
+validate-then-write split is; `--dry-run` only has meaning as a question
+about a plan that has not run yet. `set` does not accept `--dry-run` at
+all (`unknown_field`) — `set` has no plan form (above) for a dry run to
+preview.
+
 ### `--ready`
 
 An element is ready when **all** hold:
@@ -1518,10 +1965,10 @@ when claimed, `null` when not (§ 12 "Claims").
 
 | Command | JSON shape |
 |---|---|
-| `list`, `show`, `find` | `{backlog, counts, entries: [{…, _problems}]}` — `find`'s shape is identical to `list`'s, no `_match` field (§ 9a) |
-| `new`, `set`, `note`, `check`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nj new`/`nj set`, `changed` also names the section roles written (`description`, `acceptance`); for `nj check`, `changed` is `["body"]` or `[]` (a no-op) |
+| `list`, `show`, `find` | `{backlog, counts, entries: [{…, _problems}]}` — `find`'s shape is identical to `list`'s, no `_match` field (§ 9a); **`show` additionally carries `entry: {…, _problems}`** (DECISIONS 171 C), identical to `entries[0]`, exactly when `entries` has **exactly one** element — never when it has several (a `duplicate_id` target, `entries.length > 1`) or, hypothetically, none; `list`/`find` never carry it, since returning many entries is their own point |
+| `new`, `set`, `note`, `check`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nj new`/`nj set`, `changed` also names the section roles written (`description`, `acceptance`); for `nj check`, `changed` is `["body"]` or `[]` (a no-op); **`nj set` additionally carries `released?: "<holder>"`** (DECISIONS 171 B) when a write setting `status` to the last configured status released an existing claim — absent, not `null`, when there was no claim to release |
 | `archive`, `unarchive`, `rm --cascade` | `{ok, ids: […], changed: ["archived" \| "unarchived" \| "deleted"], entries: […], _problems: […]}` — for `rm --cascade` the top-level `_problems` is `[]`: the elements are gone, so their problems are too. `archive` and `unarchive` emit the union, because the elements still exist and can still carry findings. **`rm --cascade` additionally carries `dependents: […]`**, the remaining elements whose `depends_on` names a removed one — archived elements included, since they carry `depends_on:dangling` too and the agent must know it; `archive` and `unarchive` do **not** — a `depends_on` pointing into the archive is satisfied by definition (§ 11), so there is nothing to warn about and nothing an agent must act on. |
-| `claim`, `release` | `{ok, id, changed: […], entry: {…, _problems, _claim}, _problems, claim: {by, since}\|null, stolen_from?, previous_assignee?}` (§ 12 "Claims") — the write-result shape plus `claim`, the element's claim state after the call; `stolen_from` names the previous holder after a `--steal`; `previous_assignee` when the claim overwrote a different `assignee`; `changed` names `assignee` and `status` when written, a `release` reports `changed: ["claim"]` |
+| `claim`, `release` | `{ok, id, changed: […], entry: {…, _problems, _claim}, _problems, claim: {by, since}\|null, stolen_from?, previous_assignee?, released?}` (§ 12 "Claims") — the write-result shape plus `claim`, the element's claim state after the call; `stolen_from` names the previous holder after a `--steal`; `previous_assignee` when the claim overwrote a different `assignee`; `changed` names `assignee` and `status` when written, a `release` reports `changed: ["claim"]`; **`released?: "<holder>"`** (DECISIONS 171 B) on `claim` only, when `--status=<last>` released the very claim this same call just made — absent, not `null`, otherwise; `release` never carries it (a plain release is already reported via `claim: null`) |
 | `tree` | `{backlog, counts, entries: […]}` — **flat**, each entry carries `parent`; depth-first order conveys the tree |
 | `doctor` | `{backlog, ok, problems: [{code, severity, element?, file?, line?, message}]}` — `severity` ∈ `error`\|`warning` (the Doctor column value; `—` codes never appear as findings); element-level findings carry `element`, backlog-level ones do not |
 | bare `nj` | `{backlog, counts, ready: [entries ≤ 5], incomplete: [entries ≤ 5]}` |
@@ -2387,6 +2834,75 @@ and must say so). Unclaimed → exit 0, nothing to do. `assignee` is **left as
 it is** — it records who worked on the element; clearing it is an explicit
 `nj set --assignee=`.
 
+**Final status releases the claim** (DECISIONS 171 B,
+feedback/team-b-tests TSK-013: ten of twelve stale claims found by
+`claim:stale` were on elements already `done`, claimed and never
+released). Whenever a write sets `status` to the **last configured
+status** (§ 5 already requires this to be literally `done`, not merely a
+default) — via `nj set --status=<last>`, `nj claim --status=<last>`, or
+`nj next --status=<last>` (§ 12b, which reuses this same mechanism) — the
+element's claim, if it has one, is released **in the same call**, and the
+result reports it additively: `released: "<holder>"`.
+
+- **Whose claim it releases: whoever holds it, even if that is not the
+  acting name.** This is not `nj release`'s own rule (which refuses
+  `refused:claimed` unless the acting name is the holder, above) — it is
+  an administrative side effect of the element reaching `done`, not an
+  act of giving up one's own claim, so it is unconditional on who is
+  running the command. If alice runs `nj set --id=X --status=done` on an
+  element bob holds, bob's claim is released, not refused.
+- **`nj claim --status=<last>` releases the claim it just acquired, in
+  the same call.** This looks redundant but is the consistent reading of
+  "done releases the claim": the claims sequence gains two entries for
+  this one invocation (`claimed N`, then `released N`, both at the same
+  timestamp) — `nj log` then shows both, because both genuinely
+  happened, in that order, rather than silently collapsing them into
+  nothing. The same applies to `nj next --status=<last>` (§ 12b), which
+  claims via this same path.
+- **Unconditional means no ownership check and no "steal" concept** —
+  there is nothing to contest, so there is no `refused:claimed` case for
+  this release. If a *different* name holds the claim at the moment this
+  transition actually lands (it raced a concurrent claim or steal since
+  this call started), the **current** holder at that moment is who gets
+  released — the same "decide fresh every round against the freshly read
+  state, never a bare read trusted across rounds" discipline every other
+  claims transition already has (§ 12).
+- **Unclaimed: no release happens at all — not even an empty one.** The
+  claims sequence gains no new entry, and the result carries no
+  `released` key (absent, not `null`) — the same "present only when it
+  happened" shape discipline `claim`'s own `stolen_from`/
+  `previous_assignee` already use (§ 9 "JSON shapes per command").
+- **A refused `set --status=done` (`refused:children_open`, without
+  `--allow-open-children`) releases nothing.** The refusal is checked —
+  exactly as it already is today — *before* any write and before this
+  new release transition is even attempted; nothing happens to the
+  element or its claim either way. A **forced** `done`
+  (`--allow-open-children`, which still writes `done:open_children` as a
+  warning, § 7) is a write that proceeds, so it releases the claim the
+  same as any other successful final-status write.
+- **The rollback interplay with the guarded write.** The claims-sequence
+  release is attempted **first** (optimistically), then the element's own
+  guarded write (status, and any other fields given in the same call)
+  happens **second** — the same order `nj claim`'s own claim-then-mirror-
+  write already has (§ 12a step 3, above). If the guarded write fails
+  (`changed_in_parallel`, a fault hook, any I/O error), the release is
+  **always rolled back** — re-asserting `claimed <holder>` for whoever it
+  released — with no exception for a landed steal the way a plain
+  claim's own rollback has one (there is no steal here to begin with: an
+  unconditional release is never itself racing another claimant for the
+  *right* to the entry, only for *which* holder is current when it
+  lands). The command then exits with the write's own failure code,
+  exactly as it would without this feature — the release is invisible to
+  a caller that never reads `released`, on both the success and the
+  rollback path.
+- **Batch (`--id=A,B,C`).** Applies per ID, independently, exactly like
+  every other per-ID effect a batch already has (§ 9 "Batch writes") — no
+  batch-wide behaviour beyond what the existing wrapper already does.
+- **`nj-mcp`'s `set`/`claim`/`next` tools.** No MCP-side change at all:
+  each tool call spawns `dist/nj --json` as a child process and returns
+  its output verbatim (§ 17), so `released` surfaces there automatically,
+  the same way every other additive JSON field in this spec always has.
+
 **Visibility.** `list` and `show` mark a claimed element with its holder via
 `_claim` (§ 9); a reader lists the directory and reads the highest entry.
 
@@ -2502,7 +3018,12 @@ validated the same way (`invalid_value`, checked once, before any
 candidate is resolved — it does not depend on which one succeeds); when
 given, it is written in the same guarded write as the claim; omitted, the
 claimed element's status is untouched (and stays `statuses[0]`, since
-every candidate is `--ready`).
+every candidate is `--ready`). **`--status=<last>`** (DECISIONS 171 B)
+therefore applies here too, since `next` claims via the same path `claim`
+does: the claim this call just made is released again, in the same call
+— unusual (nothing was ever worked on between claiming and finishing),
+but the consistent reading of "the last status releases the claim,"
+exactly as `claim --status=<last>` already is, above.
 
 **Mechanism.** `next` reads the candidate list exactly once, then
 attempts `claim --id=<candidate> --as=<name> [--status=<s>]` against each
@@ -2705,7 +3226,7 @@ list per node, and `descendants()` — used by `rm --cascade` and `archive` —
 shared the pattern. That was fixed with a prebuilt children map
 (`childMap`, DECISIONS 81) instead of building the index for it, and `tree`
 is now in line with the scan path, not a separate case. **Re-measured on a
-genuinely quiet machine as of v3.3** (DECISIONS 150, `075dbb1`; Node
+genuinely quiet machine as of v3.3** (DECISIONS 150, `90cef67`; Node
 24.21.0, darwin-arm64, 10 000 elements, median/max of 5 runs) — `list`
 185/220 ms, `list --json` 186/187 ms, `tree` 189/192 ms, `doctor`
 188/191 ms, and the writes `new` 230/237 ms, `set --title` 221/223 ms,
@@ -2723,7 +3244,7 @@ command's load start minus 2 s are re-read — the rest reuse what the command
 already loaded. A literal re-read of every file was measured first and cost
 one read-scan per write (+70 %: `new` 441 → 712 ms); the `ctime` scan costs
 about a sixth of that. Measured with `tools/perf.js --ab` (10 000 elements,
-15 interleaved rounds, paired), against the pre-`STATUS.md` build `9fa11d9`,
+15 interleaved rounds, paired), against the pre-`STATUS.md` build `ccbc951`,
 on a machine in Low Power Mode with other agents running (10 of 30 rounds
 started under foreign CPU load; absolute numbers are therefore not comfort-bar
 numbers, the paired deltas are):
@@ -3407,6 +3928,41 @@ reported, not guessed at.
     `--version` and `--help` are unaffected, structurally, not as a
     special case (neither resolves/depends on config the way every other
     command does).
+52. **Final status releases the claim.** A write that sets `status` to
+    the last configured status (always `done`, § 5) via `nj set`,
+    `nj claim --status=<last>`, or `nj next --status=<last>` releases the
+    element's existing claim, whoever holds it, in the same call —
+    reported additively as `released: "<holder>"`, absent when there was
+    none to release. Unconditional: not `nj release`'s own ownership
+    check, since this is a side effect of reaching `done`, not an act of
+    giving a claim up. A refused `set --status=done` (`children_open`,
+    without `--allow-open-children`) releases nothing; a forced one does.
+    The release is attempted before the guarded write and rolled back if
+    that write fails, the same order and rollback discipline `nj claim`'s
+    own mirror write already has.
+53. **`show --json` carries `entry`.** Additive: identical to
+    `entries[0]`, present exactly when `entries` has one element — never
+    for a `duplicate_id` target (two entries) or, in principle, none.
+    `list`/`find` never carry it.
+54. **`--input` — JSON plans for `new`/`set`.** `--input=<file|->` takes a
+    JSON object (keys = exactly the command's own flag names) — or, for
+    `new` only, an array, and `children` nesting with `parent` implied.
+    Mutually exclusive with field flags. `set` never takes an array: one
+    object, addressing stays on the CLI. A `ref` (always `@`-prefixed; a
+    bare name or a decorated real id is `invalid_value`) lets `depends_on`
+    target a same-plan sibling **declared earlier in write order** — a
+    forward or self reference is `invalid_value`, `failed_at` naming the
+    referencing object (DECISIONS 173); `parent` is never `ref`-aware
+    (`"parent": "@x"` is `invalid_value`, use `children` nesting instead).
+    The whole plan validates before the first write; write order and id
+    order are both depth-first pre-order. A mid-plan failure names `created`, `refs`
+    resolved so far, and `failed_at` (a `ref` or a JSON path) — the one
+    documented exception to every other failure shape's `{ok, error,
+    hint}`. Success is the existing single shape for one object, a new
+    `{ok, ids, entries, refs}` otherwise. `acceptance` may be a JSON array
+    of strings, one `- [ ] …` line each, so `acceptance:no_checkbox`
+    cannot happen through `--input`. `--dry-run` (`new` only, requires
+    `--input`) validates and reports the would-be shape, writing nothing.
 
 ---
 

@@ -672,7 +672,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
     New order, each step behind the previous one:
 
-        TSK-015 A  shared code to lib/, JSON_MODE -> output   done, 342aa89
+        TSK-015 A  shared code to lib/, JSON_MODE -> output   done, c379170
         TSK-015 B  commands to lib/cmd-*.js, nj a thin entry
         TSK-019    zero-dependency bundler -> dist/nj, package.json without
                    dependencies (bin, test, build); replay against dist/nj too
@@ -769,7 +769,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     kept as `scoping/artifacts/matrix-28d4dbdb-6bcd1056.json` so the next
     change has something to compare against.
 
-    Recorded one commit late: `78930cf` carries this entry's title but was
+    Recorded one commit late: `e46475e` carries this entry's title but was
     committed while the edit adding it had been blocked — a commit message
     describing something that was not in the commit. Caught by checking the
     commit's contents instead of its message.
@@ -790,7 +790,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
     **Rule:** after a behaviour change has passed its own gate and an independent
     round, that revision becomes the new recording source, under its own tag.
-    `c2-baseline` = `5ea3701` (EPIPE fix, verified by Verifier II). `c1-baseline`
+    `c2-baseline` = `36dd9dc` (EPIPE fix, verified by Verifier II). `c1-baseline`
     stays as the historical reference: DECISIONS 84 proves the refactor
     equivalent to it, and that proof does not move.
 
@@ -1038,11 +1038,11 @@ Written for adversarial review: if a line reads like a guess, challenge it.
       ID shape only) with `rmdir`, never recursively.
 
 93. **V3-1 accepted; its verification findings ruled** (docs/verification/v3-1.md,
-    Verifier, commit d55db2d). Verdict *pass with findings*: every number
+    Verifier, commit 1a74759). Verdict *pass with findings*: every number
     reproduced, the 19 replay diffs are exactly classes (a) (b) (d), and
     `scratch/verify.js`'s one extra ✗ is class (e) of DECISIONS 90. Perf:
     no regression against v2 in an interleaved A/B; absolute gate pending
-    (DECISIONS 90). **c3-baseline = `1e85263`** (V3-1 plus its D90 follow-up,
+    (DECISIONS 90). **c3-baseline = `a10b671`** (V3-1 plus its D90 follow-up,
     whose dangling-symlink fix the Verifier confirmed as F2).
 
     - *F1 A planted `.njrc` steers other users* (`/tmp/.njrc` with
@@ -1092,13 +1092,13 @@ Written for adversarial review: if a line reads like a guess, challenge it.
       the legacy folder.
     - *B23* § 12 says three injection points, as it lists.
 
-96. **V3-1 delta `1e85263` verified** (docs/verification/v3-1.md, 893caba):
-    pass with findings; replay identical to `d517837`'s 19 named diffs; the
-    FIFO `.njrc` that hung `d517837` is refused (F10). The remaining nits go
+96. **V3-1 delta `a10b671` verified** (docs/verification/v3-1.md, 8a38074):
+    pass with findings; replay identical to `e5e5e3b`'s 19 named diffs; the
+    FIFO `.njrc` that hung `e5e5e3b` is refused (F10). The remaining nits go
     to TSK-029: a self-linking `.njrc` (ELOOP) is reported with its own
     reason, not as "dangling"; a BOM counts only at the very start; a lone
     `\r` is `invalid_njrc` (§ 4 amended); an unsearchable ancestor of the
-    cwd is `io_error` (F4 class). AC-21 covers the D90 cases since `62be2a6`
+    cwd is `io_error` (F4 class). AC-21 covers the D90 cases since `28301b0`
     (the Oracle, 499 checks); TSK-029's suite adds only the D96 nits.
 
 97. **AC-22 ambiguities 56, 60–62 ruled by the lead:**
@@ -1136,7 +1136,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
     channel, and stay as they are.
 
 100. **V3-3 test batch and `STATUS.md` edge rules, ruled by the lead** (the
-     Oracle's AC-23 impact list, 4956aea):
+     Oracle's AC-23 impact list, f0fdfa0):
 
      - *Batch strategy.* The shared harness gets one renderer, and
        `H.mkBacklog` writes a fresh `STATUS.md` into every hand-built
@@ -1164,7 +1164,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      - Shared `.md` files under `test/` are committed right after each edit;
        two authors never leave uncommitted edits in the same file.
 
-101. **AC-24 ambiguities 71–74 ruled** (Oracle-B, a57f98f):
+101. **AC-24 ambiguities 71–74 ruled** (Oracle-B, 90966c5):
      *71* a v2 backlog reached through any source — search, `--backlog`,
      `NJ_BACKLOG`, `.njrc` — is `legacy_layout`: the backlog is there, only
      old. *72* `init` at a v2 backlog is `exists`, like any occupied target.
@@ -1175,7 +1175,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      ignores a trailing `\r`, and the replacement keeps the line's ending.
 
 102. **The backlog README and placement under an invalid config** (the
-     Oracle, while writing docs/GUIDE.md and docs/MIGRATION-v3.md, abd9b35):
+     Oracle, while writing docs/GUIDE.md and docs/MIGRATION-v3.md, 9f4e331):
 
      - *README.md written by `init`* is not spec-pinned, but the corpus
        hashes it. Its text changes to the v3 wording with V3-4, as one named
@@ -1205,7 +1205,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      reads-only (`--gate=reads`), writes are reported.
 
 104. **v3.1 proposal ambiguities 75–81 ruled** (Oracle-B, AC-25/AC-26 at
-     625b373; to be folded into docs/proposals/v3.1.md):
+     db0b6ae; to be folded into docs/proposals/v3.1.md):
 
      - *75 Unarchive after a layout change: the current layout wins.* The
        subtree is gathered from the archive by its `id`/`parent` chain,
@@ -1239,7 +1239,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        verification last, as in `archive`).
 
 105. **V3-2 regressions found by Verifier-B, ruled before V3-3 builds on
-     them** (interim report on `76db3b2`):
+     them** (interim report on `448b7a8`):
 
      - *A configured folder that is a directory symlink is followed.*
        `tasks -> ../shared` was silently dropped: `list` showed 0 tasks,
@@ -1298,7 +1298,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
        hand-written `.MD`): fixed where the same code is touched; F10 —
        `new` never overwrites an existing file, case-insensitively.
 
-107. **V3-3 accepted** (docs/verification/v3-3.md, bc062c0: pass with
+107. **V3-3 accepted** (docs/verification/v3-3.md, 931f6ba: pass with
      findings). All 1892 replay diffs against `oracle-frozen-8` fall into the
      four named classes (STATUS.md appears, `init` prose names it,
      `status_stale` on fixtures without one, `fixed[]` regeneration);
@@ -1313,7 +1313,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      case-insensitivity bug now visible in `STATUS.md`) is fixed by that
      follow-up.
 
-108. **V3-4 accepted** (docs/verification/v3-4.md, 4f025ae: pass). The
+108. **V3-4 accepted** (docs/verification/v3-4.md, 0958c9c: pass). The
      `.njrc` swap race (TSK-029 T1) is closed: 0 bypasses in 800 runs, 0
      FIFO hangs in 200. All 2987 replay diffs against `oracle-frozen-8`
      trace to the v2-era corpus tooling (fixtures writing v2 backlogs,
@@ -1333,7 +1333,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
 109. **v3 closed.** EPIC-006 and TSK-025..029 are done; each step was
      tested first, implemented, and verified independently
-     (docs/verification/). `c4-baseline` = `oracle-frozen-9` = `b9ed8c6`:
+     (docs/verification/). `c4-baseline` = `oracle-frozen-9` = `ead3a32`:
      4829 recorded calls, self-replay unchanged. The suites for the v3.1
      proposal (`NJ_AUTHOR`, `unarchive`) live in `test/proposed/` and are
      not gated until v3.1 is promoted. `hardening-v3-1` is verdict-only
@@ -1362,7 +1362,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      --as` is `unknown_field`, as AC-25 already asserts.
 
 111. **V3.1-A verified: accept with one follow-up** (docs/verification/
-     v3-1-a-nj-author.md, 6391d26). Finding: `--id` together with `--file`
+     v3-1-a-nj-author.md, 8d96cce). Finding: `--id` together with `--file`
      (`invalid_target`) is checked inside target resolution, after
      `NJ_AUTHOR`, while its sibling "neither given" (`missing_argument`) is
      checked before it. *Ruling:* "both given" is argument parsing, like
@@ -1374,27 +1374,27 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
 112. **V3.1-A accepted.** `NJ_AUTHOR` (§ 0, § 9, § 10, AC-25) passes
      independent verification (docs/verification/v3-1-a-nj-author.md:
-     6391d26 accept with notes; D111 delta b6fc1d9 accept). Gate at f7e91ad:
+     8d96cce accept with notes; D111 delta 55eae0b accept). Gate at 77a8ac2:
      exit 0, replay unchanged, oracle 72/73 (the one gap is D98's root
      requirement). TSK-030 done. B (`nj unarchive`, TSK-031) starts:
      the Oracle promotes proposal § B into the spec first, with D104's
      rulings 75–83 as amended.
 
-113. **V3.1-B replay diffs: one named class.** At cd33d3a the replay
+113. **V3.1-B replay diffs: one named class.** At e1f8ce7 the replay
      against c4-baseline differs in `nj help`, `nj --help` and `nj help
      --json` only (6 calls): the added `nj unarchive` line from § 9's
      command list. As in D88, consistency with the spec wins over "0 diffs";
      the replay is accepted only if the diffs are exactly that class, which
      the Verifier confirms independently. Gate otherwise green (oracle 73/74,
-     the gap is D98), perf `--ab` vs f7e91ad within bounds. A stale AC-26
+     the gap is D98), perf `--ab` vs 77a8ac2 within bounds. A stale AC-26
      case (ac26-mis-out, pre-amendment 82) was flipped by the Oracle in
-     d8507d2 by applying 82; that was not a new ruling. *After B is
+     17e220e by applying 82; that was not a new ruling. *After B is
      accepted:* the replay baseline is re-recorded at the accepted commit
      and tagged `c5-baseline`, so C is gated against v3.1-B behaviour and
      not against the old help text.
 
 114. **Claim-protocol review adopted** (docs/review/claim-protocol.md,
-     e10be45: "sound with fixes"). All seven changes of its § 5 are taken
+     5f4aebe: "sound with fixes"). All seven changes of its § 5 are taken
      into proposal § C before promotion: (1) no live pruning in `doctor
      --fix` step 7a, so the post-check goes too; (2) roll back only after an
      own successful `link()`, and restore the entry read; (3) `ENOENT` on
@@ -1413,14 +1413,14 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      waits until B is accepted, and the Verifier re-checks the revised § C
      against the model (P3) before promotion.
 
-115. **Proposal § C (59a3a9a): two rulings.**
+115. **Proposal § C (cc4bd64): two rulings.**
      - *Rollback restores what was read (D114 point 2, as the review
        states).* A plain claim read `unclaimed`/`released`, so its rollback
        appends `released N`. A re-assertion read its own `claimed N`, so
        its rollback restores `claimed N`: a failed mirror write must not
        give up a claim N held before the command ran. In effect a
        re-assertion has nothing to roll back. A steal is never rolled back
-       (point 5). 59a3a9a's "re-assertion is rolled back with `released N`"
+       (point 5). cc4bd64's "re-assertion is rolled back with `released N`"
        is corrected.
      - *P-6: `nj unarchive` removes a leftover claim directory*, through
        the same wholesale removal that `archive`/`rm` use, so an unarchived
@@ -1434,17 +1434,17 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
 116. **V3.1-B accepted.** `nj unarchive` (§ 11a, AC-26 711/711) passes
      independent verification (docs/verification/v3-1-b-unarchive.md,
-     49b8670: accept). The replay diffs were confirmed byte for byte to be
+     3a62430: accept). The replay diffs were confirmed byte for byte to be
      exactly D113's class: 6 calls, the one inserted help line, 4829 calls
      on both sides. The helper move into core/layout.ts is a pure
      relocation. TSK-031 done. *Next, in parallel because they share no
      files:* the Implementer re-records the replay baseline at the accepted
      behaviour and tags it `c5-baseline` (D113); the Verifier re-checks the
-     revised proposal § C (2689db8) against the model before C is promoted
+     revised proposal § C (99652e8) against the model before C is promoted
      (D114/D115).
 
 117. **Proposal § C cleared for promotion** (docs/review/claim-protocol.md,
-     "Re-check of revised § C", f4179d1: ready to promote). All seven
+     "Re-check of revised § C", 000a969: ready to promote). All seven
      D114 fixes are in place as intended. D115's rollback rule is already
      covered by model variant P3. P-6 was modelled as scenario S13 (652,451
      states): I1 never fires; the I3x/I4 hits trace to the already-disclosed
@@ -1458,12 +1458,12 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      the promoted text.
 
 118. **C tests in place; implementation starts.** AC-27 (227 checks) and
-     the flipped AC-25 N6 (`--as`, 236 checks) are at 20eed2a, red against
+     the flipped AC-25 N6 (`--as`, 236 checks) are at 88c9bf4, red against
      the current dist/nj as expected. AMBIGUITIES 84 (a third kind of file
      in a claims directory: asserted only as "must not crash a read") and 85
      (the unarchive straggler race: no hook to force it) are accepted as
      recorded gaps, not ruled further now. *Stale tests:* ac-01 asserts
-     init's `.gitignore` has exactly two patterns, which b7ffad6 made
+     init's `.gitignore` has exactly two patterns, which b2d3f01 made
      three. The Oracle fixes it and sweeps the suites for other assertions
      that C's promotion makes stale: help text, "Known flags" lines for
      `note`, init output, `--ready`, JSON shapes. That sweep touches only
@@ -1501,7 +1501,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      Oracle adds that a concurrent release is not one of them.
 
 121. **V3.1-C verified: accept, with three follow-ups before acceptance**
-     (docs/verification/v3-1-c-claim.md, 4393780). core/claims.ts matches
+     (docs/verification/v3-1-c-claim.md, b03816e). core/claims.ts matches
      model P3 on every point; live `NJ_FAULT` rollbacks match § 12a; the
      AC-27 count gap (296 against the old dist vs 262) is 34 fixture guards
      that fire only on a failed precondition, so no check is skipped.
@@ -1543,7 +1543,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      acceptance. Only one agent writes `src/`. Same three teammates, no new
      ones. Drafting the proposal may start now, because it is a document only.
 
-123. **v3.2 proposal (5fe6af5): open questions ruled by the lead.** The
+123. **v3.2 proposal (2b153c7): open questions ruled by the lead.** The
      Oracle's recommendations are taken, with these precisions:
      - *A `nj check`:* addressing by `--text` (primary, a substring match on
        the item text) and `--item=<n>` (1-based among the countable
@@ -1579,7 +1579,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
 124. **V3.1-C accepted.** `nj claim` / `nj release` (§ 9 acting name,
      § 12 Claims, § 12a; AC-25, AC-27) passes independent verification
-     (docs/verification/v3-1-c-claim.md: 4393780 accept; D121 delta b697762
+     (docs/verification/v3-1-c-claim.md: b03816e accept; D121 delta 776b8a5
      accept). Replay against c5-baseline: 2,934 differing calls, exactly
      D121's four classes. The Verifier re-derived the counts in the delta
      and corrected two miscounts in its own first report: `.gitignore`
@@ -1589,10 +1589,10 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      measurement, folded into v3.2 E3 by D122) remains. *Next, in parallel
      because they share no files:* the Implementer records `c6-baseline` /
      `oracle-frozen-11` at the accepted state, and the Verifier reviews the
-     ruled v3.2 proposal (aa6ee56).
+     ruled v3.2 proposal (074d309).
 
 125. **v3.2 proposal review adopted** (docs/review/v3.2-proposal.md,
-     717fd84: "needs changes", text only). Rulings:
+     1637b66: "needs changes", text only). Rulings:
      - *D's example* uses a genuine runtime failure (`refused:claimed`),
        not `refused:archived`, which is preflight and aborts the whole batch.
      - *STATUS.md* is regenerated **once**, after the whole batch, and only
@@ -1617,7 +1617,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      diff; no second review round is needed for text-only fixes. Then
      promotion starts with A (`nj check`).
 
-126. **v3.2 proposal final (cd6da2f); promotion starts with A.** The lead
+126. **v3.2 proposal final (ab11e55); promotion starts with A.** The lead
      checked the text diff of the D125 fixes. One supersession: `nj check`
      uses `--on`/`--off` as the proposal writes them; D125's "`--uncheck`"
      wording is replaced, because the pair is symmetric and explicit.
@@ -1625,7 +1625,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      under EPIC-007, which closes when it is measured. Order: A → B → C → D
      → E, each spec → tests → implementation → verification → acceptance.
 
-127. **AC-27 joins the replay's concurrent-suite allowlist (92db73d), at
+127. **AC-27 joins the replay's concurrent-suite allowlist (304f86b), at
      file granularity, for now.** Recording `c6-baseline` showed that
      AC-27's C5 races (real parallel processes) are nondeterministic by
      design, like AC-7. baseline.js can exclude only whole suites, because
@@ -1636,10 +1636,10 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      AC-27's verdict still runs in every gate. *Accepted as a stated gap.*
      *Follow-up in v3.2 E (TSK-038):* exclude by scratch backlog (or
      scenario label) so that only the three C5 backlogs leave the replay.
-     The Verifier audits 92db73d together with the c6 recording.
+     The Verifier audits 304f86b together with the c6 recording.
 
 128. **`nj check` without `--on`/`--off` ticks; both given is
-     `invalid_value`.** § 10a (2130cbe) shows `[--on | --off]` as optional
+     `invalid_value`.** § 10a (e33c938) shows `[--on | --off]` as optional
      but does not say what neither flag means. Ticking is the command's
      name and its common case, so the default is `--on`. Both flags together
      are contradictory and are `invalid_value`, the same treatment as
@@ -1650,7 +1650,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      that the cross-cutting checks (`--backlog`, legacy migration) cover
      every command.
 
-129. **V3.2-A verified (26d1703: accept); one delta: an empty `--text=` is
+129. **V3.2-A verified (ae72808: accept); one delta: an empty `--text=` is
      `invalid_value`.** The Verifier recorded that an empty `--text=`
      matches every checkbox and so silently ticks the only one when there
      is exactly one. An empty variable expanded by an agent would tick
@@ -1663,8 +1663,8 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
 130. **V3.2-A accepted.** `nj check` (§ 10a incl. D128/D129; AC-28,
      128 checks) passes independent verification
-     (docs/verification/v3-2-a-check.md: 26d1703 accept; D129 delta
-     7c328d1 accept). Replay against c6-baseline: 6 calls, all the
+     (docs/verification/v3-2-a-check.md: ae72808 accept; D129 delta
+     ae14501 accept). Replay against c6-baseline: 6 calls, all the
      inserted `nj check` help line (class *help*). TSK-034 done; B (stale
      claims, TSK-035) starts. *Baseline cadence for v3.2:* no
      re-recording after each feature. The gate's tally (D121) keeps the
@@ -1672,10 +1672,10 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      `c7-baseline` is recorded once, after v3.2 E is accepted.
 
 131. **V3.2-B accepted** (docs/verification/v3-2-b-stale-claims.md,
-     b9e83f2: accept). Stale claims: `claims.staleAfterHours`,
+     ae2452b: accept). Stale claims: `claims.staleAfterHours`,
      `claim:stale`; AC-29 43/43. The replay against c6-baseline is still
      exactly the 6 help calls from A, confirmed unclipped over the whole
-     corpus, so the `_claim`/`_problems` key-order fix (d54322b) is
+     corpus, so the `_claim`/`_problems` key-order fix (fd4444c) is
      complete. *One text ruling:* `claim:stale` appears in the
      `_problems` of every entry `nj` returns (`list`, `show`, `tree`,
      bare `nj`, and the write results of `set`, `note`, …), exactly as
@@ -1685,7 +1685,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      re-verification of code is needed. TSK-035 done; C (`nj find`,
      TSK-036) starts.
 
-132. **`nj find` spec (1e4f062) reviewed: two notes.** (a) The Oracle
+132. **`nj find` spec (90425a0) reviewed: two notes.** (a) The Oracle
      added `--case-sensitive`, which D123 did not name. It is accepted: it
      is small, it opts out of the default rather than changing it, and
      agents searching for identifiers need it. (b) § 9a calls
@@ -1699,14 +1699,14 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
 133. **V3.2-C accepted; D paused until the backlog deletion is
      explained.** `nj find` (§ 9a incl. D132; AC-30 34/34) passes
-     independent verification (docs/verification/v3-2-c-find.md, c615a6d:
+     independent verification (docs/verification/v3-2-c-find.md, 3c8a649:
      accept). Replay: the same 6 help calls (check and find lines), and
      `list` is provably unchanged (only applyFilters' export). `find` costs
      the same as `list` at 10k elements. TSK-036 done.
      *Incident:* the Verifier found the repo's own backlog/ (106 files,
      incl. .nanojira) deleted from disk, uncommitted. The lead restored it
      from git (`git checkout -- backlog`; doctor clean, 51 entries,
-     nothing lost: the last backlog commit was 6e6d1fc and nothing wrote
+     nothing lost: the last backlog commit was 053f1fb and nothing wrote
      to the backlog after it). The cause is unknown. Until it is found,
      nobody runs `nj` or tests with cwd inside the repo, and D (batch
      writes) does not start. The Verifier does read-only forensics
@@ -1740,7 +1740,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      unchanged: one write, one firing, exit 1 (§ 12).
      `before-compare`'s marker wait applies to that one firing only.
 
-136. **Batch writes (01622e7): execution order and preflight output.**
+136. **Batch writes (d1989ec): execution order and preflight output.**
      (a) IDs are written in the order `--id` names them; `results` has the
      same order (D135 relies on it). (b) *Batch-wide argument errors* are
      not about one ID, so they use § 9's generic single-failure shape
@@ -1757,7 +1757,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      adds (a)–(c) to the batch section together with D135 and the
      matching AC-31 cases.
 
-137. **V3.2-D verified: needs changes (80b0971).** The single-ID paths are
+137. **V3.2-D verified: needs changes (a33cab7).** The single-ID paths are
      provably unchanged; AC-31's 67 vs 68 is a setup guard that fires only
      on failure. Two bugs: (1) `NJ_FAULT=before-compare` in a batch still
      hard-exits the process, because compareGuard's before-compare branch
@@ -1775,7 +1775,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
 138. **V3.2-D accepted.** Batch writes (§ 9 incl. D135/D136; AC-31, 95
      checks) pass independent verification after the D137 fixes
-     (docs/verification/v3-2-d-batch.md: 80b0971 needs changes; a249051
+     (docs/verification/v3-2-d-batch.md: a33cab7 needs changes; b5d010e
      accept). Replay against c6-baseline, confirmed unclipped: the 6 help
      calls, differing only in the accepted check/find lines and the new
      batch paragraph. *Recorded fix on a single-ID path:* single `nj claim`
@@ -1808,12 +1808,12 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
 140. **njrc-swap, final (crossed messages resolved).** The Oracle acted on
      the lead's earlier, wrong message before D139 arrived and moved the hook
-     after `open()` (5633007). D139 stands: the hook sits **between the
-     path-level lstat and `open()`**, as 625e083 had it, because only there
+     after `open()` (98c5919). D139 stands: the hook sits **between the
+     path-level lstat and `open()`**, as f9e1e6b had it, because only there
      does a swap test the fd-based ownership check. After `open()` a swap is
-     inert by POSIX and proves nothing. Kept from 5633007: the hook is a
+     inert by POSIX and proves nothing. Kept from 98c5919: the hook is a
      **pure pause**. After the marker *or* the 10 s timeout, `nj` proceeds;
-     it never aborts, so there is **no `fault:njrc-swap` code** (625e083
+     it never aborts, so there is **no `fault:njrc-swap` code** (f9e1e6b
      listed one, which contradicted its own "proceeds"). *Expected
      outcomes:* a same-user swap to a file naming another backlog → `nj`
      uses the **swapped-in** backlog (check and read from the one opened
@@ -1825,17 +1825,17 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      (keeping the code removal) and flips the non-root suite's assertions
      to the swapped-in backlog. The Implementer implements this.
 
-141. **Harness a21f195 sound; it surfaced 39 hidden claim/release diffs;
+141. **Harness aee6539 sound; it surfaced 39 hidden claim/release diffs;
      D138's replay claim was incomplete.** The audit
-     (docs/verification/harness-a21f195.md, 148296b) confirms exactly the
+     (docs/verification/harness-aee6539.md, 85fce91) confirms exactly the
      112 C5 calls are excluded and the gate is deterministic. gate.js pairs
      harness code with its own corpus, so the old tag is no mix risk. With
      AC-27's ordinary calls back in the byte replay, 39 `claim`/`release`
      calls differ from c6: the JSON key order of their single-ID output
-     changed in the batch refactor (05e8bfa/aa4a4df). The old whole-suite
+     changed in the batch refactor (245bf6f/415e43d). The old whole-suite
      exclusion hid it. **D138's "replay: the 6 help calls" was therefore
      incomplete**, and this entry corrects it. *Ruling:* the key-order
-     change was unintended. As in V3.2-B (d54322b), the original order is
+     change was unintended. As in V3.2-B (fd4444c), the original order is
      restored, so single-ID `claim`/`release` output is byte-identical to
      c6. The Implementer does this as its own commit after the E work, and
      the gate tally must then show only the help class (plus whatever E
@@ -1845,7 +1845,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      the same pass. `c7-baseline` is recorded after E's acceptance, as
      planned (D130).
 
-142. **V3.2-E + D141 verified (0785c14: accept); one narrow E.1 gap is
+142. **V3.2-E + D141 verified (6c65a50: accept); one narrow E.1 gap is
      fixed before acceptance.** D141 is done: the single-ID claim/release
      key order is restored, backlogLabel is basename-only, and the gate
      against oracle-frozen-11 shows exactly the 6 help calls, byte-confirmed.
@@ -1864,10 +1864,10 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
 143. **V3.2-E accepted; v3.2 functionally complete.** The njrc-swap hook
      (§ 4, D139/D140/D142), the stray `.ids/` cleanup (§ 14 step 0), the
-     replay exclusion per scratch backlog (a21f195/f30c2a3, D127/D141) and
+     replay exclusion per scratch backlog (aee6539/dd3ddd2, D127/D141) and
      the AC-27 before-compare rollback case pass verification
-     (docs/verification/v3-2-e-gaps.md: 0785c14 accept; D142 delta 3cfab34
-     accept). The gate at c8eeac3 against oracle-frozen-11 shows exactly the
+     (docs/verification/v3-2-e-gaps.md: 6c65a50 accept; D142 delta 083c33a
+     accept). The gate at 63efa0f against oracle-frozen-11 shows exactly the
      6 help calls (check, find and batch lines), byte-confirmed; there are
      no other replay diffs since D141. TSK-038 and EPIC-008 are done.
      *v3.2 summary:* `nj check` (D130), stale claims (D131), `nj find`
@@ -1877,7 +1877,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      the Implementer records `c7-baseline` / `oracle-frozen-12` at the
      accepted state; then v3.3 (MCP wrapper, D122) starts with a proposal.
 
-144. **v3.3 proposal (0fba429): open questions ruled.**
+144. **v3.3 proposal (f8a08db): open questions ruled.**
      - *A-1:* one backlog per server process, resolved once at startup by
        the existing rules (`--backlog`, `NJ_BACKLOG`, `.njrc`).
      - *B-1, deviating from the recommendation:* **hand-roll** the small
@@ -1912,7 +1912,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      The Oracle folds these into the proposal; then the Verifier reviews
      it before promotion (D122).
 
-145. **v3.3 proposal review adopted (13c0a02: needs changes).** *Protocol
+145. **v3.3 proposal review adopted (bb7bd86: needs changes).** *Protocol
      era:* the Verifier fetched the published MCP spec (revision
      2026-07-28). Requests now carry their protocol version in per-request
      `_meta`, `server/discover` is mandatory, and the spec names
@@ -1933,7 +1933,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      capabilities the server declares. The Oracle folds these in; the
      lead checks the diff; then promotion into § 17.
 
-146. **v3.3 proposal final (f7ce0c7); promotion into § 17 starts.** The
+146. **v3.3 proposal final (ade4541); promotion into § 17 starts.** The
      lead checked the D145 diff: the dual-era server actually implements
      `server/discover` (a `DiscoverResult` with supportedVersions
      2026-07-28 and 2025-11-25, capabilities `{tools: {}}`), keeps legacy
@@ -1948,7 +1948,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      (Oracle) → implementation (Implementer) → verification (Verifier) →
      acceptance.
 
-147. **§ 17 and AC-32..38 in place (05485ae, b749c6c); the SDK client
+147. **§ 17 and AC-32..38 in place (741e897, e3e719b); the SDK client
      may be installed as a pinned devDependency.** Per D144, the official
      `@modelcontextprotocol/sdk` serves only the conformance test
      (ac-32-mcp-sdk.js). It is installed with an **exact** version (no
@@ -1963,7 +1963,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
 148. **V3.3 accepted: `nj-mcp` ships.** § 17 MCP Interface (AC-32..38)
      passes independent verification (docs/verification/v3-3-mcp.md,
-     26ab9b0: accept). AC-36 holds: the shared flag table (8995a5d) leaves
+     e9ad1a2: accept). AC-36 holds: the shared flag table (edf4032) leaves
      the CLI byte-identical against c7-baseline, including the "Known
      fields"/"Known flags" hints. The dual-era protocol, `-32022`, and
      `-32602` before any spawn were confirmed. stdout stays pure even with
@@ -1983,18 +1983,18 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      stop).
 
 149. **User docs brought to v3.3 and verified.** README, GUIDE and
-     ARCHITECTURE describe v3.1–v3.3 and nj-mcp (ea2c5c8, de65c3f, a4a6c96),
+     ARCHITECTURE describe v3.1–v3.3 and nj-mcp (8b6bd81, aeceb10, b430f30),
      including a "Many projects on one machine" section: one install serves
      every project; each project resolves its own backlog (§ 4); one
      nj-mcp server per project (§ 17). Every GUIDE example is now pasted
      from a real run (NJ_NOW pinned). The Verifier found 10 doc-side
-     mismatches and no behavioural defect (0689f98); all 10 are fixed and
-     re-checked byte for byte (7a85a43). Still open: TSK-033 (quiet-machine
+     mismatches and no behavioural defect (a8b3911); all 10 are fixed and
+     re-checked byte for byte (ed88d34). Still open: TSK-033 (quiet-machine
      perf) and, for the user to decide, a release tag or push.
 
 150. **TSK-033 measured: the § 13 comfort bar holds at v3.3.** On a quiet
      machine (AC power, no Low Power Mode, foreign load below perf.js's
-     bar; load average 1.7), `node tools/perf.js` at 075dbb1 with 10,000
+     bar; load average 1.7), `node tools/perf.js` at 90cef67 with 10,000
      elements, 5 runs each, median/max: `list` 185/220 ms, `list --json`
      186/187, `tree` 189/192, `doctor` 188/191; all within median ≤ 250 /
      max ≤ 500. Writes (reported, no bar): `new` 230/237, `set --title`
@@ -2034,7 +2034,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      the help class (if help mentions `--version`). Backlog: EPIC-010 /
      TSK-040.
 
-152. **V3.4 verified with one gap (e5758d8): nj-mcp's startup arguments
+152. **V3.4 verified with one gap (1bc6e12): nj-mcp's startup arguments
      become strict.** `nj --version`, the install section and
      AGENT-INSTRUCTIONS.md pass (followed literally in a PATH sandbox; every
      template command runs). The gap: `nj-mcp --version` does not enforce
@@ -2055,7 +2055,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      build; nj-mcp serverInfo in both eras), strict nj-mcp startup
      arguments (D152), the GUIDE install section and
      docs/AGENT-INSTRUCTIONS.md all pass verification
-     (docs/verification/v3-4-onboarding.md: e5758d8; D152 delta 1f8b16d).
+     (docs/verification/v3-4-onboarding.md: 1bc6e12; D152 delta 3c423a6).
      The install section was followed literally in a PATH sandbox, and
      every template command was run. AC-39 59/59, and its new legs
      discriminate (27 red against the pre-fix build). The replay against
@@ -2113,7 +2113,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      `git rm --cached` (the files stay on disk). Consequence for (a): claim
      history is local to the working copy; a fresh clone shows notes and
      `created` only. `nj log` states this.
-     `nj next` (§ 12b, AC-40 text, 1406a40) is reviewed and accepted as
+     `nj next` (§ 12b, AC-40 text, 82aed8d) is reviewed and accepted as
      written. One gap: the commit contains no AC-40 test code. The Oracle
      adds it before the Implementer starts.
 
@@ -2134,14 +2134,14 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      are all done is picked; an archived child does not count as open.
 
 157. **v3.5 accepted: `nj next`, `nj log`; dogfooding findings.** Both
-     features pass verification: docs/verification/v3-5-next.md (c0ce838:
+     features pass verification: docs/verification/v3-5-next.md (eb82d1b:
      20 processes × 8 elements × 3 rounds, exactly one winner per element;
-     list/bare nj byte-unchanged) and v3-5-log.md (378a25d: never writes;
+     list/bare nj byte-unchanged) and v3-5-log.md (914b1df: never writes;
      tricky note text; the mutation tests discriminate). The AC-40 coverage
      gap the Verifier found (only 1/88 checks catches "any failure
-     advances") is closed by N13 (ba3ec74, 95 checks). Docs (60915b2) cover
+     advances") is closed by N13 (37cb532, 95 checks). Docs (912c8c3) cover
      § 12c clarifications, GUIDE § 14/15, AGENT-INSTRUCTIONS (pick work with
-     `nj next`) and README/ARCHITECTURE. Version 3.5.0 (e616b2c). The Lead
+     `nj next`) and README/ARCHITECTURE. Version 3.5.0 (e79be37). The Lead
      re-ran AC-32/39/40/41: all pass; build:check is byte-identical; the
      replay against c7 differs only in the 6 help calls. TSK-041..043 and
      EPIC-011 are done; tag `v3.5`.
@@ -2254,9 +2254,9 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
 161. **v3.6 accepted: outside-team feedback.** Batch 1 (global flags,
      multi-line notes, `next` respects assignee, bare-nj leaf rule) passed
-     verification in docs/verification/v3-6-batch1.md (6430dc3). Batch 2
+     verification in docs/verification/v3-6-batch1.md (95709cf). Batch 2
      (per-command help, did-you-mean with OSA + length threshold, release
-     docs) passed in v3-6-batch2.md (1521a78). The Lead re-ran AC-32/39/40
+     docs) passed in v3-6-batch2.md (dc288a0). The Lead re-ran AC-32/39/40
      and 42–47: all pass; build:check is byte-identical; `nj --version` gives
      3.6.0. Replay vs oracle-frozen-12: 195 differing calls, all of them
      either the D158 leaf rule or help text; no did-you-mean diffs, because
@@ -2264,7 +2264,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      The run-all "hang" was not reproduced. It is about 30 s of deliberate
      waits in three fault suites. Fixed along the way:
      - the test and harness fixture root is no longer os.tmpdir(), which
-       had a foreign backlog as an ancestor (148697c, c5c33a8);
+       had a foreign backlog as an ancestor (34c7db3, ff8a1fb);
      - stale fixtures (AC-40 N3, doctor-fix-surface, AC-46 P3);
      - the AC-42 G5 gap.
      Known, for v3.7: `nj rm --help` lacks flag lines (rm has no
@@ -2277,8 +2277,8 @@ Written for adversarial review: if a line reads like a guess, challenge it.
 
 162. **Feedback is versioned in its own repository** (2026-10-07, user: "Das
      gefällt mir"). `feedback/` is now its own git repository (`git init`
-     inside the folder, branch main, first commit 81e62b7). The nanojira
-     repo keeps ignoring it (06eadd7), so no feedback commit enters the
+     inside the folder, branch main, first commit a4b671a). The nanojira
+     repo keeps ignoring it (46b7475), so no feedback commit enters the
      development history, and the teams' path is unchanged. The claims of
      each feedback backlog stay ignored through that backlog's own
      `.gitignore`. The NanoJira Lead commits new items and answer notes at
@@ -2401,7 +2401,7 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      hint 22, help 6, scratch call 1. The Lead re-ran AC-01/13/17/29/32/39/
      40/46/48/49: all pass; build:check is byte-identical; `nj --version`
      gives 3.7.0. Fixed along the way: `nj init` briefly wrote a `problems`
-     block. The replay caught it, no AC did, and fcbb3b0 now pins init's
+     block. The replay caught it, no AC did, and cad3d25 now pins init's
      config byte-exact. Also fixed: three stale failure-vocabulary lists in
      test/edge, and the § 9 tags prose.
      Known limit (Verifier): "ignored codes never affect readiness" holds
@@ -2411,6 +2411,161 @@ Written for adversarial review: if a line reads like a guess, challenge it.
      author a second time, a candidate for later. Claims are held after the
      spec phase, so the next phase must steal them.
      TSK-049..052 and EPIC-015 are done; tag `v3.7`; `current` → 3.7.0.
+
+169. **The backlog moved into its own repository; main history rewritten
+     without it** (2026-10-07, user: "Variante A"). Steps:
+     1. Backup: a full copy in workspace/nanojira-backup-20261007/ plus
+        nanojira-backup-20261007.bundle.
+     2. `git filter-repo --subdirectory-filter backlog` on a clone gave the
+        new backlog repository, 140 commits of its own history. It lives at
+        `nanojira/backlog/`, a nested repository like `feedback/` (D162).
+        The path is unchanged, so `nj` still finds it and nothing changes
+        for the team. Local, ignored files (claims) were copied over, and
+        the content is identical to the backup.
+     3. `git filter-repo --path backlog --invert-paths` on the main repo.
+        Its 536 commits became 444; the 92 that only touched the backlog are
+        gone. Every hash changed. All 24 tags were rewritten to the new
+        commits. The signed release tags v3.3–v3.7 were re-created and
+        re-signed on their mapped commits.
+     4. `/backlog/` is git-ignored in the main repo.
+     5. Commit hashes in the current docs, verification reports and test
+        notes were remapped old→new (658 references in 42 files) from
+        filter-repo's commit map. Hashes in filenames
+        (e.g. harness-a21f195.md) and historical commit messages keep the
+        old value, except where filter-repo itself rewrote message hashes.
+        Seven references point to removed backlog-only commits and keep
+        their old hash: 2ca5c9f, 4afc759, 5b666a0, 5e1fe80, 62777f9,
+        678a89b, efd4b69. The backup resolves them.
+     From now on, backlog changes are committed in `backlog/` (its own git),
+     and code, spec and docs in the main repo. This also ends the
+     "dogfooding commits mixed into development history" noise.
+
+170. **No assistant mention in commit messages; old messages cleaned** (2026-10-07,
+     user: "In den Commit Messages soll der Assistent nicht vorkommen" … "alte
+     commits bereinigen"). Standing rule for every repo: no
+     `Co-Authored-By: …` trailer and no other mention. Cleanup:
+     - a backup in workspace/nanojira-backup-20261007-pre-msgclean;
+     - `git filter-repo --message-callback` on the main repo (446 commits),
+       backlog/ (141) and feedback/ (5). It removed every assistant
+       co-author trailer and reworded the one message that named
+       AGENTS.md;
+     - all trees are unchanged: every commit maps 1:1 by tree and
+       timestamps;
+     - tags v3.3–v3.7 re-signed on their mapped commits;
+     - hashes in the current docs remapped again: 670 references in 43
+       files, main and feedback commits.
+     The D169 list of pruned pre-D169 hashes keeps its values, which
+     resolve in nanojira-backup-20261007.
+
+171. **v3.8: JSON input, done releases the claim, show's single entry**
+     (2026-10-07, user: "setze alles um, wie du es für richtig hältst").
+     - **A, JSON input (EPIC-014, both outside teams).**
+       - `nj new --input=<file|->` and `nj set --input=<file|->` take a JSON
+         object whose keys are exactly the command's flag names (the same
+         flag table nj-mcp's schemas use). Lists are arrays; unknown keys
+         are `unknown_field`.
+       - `--input` and field flags are mutually exclusive; global flags
+         (`--backlog`, `--json`) and `--as` stay allowed.
+       - `new` also accepts an array, and an element may carry `children:
+         [...]`, so a whole plan (epic → tasks → subtasks, review subtasks
+         included) is one call. Children get their parent from the
+         nesting; `depends_on` may refer to a sibling created in the same
+         call through a local `ref` name.
+       - The whole plan is validated before the first write. Writes then
+         happen in plan order. A write failure stops the call and reports
+         the ids already created; there is no silent partial success.
+       - The Oracle pins the exact shape. The draft goes to both outside
+         leads before tests are written.
+     - **B, done releases the claim** (team-b-tests TSK-013; our own
+       team showed the same pattern). Setting the final status (the last
+       configured one, `done` by default) via `set` or `claim --status`
+       releases the element's current claim in the same call, and the
+       result reports it (`released: <holder>`, additive).
+     - **C, `show --json` with one `--id`** additionally carries `entry`
+       (the same object as `entries[0]`). It is additive and removes the
+       list-shape trap that bit our own AC authors twice (D157, D168).
+     Shelved: EPIC-013 (inbox). Kept for now: the two history backups in
+     workspace/, which are cheap and deleted only on the user's word.
+     Distribution via a remote still needs the user. Replay: the new
+     classes allowed are help text, the additive `released`/`entry`
+     fields, and nothing else.
+
+172. **The --input draft is amended after review by both outside leads**
+     (2026-10-07). Both checked it against real plans of their own, and the
+     shape carries their work. Rulings:
+     1. **No plan form for `set`.** Neither team needs one; `--id=A,B,C`
+        plus one object covers it.
+     2. **A ref must start with `@`**, both in `ref` and in `depends_on`.
+        A ref without `@`, or a real id with `@`, is `invalid_value`. The
+        draft's "a ref shadows a real id" rule is dropped: both leads named
+        it a silent wrong-dependency trap.
+     3. **The result carries `refs`** (`{"@impl": "SUB-047"}`) on success
+        and, next to `created`, on a mid-plan failure.
+     4. **Failure locator:** a mid-plan write failure and a validation
+        failure both name the object at fault. The `failed_at` value is its
+        ref if it has one, else its JSON path in the plan (e.g.
+        `[0].children[1]`). This is the one additive field on an error
+        result, scoped to `--input`; the Oracle words the exception to the
+        no-extra-fields rule explicitly.
+     5. **`--dry-run` for `new --input`:** runs the full validation, writes
+        nothing, and returns the would-be shape without ids. Asked for by
+        both.
+     6. **`acceptance` may be a JSON array of strings** in `--input`. Each
+        string becomes one `- [ ] …` line, so the acceptance:no_checkbox
+        trap (D163 E) cannot happen through --input. A plain string stays
+        as-is. Team B asked for it; it fits their TSK-011.
+     The Oracle finalises the section (dropping the DRAFT marker), then
+     writes the AC; the usual process follows.
+
+173. **--input: a forward @ref is rejected at validation.** The Lead
+     tried it live at d50b3fa: a plan whose "Review" task names
+     `depends_on: ["@impl"]` while `@impl` is declared LATER in the plan
+     passed validation, wrote everything, and stored `depends_on:
+     ["undefined"]` (`depends_on:dangling`), with exit 0 and ok:true. That
+     is a silent wrong dependency, exactly what D172 set out to prevent;
+     AC-52 had no leg for it. Ruling: a `depends_on` entry `@x` must refer
+     to a ref declared EARLIER in the plan's depth-first pre-order (the
+     write order). Otherwise the call fails `invalid_value` before any
+     write, with `failed_at` naming the referencing element and a hint
+     that tells the caller to move the referenced element earlier. This
+     is simpler than reserving ids up front and keeps "validated before
+     the first write" true. The Oracle adds § 9 wording and AC-52 legs
+     (forward ref rejected and nothing written; a backward ref still
+     works; a ref to itself is rejected). The Implementer fixes the
+     validator.
+
+174. **--input failed_at gaps from the Verifier (v3-8-input.md).**
+     1. *A fault-hook abort mid-plan* (`NJ_FAULT=after-tmp-write`) exits via
+        hardExit with no `created`/`refs`/`failed_at`. Ruling: not a
+        defect. Those hooks simulate a crash, and a killed process cannot
+        report anything; the spec's promise is about write failures the
+        process survives. The Verifier must instead prove the promise on
+        a REAL catchable failure, e.g. a read-only `tasks/` or `subtasks/`
+        directory so a later plan element fails with io_error after
+        earlier ones were written. The Oracle adds that leg to AC-52.
+        § 9 states the crash case plainly: after a crash, `nj doctor` and
+        `nj list` show what was written.
+     2. *Structural plan errors* (a non-object array member, null, a
+        non-array `children`) are raised in flattenPlan outside the
+        failed_at wrapper, so they have no locator. Ruling: a real gap,
+        fixed. Every validation failure carries `failed_at`, which for
+        these is always the JSON path. The Oracle adds legs; the
+        Implementer moves the structural checks under the same wrapper.
+     The two unticked TSK-053 criteria stay unticked until the delta is
+     verified.
+
+175. **v3.8 accepted** (2026-10-09). The Verifier's delta check of the
+     D174 fix (692f3ef, docs/verification/v3-8-d174.md) passed: structural
+     errors carry their JSON path in `failed_at`, a real read-only write
+     failure mid-plan reports `internal_error` with `created`, `refs` and
+     `failed_at`, `refs` lists only written elements, and the D173 assert
+     still crashes loudly. Mutation tests confirm that the AC legs bite.
+     The Lead spot-checked AC-39/50/51/52 and AC-32 (with `NJ_TEST_ROOT`),
+     plus build:check. The gate stays at 540 differing calls in the
+     accepted classes. The gate's ac-32-mcp-sdk CANNOT RUN without
+     `NJ_TEST_ROOT` is the known environment gap, not a regression.
+     TSK-053..055 and EPIC-014 are done. v3.8 is tagged and installed
+     with tools/release-local.sh.
 
 ## Known gaps, stated plainly
 

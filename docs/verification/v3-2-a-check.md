@@ -1,23 +1,23 @@
-# V3.2-A verification — `nj check` (`acfd135`, § 10a, AC-28, TSK-034)
+# V3.2-A verification — `nj check` (`ea5a50f`, § 10a, AC-28, TSK-034)
 
 Verifier, 2026-10-04. I didn't write any of this code — independent
 verification assigned by the Lead. Work in `/tmp/verifier-v32a-check`
-(detached worktree at `acfd135`), `/tmp/verifier-v32a-nested/projects/
+(detached worktree at `ea5a50f`), `/tmp/verifier-v32a-nested/projects/
 nanojira` (nested under its own `runtime/darwin-arm64` symlink, for
 `gate.js`'s own AC-15 check and a second, unclipped `baseline.js` run), and
 `/tmp/verifier-v32a-probe` (scratch backlogs). All removed before writing
-this file. Runtime Node v24.21.0. Read: § 10a as of `bf2de4b` (incl.
+this file. Runtime Node v24.21.0. Read: § 10a as of `a86596c` (incl.
 D128), the touched § 4/§ 7/§ 9/§ 12 lines; `src/commands/cmd-check.ts`,
-`src/nj.ts`, `src/core/help.ts`; `test/ac/ac-28-check.js` (`c1cee7e`).
+`src/nj.ts`, `src/core/help.ts`; `test/ac/ac-28-check.js` (`e63c5c6`).
 
-**VERDICT: accept.** AC-28 114/114, run-all and `gate.js --step=acfd135
+**VERDICT: accept.** AC-28 114/114, run-all and `gate.js --step=ea5a50f
 --frozen=c6-baseline` all reproduce exactly — the 6-call tally is confirmed
 byte-for-byte to be exactly the one inserted help line, nothing else. Every
 one of my own black-box probes beyond AC-28 (14 scenarios: fence edge
 cases, CRLF, marker spacing, trailing content, empty input, `## Notes`
 re-entry, addressing refusals, fault injection) matched § 10a exactly, with
 no deviation found. Reading AC-28 critically after the Implementer's own
-3-bug fix pass (`c1cee7e`), I found no further latent bug — every
+3-bug fix pass (`e63c5c6`), I found no further latent bug — every
 remaining check tests what its description claims.
 
 ## 1. AC-28, run-all, gate — the 6-call tally confirmed byte-for-byte
@@ -26,7 +26,7 @@ remaining check tests what its description claims.
 - `node test/run-all.js dist/nj`: 74/76 pass, 0 failed, 2 cannot-run (the
   usual two expected gaps: `ac-15`'s worktree-path-depth artifact,
   `hardening-njrc-foreign-link.js`'s root requirement).
-- `gate.js --step=acfd135 --frozen=c6-baseline`: `BEHAVIOUR CHANGED — 6
+- `gate.js --step=ea5a50f --frozen=c6-baseline`: `BEHAVIOUR CHANGED — 6
   differing call(s): help 4, --help 2` (no `(truncated: …)` suffix — 6 is
   the true total, not a capped display), `replay: exit 1`, `oracle: passed
   75, failed 0, cannot run 1 (1 expected)`, `gate: exit 1, replay CHANGED,
@@ -153,7 +153,7 @@ No deviation from § 10a found in any of these 14 probes.
 ## 3. AC-28 read critically, after the Implementer's 3-bug fix pass
 
 The task named three test bugs the Implementer found and fixed in
-`c1cee7e` while bringing `check()`'s `--id`-prepending helper in line with
+`e63c5c6` while bringing `check()`'s `--id`-prepending helper in line with
 every call site (the helper only prepended `--id=TSK-001` for string args,
 never for the array args every call site actually passes — `check` was
 silently seeing `missing_argument` everywhere, masked while `nj check`
@@ -203,16 +203,16 @@ mechanism, consistent with the proposal's own framing that it "reuses
 
 ---
 
-## D129 delta (`6435c52`, `417b12c`, `82c7f41`)
+## D129 delta (`2f2b9cd`, `39e6bb4`, `1a93eba`)
 
 Verifier, 2026-10-04. Worktrees `/tmp/verifier-d129-check` (plain) and
 `/tmp/verifier-d129-nested/projects/nanojira` (nested under its own
 `runtime/darwin-arm64` symlink, for `gate.js`'s own AC-15 check), both
-detached at `82c7f41`; both removed before writing this. **VERDICT: ready
+detached at `1a93eba`; both removed before writing this. **VERDICT: ready
 to accept — V3.2-A is accepted.**
 
 **The code delta is exactly what D129 describes, nothing more.**
-`git diff acfd135..82c7f41 -- src/ dist/`: one file,
+`git diff ea5a50f..1a93eba -- src/ dist/`: one file,
 `src/commands/cmd-check.ts`, +3 lines (plus its `dist/nj` mirror, +1 line)
 — a single new guard, `if (text === '') fail('invalid_value', '--text
 must not be empty')`, inserted between the existing both-given/neither-
@@ -221,14 +221,14 @@ near it — the guard is a literal `===` against the empty string, so a
 whitespace-only `--text` (e.g. a single space) never reaches it and is
 matched as an ordinary substring, exactly as D129 specifies.
 
-**§ 10a (`6435c52`)** states the rule in both places it needs to be: the
+**§ 10a (`2f2b9cd`)** states the rule in both places it needs to be: the
 `--text=<substring>` bullet itself ("the literally empty string is
 `invalid_value`... **No trimming**: a whitespace-only `--text` is not
 empty and stays a plain substring, matched as given") and AC-28's own
 criterion text, reworded to match. Consistent with D119's `--as=`
 precedent, cited by name.
 
-**AC-28 (`417b12c`): 128/128**, exact — confirmed directly
+**AC-28 (`39e6bb4`): 128/128**, exact — confirmed directly
 (`node test/ac/ac-28-check.js dist/nj`) and via `run-all`/the gate's oracle
 leg below. The two new D4 cases are well-constructed: the empty-`--text=`
 case uses a **single-checkbox** body specifically so the "would silently
@@ -257,9 +257,9 @@ empty-string guard in turn precedes the `--on`/`--off` conflict check;
 every order along this path lands on the one code a caller would expect
 regardless of which check "wins."
 
-**`gate.js --step=82c7f41 --frozen=c6-baseline`: still exactly the same 6
+**`gate.js --step=1a93eba --frozen=c6-baseline`: still exactly the same 6
 calls.** `BEHAVIOUR CHANGED — 6 differing call(s): help 4, --help 2` —
-byte-identical in composition to `acfd135`'s own result, which makes sense:
+byte-identical in composition to `ea5a50f`'s own result, which makes sense:
 D129 only adds a new validation branch inside `cmdCheck`, never touches
 `help.ts`, so the replay's only differing calls remain the help-text
 class from V3.2-A's own promotion. `oracle: passed 75, failed 0, cannot

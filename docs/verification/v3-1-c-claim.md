@@ -1,21 +1,21 @@
-# V3.1-C verification — `nj claim` / `nj release` (`bfc0733`, `5b98d01`, `908ce87`, TSK-032)
+# V3.1-C verification — `nj claim` / `nj release` (`242703a`, `b0742d6`, `a6bd4e4`, TSK-032)
 
 Verifier, 2026-10-03. I didn't write any of this code — independent
 verification assigned by the Lead. Work in `/tmp/verifier-v31c-claim`
-(detached worktree at `908ce87`), `/tmp/verifier-v31c-nested/projects/
+(detached worktree at `a6bd4e4`), `/tmp/verifier-v31c-nested/projects/
 nanojira` (a second worktree, nested under its own `runtime/darwin-arm64`
 symlink so `gate.js`'s own AC-15 check passes when I run `baseline.js`
 directly — same technique as my two prior reports), and `/tmp/
 verifier-v31c-probe` (scratch backlogs). All removed before writing this
 file. Runtime Node v24.21.0. Read: §§ 4, 7, 9 ("The acting name"), 10, 11a,
-12, 12a, 14 as of `93cc2e9`; DECISIONS 114–120; `src/core/claims.ts`,
+12, 12a, 14 as of `059a862`; DECISIONS 114–120; `src/core/claims.ts`,
 `src/core/actor.ts`, `src/commands/cmd-claim.ts`, `cmd-release.ts`,
 `cmd-note.ts`, `cmd-doctor.ts`, `cmd-archive.ts`, `cmd-rm.ts`,
 `cmd-unarchive.ts`, `core/constants.ts`; `test/ac/ac-27-claim.js`;
 `docs/review/claim-model.mjs` (P3).
 
 **VERDICT: accept.** AC-25 (234), AC-27 (262/262), run-all and
-`gate.js --step=908ce87 --frozen=c5-baseline` all reproduce. The
+`gate.js --step=a6bd4e4 --frozen=c5-baseline` all reproduce. The
 Implementer's "40 differing calls in 2 classes" **undercounts the scale,
 not the correctness**: the real total is 2,934 calls in 4 classes, every
 one of them explained and expected (§ 1). The help-text gap the task asked
@@ -40,7 +40,7 @@ every case I tried.
 - `node test/run-all.js dist/nj`: 74/75 pass (ac-27 now present and green;
   the one cannot-run is the usual root-needing `hardening-njrc-foreign-
   link.js`).
-- `gate.js --step=908ce87 --frozen=c5-baseline`: oracle 74/75 (same one
+- `gate.js --step=a6bd4e4 --frozen=c5-baseline`: oracle 74/75 (same one
   expected gap), **replay exit 8 — VERDICT RED**, naming the two frozen
   suites DECISIONS 118 predicted word for word: `ac/ac-01-basic-run.js`
   (asserts `.gitignore` has exactly two patterns; now three) and
@@ -110,13 +110,13 @@ synopsis for `nj new` lists `[--priority=…] [--tags=a,b] [--assignee=…]
 *does* show `[--status=…]`, and `cmd-new.ts`'s `NEW_FIELDS` constant
 genuinely includes `'status'`. Here `help` and the code agree with each
 other; it's § 9's own synopsis that's incomplete. Pre-existing (not
-introduced by `bfc0733`/`5b98d01`/`908ce87`), out of this task's scope, and
+introduced by `242703a`/`b0742d6`/`a6bd4e4`), out of this task's scope, and
 not a C regression — flagging only because the task asked me to check
 "every other help line."
 
 ## 3. AC-27: 296 vs 262 — explained exactly, nothing silently skipped
 
-Got the dist/nj committed at `93cc2e9` (the commit whose own message states
+Got the dist/nj committed at `059a862` (the commit whose own message states
 "ac-27 296 checks, 189 fail") and ran `ac-27-claim.js` against it directly:
 **296 checks, 189 failures, reproduced exactly.** Instrumented `T.check` in
 my own copy of `test/lib/harness.js` (one line, logging every check
@@ -131,7 +131,7 @@ design (the same pattern `ac-25`/`ac-26` already use: "fail loudly if a
 precondition breaks, say nothing when it holds"). Against the pre-
 implementation dist, *every* fixture that depends on a working `claim`
 fails (`unknown command 'claim'`), and each failure is one recorded
-`fixture: …` check; against the real, working `908ce87` dist, those same
+`fixture: …` check; against the real, working `a6bd4e4` dist, those same
 fixtures succeed and emit **zero** checks. 296 − 34 = 262. I confirmed by
 diff that every one of the 262 substantive `C1`–`C10` assertions is
 present, word-for-word identical, in both logs — nothing beyond the
@@ -290,27 +290,27 @@ against the live binary myself).
 
 ---
 
-## D121 delta (`73ae6c3`, `5b9ffff`)
+## D121 delta (`ef8f888`, `920c1de`)
 
 Verifier, 2026-10-03. Worktrees `/tmp/verifier-d121-claim` (plain, for
 AC-25/27/run-all) and `/tmp/verifier-d121-nested/projects/nanojira`
 (nested under its own `runtime/darwin-arm64` symlink, for `gate.js`'s own
 AC-15 check and for a second, uncapped `baseline.js` run), both detached at
-`73ae6c3`; both removed before writing this. **VERDICT: ready to
+`ef8f888`; both removed before writing this. **VERDICT: ready to
 accept — C is accepted.** All three D121 follow-ups land exactly as
 specified; the printed total (2,934) matches mine; one correction to my own
 first report, found while re-verifying it (below).
 
 **(a) Help lines vs § 9, once more, in full.** `src/core/help.ts`'s `note`
 line now reads `nj note --id=TSK-009 "text" [--as=…]`, matching § 9's
-`nj note --id=TSK-009 "text" [--as=<name>] (§ 10)`. `5b9ffff`'s `new` line
+`nj note --id=TSK-009 "text" [--as=<name>] (§ 10)`. `920c1de`'s `new` line
 in § 9 now includes `[--status=…]`, matching `help.ts` (unchanged there)
 and `cmd-new.ts`'s `NEW_FIELDS`. Re-checked every line, not just these two:
 `new`, `set`, `note`, `show`, `list`, `tree`, `rm`, `archive`, `unarchive`,
 `claim`, `release`, `doctor` all match § 9's synopsis flag-for-flag.
 Nothing else drifted.
 
-**(b) `gate.js --step=73ae6c3 --frozen=c5-baseline`, and the printed
+**(b) `gate.js --step=ef8f888 --frozen=c5-baseline`, and the printed
 total.** AC-25 234/234, AC-27 262/262 (unchanged, exact). `run-all.js`:
 73/75 pass, 0 failed, 2 cannot-run (the same two expected gaps as every
 prior report: `ac-15`'s path-depth artifact in my own un-nested worktree,
@@ -329,7 +329,7 @@ gate  : exit 8, VERDICT RED: a suite or check failed
 ```
 
 **2934 — exact match to my own count**, and to the total I reported for
-`908ce87` (the fix changes *what* six of those calls' diffs contain, not
+`a6bd4e4` (the fix changes *what* six of those calls' diffs contain, not
 *how many* calls differ — see the correction below). `diff()`'s tally
 buckets by `argv[0]` (the command), not by my four named classes, so I
 re-ran my own classifier (now argv-robust against embedded newlines, a
@@ -347,12 +347,12 @@ committed) to get the exact composition:
 
 Zero calls fall outside these four — confirmed programmatically (the
 classifier's "unexplained" bucket is empty). **Verdict logic and exit
-codes: unchanged**, confirmed by diff (`git diff 908ce87 73ae6c3 --
+codes: unchanged**, confirmed by diff (`git diff a6bd4e4 ef8f888 --
 tools/` touches only `baseline.js`, 37+/17− lines, exactly the `diff()`/
 report-printing change described in the commit; `gate.js` itself is
 untouched) and by outcome (replay exit 8, gate exit 8, the same two named
 `RED VERDICTS` — `ac/ac-01-basic-run.js`, `ac/ac-25-note-author.js` — as
-before `73ae6c3`).
+before `ef8f888`).
 
 **Correction to my own first report.** Re-deriving the exact composition
 above surfaced two counting errors in `docs/verification/v3-1-c-claim.md`'s
@@ -377,7 +377,7 @@ reports since it came from the tool, not from summing my own class counts.
 Flagging it anyway because the Lead and Oracle are now citing "4 classes"
 by name (D121) and the per-class numbers should be right.
 
-**(c) § 12 Limits bullet and § 9 synopsis.** `5b9ffff`'s new § 12 bullet —
+**(c) § 12 Limits bullet and § 9 synopsis.** `920c1de`'s new § 12 bullet —
 "a backlog's very first claim landing while a `list`/`tree`/bare-`nj`/
 `show` is in progress... may report `_claim: null`... and may count one of
 them as ready that no longer is... claim exclusivity itself is
@@ -390,19 +390,19 @@ backlog bound. § 9's `nj new` synopsis now reads `[--status=…] [--priority=
 
 ---
 
-## c6-baseline audit (`92db73d`, `978c7a8`, D127)
+## c6-baseline audit (`304f86b`, `1c7a0a3`, D127)
 
 Verifier, 2026-10-04. Worktrees `/tmp/verifier-d127-claim` (plain) and
 `/tmp/verifier-d127-nested/projects/nanojira` (nested under its own
 `runtime/darwin-arm64` symlink, for `gate.js`'s own AC-15 check), both
-detached at `978c7a8`; both removed before writing this. **VERDICT:
+detached at `1c7a0a3`; both removed before writing this. **VERDICT:
 sound.** The instrument change is minimal and correctly scoped, the
 nondeterminism it tags is real and exactly as large as claimed, and the
 baseline recording is self-consistent.
 
-### (1) `92db73d` touches only `CONCURRENT_SUITES`, and the exclusion is exactly `ac-27-claim.js`, 436 calls
+### (1) `304f86b` touches only `CONCURRENT_SUITES`, and the exclusion is exactly `ac-27-claim.js`, 436 calls
 
-`git show 92db73d --stat`: one file, `tools/refactor-harness/baseline.js`,
+`git show 304f86b --stat`: one file, `tools/refactor-harness/baseline.js`,
 5 insertions, 0 deletions — the one line adding `'oracle:ac/ac-27-claim.js'`
 to the `CONCURRENT_SUITES` set plus a comment. `isConcurrentProbe()` does
 `CONCURRENT_SUITES.has(rec.label)` — exact `Set` membership, not a prefix
@@ -459,17 +459,17 @@ three C5 backlogs (claim, steal, release-steal) actually race; C1–C4,
 C6–C10 are confirmed deterministic across two independent runs, not just
 asserted to be.
 
-### (3) `c6-baseline` (`978c7a8`) is self-consistent
+### (3) `c6-baseline` (`1c7a0a3`) is self-consistent
 
-- **`dist/nj` sha256 matches `73ae6c3` exactly**: `37a7ece6…50431f` on both
-  sides (`git show 73ae6c3:dist/nj | shasum -a 256` vs the worktree's own
+- **`dist/nj` sha256 matches `ef8f888` exactly**: `37a7ece6…50431f` on both
+  sides (`git show ef8f888:dist/nj | shasum -a 256` vs the worktree's own
   `dist/nj`) — confirmed byte-identical, not just "said to be."
 - **6,313 calls**, confirmed directly from the decompressed corpus
   (`corpus.ndjson.gz`, 6,313 NDJSON lines).
-- **`gate.js --step=978c7a8 --frozen=c6-baseline`** (i.e. replaying the
+- **`gate.js --step=1c7a0a3 --frozen=c6-baseline`** (i.e. replaying the
   baseline against the exact commit it was recorded at — the
   self-consistency check the task's "`--step=HEAD`" phrasing meant at the
-  time `978c7a8` was `HEAD`, since `HEAD` has since moved on to v3.2 work):
+  time `1c7a0a3` was `HEAD`, since `HEAD` has since moved on to v3.2 work):
   **`BEHAVIOUR UNCHANGED — the recorded surface is identical`**, `replay:
   exit 0`, `oracle: passed 74, failed 0, cannot run 1 (1 expected)`,
   `gate: exit 0, replay unchanged, oracle green`. `baseline: 6313 calls …

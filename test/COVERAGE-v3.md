@@ -1,13 +1,13 @@
 # v3 coverage map
 
 Every normative sentence that spec v3 added or changed (`docs/SPECIFICATION.md`,
-89ecdf1 → HEAD: § 4, § 5, § 7, § 8, § 9, § 11, § 12, § 14, § 15 AC-17/18/21–24),
+3276eeb → HEAD: § 4, § 5, § 7, § 8, § 9, § 11, § 12, § 14, § 15 AC-17/18/21–24),
 plus every ruling bullet of DECISIONS 88–101, mapped to the check(s) that
 assert it. Owner: Oracle-B. Produced for the lead's coverage audit
 (2026-09-28).
 
 **How it was made.** Each check label here is quoted exactly as it ran: every
-suite of the committed `test/` was run against c3-baseline (`1e85263`) with a
+suite of the committed `test/` was run against c3-baseline (`a10b671`) with a
 preload that logs every `T.check` label, pass or fail (5 375 distinct
 labels). Clauses were then matched to labels by reading the test source around
 each label, not by keyword. A label that fails today is still coverage: the
@@ -33,7 +33,7 @@ suites are written before their step lands.
 | gaps, testable | 29 (closed so far: 29) |
 | gaps, not testable black-box | 5 |
 
-How the 29 gaps were closed: 22 by `edge/coverage-v3-gaps.js`, 1 in `ac/ac-24-legacy-migration.js`, 4 by the Oracle in its V3-3 batch (5f73e93, 90a0c7d), and 2 by the V3-4 test batch (`/tmp/nj-v34-batch.patch`), which is prepared but not yet committed; they are open until it lands.
+How the 29 gaps were closed: 22 by `edge/coverage-v3-gaps.js`, 1 in `ac/ac-24-legacy-migration.js`, 4 by the Oracle in its V3-3 batch (5e22caa, f847d11), and 2 by the V3-4 test batch (`/tmp/nj-v34-batch.patch`), which is prepared but not yet committed; they are open until it lands.
 
 **Not testable:** S03, B17, R13, A07, Z01 (reasons in the rows).
 
@@ -68,7 +68,7 @@ How the 29 gaps were closed: 22 by `edge/coverage-v3-gaps.js`, 1 in `ac/ac-24-le
 | S04 | never read by nj (a hand-edited STATUS.md changes no command's output) | COVERED (gap closed) | ac-23-status-overview.js: "C2 STATUS.md is never read as an element (§ 4)"; coverage-v3-gaps.js: "S04 a hand-edited STATUS.md changes no read command's output (human and --json)"; coverage-v3-gaps.js: "S04 reads leave the hand-edited STATUS.md alone" |
 | S05 | one `## <status> (<count>)` section per configured status, in config order, present even when empty | COVERED | ac-23-status-overview.js: "C1 after init, STATUS.md lists every configured status, empty (golden/status-init.md)"; ac-23-status-overview.js: "C0 renderer = golden status-init.md" |
 | S06 | unconfigured statuses in a last `## ? (<count>)` section, only when non-empty | COVERED | ac-23-status-overview.js: "C3 [type] STATUS.md (golden/status-group-type.md)" |
-| S07 | within a section: list order (priority desc, id asc); unknown priority sorts with default weight (D100 70) | COVERED (gap closed) | ac-23-status-overview.js: "C3 [type] STATUS.md (golden/status-group-type.md)"; ac-23-status-overview.js: "C2 after set --status=done (golden/status-sequence-done.md)"; ac-23-status-overview.js C3b (Oracle, 5f73e93); list order for an unknown priority: ac-14 (Oracle) |
+| S07 | within a section: list order (priority desc, id asc); unknown priority sorts with default weight (D100 70) | COVERED (gap closed) | ac-23-status-overview.js: "C3 [type] STATUS.md (golden/status-group-type.md)"; ac-23-status-overview.js: "C2 after set --status=done (golden/status-sequence-done.md)"; ac-23-status-overview.js C3b (Oracle, 5e22caa); list order for an unknown priority: ac-14 (Oracle) |
 | S08 | link = path relative to backlog with / separators; title as stored | COVERED | ac-23-status-overview.js: "C3 [hierarchy] STATUS.md (golden/status-group-hierarchy.md)"; ac-23-status-overview.js: "C3 [renamed] STATUS.md (golden/status-group-renamed.md)" |
 | S09 | archived elements not listed | COVERED | ac-23-status-overview.js: "C2 after archive — archived elements are left out (golden/status-sequence-archived.md)" |
 | S10 | every line ends \n, one empty line between sections, file ends in exactly one \n | COVERED | ac-23-status-overview.js: "C1 after init, STATUS.md lists every configured status, empty (golden/status-init.md)"; ac-23-status-overview.js: "C0 renderer = golden status-problems.md" |
@@ -81,9 +81,9 @@ How the 29 gaps were closed: 22 by `edge/coverage-v3-gaps.js`, 1 in `ac/ac-24-le
 | S17 | no title → `- [<ID>](<path>)` with no trailing space | COVERED | ac-23-status-overview.js: "C4 STATUS.md with problem elements (golden/status-problems.md)" |
 | S18 | both files of a duplicate_id listed, ordered by path after list order | COVERED | ac-23-status-overview.js: "C4 STATUS.md with problem elements (golden/status-problems.md)" |
 | S19 | statusFile:false: nothing written, doctor does not check, an existing file is left alone | COVERED | ac-23-status-overview.js: "C6 statusFile false: new creates no STATUS.md"; ac-23-status-overview.js: "C6 statusFile false: doctor does not check an existing, stale STATUS.md"; ac-23-status-overview.js: "C6 statusFile false: set leaves an existing STATUS.md alone" |
-| S20 | concurrency: after the AC-7 run no error finding; status_stale is the one tolerated warning (D100) | COVERED (gap closed) | concurrency.js: "doctor --json ok=true" (source); stress/concurrency.js: every finding after the AC-7 run is backlog:status_stale:warning (Oracle, 5f73e93) |
+| S20 | concurrency: after the AC-7 run no error finding; status_stale is the one tolerated warning (D100) | COVERED (gap closed) | concurrency.js: "doctor --json ok=true" (source); stress/concurrency.js: every finding after the AC-7 run is backlog:status_stale:warning (Oracle, 5e22caa) |
 | S21 | no overview check (and no STATUS.md write) while config:invalid holds (D100) | COVERED | ac-17-configuration.js: "--fix on an invalid config writes nothing (invalid statuses)"; exit-doctor-fix.js: "invalid config survives (error, exit 2) — findings after --fix are exactly § 7's remaining set" |
-| S22 | doctor --fix reports the regeneration in fixed[] only when the file was stale or missing (D100) | COVERED | exit-doctor-fix.js: one biconditional fixed[]/STATUS.md check per scenario (Oracle, 90a0c7d; D100 as amended in f97e2f7); Verifier finding T1 (docs/verification/v3-3-test-batch.md): that check derives its expectation from the observed bytes and has no failing leg for a nj that moves/renames a file but skips regenerating STATUS.md — closed by ac-23-status-overview.js C8 (Oracle, 28a83a4), which asserts the OUTCOME directly: after --fix, STATUS.md equals H.statusFor with the NEW paths, fixed[] ends with the STATUS.md entry, and the next doctor has no status_stale, for a step-2 rename, a step-3 move, and a layout change + --fix |
+| S22 | doctor --fix reports the regeneration in fixed[] only when the file was stale or missing (D100) | COVERED | exit-doctor-fix.js: one biconditional fixed[]/STATUS.md check per scenario (Oracle, f847d11; D100 as amended in e242c60); Verifier finding T1 (docs/verification/v3-3-test-batch.md): that check derives its expectation from the observed bytes and has no failing leg for a nj that moves/renames a file but skips regenerating STATUS.md — closed by ac-23-status-overview.js C8 (Oracle, fdb1f1e), which asserts the OUTCOME directly: after --fix, STATUS.md equals H.statusFor with the NEW paths, fixed[] ends with the STATUS.md entry, and the next doctor has no status_stale, for a step-2 rename, a step-3 move, and a layout change + --fix |
 
 ### § 4 init
 
@@ -167,7 +167,7 @@ How the 29 gaps were closed: 22 by `edge/coverage-v3-gaps.js`, 1 in `ac/ac-24-le
 | P04 | backlog:legacy_layout error, backlog-level | COVERED | ac-24-legacy-migration.js: "L2 doctor: backlog:legacy_layout (error) — and nothing but the missing STATUS.md"; ac-24-legacy-migration.js: "L2 backlog:legacy_layout is backlog-level: no element (§ 9)" |
 | P05 | backlog:unreadable_dir: a directory below the backlog cannot be listed, error, backlog-level (D93 F9) | COVERED | ac-22-layout.js: "B6 [unreadable directory] doctor reports exactly backlog:unreadable_dir"; ac-22-layout.js: "B6 [unreadable directory] the finding is backlog-level (no element)" |
 | P06 | backlog:status_stale warning, backlog-level | COVERED | ac-23-status-overview.js: "C5 [hand-edited] backlog:status_stale is backlog-level (no element)" |
-| P07 | ac-13's closed code table gains every v3 code (D100) | COVERED (gap closed) | ac-13-json-contract.js TABLE holds exactly the 34 codes of § 7 (Oracle, 5f73e93) |
+| P07 | ac-13's closed code table gains every v3 code (D100) | COVERED (gap closed) | ac-13-json-contract.js TABLE holds exactly the 34 codes of § 7 (Oracle, 5e22caa) |
 | P08 | type:folder for an undeterminable type stays in every group (D92 minor) | COVERED | ac-22-layout.js: "B6 [flat, undeterminable type] the file is read and carries type:folder"; ac-22-layout.js: "B6 [hierarchy, undeterminable type] the file is read and carries type:folder" |
 
 ### § 8 identifiers

@@ -1,8 +1,8 @@
-# Harness audit — `a21f195` (D127/D138 follow-up: per-backlog replay exclusion)
+# Harness audit — `aee6539` (D127/D138 follow-up: per-backlog replay exclusion)
 
 Verifier, 2026-10-04. Independent audit of the instrument change itself
-(not a feature), assigned by the Lead. Work in `/tmp/verifier-a21f195`
-(detached worktree at `a21f195`). Removed before writing this. Read:
+(not a feature), assigned by the Lead. Work in `/tmp/verifier-aee6539`
+(detached worktree at `aee6539`). Removed before writing this. Read:
 `tools/refactor-harness/{baseline.js, nj-shim, lib/record.js}`'s full
 diff, both corpora decompressed and diffed directly, `gate.js` run twice.
 
@@ -17,8 +17,8 @@ dropped by accident. The re-recorded corpus is byte-identical to c6's
 apart from `backlogLabel` and the two expected nondeterministic windows.
 Gate stability: **gate.js always reads the harness paired with whichever
 commit it runs from** (never a stale/mismatched pairing) — but because
-`c6-baseline` (978c7a8) predates batch writes and everything since, gating
-`a21f195` against it now surfaces 45 real, previously-hidden differing
+`c6-baseline` (1c7a0a3) predates batch writes and everything since, gating
+`aee6539` against it now surfaces 45 real, previously-hidden differing
 calls, confirmed identical across two independent runs (fully
 deterministic, not flaky).
 
@@ -76,7 +76,7 @@ from the deepest upward, returning the first one matching `/^nj-(.+)-
 
 ## 2. The re-recorded corpus: diffed against c6's directly
 
-Decompressed both `corpus.ndjson.gz` files (c6-baseline's and a21f195's,
+Decompressed both `corpus.ndjson.gz` files (c6-baseline's and aee6539's,
 6313 records each) and diffed every field of every record, excluding
 `backlogLabel` (new) and `cwdHash` (expected to differ record-for-record
 — it's `sha256(cwd)`, and the two recordings used different mkdtemp
@@ -97,7 +97,7 @@ per-run ordinal rather than comparing it directly).
   content hash) is **identical**. `header.json`'s own note says exactly
   this: *"Comparison key excludes per-file raw sha; nsha (normalised
   content) is normative."* Confirmed this is pre-existing, recording-
-  session-specific raw-byte noise (not something `a21f195` introduced),
+  session-specific raw-byte noise (not something `aee6539` introduced),
   not a real content difference.
 - **Nothing else differs anywhere** in all 6313 records, field by field,
   beyond `backlogLabel`, `cwdHash`, and the two items above. The
@@ -105,11 +105,11 @@ per-run ordinal rather than comparing it directly).
 - `njSha256` (`37a7ece6...`) and `testDigest` (`67731e53...`) are
   identical between the two `header.json`s — confirmed by design, not
   coincidence: the commit message states the re-recording was done "in a
-  throwaway worktree at that same commit" (978c7a8), i.e. against the
+  throwaway worktree at that same commit" (1c7a0a3), i.e. against the
   *same* pinned old `dist/nj` and the *same* pinned old `test/`, not
-  against `a21f195`'s own (much later) `test/`/`dist/nj`. `a21f195`
+  against `aee6539`'s own (much later) `test/`/`dist/nj`. `aee6539`
   itself touches none of `src/`/`dist/nj`/`test/` — confirmed via `git
-  show a21f195 --stat` (5 files, all under `tools/refactor-harness/`).
+  show aee6539 --stat` (5 files, all under `tools/refactor-harness/`).
 
 ## 3. Gate stability — the central question
 
@@ -123,21 +123,21 @@ that revision's harness+corpus pair). **`--frozen=<tag>` only supplies
 loaded. So: **there is no scenario, through gate.js's normal operation,
 where new baseline.js code pairs with the old (pre-backlogLabel) corpus,
 or vice versa** — harness code and its corpus are always copied as one
-unit. Running `gate.js` from any commit at or after `a21f195` always uses
+unit. Running `gate.js` from any commit at or after `aee6539` always uses
 the new corpus and the new, narrower exclusion; running it from before
-`a21f195` (or with `--harness=<a pre-a21f195 rev>`) always uses the old
+`aee6539` (or with `--harness=<a pre-aee6539 rev>`) always uses the old
 corpus and the old, whole-suite exclusion — each internally consistent,
 never mixed.
 
-**What actually happened when I ran `gate.js --step=a21f195
+**What actually happened when I ran `gate.js --step=aee6539
 --frozen=c6-baseline` (twice, full output below)**: the replay's "now"
-side runs `a21f195`'s own `dist/nj` (sha `8e338c0b...` — confirmed
-identical to `aa4a4df`'s and `37f024e`'s; `a21f195` touches no source) against
+side runs `aee6539`'s own `dist/nj` (sha `8e338c0b...` — confirmed
+identical to `415e43d`'s and `5e0d8e6`'s; `aee6539` touches no source) against
 `c6-baseline`'s frozen `test/`. The corpus's "was" side was recorded with
-`978c7a8`'s **old** `dist/nj` (sha `37a7ece6...`, confirmed via `git show
-978c7a8:dist/nj | shasum`) — a materially different binary: `978c7a8`
-predates batch writes (`05e8bfa`) entirely (confirmed: `test/ac/ac-31-
-batch.js` does not exist at `978c7a8`; 66 commits separate the two).
+`1c7a0a3`'s **old** `dist/nj` (sha `37a7ece6...`, confirmed via `git show
+1c7a0a3:dist/nj | shasum`) — a materially different binary: `1c7a0a3`
+predates batch writes (`245bf6f`) entirely (confirmed: `test/ac/ac-31-
+batch.js` does not exist at `1c7a0a3`; 66 commits separate the two).
 
 Both runs, independently, reported **identically**:
 ```
@@ -150,10 +150,10 @@ BEHAVIOUR CHANGED — 45 differing call(s): claim 37, help 4, --help 2, release 
 failed — `ac-24-legacy-migration.js` and `edge/hardening-njrc-swap.js`,
 both **pre-existing**, unrelated to this audit's scope: traced to the
 in-progress V3.2-E njrc-swap/stray-`.ids/`-cleanup work landed on `main`
-*after* `a21f195` chronologically on the same day — commits `625e083`
-through `5f0e0c1`, several explicitly titled "revert" — nothing to do
+*after* `aee6539` chronologically on the same day — commits `f9e1e6b`
+through `e5de3f2`, several explicitly titled "revert" — nothing to do
 with the harness change under review here. Confirmed these are at `main`
-regardless of `a21f195`, by running `ac-24-legacy-migration.js` directly.)
+regardless of `aee6539`, by running `ac-24-legacy-migration.js` directly.)
 
 **The 623-excluded count is exactly what I computed independently in § 1
 — confirmed by the real tool, not just my own script.** The 45 differing
@@ -161,18 +161,18 @@ calls are **fully explained and exactly reproduced across two independent
 runs — deterministic, not flaky**: `help`/`--help` are the already-
 accepted doc-text growth (6 calls, byte-confirmed in my D137 delta
 report); **`claim` (37) and `release` (2) are newly, correctly surfaced**
-by `a21f195`'s own fix — these are plain, non-C5, deterministic claim/
+by `aee6539`'s own fix — these are plain, non-C5, deterministic claim/
 release calls whose JSON key order changed (`{id, ok, ...}` now, `{ok,
 id, ...}` before — confirmed in my own V3.2-D diff review: `cmd-claim.ts`
 and `cmd-release.ts`'s single-ID JSON construction became
 `Object.assign({id: el.id}, single)`, putting `id` first). **This
-divergence from `c6-baseline` genuinely existed since `05e8bfa`/`aa4a4df`,
-but was invisible before `a21f195`**, because the old whole-suite
+divergence from `c6-baseline` genuinely existed since `245bf6f`/`415e43d`,
+but was invisible before `aee6539`**, because the old whole-suite
 `CONCURRENT_SUITES` exclusion dropped *all* 436 of `ac-27-claim.js`'s
 calls (including these 37+2 ordinary, deterministic ones) from the strict
-comparison. `a21f195` doing its job correctly (recovering 324 calls into
+comparison. `aee6539` doing its job correctly (recovering 324 calls into
 the strict compare) is *why* this is visible now — not a defect in
-`a21f195`, but exactly the kind of accumulated drift a stale frozen
+`aee6539`, but exactly the kind of accumulated drift a stale frozen
 baseline will always eventually surface once the exclusion is tightened.
 
 **So: does `gate.js` ever read the old corpus when it shouldn't, making
@@ -188,9 +188,9 @@ as a "nothing unexpected happened" checkpoint.
 
 ## Recommendation: yes, a new tag is needed
 
-**Cut a new frozen tag (e.g. `c6b-baseline`) at or after `a21f195`**,
+**Cut a new frozen tag (e.g. `c6b-baseline`) at or after `aee6539`**,
 with a corpus re-recorded against the *current* `dist/nj` and `test/` (not
-978c7a8's), before gating any further v3.2 work. Reasons:
+1c7a0a3's), before gating any further v3.2 work. Reasons:
 
 1. `c6-baseline`'s own corpus is pinned to a binary from before batch
    writes; every gate run against it will keep reporting the
@@ -198,11 +198,11 @@ with a corpus re-recorded against the *current* `dist/nj` and `test/` (not
    forcing whoever reads gate output to re-litigate already-accepted
    history on every single run — the opposite of what a frozen checkpoint
    is for.
-2. `a21f195`'s own fix (recovering 324 calls into the strict comparison)
+2. `aee6539`'s own fix (recovering 324 calls into the strict comparison)
    only pays off going forward if the *next* frozen point already has
    those 324 calls correctly in scope from the start, rather than
    re-discovering the same backlog of already-known diffs every time.
-3. Not urgent for `a21f195` itself (which is harness-only and doesn't
+3. Not urgent for `aee6539` itself (which is harness-only and doesn't
    need its own gate in the normal sense), but blocking for the *next*
    real feature step: gating it against `c6-baseline` would mix that
    step's own, new diffs in with these 45 already-known, already-

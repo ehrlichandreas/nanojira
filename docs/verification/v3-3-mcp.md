@@ -1,12 +1,12 @@
-# V3.3 verification — `nj-mcp` (`8995a5d`, `e471974`, `9ccb046`), § 17 / AC-32..38
+# V3.3 verification — `nj-mcp` (`edf4032`, `f5c0e30`, `3ed6d99`), § 17 / AC-32..38
 
 Verifier, 2026-10-04. Independent verification, assigned by the Lead.
-Work in `/tmp/verifier-v33-mcp` (detached worktree at `9ccb046`),
+Work in `/tmp/verifier-v33-mcp` (detached worktree at `3ed6d99`),
 `/tmp/verifier-v33-nested/projects/nanojira` (for `gate.js`), `/tmp/
 verifier-v33-probe` (scratch backlog + a small hand-rolled JSON-RPC
 stdio probe client I wrote for this task, never committed), `/tmp/
 verifier-v33-badsibling` (one crash-scenario probe). All removed before
-writing this. Read: SPECIFICATION.md § 17 (as of `05485ae`) and § 3's
+writing this. Read: SPECIFICATION.md § 17 (as of `741e897`) and § 3's
 update in full, D144–D147 in full, the three commits' full diffs,
 `src/core/flag-table.ts`, `src/nj-mcp.ts` in full. Checked protocol
 claims against the MCP spec revision `2026-07-28` I already fetched for
@@ -14,7 +14,7 @@ the proposal review.
 
 **VERDICT: accept.** Every one of the seven check areas held up under
 live probing, not just reading. `gate.js` reports `BEHAVIOUR UNCHANGED`
-at both `8995a5d` and `9ccb046` against `c7-baseline`; all three MCP
+at both `edf4032` and `3ed6d99` against `c7-baseline`; all three MCP
 suites pass at their stated counts (36, 7, 11) once I installed the
 SDK devDependency myself (network was available in this environment);
 every protocol, confinement, concurrency and safety probe I built
@@ -25,15 +25,15 @@ that block promotion.
 
 ## 1. AC-36 — the flag-table refactor leaves the CLI byte-identical
 
-**`gate.js --step=8995a5d --frozen=c7-baseline`**: `replay: exit 0`,
+**`gate.js --step=edf4032 --frozen=c7-baseline`**: `replay: exit 0`,
 `BEHAVIOUR UNCHANGED — the recorded surface is identical` (6463 of 7086
 calls compared, 623 excluded as the usual concurrency windows). `gate`
 itself exits 4 ("coverage gap") only because the three MCP suites
 correctly report `CANNOT RUN` at this commit — `dist/nj-mcp` doesn't
-exist yet (`e471974` hasn't landed) — exactly the "by design" case the
+exist yet (`f5c0e30` hasn't landed) — exactly the "by design" case the
 task described, confirmed live, not assumed.
 
-**`gate.js --step=9ccb046 --frozen=c7-baseline`**: `replay: exit 0`,
+**`gate.js --step=3ed6d99 --frozen=c7-baseline`**: `replay: exit 0`,
 same `BEHAVIOUR UNCHANGED`. Oracle run-all: **`ac-32-mcp.js` 36/36,
 `ac-38-mcp-no-dependencies.js` 11/11**. `ac-32-mcp-sdk.js` reported
 `CANNOT RUN` *inside the gate's own throwaway worktree* (no network
