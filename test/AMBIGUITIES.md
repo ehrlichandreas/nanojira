@@ -981,6 +981,35 @@ set in `ac/ac-03` (#9). 45–46 are about how prose is phrased, which only the
 corpus can hold without inventing a rule. A ruling on 47 is a one-line edit per
 scenario; a ruling on 45 or 46 would add assertions, not change them.
 
+## 48. Stdout EPIPE from an early-closed reader (TSK-018)
+
+**Recorded, not derived.** The spec says nothing about a reader that closes
+its end of stdout before `nj` has finished writing — `nj list | head -1` on a
+backlog whose output exceeds one pipe buffer is the ordinary case that
+triggers it. Node's default behaviour for an unhandled `'error'` event on a
+stream is to crash the process with a full stack trace; before this decision,
+that default was what `nj` did too, since every write happens inside `out()`
+(`lib/output.ts`) with nothing listening for the stream's `'error'` event.
+
+**Decision (Lead):** EPIPE on stdout is silent — exit 0, nothing on stderr, no
+stack trace. The command already did what it was asked; only the reader
+stopped listening, and that is not a failure of `nj`'s. Any OTHER stdout write
+error is a real fault and must still crash visibly, exactly as an unhandled
+error normally would — the decision narrows the exception to EPIPE
+specifically, not to "any stdout write error", which is why the fix re-throws
+every other code rather than swallowing the whole class.
+
+**Why this needed a decision rather than a derivation:** most Unix tools
+(`grep`, `cat`, `ls` piped into `head`) exit cleanly under the same condition,
+via `SIGPIPE` rather than a caught `EPIPE` — Node does not deliver `SIGPIPE`
+to the process by default, so the silent-exit behaviour every other tool gets
+for free has to be built by hand here. An agent scripting `nj` through a
+pipeline should not see a spurious crash for behaviour it deliberately caused
+by not reading the rest of the output.
+
+*Affects:* `lib/output.ts`'s `process.stdout` error handler (TSK-018),
+`edge/stdout-epipe.js`.
+
 
 ## Not an ambiguity, recorded because it looks like one
 

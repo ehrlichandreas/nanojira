@@ -1,10 +1,10 @@
 {
-  "njSha256": "c866d2b29b8f0a14112009cba481f7ac06fa77ebb367ef8d76f4707b2c5350c0",
-  "njPath": "nj",
-  "node": "v24.21.0",
+  "njSha256": "e445981e4d25fbea965882d29d63b625ac2447913e623e78fb9bf9c9d8f9a838",
+  "njPath": "../../../../../../../tmp/c2-dist-nj",
+  "node": "v26.7.0",
   "platform": "darwin-arm64",
-  "recordedAt": "2026-09-23T03:14:42.444Z",
-  "calls": 3452,
+  "recordedAt": "2026-09-23T09:27:22.228Z",
+  "calls": 3454,
   "parts": [
     {
       "name": "fixtures",
@@ -13,8 +13,8 @@
     },
     {
       "name": "oracle",
-      "calls": 1339,
-      "detail": "passed 62/62, failed 0, cannot run 0"
+      "calls": 1341,
+      "detail": "passed 64/64, failed 0, cannot run 0"
     },
     {
       "name": "scratch",
@@ -45,6 +45,7 @@
     "ac/ac-20-section-writes.js",
     "fault/det-fence-heading.js",
     "fault/det-id-retry.js",
+    "fault/fault-hook-json.js",
     "fault/nj-fault-before-compare.js",
     "fault/nj-fault-points.js",
     "fault/nj-now-invalid.js",
@@ -82,11 +83,12 @@
     "edge/state-done-on-done.js",
     "edge/state-note-appears-once.js",
     "edge/state-tombstone-burn.js",
+    "edge/stdout-epipe.js",
     "edge/tombstone-partial-loss.js",
     "edge/unreadable-stub-refusals.js",
     "edge/write-encoding.js"
   ],
-  "testDigest": "28d4dbdbf420a7d332858c21230040983bead62322635cc8fd2d1f4a81c7190b",
+  "testDigest": "58c2f01934ea37f9ca39dd3243cc9cd0a2070395b74459f217823687c92f93d0",
   "testDigestScope": [
     "test/ac/",
     "test/edge/",
@@ -99,8 +101,9 @@
   "cannotRun": [],
   "notRecorded": [
     "fault/det-id-retry.js (preload-instrumented: verdict taken directly, calls not in the corpus)",
+    "edge/stdout-epipe.js (timing-dependent: verdict taken directly, calls not in the corpus)",
     "verify.js (white-box probe: reads nj's source, verdict taken directly, calls not in the corpus)"
   ],
   "note": "Comparison key excludes per-file raw sha; nsha (normalised content) is normative.",
-  "corpusSha256": "ca6b1f90f670294b5fb620d032be9cad2a311dd13dc2dc0b1446a37d8490f026"
+  "corpusSha256": "c62f1305cfdc056dea3085a10c78e11fa539f0518a562355a37c08f1bc961a11"
 }

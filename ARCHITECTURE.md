@@ -33,6 +33,13 @@ live during the `import`/`export` conversion — `dist/nj` crashed with
 `NEW_FIELDS` undefined while `tsc` reported zero errors). Keeping every real
 declaration in `types.ts` sidesteps the whole class of bug.
 
+Every `lib/*.ts` module otherwise only *defines* — functions, constants,
+nothing runs until a command calls into it — except `output.ts` (TSK-018,
+`5ea3701`): requiring it registers a `process.stdout.on('error', …)` handler
+immediately, since it is the one module every command's output already flows
+through and the handler has to be in place before the first line is printed
+(§ 4's EPIPE decision).
+
 | Command | What it checks |
 |---|---|
 | `npm run typecheck` (`tools/prep-typecheck.js && tsc --noEmit`) | `strict: true` + `erasableSyntaxOnly` over all of `lib/*.ts` plus a throwaway shadow copy of `nj` (tsc cannot resolve an extensionless file directly) |
@@ -57,7 +64,7 @@ would actually reach for, not every name; "imported by" is exact.
 | `help.ts` | The `nj help` text, nothing else | `HELP` | `nj` |
 | `derive.ts` | Read-only views over a loaded `Element`: sort order, readiness, JSON entry shape | `elementProblems`, `isReady`, `compareElements`, `entryJson`, `countsOf` | `context`, `output`, 7×`cmd-*` |
 | `parse.ts` | Frontmatter grammar and body-section editing, no `Element` knowledge | `parseFile`, `serialize`, `syncH1`, `applySections` | `args`, `load`, `store`, 3×`cmd-*` |
-| `output.ts` | The `Fail` error type, `--json` state, all printing | `fail`, `hardExit`, `out`, `writeFeedback`, `emitWriteResult`, `emitFailure` | 16 modules: `args`, `config`, `context`, `nj`, `store`, every `cmd-*` |
+| `output.ts` | The `Fail` error type, `--json` state, all printing — and the one `lib/*.ts` module with a real load-time side effect (below) | `fail`, `hardExit`, `out`, `writeFeedback`, `emitWriteResult`, `emitFailure` | 16 modules: `args`, `config`, `context`, `nj`, `store`, every `cmd-*` |
 | `args.ts` | CLI flag parsing and validation, no filesystem access | `parseArgs`, `checkFlags`, `flagString`, `readSectionFlags` | `context`, `nj`, every `cmd-*` |
 | `config.ts` | `.nanojira.json` load/validate, backlog discovery | `loadConfig`, `findBacklog`, `listMd` | `context`, `load` |
 | `store.ts` | Clock, tombstones, atomic file writes, the write-time compare guard | `nowIso`, `atomicWrite`, `compareGuard`, `guardedWrite`, `renderElement` | `load`, 5×`cmd-*` |
@@ -102,6 +109,7 @@ printed feedback reflects the post-write graph, not the pre-write one.
 | `deriveGraph`'s ten passes may run in any order **only while** (1) no pass reads another's `problems`, (2) no pass writes any field but `problems`, (3) no mark pass reads `byId`/`children` | **Corpus** convention, not mechanically enforced — a comment at `deriveGraph`, checked by a differential mutant | `load.ts` `deriveGraph`; DECISIONS 77 |
 | `assignee` stays `''` (never normalised to `null` like `parent`) — `cmdSet`'s `--assignee=` delete depends on the distinction | **Oracle** (`cmd-set.ts` behaviour is spec-pinned) — nothing mechanical stops someone from "cleaning up" the asymmetry | `load.ts` `deriveOptionals` |
 | The `childMap`/`ctx.kids` memo across `deriveGraph`'s calls is harmless **only** while no verb moves parentage | **None mechanical** — a property of round one (no command takes `--parent`), not a guarantee the type system or a fixture enforces; the trigger for a fixture is the first verb that moves an element | `load.ts` `childMap`/`descendants`; DECISIONS 81 |
+| EPIPE on stdout (reader closed early, e.g. `\| head`) exits 0 silently; any other stdout write error still crashes visibly | **Code**, one place: `output.ts`'s `process.stdout` error handler re-throws everything except `EPIPE` | `output.ts` (registered at load time); AMBIGUITIES.md 48 |
 
 DECISIONS 77 and 81 are cited, not repeated: both record a case where the
 *rule* was right and an accompanying *reason* for it was wrong, found only by

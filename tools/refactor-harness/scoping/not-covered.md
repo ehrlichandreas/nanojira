@@ -9,7 +9,7 @@ beschrieben waren dort nur sechs davon. Deshalb steht sie jetzt hier.
 |---|---|---|---|
 | NC1 | — | nicht rekonstruierbar | Nur in der Sammelzeile „NC1, NC2, NC7, NC9, NC10: vom Refactor nicht berührt" (`scoping-implementer.md:157`, `scoping-v2.md:55`), nirgends einzeln beschrieben. |
 | NC2 | — | nicht rekonstruierbar | Dito. |
-| NC3 | Fault-Hook-Codes bei `--json` nicht als exakter String gepinnt | wird geschlossen | Heute pinnt `failure-vocabulary.js` nur `fault:after-tmp-write`. Eine Probe für alle drei Hooks (`after-tmp-write`, `before-rename`, `before-compare`) ist gegen `nj` und `dist/nj` grün vorbereitet und landet im Testblock mit TSK-018. Diese Zeile wird danach auf „geschlossen" gesetzt. |
+| NC3 | Fault-Hook-Codes bei `--json` nicht als exakter String gepinnt | geschlossen | `test/fault/fault-hook-json.js`: `fault:before-rename` und `fault:before-compare` jetzt als exakte `--json`-Strings gepinnt (`fault:after-tmp-write` war bereits in `edge/failure-vocabulary.js` gepinnt) — alle drei Hooks damit string-gepinnt. |
 | NC4 | `doctor --fix`-Exit-Codes nur `[0,2]`-toleriert | geschlossen | SUB-002: alle 8 Stellen auf genau einen Wert; `T.exit` wirft bei Array-Form (`test/lib/harness.js`). |
 | NC5 | `archive` nennt keine `dependents` — nie mit Nicht-Leer-Fall geprüft | geschlossen | `test/edge/archive-hint-dependents.js`: `_problems`-Union real befüllt, kein `dependents`-Schlüssel. |
 | NC6 | `rm`/`archive`-Byte-Identität nur per Codelesen | geschlossen | `test/edge/archive-rm-byte-identity.js` (ganzer `backlog/`-Baum vor/nach), dazu der Korpus-Replay. |
@@ -19,7 +19,7 @@ beschrieben waren dort nur sechs davon. Deshalb steht sie jetzt hier.
 | NC10a | `--tag`/`--assignee`: Flag-Tippfehler unvalidiert | geschlossen | `test/edge/norm-tag-assignee-typos.js` (§ 9: unbekannte Flags → `unknown_field`). |
 | NC10b | `--tag`/`--assignee`: Unicode-Werte byte-exakt | geschlossen | `test/ac/ac-16-language.js` (`Jörg`, `hören,日本語,🎉`, Datei und JSON). |
 
-**Stand:** 4 geschlossen (NC4–6, NC10 in beiden Lesarten), 1 im nächsten Testblock (NC3),
+**Stand:** 5 geschlossen (NC3–6, NC10 in beiden Lesarten),
 1 offen und getrackt (NC8), 4 nicht rekonstruierbar (NC1/2/7/9).
 
 ## Weitere bekannte Grenzen, nicht Teil von NC1–10
