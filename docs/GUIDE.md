@@ -574,8 +574,10 @@ changed hands, not to whom it previously belonged.
 - **Stale claims.** `claims.staleAfterHours` in `.nanojira/config.json`
   (default **24**, hours; `0` disables it) turns into an advisory
   `claim:stale` warning on every read once a claim is older than that.
-  Nothing is ever auto-released or auto-stolen — it's a signal for a human
-  or agent to act on with `--steal`, never something `nj` acts on itself.
+  Nothing is ever auto-released or auto-stolen on a plain read — it's a
+  signal for a human or agent to act on with `--steal`, except for the
+  bulk cleanup `doctor --fix` performs below, which is explicit, not
+  automatic on every read.
 - **History.** These claim events feed into `nj log` (§ 15, below).
 - **A write that reaches the last configured status releases the claim
   on its own** — `nj set --status=done`, `nj claim --status=done`, `nj
@@ -593,6 +595,24 @@ changed hands, not to whom it previously belonged.
   absent from the result when nothing was claimed. A write refused for
   another reason (`refused:children_open` without
   `--allow-open-children`, for one) releases nothing; the claim survives.
+- **Old claims on already-`done` items** — left over from before the
+  above existed, or from any other path that reached the final status
+  without going through `nj` — are cleaned up in bulk with `nj doctor
+  --fix`, live or archived, whoever holds them. This replaces posing as
+  each holder in turn with `release --as=<holder>`:
+
+  ```sh
+  $ nj doctor
+  backlog/: 2 entries, 0 errors, 1 warning
+
+  WARNING TSK-001: claimed by 'alice' since 2026-01-01T00:00:00Z, past the
+  24h staleness threshold
+  $ nj doctor --fix
+  FIXED   TSK-001: released alice
+  ```
+
+  Claims on anything not yet in the final status are left alone, stale or
+  not — see § 10 for the rest of `--fix`.
 
 ## 14. `nj next`
 

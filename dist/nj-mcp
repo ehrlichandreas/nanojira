@@ -89,7 +89,7 @@ var os = __toESM(require("os"), 1);
 var path = __toESM(require("path"), 1);
 
 // src/core/version.ts
-var VERSION = "3.9.0";
+var VERSION = "3.10.0";
 
 // src/core/config.ts
 var SOURCE_CODE = { flag: "invalid_backlog_flag", env: "invalid_backlog_env", njrc: "invalid_backlog_njrc" };

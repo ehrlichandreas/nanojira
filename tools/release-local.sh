@@ -26,13 +26,15 @@ done
 git show "$TAG:docs/CHANGES.md" > "$DIR/$VER.tmp/CHANGES.md" 2>/dev/null || rm -f "$DIR/$VER.tmp/CHANGES.md"
 mv "$DIR/$VER.tmp" "$DIR/$VER"
 
-# current/ is a real directory of wrappers into ../<version>/. A symlink left
-# by an older release is removed first (only the link, never its target).
+# current/ is a real directory. current/nj and current/nj-mcp are copies of
+# the bundles themselves, not wrappers: callers run them with their own node
+# (`node .../current/nj`, D159), and this directory has no package.json above
+# it. The .cmd files call into ../<version>/ (DECISIONS 181). A symlink left by
+# an older release is removed first (only the link, never its target).
 [ ! -L "$DIR/current" ] || rm "$DIR/current"
 mkdir -p "$DIR/current"
 for b in nj nj-mcp; do
-  put "$DIR/current/$b" "#!/bin/sh
-exec \"\$(dirname \"\$0\")/../$VER/$b\" \"\$@\""
+  cp "$DIR/$VER/$b.cjs" "$DIR/current/$b.tmp" && chmod 755 "$DIR/current/$b.tmp" && mv -f "$DIR/current/$b.tmp" "$DIR/current/$b"
   put "$DIR/current/$b.cmd" "@\"%~dp0..\\$VER\\$b.cmd\" %*"
 done
 echo "installed $TAG as $DIR/$VER; current -> $VER"
