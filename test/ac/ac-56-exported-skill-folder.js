@@ -28,6 +28,13 @@
  * generate bin/* or check SKILL.md -- so every leg exercising those is red
  * for that reason. The GPG setup checks, and the legs that only need the
  * already-built dist/*.mjs, are independent and expected to pass today.
+ *
+ * v3.12.2 (DECISIONS 193): the export also copies LICENSE, since consumers
+ * vendor the exported folder and need the licence text with it. W1 checks
+ * it exists at the export root and is byte-identical to the repo's own
+ * LICENSE; W14 checks it comes from the TAG's tree specifically, like
+ * every other shipped file. Expected red until export-skill.mts is
+ * extended to copy it.
  */
 const fs = require('fs');
 const path = require('path');
@@ -48,6 +55,7 @@ const REAL_BIN_NJ_MCP = path.join(ROOT, 'bin', 'nj-mcp');
 const REAL_BIN_NJ_CMD = path.join(ROOT, 'bin', 'nj.cmd');
 const REAL_BIN_NJ_MCP_CMD = path.join(ROOT, 'bin', 'nj-mcp.cmd');
 const REAL_SKILL_MD = path.join(ROOT, 'SKILL.md');
+const REAL_LICENSE = path.join(ROOT, 'LICENSE');
 const REAL_PKG_VERSION = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version;
 const REAL_NODE_MODULES = path.join(ROOT, 'node_modules');
 
@@ -125,6 +133,8 @@ function buildFixtureRepo(label) {
     fs.copyFileSync(REAL_BIN_NJ_MCP_CMD, path.join(dir, 'bin', 'nj-mcp.cmd'));
   }
   fs.copyFileSync(REAL_SKILL_MD, path.join(dir, 'SKILL.md'));
+  T.check('fixture: this repo\'s own LICENSE exists', fs.existsSync(REAL_LICENSE), REAL_LICENSE);
+  if (fs.existsSync(REAL_LICENSE)) fs.copyFileSync(REAL_LICENSE, path.join(dir, 'LICENSE'));
   fs.writeFileSync(path.join(dir, 'package.json'),
     JSON.stringify({ name: 'nanojira-fixture', version: REAL_PKG_VERSION }, null, 2) + '\n');
 
@@ -347,13 +357,22 @@ const w1 = runExport([GOOD_TAG, DEST], REPO);
 T.check('W1 export exits 0', w1.status === 0, 'status=' + w1.status + ' stderr=' + J(w1.stderr));
 T.check('W1 (optional) export-skill.mts stderr has no MODULE_TYPELESS_PACKAGE_JSON warning',
   !/MODULE_TYPELESS/.test(w1.stderr), J(w1.stderr));
-for (const rel of ['SKILL.md', 'bin/nj', 'bin/nj-mcp', 'bin/nj.cmd', 'bin/nj-mcp.cmd', 'dist/nj.mjs', 'dist/nj-mcp.mjs']) {
+for (const rel of ['SKILL.md', 'LICENSE', 'bin/nj', 'bin/nj-mcp', 'bin/nj.cmd', 'bin/nj-mcp.cmd', 'dist/nj.mjs', 'dist/nj-mcp.mjs']) {
   T.check('W1 ' + rel + ' exists', fs.existsSync(path.join(DEST, rel)), DEST);
 }
 T.check('W1 there is no VERSION file in the export', !fs.existsSync(path.join(DEST, 'VERSION')), DEST);
 T.check('W1 the export has exactly these entries at its root (nothing from src/test/tools/package.json)',
-  fs.existsSync(DEST) && JSON.stringify(fs.readdirSync(DEST).sort()) === JSON.stringify(['SKILL.md', 'bin', 'dist']),
+  fs.existsSync(DEST) && JSON.stringify(fs.readdirSync(DEST).sort()) === JSON.stringify(['LICENSE', 'SKILL.md', 'bin', 'dist']),
   fs.existsSync(DEST) ? J(fs.readdirSync(DEST).sort()) : 'DEST does not exist');
+{
+  /* D193: consumers vendor the exported folder, so the licence text must
+   * travel with it -- byte-identical to the repo's own LICENSE, not a
+   * placeholder or a re-wrapped copy. */
+  const exportedLicense = fs.existsSync(path.join(DEST, 'LICENSE')) ? fs.readFileSync(path.join(DEST, 'LICENSE')) : null;
+  const realLicense = fs.existsSync(REAL_LICENSE) ? fs.readFileSync(REAL_LICENSE) : null;
+  T.check('W1 exported LICENSE is byte-identical to this repo\'s own LICENSE',
+    exportedLicense !== null && realLicense !== null && exportedLicense.equals(realLicense), DEST);
+}
 {
   const links = noSymlinksUnder(DEST);
   T.check('W1 no symlinks anywhere under the exported folder', links !== null && links.length === 0, links === null ? 'dest does not exist' : J(links));
@@ -516,11 +535,13 @@ T.check('W1 the export has exactly these entries at its root (nothing from src/t
   const tagSkillMd = showBuf(GOOD_TAG + ':SKILL.md');
   const tagDistNj = showBuf(GOOD_TAG + ':dist/nj.mjs');
   const tagBinNj = showBuf(GOOD_TAG + ':bin/nj');
+  const tagLicense = showBuf(GOOD_TAG + ':LICENSE');
   const tagPkgVersion = JSON.parse(showBuf(GOOD_TAG + ':package.json').toString('utf8')).version;
 
   fs.appendFileSync(path.join(REPO, 'dist', 'nj.mjs'), '\n// post-tag tamper, must never be exported\n');
   fs.appendFileSync(path.join(REPO, 'SKILL.md'), '\npost-tag tamper, must never be exported\n');
   if (fs.existsSync(path.join(REPO, 'bin', 'nj'))) fs.appendFileSync(path.join(REPO, 'bin', 'nj'), '\n# post-tag tamper\n');
+  if (fs.existsSync(path.join(REPO, 'LICENSE'))) fs.appendFileSync(path.join(REPO, 'LICENSE'), '\npost-tag tamper, must never be exported\n');
   const pkg = JSON.parse(fs.readFileSync(path.join(REPO, 'package.json'), 'utf8'));
   pkg.version = '9.9.9-posttag';
   fs.writeFileSync(path.join(REPO, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
@@ -541,6 +562,9 @@ T.check('W1 the export has exactly these entries at its root (nothing from src/t
   const gotBinNj = fs.existsSync(path.join(dest, 'bin', 'nj')) ? fs.readFileSync(path.join(dest, 'bin', 'nj')) : null;
   T.check('W14 exported bin/nj is byte-identical to the TAG\'s tree, not the tampered working tree',
     tagBinNj.length === 0 ? gotBinNj === null : (gotBinNj !== null && gotBinNj.equals(tagBinNj)), dest);
+  const gotLicense = fs.existsSync(path.join(dest, 'LICENSE')) ? fs.readFileSync(path.join(dest, 'LICENSE')) : null;
+  T.check('W14 exported LICENSE is byte-identical to the TAG\'s tree, not the tampered working tree',
+    tagLicense.length === 0 ? gotLicense === null : (gotLicense !== null && gotLicense.equals(tagLicense)), dest);
   T.check('W14 the export still has no VERSION file', !fs.existsSync(path.join(dest, 'VERSION')), dest);
   T.check('W14 (fixture sanity) the tag\'s own package.json version is NOT the tampered 9.9.9-posttag',
     tagPkgVersion !== '9.9.9-posttag', tagPkgVersion);

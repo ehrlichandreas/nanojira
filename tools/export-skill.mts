@@ -105,6 +105,7 @@ function main(): void {
     }
   }
   const skillMd = show('SKILL.md');
+  const license = show('LICENSE');
   const binNj = show('bin/nj');
   const binNjMcp = show('bin/nj-mcp');
   const binNjCmd = show('bin/nj.cmd');
@@ -139,6 +140,7 @@ function main(): void {
       fs.chmodSync(p, mode);
     };
     write('SKILL.md', skillMd, 0o644);
+    write('LICENSE', license, 0o644);
     write('dist/nj.mjs', distNj, 0o755);
     write('dist/nj-mcp.mjs', distNjMcp, 0o755);
     write('bin/nj', binNj, 0o755);

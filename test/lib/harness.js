@@ -663,6 +663,30 @@ function cleanup() {
   }
 }
 
+/* A test that crashes with an uncaught exception, or that a caller's own
+ * timeout (test/run-all.js's spawnSync, det-id-retry.js's engaged() early
+ * process.exit(1) abort) ends before T.finish() ever runs, still leaves
+ * every freshDir() it created up to that point unless cleanup() also runs
+ * from here — T.finish()'s own call is not reached in either case. Same
+ * fix as D189 (tools/refactor-harness/scratch/lib/cleanup.js): a
+ * process-wide 'exit' handler, which node still runs after an uncaught
+ * exception or an explicit process.exit() (both fire 'exit' before the
+ * process truly dies), plus SIGTERM/SIGINT/SIGHUP handlers for the case a
+ * caller's timeout kills the test outright — node's default disposition
+ * for those three never fires 'exit' at all. Each signal handler cleans up,
+ * drops itself, then re-raises the same signal against our own pid so the
+ * parent still observes the test die BY that signal, exactly as it would
+ * have with no handler installed. */
+process.on('exit', cleanup);
+for (const name of ['SIGHUP', 'SIGINT', 'SIGTERM']) {
+  const handler = () => {
+    cleanup();
+    process.removeListener(name, handler);
+    process.kill(process.pid, name);
+  };
+  process.on(name, handler);
+}
+
 /**
  * Copies the actual shipped unit nj/nj-mcp are part of (§ 18) into destDir —
  * nothing more, nothing less — so a "no dependency outside what's shipped"
