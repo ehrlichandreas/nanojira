@@ -4138,6 +4138,31 @@ reported, not guessed at.
     before, never releases anything itself. Named in `fixed[]`, one line
     per element, naming the id and the released holder. Idempotent: a
     second `--fix` releases nothing (nothing left to release).
+58. **The exported skill folder** (DECISIONS 185, § 18). `node
+    tools/export-skill.mts <tag> <dest>` (TypeScript, run directly —
+    no build step, no shell; git invoked via `execFileSync`) verifies
+    `<tag>` with `git tag -v` (refusing an unsigned or non-existent
+    tag), reads every shipped file from the tag's tree (never the
+    working tree), builds beside `<dest>` and renames atomically into
+    place, and refuses to replace a `<dest>` that lacks its own
+    `VERSION` file. The folder (`SKILL.md`, `VERSION`,
+    `bin/{nj,nj-mcp}`, `bin/{nj,nj-mcp}.cmd`, `dist/{nj,nj-mcp}.mjs`)
+    has no symlinks anywhere, so the whole folder may be `cp -R`'d
+    elsewhere and keeps working from the copy. Each `bin/` wrapper
+    (the only `sh`/`.cmd` files in the folder — they exist only to
+    start node) resolves its own location with a plain `dirname "$0"`,
+    never following a symlink, honours `NJ_NODE`, requires Node.js ≥
+    24, unsets `NODE_OPTIONS`, and on any startup failure exits 127
+    with exactly one stderr line, prefixed `nj:`/`nj-mcp:`, naming the
+    cause in words ("node not found", or "node too old (requires
+    Node.js >= 24)"). The bundle is ESM (addendum 9b3d0de:
+    `dist/nj.mjs`/`dist/nj-mcp.mjs`, in the repo and in every export,
+    replacing the earlier extensionless CommonJS entirely; the build
+    rejects any import but `node:*` built-ins). `nj-mcp` still finds
+    its `dist/nj.mjs` sibling under this layout, unaffected by an
+    ambient `"type": "module"` above `<dest>`. `skill/SKILL.md`'s
+    `metadata.version` equals `package.json`'s version, checked
+    directly.
 
 ---
 
@@ -4347,6 +4372,19 @@ construction. The per-call overhead this adds over a direct CLI
 invocation is budgeted at p50 ≤ 50 ms, measured against `dist/nj
 --json`'s own wall-clock time for the identical invocation.
 
+**A missing sibling** (DECISIONS 185 addendum 9b3d0de: `nj-mcp.mjs`
+looks for `nj.mjs` next to itself, unconditionally — no extension
+detection, D179's own matching rule retired along with the extensionless
+build it existed for) fails **fast, as a JSON-RPC protocol-level error**
+on the specific `tools/call` that needed it (`-32603 Internal error`,
+naming node's own "cannot find module" text), never a hang and never a
+crash of the server process itself: node starting with a missing entry
+point is not a spawn-level failure (the `node` binary itself still
+exists and starts) but an ordinary non-zero exit with nothing on stdout,
+handled by the same path an `nj` child's any other unparseable-stdout
+exit already takes. The server keeps running and answers later calls
+normally — only the one call that needed the missing sibling fails.
+
 ### What is out of scope
 
 MCP resources and prompts (only tools); any transport but stdio (no
@@ -4355,3 +4393,175 @@ identities" and § 9's "no registry, no authentication," was never built
 for a network-reachable, multi-tenant transport); authentication (the
 process that spawns `nj-mcp` is the trust boundary, exactly as it already
 is for the plain CLI).
+
+## 18. Packaging: the exported skill folder
+
+(v3.11, DECISIONS 185, addenda 5f6529e, 9b3d0de, 85434d9.) `workspace/bin/`
+(the shared install directory, D159) is retired: there is no common place to
+install `nj` into, and a consuming team vendors (copies) a
+self-contained folder into its own repo instead. `node
+tools/export-skill.mts <tag> <dest>` builds that folder — TypeScript,
+run directly (Node ≥ 22.18 strips types; the repo's `tsconfig.json`
+enforces `erasableSyntaxOnly` and includes `tools/**/*.mts`, so this file
+is type-checked like any other source), not a shell script: it runs
+identically on Windows (team-c is a consumer), needs no shell
+quoting, and the AC drives it exactly like any other tool in this repo.
+The file is `.mts`, not `.ts` (addendum 85434d9): this package has no
+`"type"` field, and node emits `MODULE_TYPELESS_PACKAGE_JSON` on stderr
+for every `.ts` invocation under that condition — `.mts` is unambiguous
+and silent. It calls git (`tag -v`, `show`) via `execFileSync`, never
+through a shell. The only two files in the exported folder that remain
+POSIX `sh`/Windows `.cmd` are the launchers, `bin/nj` and `bin/nj-mcp`
+(below) — they alone exist to start node, which a `.mts` file cannot
+itself do for a caller that has no `node` on its own `PATH` yet.
+
+### The folder
+
+```
+<dest>/
+  SKILL.md
+  VERSION
+  bin/nj
+  bin/nj-mcp
+  bin/nj.cmd
+  bin/nj-mcp.cmd
+  dist/nj.mjs
+  dist/nj-mcp.mjs
+```
+
+**No symlinks anywhere in the tree, ever** — not written by the export,
+and the wrapper itself never follows one into existence either (see
+below). `VERSION` holds the bare `package.json` version string (e.g.
+`3.11.0\n`) — the same value `nj --version` and `SKILL.md`'s own
+`metadata.version` carry (§ 9, below). `SKILL.md` is a verbatim copy of
+`skill/SKILL.md` (below) at the exported tag; nothing in `dist/` or
+`bin/` is generated per-export — `dist/nj.mjs` and `dist/nj-mcp.mjs` are
+the committed `dist/nj.mjs`/`dist/nj-mcp.mjs` bundles (addendum 9b3d0de:
+the bundle is ESM, replacing the earlier "`dist/nj`/`dist/nj-mcp`,
+extensionless CommonJS" point this section previously made — the
+extensionless files go away entirely, in the repo and in every export
+alike), copied verbatim, and `bin/*` are the wrapper template (below),
+copied verbatim. Because nothing in the folder is a link, a consuming team may
+freely `cp -R` the whole folder anywhere — into their own repo, or
+anywhere else — and it keeps working from the copy exactly as it did at
+the export site.
+
+### Built from the tag, never the working tree
+
+`export-skill.mts` resolves the git repository from its **current
+working directory** (`git rev-parse --show-toplevel`, not from the
+script's own path) — any repo laid out like this one works, which is
+what makes the tool testable against a throwaway fixture repo without
+touching this project's own history. Given `<tag>`:
+
+1. **Verify the tag** with `git tag -v <tag>`. A tag that does not exist,
+   or exists but is not a valid signed tag object (lightweight, or
+   annotated but unsigned), fails this step — exits non-zero, one
+   stderr line naming the tag and git's own reason, and touches `<dest>`
+   not at all.
+2. **Read every shipped file from the tag's tree** (`git show
+   <tag>:<path>`), never from the working tree — a dirty or
+   out-of-sync checkout must not change what gets exported, and must
+   not need to.
+3. **Build atomically.** Write the folder at a temporary path beside
+   `<dest>` (same parent directory, so the final step is a same-
+   filesystem rename) and rename it into place as the last step — there
+   is never a half-written `<dest>`.
+4. **Refuse a foreign `<dest>`.** If `<dest>` already exists, it is
+   only replaced when it itself contains a `VERSION` file (i.e. it is
+   already an export of this same tool) — anything else (an unrelated
+   directory happening to sit at that path) is refused untouched, exit
+   non-zero, one stderr line. An existing valid export is replaced
+   wholesale, not merged: no file from a previous version's folder
+   survives into the new one.
+
+### The wrapper (`bin/nj`, `bin/nj-mcp`)
+
+One template, parameterised only by its own filename (so both binaries
+share identical logic):
+
+- it resolves its own location via a plain `dirname "$0"` and is
+  `CDPATH`-safe — **it does not follow symlinks**: since the exported
+  folder never contains one (above), there is nothing to resolve, and a
+  caller who does place a symlink elsewhere pointing in at `bin/nj` is
+  outside this contract (`cp -R` the folder instead, which does keep
+  working, unlike a symlink to one file inside it);
+- `NJ_NODE`, if set, names the node binary to run; otherwise `node` from
+  `PATH`;
+- it confirms that binary exists (`command -v`) and runs `<node>
+  --version`, parsing the major version number out of the printed
+  `vX.Y.Z` string — a plain text check, no JS evaluated inside the
+  probe — refusing anything below **Node.js 24** (§ 3 — the one
+  runtime floor this project already states; unaffected by
+  `workspace/bin/`'s removal, since it was never *where* the floor came
+  from) the same way a missing binary is refused;
+- it **unsets `NODE_OPTIONS`** before exec'ing node, so a caller's own
+  `NODE_OPTIONS` (e.g. `--require`) cannot load foreign code into the
+  tool;
+- on any of the above failing, it **exits 127 with exactly one line on
+  stderr**, prefixed `nj:` (`bin/nj`) or `nj-mcp:` (`bin/nj-mcp`) — the
+  same `<name>: <reason>` convention `nj`'s own CLI already uses (§ 4,
+  § 17) — naming the cause in words, not only by exit code:
+  - the binary not existing: `` `<name>: node not found (looked for
+    '<NJ_NODE or "node">')` ``;
+  - a binary that exists but fails the version check: `` `<name>: node
+    too old (requires Node.js >= 24)` ``;
+  - the (in principle, though every shipped export has it) missing
+    `../dist/<name>.mjs` entry: names that path directly.
+
+  Nothing else is written anywhere;
+- otherwise it execs `node <dest>/dist/<name>.mjs "$@"` — the sibling
+  lookup an invoked `nj-mcp` itself performs internally (its own
+  extension-matching rule, unchanged in spirit from D179, now matching
+  `.mjs`) still resolves `dist/nj.mjs` correctly, since both `.mjs`
+  bundles ship side by side in the same `dist/` directory regardless of
+  where `bin/` sits.
+- `bin/nj.cmd`/`bin/nj-mcp.cmd` provide the same behaviour for Windows'
+  `cmd.exe`, to the extent its own scripting lets them: `NJ_NODE` or
+  `node` from `PATH`, the same `dist/<name>.mjs` entry, the same exit
+  127 on failure to start.
+
+An ambient `package.json` with `"type": "module"` (or no `type` at all,
+which defaults to CommonJS) anywhere above `<dest>` has no effect on
+any of this: `dist/*.mjs`'s extension already fixes its module type as
+ESM unambiguously regardless of any ambient `type` field, exactly as
+`.cjs` previously fixed it as CommonJS unambiguously (D178/D179) — and
+the wrapper never asks node to resolve an extensionless file either
+way.
+
+### The bundle is ESM, built only from `node:*` built-ins
+
+(Addendum 9b3d0de.) `tools/bundle.js` writes `dist/nj.mjs` and
+`dist/nj-mcp.mjs` — in the repo, not only in an export — replacing the
+earlier extensionless CommonJS `dist/nj`/`dist/nj-mcp` entirely, old
+tags' own `dist/nj` included (a frozen oracle replay against an old tag
+keeps working by naming that tag's own `dist/nj` explicitly via
+`--nj=<path>`; nothing about replaying an old tag changes). This
+matches the convention the other `agent-skills` Node skills
+already use (`dist/<name>.mjs`, esbuild, `node:*` imports only) and is
+feasible because nothing under `src/` uses `__dirname`, `__filename`,
+`require` or `module.exports`, and `nj-mcp` depends on no SDK that
+would need a CommonJS-only import. The build step itself additionally
+rejects (fails the build) any import other than a `node:*` built-in —
+nothing from `node_modules` ships in the bundle, enforced at build
+time, not merely by convention.
+
+### `skill/SKILL.md`
+
+The committed source the export copies verbatim (never generated, never
+edited post-export). Frontmatter: `name`, `description` (≤ 1024
+characters — the field a skill-discovery system reads without opening
+the file), `license`, `metadata.version`. **`metadata.version` must
+equal `package.json`'s own `version`** — checked directly (not merely
+"close" or "compatible"), since the exported `VERSION` file and `nj
+--version` both carry that exact same string and a skill whose own
+declared version disagreed with the binary inside it would be
+self-contradictory. Body: when to use `nj` and when not to, how to
+invoke it (`sh <skill>/bin/nj …`, always with `--json`), the rules an
+agent follows while using it, the exit/error-code vocabulary (§ 9), and
+where to report a problem with `nj` itself (the project's own feedback
+mechanism, not this consuming repo's own tracker). It stays generic —
+no repo-specific tags, workflows or conventions; a consuming team's own
+house rules belong in their own AGENTS.md or equivalent, same as
+Team B's current hand-written skill already separates its
+nj-specific usage notes from its repo-specific always-on rules.

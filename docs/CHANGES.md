@@ -5,6 +5,44 @@ User-facing changes only — not an engineering changelog. Full rules are in
 parentheses are from each team's own backlog (`nj --backlog=feedback/<team>
 show --id=<id>`), not ours.
 
+## 3.11.0
+
+Packaging changes only — no command, flag or output behaviour changed.
+
+- **`nj` ships as a self-contained skill folder**, not a shared install. A
+  consuming team vendors its own copy with:
+
+  ```sh
+  $ node tools/export-skill.mts <tag> <dest>
+  ```
+
+  which reads every file only from `<tag>`'s own signed, verified commit —
+  never from the working tree, however it is currently checked out. Copy
+  the resulting folder (`cp -R`) wherever it is needed; never symlink into
+  it or out of it — nothing inside is, or should be treated as, a link.
+
+- **It runs through `bin/nj` or `bin/nj-mcp`** (a plain `sh` script, plus a
+  `.cmd` for Windows). `NJ_NODE` picks a specific `node` if more than one is
+  on `PATH`; the minimum supported version is Node 24; an inherited
+  `NODE_OPTIONS` is unset before `node` ever starts, so it cannot load
+  foreign code into the tool. Any startup failure (no `node`, `node` too
+  old, a missing bundle) exits 127 with exactly one line on stderr naming
+  the cause — never a stack trace, never partial output.
+
+- **The bundles are ESM**: `dist/nj.mjs` and `dist/nj-mcp.mjs`, both in
+  this repo and in every exported folder. The repo's earlier extensionless
+  `dist/nj`/`dist/nj-mcp` and the release's `nj.cjs`/`nj-mcp.cjs` are both
+  gone.
+
+- **The shared workspace install is retired.** `workspace/bin/nanojira/`
+  and `tools/release-local.sh` no longer exist; there is no common place
+  to install `nj` into, and no "`current` always points at the latest
+  version" convention to rely on.
+
+- **Migrating:** replace a vendored `nj.cjs`/`nj-mcp.cjs` (or a
+  `bin/nanojira/current/nj` wrapper) with a freshly exported folder, and
+  call `sh <skill>/bin/nj` (or `bin/nj-mcp`) in its place.
+
 ## 3.10.0
 
 Two small gaps closed, both found live: a holder loop an outside team

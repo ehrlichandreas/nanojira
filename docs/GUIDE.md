@@ -12,40 +12,59 @@ from an earlier v3 release (this guide already describes the latest):
 `docs/CHANGES.md`.
 
 This describes spec v3.7's end state. Most examples below were run directly
-against `dist/nj`; output is shown as it is printed, with the
+against `dist/nj.mjs`; output is shown as it is printed, with the
 machine-specific path shortened to `…`.
 
 ```sh
-alias nj="$PWD/dist/nj"       # or: <runtime-node> dist/nj  (§ 4)
+alias nj="$PWD/dist/nj.mjs"       # or: <runtime-node> dist/nj.mjs  (§ 4)
 ```
 
 ---
 
 ## 1. Install
 
-`dist/nj` and `dist/nj-mcp` are each a single, self-contained file (no
-runtime dependencies, § 3 of the spec) — there is nothing to `npm install`
-on the machine that runs them.
+`nj` ships as a self-contained **exported skill folder**, not a shared
+machine-wide install (§ 18 of the spec). A consuming team vendors its own
+copy:
 
-- Put `dist/nj` on your `PATH`, either by copying it somewhere already on
-  `PATH` or by symlinking it there (`ln -s /path/to/dist/nj /usr/local/bin/nj`,
-  or wherever your `PATH` already reaches); `dist/nj-mcp` the same way if you
-  also want it runnable by name. One install serves every project on the
-  machine (§ 4, below) — nothing further to install per project.
-- Per project: run `nj init` once (§ 2) to create that project's `backlog/`.
+```sh
+$ node tools/export-skill.mts <signed-tag> <dest>
+```
+
+This reads every shipped file from `<signed-tag>`'s own tree — never the
+working tree — and writes `<dest>/` as one atomic unit:
+
+```
+<dest>/
+  SKILL.md
+  VERSION
+  bin/nj         bin/nj-mcp         (sh launchers)
+  bin/nj.cmd     bin/nj-mcp.cmd     (Windows launchers)
+  dist/nj.mjs    dist/nj-mcp.mjs    (the bundles)
+```
+
+**No symlinks anywhere in this folder, and none pointing into or out of
+it.** To move or share it, `cp -R` the whole folder — it keeps working from
+the copy, since nothing in it depends on where it sits.
+
+- Per project: run `<dest>/bin/nj init` once (§ 2) to create that project's
+  `backlog/`.
 - Per project, if the project uses `nj-mcp`: add one `nj-mcp` entry to that
-  project's MCP client config, pointed at that project with its own
-  `--backlog=` (§ 4, below, and § 19's client-config shape) — never a single
-  shared entry meant to serve several projects.
-- Verify the install with `nj --version`, which prints `nj <version>` and
-  exits 0 from anywhere, without needing a backlog (§ 9 of the spec).
-- **No `node` on `PATH`?** `dist/nj`'s shebang (`#!/usr/bin/env node`)
-  needs `node` resolvable there to run as `nj` directly. If an agent's
-  environment doesn't put `node` on `PATH` but does have one available at
-  a known path, run `dist/nj` with it explicitly instead of relying on
-  the shebang: `node /path/to/dist/nj --version` (and the same for
-  `dist/nj-mcp`, in whatever launches it) — `dist/nj` is a plain Node
-  script underneath, so this always works, symlinked onto `PATH` or not.
+  project's MCP client config, pointed at `<dest>/bin/nj-mcp` with that
+  project's own `--backlog=` (§ 4, below, and § 19's client-config shape) —
+  never a single shared entry meant to serve several projects.
+- Verify the export with `<dest>/bin/nj --version`, which prints
+  `nj <version>` and exits 0 from anywhere, without needing a backlog (§ 9
+  of the spec).
+- `NJ_NODE` picks a specific `node` binary when more than one is on `PATH`.
+  The minimum supported version is Node 24; an inherited `NODE_OPTIONS` is
+  unset before `node` starts. Any startup failure (`node` missing, `node`
+  too old, a missing bundle) exits 127 with exactly one line on stderr
+  naming the cause — never a stack trace.
+- **Migrating off an earlier release?** Replace a vendored
+  `nj.cjs`/`nj-mcp.cjs`, or a `bin/nanojira/current/nj` wrapper, with a
+  freshly exported folder, and call `<dest>/bin/nj` in its place —
+  `docs/CHANGES.md` 3.11.0.
 
 ## 2. Start a backlog
 
@@ -807,18 +826,26 @@ comma) is unaffected.
 
 ## 19. `nj-mcp` — the MCP wrapper
 
-`dist/nj-mcp` is a second binary, built alongside `dist/nj`, that exposes
-the same commands as MCP tools over stdio instead of a CLI an agent has to
-shell out to and parse `--json` from:
+`dist/nj-mcp.mjs` is a second binary, built alongside `dist/nj.mjs`, that
+exposes the same commands as MCP tools over stdio instead of a CLI an agent
+has to shell out to and parse `--json` from:
 
 ```sh
-$ dist/nj-mcp --backlog=./backlog [--allow-destructive]
+$ dist/nj-mcp.mjs --backlog=./backlog [--allow-destructive]
+```
+
+In an exported skill folder (§ 1, § 18 of the spec), start it through the
+wrapper instead, which resolves `node` and the bundle for you:
+
+```sh
+$ <dest>/bin/nj-mcp --backlog=./backlog [--allow-destructive]
 ```
 
 - Resolves its backlog once at startup, the same rules as the CLI
   (`--backlog`, `NJ_BACKLOG`, `.njrc`), and serves only that one backlog.
-- Every tool's result **is** exactly the JSON `dist/nj --json` would return
-  for the equivalent CLI call — nothing to learn beyond the contract above.
+- Every tool's result **is** exactly the JSON `dist/nj.mjs --json` would
+  return for the equivalent CLI call — nothing to learn beyond the contract
+  above.
 - Tools: `list`, `show`, `find`, `tree`, `new`, `set`, `note`, `check`,
   `claim`, `release`, `archive`, `unarchive`, `doctor`. **`rm` is never
   offered.** `archive`/`unarchive` are offered ungated (both reversible);
@@ -827,7 +854,7 @@ $ dist/nj-mcp --backlog=./backlog [--allow-destructive]
 - A minimal client config — the shape only; where this goes is your MCP
   client's own concern, not `nj`'s:
   ```json
-  { "command": "node", "args": ["/path/to/dist/nj-mcp", "--backlog=/path/to/backlog"] }
+  { "command": "sh", "args": ["/path/to/<skill>/bin/nj-mcp", "--backlog=/path/to/backlog"] }
   ```
 
 ## 20. Failure codes an agent should handle

@@ -2699,6 +2699,145 @@ Written for adversarial review: if a line reads like a guess, challenge it.
         child") goes through the same article helper as the rest
         (D180 known gap).
 
+183. **v3.10 accepted** (2026-10-09). Verifier PASS (docs/verification/
+     v3-10.md):
+     - doctor --fix releases claims on final-status elements, live and
+       archived, any holder, through v3.8 B's releaseUnconditional;
+     - unfinished claims are untouched;
+     - plain doctor writes nothing, and --fix is idempotent;
+     - a claim taken between scan and fix is released from its current
+       holder, never a stale one (transition() re-reads every CAS round);
+     - "TSK-404: released nobody" in the gate is a fixture's literal
+       holder name, not a sentinel;
+     - mutation tests bite.
+     Gate: 1057 = 1055 + 2 holder-naming lines in ac-27's --fix fixtures.
+     3.10.0 is the first two-digit minor version. minVersion compares
+     numeric tuples, which the Lead checked live: 3.7.0/3.9.0/3.10.0 pass,
+     3.11.0/4.0.0 give needs_newer_nj. AC-39 pins with exact equality only.
+     Per the D181 lesson, the consumer paths were run against a scratch
+     install before the real one, and team-a's workspace/bin/nj right
+     after it. TSK-058/059 and EPIC-017 are done.
+
+184. **Whole history re-signed** (2026-10-09, user decision). Commits made
+     before 2026-10-09 were unsigned and carried host-derived emails
+     (…@host2.example, …@host.example, …@host.local,
+     …@example.com). The user asked for every commit to be signed with key
+     E87870613F0E8704 and ehrlich.andreas@googlemail.com. All three repos
+     (main 498, backlog 176, feedback 9 commits) were rewritten in place:
+     - each commit re-signed, with author and committer email set to the
+       googlemail address;
+     - trees, names, dates and message text are unchanged, except that
+       abbreviated hashes in commit messages now point to the new commits;
+     - annotated tags were re-created with the same message and date and
+       signed with the new key; lightweight tags were moved.
+     Old hashes in file contents (this file, docs/verification/, backlog and
+     feedback notes) were not touched; docs/history-resign-20261009.map
+     resolves them. The pre-rewrite state is kept in
+     ../nanojira-backup-20261009-pre-resign/ (bundles and .git copies).
+     Consequences: tags v3.3–v3.10 are now different tag objects. The
+     released files under bin/nanojira are byte-identical because the trees
+     are unchanged.
+
+185. **v3.11 scope: nj ships as a skill folder; no shared install
+     directory** (2026-10-09, user: "deine ideen gefallen mir. aber
+     workspace/bin/ wird heute gelöscht werden"). workspace/bin/ (with
+     bin/nanojira/ and team-a's bin/nj) is removed today. D159's shared
+     install ends: there is no common place to install into, and teams
+     copy (vendor) nj into their own repos. Team B already does this.
+     The model is taken from agent-skills (git-merge-branches with
+     write-node-skills): the delivered unit is one self-contained folder.
+     - **The folder.** `node tools/export-skill.mts <tag> <dest>` builds it
+       **from the signed tag**, never from the working tree:
+       - it first checks the tag with `git tag -v` and refuses an unsigned
+         or bad tag;
+       - it writes
+         `<dest>/{SKILL.md, VERSION, bin/nj, bin/nj-mcp, bin/nj.cmd,
+         bin/nj-mcp.cmd, dist/nj.mjs, dist/nj-mcp.mjs}`;
+       - it builds next to the destination and then renames, so there is no
+         half-written folder; an existing <dest> is replaced only if it
+         holds a VERSION file (so it never overwrites a foreign directory);
+       - the exported folder contains no symlinks.
+     - **The bundle stays CommonJS with the .cjs extension.** Like .mjs,
+       .cjs is unambiguous under any package.json, and it needs no ESM port
+       (nj-mcp's sibling lookup, __dirname). In the repo, dist/nj and
+       dist/nj-mcp stay as they are: the gate and the suites run them.
+     - **Robust sh wrapper.** It is one template for both binaries, in the
+       style of the agent-skills wrapper:
+       - it finds dist/ from its own path (`dirname "$0"`) and is
+         CDPATH-safe; it does not resolve symlinks, because there are none:
+         nj is copied, never linked (user, 2026-10-09: "keine symlinks");
+       - `NJ_NODE` picks a node binary, otherwise node from PATH;
+       - it checks that node exists and is at least the minimum version;
+       - it unsets NODE_OPTIONS;
+       - if it cannot start, it exits 127 with one stderr line naming the
+         cause;
+       - `.cmd` wrappers do the same where cmd allows it (NJ_NODE, or node
+         from PATH).
+     - **SKILL.md is short and English:** when to use nj and when not, how
+       to call it (`sh <skill>/bin/nj …`, always `--json`), the rules for
+       agents, the exit codes, and where to report problems. Details stay
+       in GUIDE/`--help`. The frontmatter has name, description (≤ 1024
+       chars), license and metadata.version; the version must equal
+       package.json, and a check enforces it.
+     - **Tests.** A new AC exports into a scratch directory and runs the
+       folder only through its wrappers:
+       - from another cwd, with NJ_NODE, and from a copy of the folder
+         moved to a new place;
+       - an export that contains no symlink anywhere (`find -type l` is
+         empty);
+       - with node missing or too old (expect 127);
+       - under a package.json with "type":"module" above the folder;
+       - nj-mcp finding its sibling;
+       - VERSION equal to `nj --version`;
+       - refusals for a bad tag, an unsigned tag, and a <dest> without
+         VERSION.
+
+       This closes the gap that let D179 through: nothing has tested the
+       delivered layout before.
+     - **Retired.** tools/release-local.sh and the bin/nanojira README;
+       both stay in git history only.
+     - **Consumers.** team-a and team-c called workspace/bin/nj
+       and must vendor before the removal. Until v3.11 they use a copy of
+       3.10.0/nj.cjs; team-a was told today. Team B replaces its
+       hand-made skills/nj with the exported folder when it chooses to.
+     Addendum (user: "wieso nicht mit typescript ersetzen?"): the export
+     tool is TypeScript, run as `node tools/export-skill.mts`. It needs no
+     build step: node ≥ 22.18 strips types, and the repo already enforces
+     erasableSyntaxOnly. tsconfig includes tools/**/*.mts so it is type
+     checked. Why TypeScript:
+     - it runs on Windows too (team-c), so no sh is needed to export;
+     - it is the repo's language, with typecheck;
+     - no shell quoting traps;
+     - the AC can drive it like any other tool.
+     It calls git (`tag -v`, `show`) through execFileSync without a shell.
+     Only the two launchers that must start node stay sh and .cmd:
+     bin/nj and bin/nj-mcp in the exported folder.
+     Addendum 2 (user: "macht es sinn nach *.mjs zu kompilieren? alle
+     unseren sonstigen skills werden doch dahin kompiliert"): yes. The
+     bundle becomes ESM, written as dist/nj.mjs and dist/nj-mcp.mjs in the
+     repo and in the exported folder. This replaces the "stays CommonJS
+     with .cjs" point above.
+     - **Why.** It matches the agent-skills Node skills (esbuild,
+       dist/<name>.mjs, only node:* imports). Like .cjs, .mjs is unambiguous
+       under any package.json. The layout changes for consumers in v3.11
+       anyway, so the file name changes only once.
+     - **Feasible.** src/ has no __dirname, __filename, require or
+       module.exports, and nj-mcp uses no SDK.
+     - **Changes:**
+       - tools/bundle.js switches to format esm and writes .mjs;
+       - the build also rejects any import other than node:* built-ins;
+       - nj-mcp's sibling lookup becomes nj-mcp.mjs → nj.mjs;
+       - test/run-all.js, the harness and the gate take the new path;
+       - consumers move from nj.cjs to the exported folder's bin/nj.
+     The extensionless dist/nj and dist/nj-mcp go away. Old tags keep
+     their dist/nj, so the gate's frozen oracle replays keep working
+     through --nj=<path>.
+     Addendum 3: the file is tools/export-skill.mts. With .ts, node
+     guessed the module type and printed a MODULE_TYPELESS_PACKAGE_JSON
+     warning on every run. Adding "type":"module" to the repo would break
+     the CommonJS tools/ and test/ scripts. The .mts extension makes it
+     ESM without that.
+
 ## Known gaps, stated plainly
 
 - ~~Compare-before-write is not covered by my self-check.~~ **Closed.** § 12 now

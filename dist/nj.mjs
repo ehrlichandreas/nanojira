@@ -1,30 +1,7 @@
 #!/usr/bin/env node
-"use strict";
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
 
 // src/core/args.ts
-var fs3 = __toESM(require("fs"), 1);
+import * as fs3 from "node:fs";
 
 // src/core/constants.ts
 var TYPE_PREFIX = { epic: "EPIC", task: "TSK", subtask: "SUB" };
@@ -140,8 +117,8 @@ var BLOCKS_READY = /* @__PURE__ */ new Set([
 var BACKLOG_LEVEL = /* @__PURE__ */ new Set(["backlog:stray_tmp", "backlog:ids_missing", "backlog:unreadable_dir", "config:invalid", "config:unknown_key", "config:unknown_code"]);
 
 // src/core/claims.ts
-var fs = __toESM(require("fs"), 1);
-var path = __toESM(require("path"), 1);
+import * as fs from "node:fs";
+import * as path from "node:path";
 var ROUNDS = 100;
 function claimsRootDir(backlog) {
   return path.join(backlog, ".nanojira", "claims");
@@ -668,8 +645,8 @@ function parseNotes(body) {
 }
 
 // src/core/store.ts
-var fs2 = __toESM(require("fs"), 1);
-var path2 = __toESM(require("path"), 1);
+import * as fs2 from "node:fs";
+import * as path2 from "node:path";
 function nowIso() {
   const pinned = process.env.NJ_NOW;
   if (pinned !== void 0 && pinned !== "") {
@@ -1137,8 +1114,8 @@ function readSectionFlags(flags) {
 }
 
 // src/commands/cmd-archive.ts
-var fs9 = __toESM(require("fs"), 1);
-var path8 = __toESM(require("path"), 1);
+import * as fs9 from "node:fs";
+import * as path8 from "node:path";
 
 // src/core/flag-table.ts
 var str = (name) => ({ name, kind: "string" });
@@ -1193,16 +1170,16 @@ function commandFields(command) {
 }
 
 // src/core/context.ts
-var fs7 = __toESM(require("fs"), 1);
-var path6 = __toESM(require("path"), 1);
+import * as fs7 from "node:fs";
+import * as path6 from "node:path";
 
 // src/core/config.ts
-var fs4 = __toESM(require("fs"), 1);
-var os = __toESM(require("os"), 1);
-var path3 = __toESM(require("path"), 1);
+import * as fs4 from "node:fs";
+import * as os from "node:os";
+import * as path3 from "node:path";
 
 // src/core/version.ts
-var VERSION = "3.10.0";
+var VERSION = "3.11.0";
 function parseVersionTuple(s) {
   const m = /^(\d+)\.(\d+)\.(\d+)$/.exec(s);
   return m ? [Number(m[1]), Number(m[2]), Number(m[3])] : null;
@@ -1579,12 +1556,12 @@ function isLegacyBacklog(backlog) {
 }
 
 // src/core/load.ts
-var fs6 = __toESM(require("fs"), 1);
-var path5 = __toESM(require("path"), 1);
+import * as fs6 from "node:fs";
+import * as path5 from "node:path";
 
 // src/core/layout.ts
-var fs5 = __toESM(require("fs"), 1);
-var path4 = __toESM(require("path"), 1);
+import * as fs5 from "node:fs";
+import * as path4 from "node:path";
 var INTERNAL_DIRS = [".ids", ".nanojira"];
 var TOP_LEVEL_DOCS = /* @__PURE__ */ new Set(["README.md", "STATUS.md"]);
 var ID_FOLDER = /^(EPIC|TSK|SUB)-\d+$/;
@@ -2185,8 +2162,8 @@ function requireActive(el, verb) {
 }
 
 // src/core/status.ts
-var fs8 = __toESM(require("fs"), 1);
-var path7 = __toESM(require("path"), 1);
+import * as fs8 from "node:fs";
+import * as path7 from "node:path";
 function statusPath(backlog) {
   return path7.join(backlog, "STATUS.md");
 }
@@ -2783,15 +2760,15 @@ function cmdFind(flags, positional) {
 }
 
 // src/commands/cmd-doctor.ts
-var fs12 = __toESM(require("fs"), 1);
-var path10 = __toESM(require("path"), 1);
+import * as fs12 from "node:fs";
+import * as path10 from "node:path";
 
 // src/commands/cmd-new.ts
-var fs11 = __toESM(require("fs"), 1);
-var path9 = __toESM(require("path"), 1);
+import * as fs11 from "node:fs";
+import * as path9 from "node:path";
 
 // src/core/input.ts
-var fs10 = __toESM(require("fs"), 1);
+import * as fs10 from "node:fs";
 function readInputText(value) {
   if (value === "-") {
     try {
@@ -3926,8 +3903,8 @@ function fixReport(json, actions, notes, ctx, findings) {
 }
 
 // src/commands/cmd-init.ts
-var fs13 = __toESM(require("fs"), 1);
-var path11 = __toESM(require("path"), 1);
+import * as fs13 from "node:fs";
+import * as path11 from "node:path";
 function cmdInit(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json"]), false);
   const json = flags.has("json");
@@ -4200,7 +4177,7 @@ function cmdRelease(flags) {
 }
 
 // src/commands/cmd-rm.ts
-var fs14 = __toESM(require("fs"), 1);
+import * as fs14 from "node:fs";
 function removeIfEmpty(dir) {
   try {
     fs14.rmdirSync(dir);
@@ -4262,7 +4239,7 @@ ${archivedVictims.map((v) => "  " + v.id).join("\n")}`,
 }
 
 // src/commands/cmd-set.ts
-var path12 = __toESM(require("path"), 1);
+import * as path12 from "node:path";
 function buildSetInputFlags(inputValue) {
   const raw = readInputText(inputValue);
   const parsed = parseInputJson(raw);
@@ -4672,7 +4649,7 @@ function cmdTree(flags) {
 }
 
 // src/commands/cmd-unarchive.ts
-var path13 = __toESM(require("path"), 1);
+import * as path13 from "node:path";
 var STABLE_HINT3 = "retry once the backlog is stable \u2014 unarchive takes no --force";
 var FIX_HINT = "run `nj doctor --fix` to move the files into their places, then unarchive again";
 function orderedSubtree(ctx, el) {

@@ -1,31 +1,11 @@
 #!/usr/bin/env node
-"use strict";
-var __create = Object.create;
-var __defProp = Object.defineProperty;
-var __getOwnPropDesc = Object.getOwnPropertyDescriptor;
-var __getOwnPropNames = Object.getOwnPropertyNames;
-var __getProtoOf = Object.getPrototypeOf;
-var __hasOwnProp = Object.prototype.hasOwnProperty;
-var __copyProps = (to, from, except, desc) => {
-  if (from && typeof from === "object" || typeof from === "function") {
-    for (let key of __getOwnPropNames(from))
-      if (!__hasOwnProp.call(to, key) && key !== except)
-        __defProp(to, key, { get: () => from[key], enumerable: !(desc = __getOwnPropDesc(from, key)) || desc.enumerable });
-  }
-  return to;
-};
-var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__getProtoOf(mod)) : {}, __copyProps(
-  // If the importer is in node compatibility mode or this is not an ESM
-  // file that has been converted to a CommonJS file using a Babel-
-  // compatible transform (i.e. "__esModule" has not been set), then set
-  // "default" to the CommonJS "module.exports" for node compatibility.
-  isNodeMode || !mod || !mod.__esModule ? __defProp(target, "default", { value: mod, enumerable: true }) : target,
-  mod
-));
 
 // src/nj-mcp.ts
-var path2 = __toESM(require("path"), 1);
-var import_child_process = require("child_process");
+import * as path4 from "node:path";
+import { spawn } from "node:child_process";
+
+// src/core/args.ts
+import * as fs3 from "node:fs";
 
 // src/core/constants.ts
 var SECTION_FLAGS = ["description", "description-file", "acceptance", "acceptance-file"];
@@ -35,7 +15,13 @@ var V3_DIR_REL = ".nanojira";
 var V3_CONFIG_REL = ".nanojira/config.json";
 var LEGACY_CONFIG_REL = ".nanojira.json";
 
+// src/core/claims.ts
+import * as fs from "node:fs";
+import * as path from "node:path";
+
 // src/core/store.ts
+import * as fs2 from "node:fs";
+import * as path2 from "node:path";
 function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -84,12 +70,12 @@ function flagString(flags, name) {
 }
 
 // src/core/config.ts
-var fs = __toESM(require("fs"), 1);
-var os = __toESM(require("os"), 1);
-var path = __toESM(require("path"), 1);
+import * as fs4 from "node:fs";
+import * as os from "node:os";
+import * as path3 from "node:path";
 
 // src/core/version.ts
-var VERSION = "3.10.0";
+var VERSION = "3.11.0";
 
 // src/core/config.ts
 var SOURCE_CODE = { flag: "invalid_backlog_flag", env: "invalid_backlog_env", njrc: "invalid_backlog_njrc" };
@@ -97,13 +83,13 @@ function sourceName(src) {
   return src.kind === "flag" ? "--backlog" : src.kind === "env" ? "NJ_BACKLOG" : src.file;
 }
 function holdsBacklog(dir) {
-  return fs.existsSync(path.join(dir, V3_CONFIG_REL)) || fs.existsSync(path.join(dir, LEGACY_CONFIG_REL));
+  return fs4.existsSync(path3.join(dir, V3_CONFIG_REL)) || fs4.existsSync(path3.join(dir, LEGACY_CONFIG_REL));
 }
 function claim(dir, src, lenient) {
   const shown = src.kind === "njrc" ? escapeInvisible(dir) : dir;
   if (!isDir(dir)) fail(SOURCE_CODE[src.kind], `no backlog at ${shown} (from ${sourceName(src)})`);
   if (lenient || holdsBacklog(dir)) return dir;
-  if (fs.existsSync(path.join(dir, V3_DIR_REL))) {
+  if (fs4.existsSync(path3.join(dir, V3_DIR_REL))) {
     fail(
       "backlog_without_config",
       `${shown} exists but has no ${V3_CONFIG_REL}`,
@@ -130,33 +116,33 @@ function explicitLocation(flags) {
   return null;
 }
 function njrcLocation(dir) {
-  const file = path.join(dir, ".njrc");
+  const file = path3.join(dir, ".njrc");
   const raw = readNjrc(file);
   if (raw === null) return null;
   const value = parseNjrc(file, raw).get("backlog");
   if (value === void 0) return null;
-  const expanded = value.startsWith("~/") ? path.join(os.homedir(), value.slice(2)) : value;
-  return { dir: path.resolve(dir, expanded), src: { kind: "njrc", file } };
+  const expanded = value.startsWith("~/") ? path3.join(os.homedir(), value.slice(2)) : value;
+  return { dir: path3.resolve(dir, expanded), src: { kind: "njrc", file } };
 }
 function readNjrc(file) {
   let link;
   try {
-    link = fs.lstatSync(file);
+    link = fs4.lstatSync(file);
   } catch {
     return null;
   }
   const bad = (reason, hint) => fail("invalid_njrc", `invalid .njrc at ${file}: ${reason}`, hint);
   checkOwner(link.uid, bad);
-  njrcSwapFaultHook(path.dirname(file));
+  njrcSwapFaultHook(path3.dirname(file));
   let fd;
   try {
-    fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+    fd = fs4.openSync(file, fs4.constants.O_RDONLY | fs4.constants.O_NONBLOCK);
   } catch (e) {
     if (e.code === "ELOOP") return bad("it is a symlink loop (ELOOP)");
     if (e.code === "ENOENT") {
       let fresh;
       try {
-        fresh = fs.lstatSync(file);
+        fresh = fs4.lstatSync(file);
       } catch {
         return null;
       }
@@ -167,7 +153,7 @@ function readNjrc(file) {
   try {
     let st;
     try {
-      st = fs.fstatSync(fd);
+      st = fs4.fstatSync(fd);
     } catch (e) {
       return bad(`cannot stat it -- ${e.code || e.message}`);
     }
@@ -175,20 +161,20 @@ function readNjrc(file) {
     if (!st.isFile()) return bad(st.isDirectory() ? "it is a directory, not a file" : "it is not a regular file");
     let raw;
     try {
-      raw = fs.readFileSync(fd, "utf8");
+      raw = fs4.readFileSync(fd, "utf8");
     } catch (e) {
       return bad(`cannot read it -- ${e.code || e.message}`);
     }
     return raw.startsWith("\uFEFF") ? raw.slice(1) : raw;
   } finally {
-    fs.closeSync(fd);
+    fs4.closeSync(fd);
   }
 }
 function njrcSwapFaultHook(dir) {
   if (process.env.NJ_FAULT !== "njrc-swap") return;
-  const marker = path.join(dir, ".nj-fault-go");
+  const marker = path3.join(dir, ".nj-fault-go");
   const deadline = Date.now() + 1e4;
-  while (!fs.existsSync(marker)) {
+  while (!fs4.existsSync(marker)) {
     if (Date.now() >= deadline) return;
     sleepMs(50);
   }
@@ -235,7 +221,7 @@ function workingDir() {
   }
 }
 function fromCwd(p) {
-  return path.isAbsolute(p) ? path.resolve(p) : path.resolve(workingDir(), p);
+  return path3.isAbsolute(p) ? path3.resolve(p) : path3.resolve(workingDir(), p);
 }
 function oneLine(e) {
   const msg = e && e.message ? String(e.message) : String(e);
@@ -244,10 +230,10 @@ function oneLine(e) {
 function findBacklog(flags, lenient) {
   const explicit = explicitLocation(flags);
   if (explicit !== null) return claim(explicit.dir, explicit.src, lenient);
-  for (let dir = workingDir(); ; dir = path.dirname(dir)) {
+  for (let dir = workingDir(); ; dir = path3.dirname(dir)) {
     const rc = njrcLocation(dir);
     if (rc !== null) return claim(rc.dir, rc.src, lenient);
-    const candidate = path.join(dir, "backlog");
+    const candidate = path3.join(dir, "backlog");
     if (isDir(candidate)) {
       if (lenient || holdsBacklog(candidate)) return candidate;
       fail(
@@ -256,7 +242,7 @@ function findBacklog(flags, lenient) {
         "run `nj doctor` \u2014 it tolerates the missing file and reports config:invalid"
       );
     }
-    if (path.dirname(dir) === dir) break;
+    if (path3.dirname(dir) === dir) break;
   }
   return fail(
     "no_backlog",
@@ -266,7 +252,7 @@ function findBacklog(flags, lenient) {
 }
 function isDir(p) {
   try {
-    return fs.statSync(p).isDirectory();
+    return fs4.statSync(p).isDirectory();
   } catch {
     return false;
   }
@@ -388,8 +374,7 @@ function main() {
 `);
     process.exit(1);
   }
-  const selfIsCjs = path2.basename(process.argv[1]).endsWith(".cjs");
-  const njPath = path2.join(path2.dirname(path2.resolve(process.argv[1])), selfIsCjs ? "nj.cjs" : "nj");
+  const njPath = path4.join(path4.dirname(path4.resolve(process.argv[1])), "nj.mjs");
   const liveChildren = /* @__PURE__ */ new Set();
   function send(obj) {
     process.stdout.write(JSON.stringify(obj) + "\n");
@@ -444,7 +429,7 @@ function main() {
       flagArgs.push(`--${f.name}=${v}`);
     }
     const childArgv = [njPath, name, ...flagArgs, `--backlog=${backlog}`, "--json", ...positionals];
-    const child = (0, import_child_process.spawn)(process.execPath, childArgv, { env: process.env });
+    const child = spawn(process.execPath, childArgv, { env: process.env });
     liveChildren.add(child);
     let out = "";
     let err = "";

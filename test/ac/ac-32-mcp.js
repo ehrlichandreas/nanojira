@@ -308,10 +308,18 @@ await withServer(model('mcp-m3'), [], {}, async s => {
 }
 
 /* ===================================================================== */
-/* M12 — nj-mcp finds its sibling `nj` by its OWN extension (DECISIONS   */
-/* 179): as `nj-mcp` (no extension) it spawns `nj`; as `nj-mcp.cjs` it   */
-/* must spawn `nj.cjs`, not a same-named sh wrapper next to it — `node`  */
-/* cannot parse a shell script, so the call would otherwise fail.        */
+/* M12 — nj-mcp.mjs looks for its sibling nj.mjs unconditionally          */
+/* (DECISIONS 185 addendum 9b3d0de, replacing D179's extension-matching   */
+/* rule now that the bundle is ESM-only, one fixed extension): present,   */
+/* a tool call works; missing, the one call that needed it fails fast     */
+/* and cleanly (§ 17 "A missing sibling") — never a hang, never a crash   */
+/* of the server itself. A fixture that makes the server die outright     */
+/* (e.g. a bad copy) must still fail this test cleanly, not hang until    */
+/* mcp-stdio.js's internal timeout and crash the whole suite with an      */
+/* unhandled rejection — ac-56's own W5/W6 note the same class of risk;   */
+/* this is why mcp-stdio.js's request() now rejects every pending call    */
+/* promptly when the child process exits, instead of waiting out a fixed */
+/* timeout no matter what.                                                */
 /* ===================================================================== */
 function spawnMcpAt(njMcpPath, x, args, env) {
   return MCP.spawnServer(njMcpPath, ['--backlog=' + x.bl].concat(args || []),
@@ -326,38 +334,54 @@ function copyExec(src, dest) {
   fs.chmodSync(dest, 0o755);
 }
 {
-  /* M12a — baseline, unchanged layout: dist/nj-mcp next to dist/nj (both
-   * extensionless). Already green; a control for M12b. */
+  /* M12a — both siblings present, copied together: a tool call works
+   * exactly as it does against the repo's own dist/. */
   const bin = H.freshDir('mcp-m12a-bin');
-  copyExec(H.NJ, path.join(bin, 'nj'));
-  copyExec(H.NJ_MCP, path.join(bin, 'nj-mcp'));
+  copyExec(H.NJ, path.join(bin, 'nj.mjs'));
+  copyExec(H.NJ_MCP, path.join(bin, 'nj-mcp.mjs'));
   const x = model('mcp-m12a');
-  await withServerAt(path.join(bin, 'nj-mcp'), x, [], {}, async s => {
-    const r = await s.modernToolsCall('doctor', {});
-    T.check('M12a extensionless nj-mcp next to extensionless nj: no protocol error',
+  await withServerAt(path.join(bin, 'nj-mcp.mjs'), x, [], {}, async s => {
+    let r;
+    try {
+      r = await s.modernToolsCall('doctor', {});
+    } catch (e) {
+      T.check('M12a nj.mjs + nj-mcp.mjs copied together: tools/call doctor did not fail/hang', false, String(e && e.message) + ' stderr=' + s.stderr());
+      return;
+    }
+    T.check('M12a nj.mjs + nj-mcp.mjs copied together: no protocol error',
       !r.error, J(r.error));
-    T.check('M12a extensionless nj-mcp next to extensionless nj: doctor returns a result',
+    T.check('M12a nj.mjs + nj-mcp.mjs copied together: doctor returns a result',
       !!(r.result && r.result.structuredContent), J(r.result));
   });
 }
 {
-  /* M12b — a release per D179: nj-mcp.cjs next to nj.cjs AND a same-named
-   * sh wrapper `nj` (not `nj.cjs`) that a careless sibling lookup would
-   * hit instead. nj-mcp must notice its own `.cjs` extension and spawn
-   * `nj.cjs`, never the wrapper. */
+  /* M12b — nj-mcp.mjs copied WITHOUT its nj.mjs sibling: the server
+   * process itself starts and stays up (it needs no sibling to answer
+   * server/discover or to parse a request — only a tool call that
+   * actually spawns nj needs one); the tools/call this leg makes must
+   * fail fast as a clean JSON-RPC protocol error (§ 17), never hang and
+   * never crash nj-mcp.mjs itself — confirmed separately by a second,
+   * unrelated call succeeding afterward in the SAME session. */
   const bin = H.freshDir('mcp-m12b-bin');
-  copyExec(H.NJ, path.join(bin, 'nj.cjs'));
-  copyExec(H.NJ_MCP, path.join(bin, 'nj-mcp.cjs'));
-  fs.writeFileSync(path.join(bin, 'nj'),
-    '#!/bin/sh\nexec node "$(dirname "$0")/nj.cjs" "$@"\n');
-  fs.chmodSync(path.join(bin, 'nj'), 0o755);
+  copyExec(H.NJ_MCP, path.join(bin, 'nj-mcp.mjs'));
+  T.check('fixture: M12b has no nj.mjs sibling', !fs.existsSync(path.join(bin, 'nj.mjs')), bin);
   const x = model('mcp-m12b');
-  await withServerAt(path.join(bin, 'nj-mcp.cjs'), x, [], {}, async s => {
-    const r = await s.modernToolsCall('doctor', {});
-    T.check('M12b nj-mcp.cjs spawns nj.cjs (its own extension), not the sh wrapper `nj`: no protocol error',
-      !r.error, J(r.error));
-    T.check('M12b nj-mcp.cjs spawns nj.cjs (its own extension), not the sh wrapper `nj`: doctor returns a result',
-      !!(r.result && r.result.structuredContent), J(r.result) + ' stderr=' + s.stderr());
+  await withServerAt(path.join(bin, 'nj-mcp.mjs'), x, [], {}, async s => {
+    let r;
+    try {
+      r = await s.modernToolsCall('doctor', {}, { timeout: 5000 });
+    } catch (e) {
+      T.check('M12b missing nj.mjs sibling: tools/call fails cleanly, not a hang/crash', false, String(e && e.message) + ' stderr=' + s.stderr());
+      return;
+    }
+    T.check('M12b missing nj.mjs sibling: a protocol-level error (not a tool-content isError), naming the missing module',
+      !!r.error && /nj\.mjs|cannot find module/i.test(JSON.stringify(r.error)), J(r.error));
+    T.check('M12b missing nj.mjs sibling: the server process is still alive (only the call failed, not the server)',
+      !s.child.killed && s.child.exitCode === null, 'exitCode=' + s.child.exitCode);
+
+    /* The same session still answers an unrelated call normally. */
+    const r2 = await s.modernToolsList({});
+    T.check('M12b after the failed call, tools/list in the SAME session still answers normally', !r2.error && Array.isArray(r2.result && r2.result.tools), J(r2));
   });
 }
 

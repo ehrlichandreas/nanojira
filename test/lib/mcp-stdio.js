@@ -62,9 +62,31 @@ function spawnServer(njMcpPath, args, opts) {
   });
   child.stderr.on('data', chunk => { errBuf += chunk.toString('utf8'); });
 
+  /* A dead server must fail every STILL-PENDING request promptly, not
+   * leave each one to its own fixed timeout -- a server that crashed (or
+   * never started, e.g. a missing sibling under a broken fixture) would
+   * otherwise hang every caller for the full timeout and, since nothing
+   * here would ever settle those promises otherwise, surface as an
+   * unhandled rejection rather than a clean failure once the timeout
+   * finally does fire. `exited` also lets a request() placed AFTER the
+   * child has already died fail immediately instead of waiting at all. */
+  let exited = null;
+  function rejectAllPending(reason) {
+    for (const [, { reject }] of pending) reject(new Error(reason));
+    pending.clear();
+  }
   const exitPromise = new Promise(resolve => {
-    child.on('error', e => resolve({ status: null, signal: null, spawnError: e.message }));
-    child.on('close', (code, signal) => resolve({ status: code, signal }));
+    child.on('error', e => {
+      exited = { status: null, signal: null, spawnError: e.message };
+      resolve(exited);
+      rejectAllPending('the server process failed to spawn: ' + e.message);
+    });
+    child.on('close', (code, signal) => {
+      exited = { status: code, signal };
+      resolve(exited);
+      rejectAllPending('the server process exited (code=' + code + ' signal=' + signal +
+        ') before answering -- stderr: ' + errBuf.slice(0, 2000));
+    });
   });
 
   function rawSend(obj) {
@@ -76,12 +98,17 @@ function spawnServer(njMcpPath, args, opts) {
     const id = ro.id !== undefined ? ro.id : nextId++;
     const timeoutMs = ro.timeout || 15000;
     const msg = { jsonrpc: '2.0', id, method, params: params || {} };
+    if (exited) {
+      return Promise.reject(new Error('the server process already exited (code=' + exited.status +
+        ' signal=' + exited.signal + (exited.spawnError ? ' spawnError=' + exited.spawnError : '') +
+        ') before this request was sent -- stderr: ' + errBuf.slice(0, 2000)));
+    }
     const p = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         pending.delete(id);
         reject(new Error('timed out waiting for a response to ' + method + ' (id=' + id + ')'));
       }, timeoutMs);
-      pending.set(id, { resolve: m => { clearTimeout(timer); resolve(m); } });
+      pending.set(id, { resolve: m => { clearTimeout(timer); resolve(m); }, reject: e => { clearTimeout(timer); reject(e); } });
     });
     rawSend(msg);
     return p;

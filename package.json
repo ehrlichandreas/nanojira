@@ -1,17 +1,17 @@
 {
   "name": "nanojira",
   "private": true,
-  "version": "3.10.0",
+  "version": "3.11.0",
   "description": "NanoJira: a local, file-based task tool for agents.",
   "bin": {
-    "nj": "dist/nj",
-    "nj-mcp": "dist/nj-mcp"
+    "nj": "dist/nj.mjs",
+    "nj-mcp": "dist/nj-mcp.mjs"
   },
   "scripts": {
     "build": "node tools/bundle.js",
     "build:check": "node tools/bundle.js --check",
     "typecheck": "tsc --noEmit",
-    "test": "node tools/bundle.js --check && node test/run-all.js dist/nj",
+    "test": "node tools/bundle.js --check && node test/run-all.js dist/nj.mjs",
     "perf": "node tools/bundle.js --check && node tools/perf.js"
   },
   "devDependencies": {

@@ -24,14 +24,14 @@ are folded into the module descriptions below rather than listed separately.
 acting name, `core/actor.ts`), `nj claim`/`nj release`/`nj unarchive`
 (`core/claims.ts`, `cmd-claim.ts`, `cmd-release.ts`, `cmd-unarchive.ts`),
 `nj check`/`nj find` (`cmd-check.ts`, `cmd-find.ts`), batch writes,
-`--id=A,B,C` (`core/batch.ts`), and the MCP wrapper, `dist/nj-mcp`
+`--id=A,B,C` (`core/batch.ts`), and the MCP wrapper, `dist/nj-mcp.mjs`
 (`src/nj-mcp.ts`, `core/flag-table.ts`). Each is described in its own place
 below rather than repeated here.
 
 **v3.4–v3.5** added two more, read directly from their own source (not
 re-walked backlog-mechanically like § 2's import counts): `nj --version`
 (`core/version.ts`, read once at build time from `package.json`, embedded
-into both `dist/nj` and `dist/nj-mcp`; checked before any command
+into both `dist/nj.mjs` and `dist/nj-mcp.mjs`; checked before any command
 dispatches, § 9), `nj next` (`cmd-next.ts`, § 12b — reuses `cmd-list.ts`'s
 own `applyFilters`/`availableToActor` and `cmd-claim.ts`'s `claimOne`
 rather than re-deriving either; adds the D156 leaf-work filter on top),
@@ -176,20 +176,23 @@ existing ones:
 src/nj.ts      (entry, ES module)              src/nj-mcp.ts  (entry, ES module)
  └─ imports src/commands/*.ts + src/core/*.ts     └─ imports src/core/{args,config,output,flag-table}.ts
                               │                                       │  — never src/commands/*, § 17:
-                              │  esbuild --bundle --format=cjs        │    one dist/nj child process per tool call
+                              │  esbuild --bundle --format=esm        │    one dist/nj.mjs child process per tool call
                               ▼                                       ▼
-                         dist/nj                                 dist/nj-mcp
+                       dist/nj.mjs                             dist/nj-mcp.mjs
                  (one file, checked into git, what ships, each built the same way)
 ```
 
-`tools/bundle.js` builds **two targets** from the one `src/` tree: `dist/nj`
-(round one's CLI, importing everything under `src/commands/` and
-`src/core/`) and `dist/nj-mcp` (§ 17, importing only the handful of
+`tools/bundle.js` builds **two targets** from the one `src/` tree:
+`dist/nj.mjs` (round one's CLI, importing everything under `src/commands/`
+and `src/core/`) and `dist/nj-mcp.mjs` (§ 17, importing only the handful of
 `src/core/` modules it needs to resolve a backlog, parse its own flags and
-generate MCP tool schemas — `dist/nj-mcp` never imports a `cmd-*.ts` module
-directly; a tool call spawns `dist/nj --json` as a child process instead).
-Both are esbuild `--bundle --format=cjs` outputs, both committed, both
-checked for staleness by `build:check`.
+generate MCP tool schemas — `dist/nj-mcp.mjs` never imports a `cmd-*.ts`
+module directly; a tool call spawns `dist/nj.mjs --json` as a child process
+instead). Both are esbuild `--bundle --format=esm` outputs (addendum
+9b3d0de — the earlier extensionless CommonJS `dist/nj`/`dist/nj-mcp` pair
+is gone, in the repo and in every export alike), rejecting at build time any
+import that is not a `node:*` built-in; both committed, both checked for
+staleness by `build:check`.
 
 `src/nj.ts` is a real ES module like every other file under `src/`, which a
 single `src/package.json` (`{"type": "module"}`) marks for the whole
@@ -209,7 +212,7 @@ only ever reached through `import type`, which erases completely under
 with its own `export` as an ES module regardless of whether the export is
 type-only, and a file that is both ES-module-shaped *and* does
 `module.exports = {…}` at runtime gets a broken bundle (found live during the
-`import`/`export` conversion — `dist/nj` crashed with `NEW_FIELDS` undefined
+`import`/`export` conversion — `dist/nj.mjs` crashed with `NEW_FIELDS` undefined
 while `tsc` reported zero errors). Keeping every real declaration in
 `types.ts` sidesteps the whole class of bug.
 
@@ -223,10 +226,10 @@ decision).
 | Command | What it checks |
 |---|---|
 | `npm run typecheck` (`tsc --noEmit`) | `strict: true` + `erasableSyntaxOnly` over all of `src/**/*.ts`, `src/nj.ts` included directly (it carries a real `.ts` extension, so tsc needs no shadow copy) |
-| `npm run build` (`node tools/bundle.js`) | writes both `dist/nj` (from `src/nj.ts` + `src/commands/` + `src/core/`) and `dist/nj-mcp` (from `src/nj-mcp.ts` + the handful of `src/core/` modules it needs); refuses to bundle a source file missing its own `'use strict'` |
+| `npm run build` (`node tools/bundle.js`) | writes both `dist/nj.mjs` (from `src/nj.ts` + `src/commands/` + `src/core/`) and `dist/nj-mcp.mjs` (from `src/nj-mcp.ts` + the handful of `src/core/` modules it needs); refuses to bundle a source file missing its own `'use strict'`, or one that imports anything but a `node:*` built-in |
 | `npm run build:check` (`node tools/bundle.js --check`) | rebuilds both targets in memory, exits 1 unless each is byte-identical to its committed file — catches a stale bundle of either |
-| `npm test` (`build:check && node test/run-all.js dist/nj`) | the oracle (§ 5) against the shipped `dist/nj`; the MCP suites (`test/ac/ac-32-mcp*.js`, `ac-38-*`) additionally drive `dist/nj-mcp` |
-| `npm run perf` (`build:check && node tools/perf.js`) | TSK-003: builds a 10 000-element backlog under `/tmp` and measures `dist/nj list`/`list --json`/`tree`/`doctor` against SPECIFICATION.md:849's comfort bar (median ≤ 250 ms, worst ≤ 500 ms); aborts instead of measuring if another `node` process is running, so machine load is never reported as an `nj` regression |
+| `npm test` (`build:check && node test/run-all.js dist/nj.mjs`) | the oracle (§ 5) against the shipped `dist/nj.mjs`; the MCP suites (`test/ac/ac-32-mcp*.js`, `ac-38-*`, `ac-56-*`) additionally drive `dist/nj-mcp.mjs` and the exported skill folder |
+| `npm run perf` (`build:check && node tools/perf.js`) | TSK-003: builds a 10 000-element backlog under `/tmp` and measures `dist/nj.mjs list`/`list --json`/`tree`/`doctor` against SPECIFICATION.md:849's comfort bar (median ≤ 250 ms, worst ≤ 500 ms); aborts instead of measuring if another `node` process is running, so machine load is never reported as an `nj` regression |
 
 `tools/refactor-harness/baseline.js` (record/verify) and
 `tools/blindness-matrix/run.js` are not wired into `npm test` — they are run
@@ -261,7 +264,7 @@ would actually reach for, not every name; "imported by" is exact.
 | `core/flag-table.ts` (v3.2 D144 C-2, v3.3 § 17, v3.5 `next`/`log`, v3.7 `rm`/tags) | The one per-command flag table both the CLI's own `checkFlags` and `nj-mcp`'s MCP schema generator read — the global `--backlog`/`--json` controls are a separate table, never part of a command's own, so a schema built from this table excludes `backlog` by construction (§ 17). `rm` gained an entry in v3.7 (163 A) purely for `commandHelp` to read — `nj-mcp.ts`'s own `TOOL_NAMES` still omits `rm` unconditionally, so this does not expose it as a tool; `set` gained `add-tags`/`remove-tags` (163 B) | `FLAG_TABLE`, `cliFieldNames`, `commandFields`, `commandFieldNames` | `nj-mcp.ts`, `core/help.ts` (v3.6 — `commandHelp` reuses this same table for each command's own flag list) and 16 `cmd-*` modules (every one except `cmd-init`, `cmd-status`, which take no settable fields; `cmd-rm`'s own entry, v3.7, is read only by `commandHelp`, never by `nj-mcp`) |
 | `core/suggest.ts` (v3.6, DECISIONS 158 EV-3/160) | Did-you-mean: a tiny fixed synonym table checked first, then an OSA (optimal-string-alignment — an adjacent transposition costs 1, not 2) distance against the allowed values, length-dependent threshold (≤ 1 for a ≤ 4-character value, ≤ 2 otherwise), feeding the hint on an `invalid_value` failure — never the message or the accepted vocabulary | `suggestValue`, `valueHint` | 5 modules: `cmd-claim`, `cmd-list`, `cmd-new`, `cmd-next`, `cmd-set` |
 | `commands/cmd-init.ts` … `commands/cmd-log.ts` (18 modules) | One per verb (`init new set note check find show list tree rm archive unarchive claim release next log doctor status`); `init` writes the full `layout` block and the v3 README; `doctor --fix`'s step 0 migrates a legacy layout (unless both places exist, which is ambiguous and moves nothing); `check`/`find` are v3.2 (§ 10a, § 9a), `claim`/`release`/`unarchive` are v3.1 (§ 12a, § 11a), `next`/`log` are v3.5 (§ 12b, § 12c) | one `cmdX` function each | `nj` only |
-| `src/nj-mcp.ts` (v3.3, § 17 "MCP Interface") | A second, separate entry point: the dual-era MCP stdio server. Imports only `core/args.ts`, `core/config.ts`, `core/output.ts` and `core/flag-table.ts` — never a `cmd-*` module directly; a tool call spawns `dist/nj --json` as a child process instead (process-per-call, § 17), so there is no duplicated command logic to keep in sync | (an entry point, not a library — nothing else imports it) | — |
+| `src/nj-mcp.ts` (v3.3, § 17 "MCP Interface") | A second, separate entry point: the dual-era MCP stdio server. Imports only `core/args.ts`, `core/config.ts`, `core/output.ts` and `core/flag-table.ts` — never a `cmd-*` module directly; a tool call spawns `dist/nj.mjs --json` as a child process instead (process-per-call, § 17), so there is no duplicated command logic to keep in sync | (an entry point, not a library — nothing else imports it) | — |
 
 Nothing above `context.ts`/`args.ts`/`output.ts` is imported by anything
 below it — a `cmd-*` module may use CLI helpers and printing, but no CLI
@@ -326,7 +329,7 @@ and the Blindness matrix (Orakel/Korpus/Blindheits-Matrix in team shorthand).
 
 **Oracle** (`test/`, 95 files derived only from `SPECIFICATION.md` — `ac/`
 45, `edge/` 43, `fault/` 6, `stress/` 1 — run via `npm test`): black-box,
-spawns `nj`/`dist/nj` (and, for the MCP suites, `dist/nj-mcp`), asserts
+spawns `nj`/`dist/nj.mjs` (and, for the MCP suites, `dist/nj-mcp.mjs`), asserts
 exit code/stdout/stderr/file bytes, never reads implementation source.
 Reach for it to answer "is this still spec-conformant" — it is what
 CI-equivalent gating runs by default.
