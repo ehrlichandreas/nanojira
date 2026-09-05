@@ -1,7 +1,7 @@
 'use strict';
 
-// The acting name (§ 9 "The acting name"): who is acting, for `nj note` and
-// `nj claim`/`nj release`. --as outranks NJ_AUTHOR. "Empty counts as unset"
+// The acting name (§ 9 "The acting name"): who is acting, for `nanojira note` and
+// `nanojira claim`/`nanojira release`. --as outranks NJ_AUTHOR. "Empty counts as unset"
 // (DECISIONS 89) applies only to NJ_AUTHOR; for a name "from either source",
 // § 9 requires non-empty, so an empty --as= is invalid_value, not unset
 // (DECISIONS 119). A name is valid when, trimmed of leading/trailing spaces
@@ -23,8 +23,8 @@ function validActorName(raw: string): string | null {
 /**
  * Resolves `--as` (when the command has it) over `NJ_AUTHOR`, failing on an
  * invalid name from either source. `required` is the one difference between
- * `nj note` (false: falls back to `assignee`/`?`, § 10) and
- * `nj claim`/`nj release` (true: `missing_argument` when neither is set,
+ * `nanojira note` (false: falls back to `assignee`/`?`, § 10) and
+ * `nanojira claim`/`nanojira release` (true: `missing_argument` when neither is set,
  * § 12a).
  */
 function resolveActingName(flags: Flags, required: boolean): string | null {

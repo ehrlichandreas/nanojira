@@ -12,7 +12,7 @@ import { FOLDER_ROLES, TYPE_FOLDER_ROLE } from './constants.ts';
 
 // ---------------------------------------------------------------------- scan
 
-// Bookkeeping directories nj scans for its own temp files; element files
+// Bookkeeping directories nanojira scans for its own temp files; element files
 // never lie there. Every dot-directory is outside the element scan anyway.
 const INTERNAL_DIRS = ['.ids', '.nanojira'];
 // Human-facing files at the top of the backlog; everywhere else a `*.md` is
@@ -216,7 +216,7 @@ function ownFolder(el: Element): string | null {
 // The folders a move left behind: removed once empty, walking up, but only
 // the ID-shaped ones `hierarchy` creates — never a type folder, never with
 // anything still in it, never recursively (DECISIONS 92). Shared by
-// `doctor --fix` step 3 and `nj unarchive` (§ 11a).
+// `doctor --fix` step 3 and `nanojira unarchive` (§ 11a).
 function removeEmptiedIdFolders(backlog: string, dirs: Set<string>) {
   for (const start of dirs) {
     for (let d = start; d !== backlog && d.startsWith(backlog + path.sep) && ID_FOLDER.test(path.basename(d)); d = path.dirname(d)) {

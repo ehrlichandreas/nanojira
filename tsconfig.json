@@ -4,8 +4,8 @@
     "checkJs": true,
     "noEmit": true,
     "target": "ES2022",
-    "module": "commonjs",
-    "moduleResolution": "node",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
     "strict": true,
     "erasableSyntaxOnly": true,
     "allowImportingTsExtensions": true

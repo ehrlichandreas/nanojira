@@ -233,7 +233,7 @@ function sectionHeadingIndex(lines: string[], names: string[]) {
 }
 
 // After optional leading whitespace, a list marker then `[ ]`/`[x]`/`[X]`
-// (§ 10a) — the one countable-checkbox shape, shared by `nj check`'s own
+// (§ 10a) — the one countable-checkbox shape, shared by `nanojira check`'s own
 // scan and `acceptance:no_checkbox`'s span check (DECISIONS 163 E) so the
 // two can never disagree on what counts as a checkbox.
 const CHECKBOX_RE = /^([ \t]*)(-|\*|\+|\d+\.|\d+\))\ \[( |x|X)\](.*)$/;
@@ -251,7 +251,7 @@ function sectionEnd(lines: string[], headingIdx: number) {
  * section span (heading to the next `#`/`##` heading or the end of the
  * body — the same span `sectionHeadingIndex`/`sectionEnd` already define)
  * contains at least one countable checkbox line. A fenced code block
- * within the span is skipped exactly the way `nj check`'s own scan skips
+ * within the span is skipped exactly the way `nanojira check`'s own scan skips
  * one (§ 10a) — a checkbox-shaped example line inside ``` ``` ``` never
  * counts. False when the section has no heading at all (nothing to scan).
  */
@@ -367,7 +367,7 @@ function applySections(body: string, wanted: Map<string, string>, cfg: Config) {
 interface NoteLine { at: string; actor: string; text: string }
 
 /**
- * Every note line under `## Notes` (§ 10, `nj log` § 12c), in document
+ * Every note line under `## Notes` (§ 10, `nanojira log` § 12c), in document
  * order — the inverse of `withNote`'s own `- <ISO-8601> <author>: <text>`
  * format. The author never contains `:` (§ 9 "the acting name"), so the
  * first `: ` after it is an unambiguous boundary, exactly as § 12c states

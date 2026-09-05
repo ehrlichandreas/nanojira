@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj list`.
+// `nanojira list`.
 
 import type { Flags, Element, Config } from '../core/types.ts';
 
@@ -23,7 +23,7 @@ function availableToActor(backlog: string, id: string, name: string | null): boo
   return claim === null || claim.by === name;
 }
 
-// Shared with `nj find` (§ 9a), which combines the same filters as an AND
+// Shared with `nanojira find` (§ 9a), which combines the same filters as an AND
 // with its own text-match predicate.
 function applyFilters(elements: Element[], flags: Flags, cfg: Config) {
   const all = flags.has('all');

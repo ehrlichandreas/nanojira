@@ -1,7 +1,7 @@
 'use strict';
 
 // Claims (§ 12 "Claims", § 12a): the append-only CAS sequence behind
-// `nj claim` / `nj release`. Verified against docs/review/claim-model.mjs
+// `nanojira claim` / `nanojira release`. Verified against docs/review/claim-model.mjs
 // (variant P3) and docs/review/claim-protocol.md: no live pruning, rollback
 // only if this invocation appended and restores the entry it read, ENOENT
 // treated like EEXIST, the idempotent "already held" path re-asserts via a
@@ -55,7 +55,7 @@ function highestEntry(dir: string): Entry | null {
 }
 
 /**
- * Every generation, oldest first (`nj log`, § 12c) — the same filtering
+ * Every generation, oldest first (`nanojira log`, § 12c) — the same filtering
  * `highestEntry` applies (numeric names only, a stored kind of `claimed` or
  * `released`), just every one of them instead of only the highest, and
  * ascending instead of descending: `log`'s merge classifies each entry by
@@ -79,8 +79,8 @@ function allEntriesAscending(backlog: string, id: string): Entry[] {
 }
 
 /** The current holder for display (`_claim`, § 9), or null when unclaimed. */
-// A per-process cache, not per-call: one `nj` invocation targets exactly one
-// backlog, and `.nanojira/claims/` — once it exists — is never removed by nj
+// A per-process cache, not per-call: one `nanojira` invocation targets exactly one
+// backlog, and `.nanojira/claims/` — once it exists — is never removed by nanojira
 // itself (only the per-element directories under it are, § 12a); staying
 // `true` forever once observed is therefore always correct, never stale.
 // Without this, `list --json` on a backlog with no claims at all paid one
@@ -213,7 +213,7 @@ function removeClaimDirWholesale(backlog: string, id: string): void {
 
 /**
  * Final status releases the claim (§ 12a, DECISIONS 171 B): whoever
- * currently holds the claim, unconditionally -- not `nj release`'s own
+ * currently holds the claim, unconditionally -- not `nanojira release`'s own
  * ownership check. Used by a write that sets `status` to the last
  * configured status, whether that write is `set`'s own or the mirror write
  * `claim`/`next --status=<last>` just made for itself. Unclaimed is a

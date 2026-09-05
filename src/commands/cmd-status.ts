@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj` without a command: the status overview.
+// `nanojira` without a command: the status overview.
 
 import type { Flags } from '../core/types.ts';
 
@@ -14,7 +14,7 @@ function cmdStatus(flags: Flags) {
   const ctx = context(flags);
   const scope = ctx.elements.filter((e) => !e.archived);
   const counts = countsOf(scope, ctx.scan.unreadable.length);
-  // D158 EV-4: bare `nj`'s own "Ready to work" applies the D156 leaf rule
+  // D158 EV-4: bare `nanojira`'s own "Ready to work" applies the D156 leaf rule
   // (reused, not reimplemented) — an element with an open child is left
   // out here, in favor of that child if it is itself ready. `list --ready`
   // (cmd-list.ts) does not call this: it stays a pure readiness filter.
@@ -43,7 +43,7 @@ function cmdStatus(flags: Flags) {
   }
   if (counts.errors > 0) {
     out('');
-    out(`${counts.errors} element${counts.errors === 1 ? '' : 's'} with errors — run \`nj doctor\`.`);
+    out(`${counts.errors} element${counts.errors === 1 ? '' : 's'} with errors — run \`nanojira doctor\`.`);
   }
   return 0;
 }

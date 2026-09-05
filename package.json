@@ -1,21 +1,22 @@
 {
   "name": "nanojira",
   "private": true,
-  "version": "3.12.2",
+  "type": "module",
+  "version": "4.0.0",
   "description": "NanoJira: a local, file-based task tool for agents.",
   "engines": {
     "node": ">=24"
   },
   "bin": {
-    "nj": "dist/nj.mjs",
-    "nj-mcp": "dist/nj-mcp.mjs"
+    "nanojira": "dist/nanojira.mjs",
+    "nanojira-mcp": "dist/nanojira-mcp.mjs"
   },
   "scripts": {
-    "build": "node tools/bundle.js",
-    "build:check": "node tools/bundle.js --check",
+    "build": "node tools/bundle.mjs",
+    "build:check": "node tools/bundle.mjs --check",
     "typecheck": "tsc --noEmit",
-    "test": "node tools/bundle.js --check && node test/run-all.js",
-    "perf": "node tools/bundle.js --check && node tools/perf.js"
+    "test": "node tools/bundle.mjs --check && node test/run-all.mjs",
+    "perf": "node tools/bundle.mjs --check && node tools/perf.mjs"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.32.0",

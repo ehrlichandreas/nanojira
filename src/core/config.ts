@@ -27,7 +27,7 @@ function validateConfig(obj: any): ValidationResult {
     return { errors: ['configuration must be a JSON object'], warnings: [] };
   }
   // An unrecognised top-level key is a warning, not an error (DECISIONS
-  // 166 correcting 165/163 D's own premise): a 3.6-or-older nj silently
+  // 166 correcting 165/163 D's own premise): a 3.6-or-older nanojira silently
   // ignored it anyway, so this is only ever a visibility change, never a
   // behaviour change, for a binary new enough to apply this rule at all.
   for (const k of Object.keys(obj)) {
@@ -270,17 +270,17 @@ function claim(dir: string, src: Source, lenient: boolean): string {
   // must say so regardless of which source named it.
   if (fs.existsSync(path.join(dir, V3_DIR_REL))) {
     fail('backlog_without_config', `${shown} exists but has no ${V3_CONFIG_REL}`,
-      'run `nj doctor` — it tolerates the missing file and reports config:invalid');
+      'run `nanojira doctor` — it tolerates the missing file and reports config:invalid');
   }
   fail(SOURCE_CODE[src.kind], `no backlog at ${shown} (from ${sourceName(src)})`,
-    `the directory has no ${V3_CONFIG_REL} — check the path, or run \`nj init\` with the same source to create a backlog there`);
+    `the directory has no ${V3_CONFIG_REL} — check the path, or run \`nanojira init\` with the same source to create a backlog there`);
 }
 
 // Any character outside printable ASCII (space through ~) becomes a \uXXXX
 // escape — NBSP, a lone \v/\f, U+2028, a BOM mid-value — so a message never
 // shows an invisible character as though it were absent (TSK-029 T3). Applied
 // only to text taken from untrusted input (an `.njrc` key, value or the path
-// derived from one), never to nj's own static prose.
+// derived from one), never to nanojira's own static prose.
 function escapeInvisible(s: string): string {
   return s.replace(/[^\x20-\x7E]/g, (c) => '\\u' + c.charCodeAt(0).toString(16).padStart(4, '0'));
 }
@@ -318,7 +318,7 @@ function njrcLocation(dir: string): { dir: string; src: Source } | null {
 // is a `.njrc` the search reached and could not use: fatal, not "absent" (§ 4).
 //
 // Ownership comes first, before a single byte is read: a `.njrc` planted in a
-// shared ancestor (`/tmp`) must not steer another user's `nj`, so one owned
+// shared ancestor (`/tmp`) must not steer another user's `nanojira`, so one owned
 // by anybody but the current user or root is refused — for a symlink, the
 // link and its target both (§ 4, DECISIONS 93 F1, 98).
 // Checked and read through ONE file descriptor (TSK-029 T1): `lstat` for the
@@ -395,7 +395,7 @@ function readNjrc(file: string): string | null {
  * ownership `lstat` and the `open()` -- the exact window TSK-029's residual
  * race lived in. Polls for `<dir>/.nj-fault-go` (timeout 10s, the same
  * marker filename `before-compare` uses, § 12). Released by the marker or
- * by the timeout, `nj` always proceeds to `open()` next -- there is no
+ * by the timeout, `nanojira` always proceeds to `open()` next -- there is no
  * `fault:njrc-swap` code, so this never fails or throws.
  */
 function njrcSwapFaultHook(dir: string) {
@@ -452,7 +452,7 @@ function parseNjrc(file: string, raw: string): Map<string, string> {
 
 // `init` takes its target from the same sources, except that the upward
 // search looks only for a `.njrc` — an existing `backlog/` is never a target
-// for `init` — and ends at `./backlog` (§ 4, `nj init`).
+// for `init` — and ends at `./backlog` (§ 4, `nanojira init`).
 function initLocation(flags: Flags): string {
   const explicit = explicitLocation(flags);
   if (explicit !== null) return explicit.dir;
@@ -501,12 +501,12 @@ function findBacklog(flags: Flags, lenient: boolean): string {
       // A backlog folder without its config is a different failure from "none
       // at all" and must say so rather than send the caller hunting (§ 4).
       fail('backlog_without_config', `${candidate} exists but has no ${V3_CONFIG_REL}`,
-        'run `nj doctor` — it tolerates the missing file and reports config:invalid');
+        'run `nanojira doctor` — it tolerates the missing file and reports config:invalid');
     }
     if (path.dirname(dir) === dir) break;
   }
   return fail('no_backlog', `no backlog found (looked for backlog/${V3_CONFIG_REL} upward from the working directory)`,
-    'run `nj init` to create one, or set NJ_BACKLOG');
+    'run `nanojira init` to create one, or set NJ_BACKLOG');
 }
 
 function isDir(p: string) {

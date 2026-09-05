@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj check` (§ 10a).
+// `nanojira check` (§ 10a).
 
 import type { Flags, Element } from '../core/types.ts';
 
@@ -92,7 +92,7 @@ function cmdCheck(flags: Flags) {
   const text = flagString(flags, 'text');
   const item = flagString(flags, 'item');
   if (text !== undefined && item !== undefined) fail('invalid_value', 'use either --text or --item, not both');
-  if (text === undefined && item === undefined) fail('missing_argument', 'nj check needs --text=<substring> or --item=<n>');
+  if (text === undefined && item === undefined) fail('missing_argument', 'nanojira check needs --text=<substring> or --item=<n>');
   // The empty string is rejected, not trimmed (DECISIONS 129): a
   // whitespace-only --text is still a substring to match against.
   if (text === '') fail('invalid_value', '--text must not be empty');

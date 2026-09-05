@@ -1,6 +1,6 @@
 'use strict';
 
-// The README.md text `nj init` writes, and the v2 text it replaces on
+// The README.md text `nanojira init` writes, and the v2 text it replaces on
 // migration (§ 14 step 0, DECISIONS 102). Kept in one module, never a
 // per-command literal, so the two texts cannot drift apart from each other
 // by accident.
@@ -45,8 +45,8 @@ tasks, subtasks). Where the files lie is set by \`layout\` in
 
 Every file has a frontmatter block between \`---\` lines and a free Markdown
 body. The frontmatter is the truth; the body belongs to you, except for the
-\`# H1\` (mirrors \`title\`), the \`## Notes\` section written by \`nj note\`, and
-the sections \`nj new\`/\`nj set\` write when asked to.
+\`# H1\` (mirrors \`title\`), the \`## Notes\` section written by \`nanojira note\`, and
+the sections \`nanojira new\`/\`nanojira set\` write when asked to.
 
 An element is *ready to work* when its status is the first configured status,
 all \`depends_on\` targets are done, it carries no error, and it has a
@@ -54,17 +54,17 @@ non-empty \`## Description\` (plus \`## Acceptance Criteria\` for tasks and
 subtasks). A heading with nothing under it counts as absent — that is
 deliberate.
 
-\`STATUS.md\` is a generated overview by status. Do not edit it; \`nj\` rewrites
-it after every change, and \`nj doctor --fix\` repairs it.
+\`STATUS.md\` is a generated overview by status. Do not edit it; \`nanojira\` rewrites
+it after every change, and \`nanojira doctor --fix\` repairs it.
 
-\`.nanojira/\` holds what only \`nj\` needs: the configuration and \`ids/\`, one
+\`.nanojira/\` holds what only \`nanojira\` needs: the configuration and \`ids/\`, one
 empty tombstone file per allocated ID. Both are versioned and must be
 committed — the tombstones are what guarantee IDs are never reused. Do not
 delete them. Only \`.nanojira/index.json\` (a cache) and temporary files are
 ignored.
 
-Useful commands: \`nj\`, \`nj list --ready\`, \`nj show --id=…\`,
-\`nj new --type=task --parent=EPIC-001 --title="…"\`, \`nj doctor\`.
+Useful commands: \`nanojira\`, \`nanojira list --ready\`, \`nanojira show --id=…\`,
+\`nanojira new --type=task --parent=EPIC-001 --title="…"\`, \`nanojira doctor\`.
 `;
 
 export { V2_README, V3_README };

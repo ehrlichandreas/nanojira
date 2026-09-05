@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj claim` (§ 12 "Claims", § 12a).
+// `nanojira claim` (§ 12 "Claims", § 12a).
 
 import type { Flags, Element, Context } from '../core/types.ts';
 
@@ -18,7 +18,7 @@ import { refreshStatus } from '../core/status.ts';
 import { compareGuard, mirrorWrite, nowIso, renderElement } from '../core/store.ts';
 import { valueHint } from '../core/suggest.ts';
 
-const STABLE_HINT = 'the element changed in parallel — nj claim takes no --force; retry once it is stable';
+const STABLE_HINT = 'the element changed in parallel — nanojira claim takes no --force; retry once it is stable';
 
 /** The claim CAS loop, mirror write and rollback for one element — already catchable (mirrorWrite), so the single and batch paths share it unchanged. */
 function claimOne(ctx: Context, el: Element, name: string, status: string | undefined, steal: string | undefined, ts: string) {

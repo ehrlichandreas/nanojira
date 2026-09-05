@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj unarchive` (§ 11a) — the inverse of `nj archive`.
+// `nanojira unarchive` (§ 11a) — the inverse of `nanojira archive`.
 
 import type { Flags, Element, Context } from '../core/types.ts';
 
@@ -18,7 +18,7 @@ import { nowIso, atomicWrite, compareGuard, planMove, runMove, renderElement } f
 import { loadElement } from '../core/load.ts';
 
 const STABLE_HINT = 'retry once the backlog is stable — unarchive takes no --force';
-const FIX_HINT = 'run `nj doctor --fix` to move the files into their places, then unarchive again';
+const FIX_HINT = 'run `nanojira doctor --fix` to move the files into their places, then unarchive again';
 
 /** Depth-first, pre-order, siblings by `id` ascending (§ 11a "Output"). */
 function orderedSubtree(ctx: Context, el: Element): Element[] {

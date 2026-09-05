@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj note`.
+// `nanojira note`.
 
 import type { Flags, Element } from '../core/types.ts';
 
@@ -72,7 +72,7 @@ function cmdNote(flags: Flags, positional: string[]) {
   // write path (§ 7); the overall text is then trimmed, exactly as before
   // multi-line text existed (§ 10 "Multi-line text").
   const text = positional.join(' ').replace(/\r\n/g, '\n').replace(/\r/g, '\n').trim();
-  if (text === '') fail('missing_argument', 'nj note needs the note text as an argument', 'nj note --id=TSK-007 "…"');
+  if (text === '') fail('missing_argument', 'nanojira note needs the note text as an argument', 'nanojira note --id=TSK-007 "…"');
 
   const author = resolveActingName(flags, false);
 

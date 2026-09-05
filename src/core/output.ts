@@ -32,7 +32,7 @@ function hardExit(code: string, message: string): never {
 
 // ----------------------------------------------------------------- printing
 
-// TSK-018: a reader that closes early (`nj list | head`) makes the next
+// TSK-018: a reader that closes early (`nanojira list | head`) makes the next
 // stdout write fail with EPIPE. Node's write() call itself does not throw --
 // the failure surfaces asynchronously as an 'error' event on the stream --
 // so an unhandled EPIPE crashes the process with a full stack trace despite

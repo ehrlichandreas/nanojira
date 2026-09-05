@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj next` (§ 12b, DECISIONS 154): one call that picks the highest-ranked
+// `nanojira next` (§ 12b, DECISIONS 154): one call that picks the highest-ranked
 // `--ready` element and claims it, closing the gap where a separate
 // `list --ready` and `claim` let two callers read the same top candidate
 // before either claims it. Built on `claim`'s own CAS (`claimOne`) — never
@@ -40,7 +40,7 @@ function cmdNext(flags: Flags) {
   // OPEN child (neither done nor archived) is never a candidate, whatever
   // type it is — a childless epic, or one whose children are all done, is
   // unaffected. This is `next`'s own extra filter, applied after `list`'s
-  // own `--ready`/filters; `list --ready` and bare `nj` are unchanged.
+  // own `--ready`/filters; `list --ready` and bare `nanojira` are unchanged.
   //
   // D158 PA-5: an `assignee` naming someone other than the acting name is
   // also disqualifying, on by default — not an option. This composes with

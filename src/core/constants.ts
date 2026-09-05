@@ -2,7 +2,7 @@
 
 // Constants: fields, statuses, severities. Shared types live in types.ts —
 // see there for why: this file must not carry an `export` of its own, or
-// esbuild bundles it broken (dist/nj gate caught this; do not reintroduce).
+// esbuild bundles it broken (dist/nanojira gate caught this; do not reintroduce).
 
 import type { Config } from './types.ts';
 

@@ -3,13 +3,15 @@
 A local, file-based task tool for agents. No database, no server, no
 dependencies. Epics → Tasks → Subtasks, one Markdown file per element.
 
-Status: **v3 draft, 2026-09-24 — released for implementation 2026-09-28
-(DECISIONS 87), not yet implemented.**
-v2 was approved by the user on 2026-09-23 and is what `dist/nj` implements.
+Status: **v3 released for implementation 2026-09-28 (DECISIONS 87) and
+implemented since; this is the shipped specification.** v2 was approved by
+the user on 2026-09-23 and is what the tool implemented before v3.
 v3 adds a configurable backlog location (`--backlog`, `.njrc`), a configurable
 layout (groupings, folder names), the generated `STATUS.md` and the
 `.nanojira/` folder for internal files — DECISIONS 86, which also fixes the
-implementation order. Changes since are recorded in `docs/DECISIONS.md`.
+implementation order. Changes since (through the current release,
+`docs/CHANGES.md`, including the v4.0.0 `nj`→`nanojira` CLI rename) are
+recorded in `docs/DECISIONS.md`.
 
 ---
 
@@ -55,47 +57,56 @@ allowed; only its *position* matters.
 | | |
 |---|---|
 | Language | Node.js ≥ 24, from `workspace/portable/runtime/<platform>/bin/node` |
-| Dependencies | **none** at runtime — no external service, `dist/nj` runs as one file without `node_modules` and without network; build-time tooling may declare `devDependencies` |
+| Dependencies | **none** at runtime — no external service, the shipped `dist/*.mjs` bundles run without `node_modules` and without network; build-time tooling may declare `devDependencies` |
 | Platforms | `darwin-arm64`, `linux-x64` (the portable tool tree's platforms) |
-| Entry point | one executable script, `dist/nj` (shebang `#!/usr/bin/env node`; where `PATH` may lack Node ≥ 24, invoke as `<runtime-node> dist/nj`) |
+| Entry point | `bin/nanojira` / `bin/nanojira-mcp` (POSIX sh, plus `.cmd` siblings for Windows) — generated wrapper scripts that locate and exec the ESM bundle beside them; see § 18 for the wrapper's own contract (node version check, `NJ_NODE`, exit 127 on failure to start) |
 
-What ships is `dist/nj`, a single file. It is built by `npm run build`
-from the sources — the entry `src/nj.ts` and the modules in `src/commands/`
-and `src/core/` — and it is committed: a fresh build must be byte-identical
-to the committed file (`npm run build:check`), so a stale bundle fails at
-once. Whoever changes anything under `src/` rebuilds and commits `dist/nj` in
-the same commit. The oracle and the recorded corpus run against `dist/nj`,
-and against the sources, which behave identically. The root `package.json`
-carries metadata, `bin`, the `build` and `test` scripts, and
-`devDependencies` for build-time tooling (TypeScript, esbuild); it carries no
-runtime `dependencies` and no `type` field — a root `"type": "module"` would
-make Node load every oracle suite as an ES module and break it. Everything
-under `src/`, entry included, is a real TypeScript ES module
-(`import`/`export`); a single `src/package.json` declares `"type": "module"`
-for that whole subtree and is not part of `dist/nj`.
+What ships is the repo root itself — `SKILL.md`, `bin/`, `dist/` — per § 18
+"Packaging: the repo is the skill folder". `bin/nanojira` and
+`bin/nanojira-mcp` are generated wrapper scripts, not the program; each
+execs `node` against the real artefact beside it, `dist/nanojira.mjs` or
+`dist/nanojira-mcp.mjs`, a single-file ESM bundle. Both the wrappers and
+the bundles are built by `npm run build` from the sources — the entries
+`src/nanojira.ts`/`src/nanojira-mcp.ts` and the modules in `src/commands/`
+and `src/core/` — and all four generated files are committed: a fresh
+build must be byte-identical to what is committed (`npm run build:check`),
+so a stale bundle or a hand-edited wrapper fails at once. Whoever changes
+anything under `src/` rebuilds and commits `bin/` and `dist/*.mjs` in the
+same commit. The oracle and the recorded corpus run against `bin/nanojira`
+(and directly against `dist/nanojira.mjs`, § 18), and against the sources,
+which behave identically. The root `package.json` carries metadata, `bin`,
+the `build` and `test` scripts, and `devDependencies` for build-time
+tooling (TypeScript, esbuild); it carries no runtime `dependencies`. An
+ambient `"type"` field in the root `package.json` (or its absence) has no
+bearing on the shipped bundles: `dist/*.mjs`'s extension already fixes
+their module type as ESM regardless (§ 18). Everything under `src/`, entry
+included, is a real TypeScript ES module (`import`/`export`); a single
+`src/package.json` declares `"type": "module"` for that whole subtree and
+is not part of what ships.
 
-"Dependencies: none" names what `nj` depends on to run — not on Jira, not on
+"Dependencies: none" names what `nanojira` depends on to run — not on Jira, not on
 any other external service, and not on a package fetched at runtime. It was
 misread once as "no npm packages at all" and tightened on that misreading
-(`dist/nj` briefly required no dependency "at build time" either); that
-reading is withdrawn (DECISIONS 83). Development tooling choosing its own
-libraries — a bundler, a type checker — does not compromise what round one
-actually promises: a single shipped file, no `node_modules`, no network, at
-the moment an agent runs `nj`.
+(the shipped bundle briefly required no dependency "at build time" either);
+that reading is withdrawn (DECISIONS 83). Development tooling choosing its
+own libraries — a bundler, a type checker — does not compromise what round
+one actually promises: a single shipped artefact, no `node_modules`, no
+network, at the moment an agent runs `nanojira`.
 
 Python is ruled out: the tool tree ships Node for both platforms and only
 macOS system Python.
 
-**`dist/nj-mcp`** (§ 17 "MCP Interface") is a second, independent entry
-point, built and shipped the same way: one committed file, built by
-`npm run build` alongside `dist/nj`, byte-identical on a fresh build.
-**It carries no dependency of any kind — not at runtime, and not at
-build time either**: unlike `dist/nj` (whose build-time tooling, esbuild
-and TypeScript, are themselves `devDependencies`), `nj-mcp`'s own MCP
+**`dist/nanojira-mcp.mjs`** (§ 17 "MCP Interface"), run via its own wrapper
+`bin/nanojira-mcp`, is a second, independent entry point, built and shipped
+the same way: committed files, built by `npm run build` alongside
+`dist/nanojira.mjs`, byte-identical on a fresh build. **It carries no
+dependency of any kind — not at runtime, and not at build time either**:
+unlike `dist/nanojira.mjs` (whose build-time tooling, esbuild and
+TypeScript, are themselves `devDependencies`), `nanojira-mcp`'s own MCP
 protocol handling is hand-rolled, so there is nothing third-party to
 bundle away in the first place. The official MCP SDK's **client** is a
 `devDependency` used **only** by the test suite's conformance leg (§ 17),
-never bundled into `dist/nj-mcp`, never required to build or run it —
+never bundled into `dist/nanojira-mcp.mjs`, never required to build or run it —
 the same "build tooling may use libraries the runtime may not" reading
 this section already gives `esbuild`/`typescript`, applied here to a
 dependency that is not even build tooling for the shipped artifact, only
@@ -114,7 +125,7 @@ for its tests.
 ├── tasks/                     TSK-001.md …    │ folder names configurable (§ 5)
 ├── subtasks/                  SUB-001.md …    ┘
 ├── archive/                   archived elements (§ 11); name configurable
-└── .nanojira/                 everything only nj itself needs
+└── .nanojira/                 everything only nanojira itself needs
     ├── config.json            configuration (§ 5)
     ├── ids/                   ID tombstones (§ 8)
     ├── claims/                claim sequences (§ 12 "Claims"), never committed
@@ -123,15 +134,15 @@ for its tests.
 
 **Content and bookkeeping are separated.** The top level of a backlog shows
 the elements and the two human-facing files; everything that exists only for
-`nj` — configuration, tombstones, the future index — lives in one hidden
+`nanojira` — configuration, tombstones, the future index — lives in one hidden
 folder, `.nanojira/`. The v2 layout (`.nanojira.json` and `.ids/` at the top
-level) is a **legacy layout**: every command except `nj doctor` refuses it
-with `legacy_layout` and points at `nj doctor --fix`, which migrates it (§ 14).
+level) is a **legacy layout**: every command except `nanojira doctor` refuses it
+with `legacy_layout` and points at `nanojira doctor --fix`, which migrates it (§ 14).
 
 **One file per element; the grouping is configurable** (`layout.group`, § 5):
 
 - **`type`** (default) — one folder per type, as drawn above. The type is
-  immutable, so this placement can never become wrong through `nj`.
+  immutable, so this placement can never become wrong through `nanojira`.
 - **`hierarchy`** — the tree becomes the folder structure. An epic and a task
   each get a folder named after their ID that holds their own file; a subtask
   is a file in its task's folder:
@@ -145,30 +156,30 @@ with `legacy_layout` and points at `nj doctor --fix`, which migrates it (§ 14).
 - **`flat`** — every element file directly in `<backlog>/`.
 
 **The frontmatter is the truth, the location is derived from it** — from
-`type` under `type`, from the `parent` chain under `hierarchy`. `nj` never
+`type` under `type`, from the `parent` chain under `hierarchy`. `nanojira` never
 infers `type` or `parent` from where a file lies. It finds element files
 wherever they lie: every `*.md` below the backlog except `README.md`,
 `STATUS.md` and anything under `.nanojira/` is an element file, and it is
 archived exactly when it lies below the archive folder. A file whose location
 disagrees with the layout carries `type:folder` (group `type`) or
 `layout:misplaced` (groups `hierarchy` and `flat`); it still loads and every
-command still works on it. `nj doctor --fix` moves it (§ 14).
+command still works on it. `nanojira doctor --fix` moves it (§ 14).
 
-**`nj set --parent=<id>` reparents a task or subtask** (DECISIONS 176 A, §
-9 "Rules") — the one way `nj` itself changes `parent` outside a hand edit.
+**`nanojira set --parent=<id>` reparents a task or subtask** (DECISIONS 176 A, §
+9 "Rules") — the one way `nanojira` itself changes `parent` outside a hand edit.
 Under `hierarchy`, the move is one `rename` (the element's own file for a
 subtask; its whole folder, children included, for a task), the same
 atomic-within-one-filesystem move `archive`/`doctor --fix` already use for
 a subtree. Under `type` or `flat`, reparenting writes only the frontmatter
 — the type never changes, so there is nowhere to move the file to. Besides
-`--parent`, a file still moves only through `nj archive`, `nj doctor
+`--parent`, a file still moves only through `nanojira archive`, `nanojira doctor
 --fix`, or by hand. Changing `layout` in the configuration is allowed at any time:
-afterwards every element reports its old place, and one `nj doctor --fix`
+afterwards every element reports its old place, and one `nanojira doctor --fix`
 moves the backlog into the new layout. The same step migrates a legacy
 backlog. Grouping by type stays the default because it is the only grouping
 no edit can invalidate; `hierarchy` freezes one view — the tree — into the
 filesystem, which is worth it only where people browse the backlog without
-`nj`.
+`nanojira`.
 
 A backlog is **self-contained** — moving the folder is enough. A `.njrc`
 pointing at it (below) is outside the backlog and has to follow.
@@ -179,19 +190,19 @@ must be committed. The only uncommitted artifacts are the index (§ 13),
 temp files (§ 12), and claim sequences (`.nanojira/claims/`, § 12 "Claims") —
 local runtime state, not project memory: a claim coordinates processes
 sharing one working tree, and a claim made in another clone cannot be
-honoured without a server. `nj init` writes a `.gitignore` containing exactly
+honoured without a server. `nanojira init` writes a `.gitignore` containing exactly
 three patterns: `.nanojira/index.json`, `.nj-tmp-*` and `.nanojira/claims/`.
 `.nanojira/ids/` is never ignored, by design.
 
 ### Status overview (`STATUS.md`)
 
 A generated, read-only overview of the active backlog by status, so the state
-is readable without `nj` — in an editor or a forge's web view.
+is readable without `nanojira` — in an editor or a forge's web view.
 
-- **Written** by `nj init` and after every successful write of `new`, `set`,
+- **Written** by `nanojira init` and after every successful write of `new`, `set`,
   `note`, `check`, `rm`, `archive`, `unarchive`, `claim`, `release` and
   `doctor --fix`, from a full scan, atomically (§ 12). **Never read** by
-  `nj`: it is derived, never the truth.
+  `nanojira`: it is derived, never the truth.
 - **A batch write (`--id=A,B,C`, § 9) regenerates it at most once, after
   every ID's write phase has finished** — never once per ID. If every ID in
   the batch failed, nothing was written and `STATUS.md` is not touched at
@@ -223,7 +234,7 @@ is readable without `nj` — in an editor or a forge's web view.
   exactly one `\n`.
 - **Staleness is tolerated, never hidden.** Two writers racing each regenerate
   it; the last rename wins and may be one write behind. Hand edits and git
-  merges can leave it stale or conflicted. `nj doctor` compares it with a
+  merges can leave it stale or conflicted. `nanojira doctor` compares it with a
   fresh rendering and reports `backlog:status_stale` (warning); `doctor --fix`
   regenerates it — which also resolves a merge conflict in it.
 - **A failed overview never fails the write.** The element write is the
@@ -244,7 +255,7 @@ is readable without `nj` — in an editor or a forge's web view.
 - **Cost:** one full scan per write — ≈200 ms at 10 000 elements (§ 13). The
   § 13 index trigger applies to writes as well once this lands.
 
-### `nj init`
+### `nanojira init`
 
 Creates the layout above with default configuration, the README, `STATUS.md`
 and the `.gitignore`, at the location given by `--backlog`, `NJ_BACKLOG` or
@@ -271,25 +282,25 @@ sources that is set:
    it.
 4. **Nothing found: exit 1, `no_backlog`, hard error.** Never fall back to a
    relative path, never operate on an empty backlog, never auto-create
-   outside `nj init`.
+   outside `nanojira init`.
 
 **A chosen source is binding.** When the source picked by these rules does
 not hold a backlog, the command exits 1 with an error that names the path and
 the source, and never falls through to a lower source:
 
 ```
-nj: no backlog at /abs/path (from --backlog)            invalid_backlog_flag
-nj: no backlog at /abs/path (from NJ_BACKLOG)           invalid_backlog_env
-nj: no backlog at /abs/path (from /abs/dir/.njrc)       invalid_backlog_njrc
+nanojira: no backlog at /abs/path (from --backlog)            invalid_backlog_flag
+nanojira: no backlog at /abs/path (from NJ_BACKLOG)           invalid_backlog_env
+nanojira: no backlog at /abs/path (from /abs/dir/.njrc)       invalid_backlog_njrc
 ```
 
 "Holds a backlog" means `.nanojira/config.json` exists there. A folder with
 `.nanojira/` but without `config.json`, or a `backlog/` found by the search
 with neither, is `backlog_without_config` — the error says exactly that and
-points at `nj doctor` (which tolerates the missing file and reports
+points at `nanojira doctor` (which tolerates the missing file and reports
 `config:invalid`), never a plain "no backlog found". A folder with the legacy
 `.nanojira.json` at its top level is `legacy_layout`, pointing at
-`nj doctor --fix`.
+`nanojira doctor --fix`.
 
 Silently reporting "0 entries" from the wrong directory would be the worst
 failure mode of a tool whose job is telling an agent what to do.
@@ -318,17 +329,17 @@ backlog = ../shared/backlog
   of the value — only whole-line comments exist.
 - A `.njrc` that exists but is not a readable regular file (a directory, a
   dangling symlink, no read permission) is `invalid_njrc` —
-  `nj: invalid .njrc at <abs path>: <reason>`, no line number. A symlinked
+  `nanojira: invalid .njrc at <abs path>: <reason>`, no line number. A symlinked
   `.njrc` resolves a relative value against the directory where the link
   lies, not its target's. `~/.njrc` has no special role: it is read only
   when the home directory is on the search path, like any ancestor.
 - **Ownership.** A `.njrc` the search reaches must be owned by the current
   user or by root; otherwise the command exits 1 with `invalid_njrc` and
-  `nj: invalid .njrc at <abs path>: owned by uid <n>, not by you` — never
+  `nanojira: invalid .njrc at <abs path>: owned by uid <n>, not by you` — never
   silently skipped, never obeyed. For a symlinked `.njrc` both the link and
   its target must pass. Ownership is checked before the file is read, so it
   is reported ahead of every other `.njrc` fault. A file planted in a shared ancestor
-  (`/tmp`) must not steer another user's `nj` (the precedent is git's
+  (`/tmp`) must not steer another user's `nanojira` (the precedent is git's
   `safe.directory`). `--backlog` and `NJ_BACKLOG` stop the search first and
   so bypass the check (DECISIONS 93). Ownership is checked on the open file
   descriptor (`lstat` for the link owner, then `open(O_RDONLY|O_NONBLOCK)`,
@@ -342,7 +353,7 @@ backlog = ../shared/backlog
   this hook already knows at the point it fires: no backlog is resolved
   yet, only the `.njrc` being checked is. **It is a pure pause, not a
   fault injector: whether released by the marker or by the 10 s timeout,
-  `nj` always proceeds to `open()` next — there is no `fault:njrc-swap`
+  `nanojira` always proceeds to `open()` next — there is no `fault:njrc-swap`
   code.** Proceeding means `open()`ing whatever is at the path *at that
   moment*, so a `.njrc` swapped in during the pause (even a same-user file
   naming a different backlog) is what gets checked and read — the path is
@@ -364,7 +375,7 @@ backlog = ../shared/backlog
 - Known keys: `backlog`. A `.njrc` without `backlog` (e.g. only comments) does
   not set a location; the search continues upward.
 - An unknown key, a line without `=`, an empty value or a repeated key: exit
-  1 with `invalid_njrc` and `nj: invalid .njrc at <abs path>: line <n>:
+  1 with `invalid_njrc` and `nanojira: invalid .njrc at <abs path>: line <n>:
   <reason>` — strict for the same reason unknown flags are (§ 9). Only a
   `.njrc` the search actually reaches is parsed; a search stopped by
   `--backlog` or `NJ_BACKLOG` never reads one.
@@ -373,7 +384,7 @@ backlog = ../shared/backlog
 
 ## 5. Configuration
 
-`<backlog>/.nanojira/config.json` — as written by `nj init`:
+`<backlog>/.nanojira/config.json` — as written by `nanojira init`:
 
 ```json
 {
@@ -422,10 +433,10 @@ Rules:
   judged: `type:folder` and `layout:misplaced` are not reported, because the
   layout they would be judged against is unknown (DECISIONS 102).
 - Changing `layout` is always allowed; it never invalidates the configuration.
-  The elements then report their old places, and `nj doctor --fix` moves them
+  The elements then report their old places, and `nanojira doctor --fix` moves them
   (§ 4, § 14).
-- An invalid configuration makes every command except `nj doctor` fail with
-  exit 1 and a pointer to `nj doctor`; `doctor` reports the defect (exit 2).
+- An invalid configuration makes every command except `nanojira doctor` fail with
+  exit 1 and a pointer to `nanojira doctor`; `doctor` reports the defect (exit 2).
 - `claims.staleAfterHours` (§ 12 "Claims"): an optional top-level
   `"claims": {"staleAfterHours": <n>}` block, not written by `init`. A plain
   integer, hours. Default when the key or the whole `claims` block is
@@ -453,7 +464,7 @@ Rules:
   it still applies.
 - **`minVersion`** (DECISIONS 166): an optional top-level `"minVersion":
   "X.Y.Z"` — three dot-separated non-negative integers, nothing else. If
-  the running `nj`'s own version (the same value `--version` reports) is
+  the running `nanojira`'s own version (the same value `--version` reports) is
   older than `minVersion`, comparing `(major, minor, patch)` as integer
   tuples component by component (`3.9.0` is older than `3.10.0` — numeric,
   never a string compare), **every** command — including `doctor`, which
@@ -463,7 +474,7 @@ Rules:
   only in the stderr message) names both the running version and
   `minVersion` — checked before any other configuration validation (so an old binary gets
   this one, specific, actionable reason rather than a confusing report
-  about fields it may not recognise). `nj --version` and `nj <command>
+  about fields it may not recognise). `nanojira --version` and `nanojira <command>
   --help` are unaffected: neither resolves a backlog/config at all
   (`--version`) or ever fails on one (`--help`'s existing best-effort,
   silent resolution, § 9) — both pre-date this check structurally, not as
@@ -479,8 +490,8 @@ Rules:
   the configuration invalid. Every command still succeeds; `doctor`
   reports the warning `config:unknown_key`, naming the key, so a typo
   stays visible without stopping work. **The
-  honest limit:** this only ever applies going forward, from the nj
-  revision that understands it (3.7). A 3.6-or-older `nj` cannot
+  honest limit:** this only ever applies going forward, from the nanojira
+  revision that understands it (3.7). A 3.6-or-older `nanojira` cannot
   retroactively learn the new, more lenient rule — it still fails
   strictly (`invalid_config`) on an unknown key inside a nested block
   (`layout`/`claims`), exactly as it always has. Only **top-level** keys
@@ -510,8 +521,8 @@ Timestamps are UTC because the backlog travels via git across time zones;
 offset-less local times would be ambiguous. Format: `2026-09-21T18:02:44Z`.
 
 **The hierarchy is strictly three levels.** Epic without parent, task under
-epic, subtask under task. `nj new` rejects deeper nesting and wrong parent
-types; `nj doctor` reports violations. `id` and `type` are **immutable** after
+epic, subtask under task. `nanojira new` rejects deeper nesting and wrong parent
+types; `nanojira doctor` reports violations. `id` and `type` are **immutable** after
 creation.
 
 ### Optional fields
@@ -522,11 +533,11 @@ creation.
 | `assignee` | string | empty | who (which agent) is on it; free text, no registry — **advisory**, unless the element is claimed (§ 12 "Claims"), where the claim sequence is the truth for exclusivity and `assignee` is its mirror |
 | `tags` | list | empty | filter dimension |
 | `depends_on` | list of IDs | empty | dependencies, enables `--ready` |
-| `archived` | timestamp | absent | set by `nj archive` (§ 11), tool-written only |
+| `archived` | timestamp | absent | set by `nanojira archive` (§ 11), tool-written only |
 
 Missing optional fields are **not** worth a warning — that is the normal
 case. Optional fields are written into a file only when explicitly set;
-defaults are never materialised. `nj new` therefore omits `priority` unless
+defaults are never materialised. `nanojira new` therefore omits `priority` unless
 given.
 
 ### Deliberately excluded
@@ -590,9 +601,9 @@ Create `/login` and `/register` including error handling.
 ### Title
 
 `title` in the frontmatter is the **truth**. It is additionally mirrored as
-`# H1` in the body — for humans. On every title change, `nj` rewrites the H1.
+`# H1` in the body — for humans. On every title change, `nanojira` rewrites the H1.
 An existing H1 as the first non-empty body line is synchronised; if there is
-none, none is inserted. `nj doctor` reports drift.
+none, none is inserted. `nanojira doctor` reports drift.
 
 Titles are normalised on write: line breaks become spaces, leading and
 trailing whitespace is dropped. This is the single exception to § 2's
@@ -600,18 +611,18 @@ byte-exact rule.
 
 ### Body
 
-The body belongs to the user. `nj` writes it back **byte-for-byte unchanged**
+The body belongs to the user. `nanojira` writes it back **byte-for-byte unchanged**
 — with exactly four sanctioned exceptions: the H1 synchronisation above,
-`nj note` appending under `## Notes` (§ 10), `nj new`/`nj set` writing a
+`nanojira note` appending under `## Notes` (§ 10), `nanojira new`/`nanojira set` writing a
 configured **section role** (`description`, `acceptance`) when one of the
-section flags in § 9 is given, and `nj check` flipping one checkbox's
+section flags in § 9 is given, and `nanojira check` flipping one checkbox's
 bracket content (§ 10a). Unknown sections are preserved.
 
 Section matching is line-based and **not** fenced-code-aware: a
 `## Description` line inside a fenced block is a section heading for reads and
 writes alike, so a section write replaces that region and destroys the fence
 content. Fence-aware matching is deliberately out of scope for round one —
-**except for `nj check`** (§ 10a), which tracks fence state and never
+**except for `nanojira check`** (§ 10a), which tracks fence state and never
 matches a checkbox-shaped line inside one; that command's own section states
 the one exception, this rule is otherwise unchanged.
 
@@ -723,7 +734,7 @@ added to `doctor`'s report.
   exclusive, since this one requires content to exist at all), but
   scanning *that section's own span* (from its heading to the next
   `#`/`##` heading or the end of the body — `core/parse.ts`'s existing
-  `sectionHeadingIndex`/`sectionEnd`) for a countable checkbox line (`nj
+  `sectionHeadingIndex`/`sectionEnd`) for a countable checkbox line (`nanojira
   check`'s own rule, § 10a: a list marker — `-`, `*`, `+`, or an ordered
   `N.`/`N)` — then one space, then `[ ]`/`[x]`/`[X]`; a fenced code
   block within the section, opened and closed the same way § 10a's own
@@ -782,7 +793,7 @@ unticked out of the section's own total countable checkboxes:
 ⚠ TSK-011 is done with 1 of 3 acceptance boxes still unticked.
 ```
 
-**`nj set` (and `nj claim`, for the same `--status=<last>` call D171 B
+**`nanojira set` (and `nanojira claim`, for the same `--status=<last>` call D171 B
 already covers) additionally report `done:open_acceptance` in their own
 `--json` result** — not only inside `_problems`, which carries the bare
 code same as every other result consumer, but with the count attached, the
@@ -890,9 +901,9 @@ here).
 
 ### Config forward compatibility (DECISIONS 166)
 
-Today, an older `nj` fails **every** command with `invalid_config` on a
+Today, an older `nanojira` fails **every** command with `invalid_config` on a
 key written for a newer one — the correction this round itself is built
-on: the Lead assumed old `nj` already rejected an unknown top-level key
+on: the Lead assumed old `nanojira` already rejected an unknown top-level key
 outright and had not checked; the Oracle found, and the Lead confirmed
 live against 3.5.0 and 3.6.0, that it is **silently ignored** instead.
 From 3.7 this becomes a visible warning rather than silence, so a typo
@@ -900,8 +911,8 @@ stays discoverable without anything stopping working — see § 5's own
 "Unknown keys are warnings, not errors" and `minVersion` rules for the
 exact behaviour and codes (`config:unknown_key`, `config:unknown_code`,
 `needs_newer_nj`), and the honest limit stated there: this relaxation is
-only ever as forward-reaching as the `nj` revision running it. A
-3.6-or-older `nj` reading a 3.7-written config still fails strictly on
+only ever as forward-reaching as the `nanojira` revision running it. A
+3.6-or-older `nanojira` reading a 3.7-written config still fails strictly on
 an unknown key inside a nested block — nothing retroactive changes that.
 `problems`/`minVersion` are new **top-level** keys, which is exactly the
 shape old binaries already tolerate silently, so adding either to a
@@ -930,8 +941,8 @@ is the **sole** claiming authority: the allocator computes only a **start
 value** — the highest number found across `ids/` *and* all element files
 (active and archive) — and probes upward from there with `O_CREAT|O_EXCL`
 (bounded at 100 retries, then exit 1 with the stderr line
-`nj: id allocation failed after 100 retries (<TYPE>)`). `nj archive` and
-`nj rm` leave tombstones in place — the ID stays claimed forever, so no
+`nanojira: id allocation failed after 100 retries (<TYPE>)`). `nanojira archive` and
+`nanojira rm` leave tombstones in place — the ID stays claimed forever, so no
 `parent`, `depends_on`, git history or agent transcript can ever be repointed
 by a recycled ID. A hand-placed element with a high number raises the start
 value above it and leaves gaps — never-reuse outranks dense numbering, by
@@ -946,7 +957,7 @@ every ID found in element files (active and archive) — unambiguous
 restoration. Tombstones for already-deleted IDs cannot be recovered; `--fix`
 reports that the never-reuse guarantee is void for those numbers. Residual
 risk, disclosed: a lost `ids/` can still recycle the numbers of elements
-deleted with `nj rm`, if their tombstones were lost with it — live and
+deleted with `nanojira rm`, if their tombstones were lost with it — live and
 archived elements are always protected by the file-scan start value. A
 tombstone without an element is normal (deleted or archived).
 
@@ -963,37 +974,37 @@ line, file, JSON output. The agent translates nothing.
 ### Commands (round one)
 
 ```
-nj --version                           print the version and exit (§ 9, below)
-nj                                     short status: counts, top ready, problems
-nj init                                create backlog layout (§ 4)
-nj <any command> --backlog=<path>      use this backlog (§ 4, Backlog location)
-nj new   --type=task --parent=EPIC-001 --title="…"
+nanojira --version                           print the version and exit (§ 9, below)
+nanojira                                     short status: counts, top ready, problems
+nanojira init                                create backlog layout (§ 4)
+nanojira <any command> --backlog=<path>      use this backlog (§ 4, Backlog location)
+nanojira new   --type=task --parent=EPIC-001 --title="…"
          [--status=…] [--priority=…] [--tags=a,b] [--assignee=…] [--depends-on=…]
          [--description=… | --description-file=…]
          [--acceptance=…  | --acceptance-file=…]
-nj set   --id=TSK-009 [--title=…] [--status=…] [--priority=…]
+nanojira set   --id=TSK-009 [--title=…] [--status=…] [--priority=…]
          [--tags=…] [--assignee=…] [--depends-on=…]
          [--description=… | --description-file=…]
          [--acceptance=…  | --acceptance-file=…]
          [--force] [--allow-open-children]
-nj note  --id=TSK-009 "text" [--as=<name>] (§ 10)
-nj check --id=TSK-009 --text=<substring> [--on | --off] [--force] (§ 10a)
-nj check --id=TSK-009 --item=<n>         [--on | --off] [--force] (§ 10a)
-nj show  --id=TSK-009 [--json]
-nj list  [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
+nanojira note  --id=TSK-009 "text" [--as=<name>] (§ 10)
+nanojira check --id=TSK-009 --text=<substring> [--on | --off] [--force] (§ 10a)
+nanojira check --id=TSK-009 --item=<n>         [--on | --off] [--force] (§ 10a)
+nanojira show  --id=TSK-009 [--json]
+nanojira list  [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
          [--ready] [--all] [--json]
-nj find  "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
+nanojira find  "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
          [--all] [--case-sensitive] [--json] (§ 9a)
-nj tree  [--id=EPIC-001] [--all] [--json]
-nj rm    --id=TSK-009 [--cascade]
-nj archive --id=EPIC-001 (§ 11)
-nj unarchive --id=EPIC-001 (§ 11a)
-nj claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] (§ 12 "Claims")
-nj release --id=TSK-007 [--as=<name>] (§ 12 "Claims")
-nj next    [--as=<name>] [--status=<s>] [--type=…] [--tag=…] [--parent=…]
+nanojira tree  [--id=EPIC-001] [--all] [--json]
+nanojira rm    --id=TSK-009 [--cascade]
+nanojira archive --id=EPIC-001 (§ 11)
+nanojira unarchive --id=EPIC-001 (§ 11a)
+nanojira claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] (§ 12 "Claims")
+nanojira release --id=TSK-007 [--as=<name>] (§ 12 "Claims")
+nanojira next    [--as=<name>] [--status=<s>] [--type=…] [--tag=…] [--parent=…]
            [--assignee=…] [--json] (§ 12b)
-nj log     --id=TSK-009 [--json] (§ 12c)
-nj doctor [--fix] [--json]
+nanojira log     --id=TSK-009 [--json] (§ 12c)
+nanojira doctor [--fix] [--json]
 ```
 
 All commands accept `--json`; reads *and* writes (§ below). All commands
@@ -1006,21 +1017,21 @@ known flags; `--backlog` without a value is `missing_value`.
 
 ### `--version`
 
-`nj --version` prints `nj <version>` and exits 0; with `--json`, it
+`nanojira --version` prints `nanojira <version>` and exits 0; with `--json`, it
 prints `{"version": "<version>"}` instead — the only two forms. It
 resolves no backlog and reads no file other than its own, so it works
 anywhere, including a directory with no backlog and no `.njrc` anywhere
-above it. `nj version` (a subcommand) is not added; `--version` is a flag
+above it. `nanojira version` (a subcommand) is not added; `--version` is a flag
 only, checked before a command is even dispatched — ahead of the backlog
-resolution every other command (including bare `nj`) performs.
+resolution every other command (including bare `nanojira`) performs.
 
 **There is exactly one version source**: the `"version"` field in
 `package.json` (`3.4.0` as of this round), embedded at build time into
-`dist/nj` and `dist/nj-mcp` alike, so the two binaries can never report
+`dist/nanojira` and `dist/nanojira-mcp` alike, so the two binaries can never report
 different versions of themselves from drifting independently.
 
 `--version` combined with anything beyond `--json` — another flag (`--
-help`, `--backlog=…`, …) or an explicit subcommand (`nj list --version`)
+help`, `--backlog=…`, …) or an explicit subcommand (`nanojira list --version`)
 — is `unknown_field`, exactly the same code and the same reason a typo'd
 flag already is: `--version` is not a known flag for whatever command
 context applies once something else is present (the subcommand named, or
@@ -1028,12 +1039,12 @@ the implicit bare command when none is). It is not a special case that
 tolerates being combined with anything; it recognises only itself and
 `--json`, nothing more.
 
-`nj help` lists `--version` in its command summary.
+`nanojira help` lists `--version` in its command summary.
 
 ### `--help` (per-command, DECISIONS 158 EV-2/EV-3, 163 A)
 
-`nj <command> --help` prints **that command's own** synopsis and flags —
-not the general help every command used to fall back to. `nj help` and
+`nanojira <command> --help` prints **that command's own** synopsis and flags —
+not the general help every command used to fall back to. `nanojira help` and
 bare `--help` (no command word before it) are unchanged: the same general
 command list as always. The precedence `--help`/`help` already has —
 checked before anything else, regardless of what other flags are present,
@@ -1043,26 +1054,26 @@ is present, the general one otherwise.
 
 A command's own `--help` text has, in order:
 
-1. Its synopsis line(s), exactly as `nj help`'s own command list already
+1. Its synopsis line(s), exactly as `nanojira help`'s own command list already
    shows them (§ 9 "Commands (round one)") — one `--help` source, not a
    second copy to keep in sync.
 2. One line per flag the command accepts, from the same per-command flag
-   table `nj-mcp`'s own tool schemas already read (`core/flag-table.ts`,
-   § 17) — so this, `nj-mcp`'s schemas, and the CLI's own flag validation
+   table `nanojira-mcp`'s own tool schemas already read (`core/flag-table.ts`,
+   § 17) — so this, `nanojira-mcp`'s schemas, and the CLI's own flag validation
    can never drift apart from each other. A flag with a **closed
    vocabulary** (`--type`, `--status`, `--priority`) names its allowed
    values on the same line; any other flag is marked free-form, nothing
    invented about it.
 
-`nj rm --help` gets these same per-flag lines (`--id`, `--file`,
+`nanojira rm --help` gets these same per-flag lines (`--id`, `--file`,
 `--cascade`) too (DECISIONS 163 A) — it had none before this, not because
 anything about `rm` itself is different, but because `rm` is never
-exposed as an `nj-mcp` tool at all (§ 17: `rm` is omitted from the tool
+exposed as an `nanojira-mcp` tool at all (§ 17: `rm` is omitted from the tool
 list unconditionally, not merely gated), so its flags had never been
 added to the shared table either. That gate on *exposure* is separate
 from this one on *documentation*: `rm`'s own table entry answers only
-`nj rm --help`'s question, same as any other command's, and changes
-nothing about which tools `nj-mcp` offers.
+`nanojira rm --help`'s question, same as any other command's, and changes
+nothing about which tools `nanojira-mcp` offers.
 
 **Allowed values shown:** `--type` is always `epic | task | subtask`;
 `--priority` is always `low | normal | high | urgent` — neither is
@@ -1080,9 +1091,9 @@ answer even from an empty directory, the defaults standing in for "no
 backlog resolved."
 
 `--json` has no meaning combined with `--help`, on any command: output is
-prose regardless, the same rule `nj help` itself already has (§ 9
+prose regardless, the same rule `nanojira help` itself already has (§ 9
 "Failure codes — closed vocabulary": "`--json` is defined for the command
-set of this section. `nj help` is not one of them").
+set of this section. `nanojira help` is not one of them").
 
 ### Did-you-mean (DECISIONS 158 EV-3, 160)
 
@@ -1132,8 +1143,8 @@ did you mean 'normal'? Known priorities: low, normal, high, urgent
 
 ### The acting name
 
-Two commands need to know **who is acting**: `nj note` (§ 10, who signs) and
-`nj claim`/`nj release` (§ 12 "Claims", who claims). Both resolve it the same
+Two commands need to know **who is acting**: `nanojira note` (§ 10, who signs) and
+`nanojira claim`/`nanojira release` (§ 12 "Claims", who claims). Both resolve it the same
 way, in this order:
 
 1. an explicit `--as=<name>` flag, on the commands that have one;
@@ -1149,7 +1160,7 @@ gets the "unset" reading. A name — from either source — is valid when,
 after dropping leading and trailing whitespace, it is non-empty, is a single
 line, and contains no `:`; only spaces and tabs are trimmed, any `\n` or `\r`
 left (trailing included) makes it multi-line, and Unicode spaces are literal,
-not trimmed. The trimmed value is used. The colon is excluded because `nj
+not trimmed. The trimmed value is used. The colon is excluded because `nanojira
 note`'s line format (§ 10) is `- <timestamp> <author>: <text>`: a name with a
 colon would make the author/text boundary unreadable.
 
@@ -1159,7 +1170,7 @@ environment, so a malformed `NJ_AUTHOR` does not fail a command that was
 given one. Reads never fail on it: `list --ready` (condition 5, § 12
 "Claims") treats an invalid or absent acting name as no name. Whether the
 **absence** of any acting name is itself an error depends on the command:
-`nj note` falls back to `assignee`, else `?` (§ 10); `nj claim`/`nj release`
+`nanojira note` falls back to `assignee`, else `?` (§ 10); `nanojira claim`/`nanojira release`
 require one (`missing_argument`, § 12 "Claims").
 
 Names are labels, not identities: there is no registry, no authentication,
@@ -1168,9 +1179,9 @@ model `assignee` has (§ 6).
 
 ### Rules
 
-- **Verb as a subcommand**, not as a flag: `nj set`, not `nj --set`.
+- **Verb as a subcommand**, not as a flag: `nanojira set`, not `nanojira --set`.
 - **`--backlog` and `--json` may precede the command word** (DECISIONS
-  158, EV-6) — `nj --backlog=<path> list`, `nj --json list
+  158, EV-6) — `nanojira --backlog=<path> list`, `nanojira --json list
   --backlog=<path>`, or any mix of the two in either order, any number of
   times (the last occurrence of a repeated one wins, the same as anywhere
   else a flag repeats). These are the **only** two flags this applies to:
@@ -1188,8 +1199,8 @@ model `assignee` has (§ 6).
   wherever they actually sat, plus the command's own flags and
   positionals — is parsed together, in original order, as that command's
   own arguments; the command word itself is never silently dropped (the
-  bug this closes: `nj --backlog=X list` used to run the bare, no-command
-  status instead of `list`, and `nj --backlog=X show --id=…` used to fail
+  bug this closes: `nanojira --backlog=X list` used to run the bare, no-command
+  status instead of `list`, and `nanojira --backlog=X show --id=…` used to fail
   `unknown_field` for `--id` against the bare command, never reaching
   `show` at all). `--version`'s own exclusivity (§ 9 "`--version`",
   DECISIONS 151/152) is checked first, against the complete, unmodified
@@ -1199,14 +1210,14 @@ model `assignee` has (§ 6).
   existing precedence (recognised regardless of where `--help` sits,
   unconditionally printing the general help) and are not changed by this
   rule either — a per-command `--help` is separate, later work, not part
-  of this rule, and `nj --backlog=X help`/`nj --backlog=X --help` both
+  of this rule, and `nanojira --backlog=X help`/`nanojira --backlog=X --help` both
   still just print the general help today, backlog unused.
 - **Addressing is only by `--id`** — exact, case-sensitive. Titles are labels,
   not addresses, and carry no uniqueness requirement. References (in files and
   in `--parent`/`--depends-on`) are matched exactly; `doctor` reports anything
   that points nowhere.
 - **Duplicate IDs:** reads show both entries, marked `duplicate_id` — and
-  `nj show --json`'s own additive `entry` (DECISIONS 171 C, § 9
+  `nanojira show --json`'s own additive `entry` (DECISIONS 171 C, § 9
   "JSON shapes per command") is exactly the one case where it is absent:
   two entries, not one. Writes
   refuse, naming the code `duplicate_id`, both absolute file paths and the
@@ -1219,12 +1230,12 @@ model `assignee` has (§ 6).
   `--all`, `--allow-open-children`) are not schema fields; they are hard-wired
   in the tool. Unknown field flags are **rejected** — nothing is written —
   and the known fields are listed. A control flag that the addressed command
-  does not take is rejected the same way, as `unknown_field` (e.g. `nj archive
+  does not take is rejected the same way, as `unknown_field` (e.g. `nanojira archive
   --force`, § 12).
 - List fields are set, not appended: `--tags=a,b` replaces the list.
   `--tags=` empties it. `--tags=` / `--depends-on=` reject items containing
   `,` or `]` with a clear error.
-- **`nj set --add-tags=<list>` / `--remove-tags=<list>`** (DECISIONS 163 B):
+- **`nanojira set --add-tags=<list>` / `--remove-tags=<list>`** (DECISIONS 163 B):
   an incremental alternative to replacing the whole `tags` list, for
   `set` only (`new` has no existing list to add to or remove from).
   Each is comma-separated and validated **per item**, exactly like
@@ -1260,13 +1271,13 @@ model `assignee` has (§ 6).
   (every removal and addition turned out to be a no-op), `tags` is not
   reported in `changed` — the same "no actual change, nothing to
   report" rule `--tags=` itself already follows.
-- `nj-mcp`'s `set` tool schema carries `add-tags` and `remove-tags` as two
+- `nanojira-mcp`'s `set` tool schema carries `add-tags` and `remove-tags` as two
   more input fields (§ 17), the same hyphenated-name convention
   `case-sensitive`/`allow-open-children` already use for a flag that is
   not itself an `Element` schema field (unlike `depends-on`, which is
   normalised to the real field name `depends_on` because one already
   exists).
-- `nj new` validates: `--parent` required for task/subtask and must exist with
+- `nanojira new` validates: `--parent` required for task/subtask and must exist with
   the correct type (task→epic, subtask→task); forbidden for epics. The parent
   must be **active** — an archived parent is refused, since a fresh child of
   an archived parent would instantly carry `archive:split`. An **unreadable
@@ -1274,7 +1285,7 @@ model `assignee` has (§ 6).
   type cannot be verified, and § 6 forbids inventing facts about it.
   `--depends-on` targets must exist. `--priority` and `--status` are validated
   against the config.
-- **`nj set --parent=<id>` reparents a task or subtask** (DECISIONS 176
+- **`nanojira set --parent=<id>` reparents a task or subtask** (DECISIONS 176
   A, 177, feedback/team-b-tests TSK-014). The id, the body (description,
   acceptance, any unknown sections) and the claim log are all kept
   unchanged — a claim is keyed by **id** (§ 12 "Claims"), never by path,
@@ -1292,10 +1303,10 @@ model `assignee` has (§ 6).
   `--parent` already uses. Nothing is written in any of these cases. An
   **unreadable stub** as the new parent is refused the same way `new`
   already refuses one (`file:unreadable`, its type unverifiable).
-  `nj set --parent=<old>` (moving an element back to its previous parent)
+  `nanojira set --parent=<old>` (moving an element back to its previous parent)
   is an ordinary reparent like any other and **restores the previous
   state**: the file sits back at its old location, and the frontmatter is
-  identical to before apart from `updated` — there is no separate `nj
+  identical to before apart from `updated` — there is no separate `nanojira
   undo` command (DECISIONS 177 corrects D176's mistaken mention of one;
   `undoRelease` in `core/claims.ts` is only the internal rollback of a
   failed `set`, never a user-facing command). Under
@@ -1312,7 +1323,7 @@ model `assignee` has (§ 6).
   guarantee every other write in this spec already gives (§ 12).
   `--input set` accepts `parent` as one more of
   `set`'s own settable fields, same as every other flag (§ 9 "`--input`").
-- `nj new` scaffolds the body: `# <title>` plus the configured section
+- `nanojira new` scaffolds the body: `# <title>` plus the configured section
   headings as **empty** headings (`## Description`, and for task/subtask also
   `## Acceptance Criteria`). Empty headings count as absent for completeness
   (§ 7), so the gate stays sharp — but humans and agents see at once what is
@@ -1330,7 +1341,7 @@ model `assignee` has (§ 6).
   and the file ends with exactly one trailing newline. The scaffolded file is
   pinned by a golden fixture (AC-2).
 - **Section writes — `--description`, `--acceptance` (roles from § 5).** Both
-  `nj new` and `nj set` accept the configured section roles as write fields.
+  `nanojira new` and `nanojira set` accept the configured section roles as write fields.
   The flag names the **role**, not the heading; the heading written is the
   first name configured for that role, matched case-insensitively on read. The
   flags are accepted for every type; the completeness rules (§ 7) are
@@ -1362,11 +1373,11 @@ model `assignee` has (§ 6).
   directory** (`--file`, by contrast, resolves against the backlog). Content is
   written as given; a level-2 heading inside the content is indistinguishable
   from a section boundary on the next read, so callers must not embed one.
-- `nj set --status=done` on an element with children not `done` is **refused**
+- `nanojira set --status=done` on an element with children not `done` is **refused**
   unless `--allow-open-children`; forcing it produces `done:open_children`.
   `--force` has exactly one meaning: overwrite a parallel change (§ 12). It
   never weakens the parent rule.
-- `nj rm` refuses while child elements exist and names them. `--cascade`
+- `nanojira rm` refuses while child elements exist and names them. `--cascade`
   deletes the subtree. Tombstones remain either way. If other elements
   `depends_on` the removed element, `rm` names them as a warning
   (`depends_on:dangling` will follow). A mode that leaves orphaned elements
@@ -1384,17 +1395,17 @@ model `assignee` has (§ 6).
   `refused:unreadable`, not `not_found`. Reads (`list`, `tree`, `show`,
   `doctor`) stay open so the stub remains findable.
 - Archived elements are **read-only**: `set`, `note`, `rm` and `archive`
-  refuse them; `nj unarchive` (§ 11a) is the one write that accepts an
+  refuse them; `nanojira unarchive` (§ 11a) is the one write that accepts an
   archived element. Reads and `--all` keep working.
 - **A claim is exclusive only against another claim** (§ 12 "Claims"): it
   never blocks a read or any other write — `set`, `note`, `rm`, `archive`,
   `doctor --fix` work on a claimed element exactly as on an unclaimed one.
-  It blocks only a competing `nj claim`, and hides the element from another
+  It blocks only a competing `nanojira claim`, and hides the element from another
   acting name's `--ready` (below).
 - `list` filters are validated: `--status` against the configured statuses,
   `--parent` against existence — a typo'd filter is an error (exit 1), never a
   silently empty result.
-- **Sort order** of `list`, `tree` and bare `nj` is deterministic: priority
+- **Sort order** of `list`, `tree` and bare `nanojira` is deterministic: priority
   weight descending (`urgent` 4, `high` 3, `normal` 2, `low` 1, missing 2),
   then `id` ascending. Never filesystem order.
 
@@ -1443,7 +1454,7 @@ abort identically.
 every ID, **the IDs are written in the order `--id` named them** —
 execution order, not just the results order below — and each one writes
 independently through that command's own existing
-live-state mechanism (compare-before-write, § 12; `nj claim`'s
+live-state mechanism (compare-before-write, § 12; `nanojira claim`'s
 read-decide-`link()` loop, § 12a) exactly as a single invocation would.
 Anything that mechanism can produce because the backlog moved between
 preflight and this ID's turn to write is specific to that one ID —
@@ -1520,7 +1531,7 @@ In both wrapper forms (2 and 3):
   hint: "…"}` — `hint` optional, exactly as in § 9's generic single-write
   failure shape.
 - This is a genuinely new top-level shape, not an overload of the
-  single-write one: a single `nj set --id=TSK-001` continues to produce
+  single-write one: a single `nanojira set --id=TSK-001` continues to produce
   exactly what it produces today, since that path never produces a
   `results` array.
 
@@ -1534,10 +1545,10 @@ actually written.
 > against real plans of their own (DECISIONS 172). Settled, not a
 > proposal.
 
-`nj new --input=<file|->` and `nj set --input=<file|->` take a JSON
+`nanojira new --input=<file|->` and `nanojira set --input=<file|->` take a JSON
 **object** — or, for `new` only, an **array** of objects — whose keys are
 exactly that command's own flag names (the same per-command flag table
-`nj-mcp`'s tool schemas already read, § 17; `nj <command> --help`, § 9,
+`nanojira-mcp`'s tool schemas already read, § 17; `nanojira <command> --help`, § 9,
 lists them). A list-valued field (`tags`, `depends_on`) is a JSON array of
 strings, not a comma-joined string; a multi-line value (`description`,
 `acceptance`) is a plain JSON string, embedded newlines and all — no
@@ -1546,7 +1557,7 @@ this JSON. An unknown key — anything not one of the command's own fields,
 and not `children`/`ref` below — is `unknown_field`, the same as an
 unknown `--flag` today.
 
-**Mutually exclusive with field flags.** `nj new --input=- --title=X` is
+**Mutually exclusive with field flags.** `nanojira new --input=- --title=X` is
 rejected (`invalid_value`, nothing written): `--input` and the field flags
 are two different sources for the same values, and mixing them is never
 assumed to mean one or the other — the same discipline `--tags=` combined
@@ -1693,7 +1704,7 @@ each top-level object in the order given, each one's own `children`
 A single object with no `children` is the trivial one-element case of the
 same order. **ID assignment follows the same order**: each object's ID is
 allocated at the moment it is written (the same tombstone-claiming
-mechanism a single `nj new` already uses, never reserved in advance), so
+mechanism a single `nanojira new` already uses, never reserved in advance), so
 "ID order" and "write order" are one and the same fact stated twice, not
 two separate rules to keep in sync.
 
@@ -1707,7 +1718,7 @@ stops the others" does not apply here: the remaining objects' own
 validity may depend on the one that just failed). The failed object's own
 write never happened; every object before it in write order already did,
 and stays written — there is no transaction across a whole plan, the same
-"no rollback" property every other multi-file nj operation already has.
+"no rollback" property every other multi-file nanojira operation already has.
 The JSON failure result is § 9's ordinary single-write failure shape,
 `{ok: false, error: "<code>", hint: "…"}`, **plus** two additive fields
 (DECISIONS 172): `created` — the IDs actually written, in write order —
@@ -1781,7 +1792,7 @@ there is no JS exception to catch, and so no `created`/`refs`/`failed_at`
 to attach, the same as a real process or machine crash at that instant.
 `failed_at`'s promise is about a write failure the process survives to
 report on; a crash is answered the way every other crash in this spec
-already is, by reading the backlog afterward — `nj doctor`/`nj list`
+already is, by reading the backlog afterward — `nanojira doctor`/`nanojira list`
 show exactly what was written, the same as after a crash mid-archive or
 mid-cascade (§ 12).
 
@@ -1857,7 +1868,7 @@ subtask and a review subtask assigned to a reviewer, the review
 }
 ```
 
-`nj new --input=plan.json --json` (a single object with `children`, so the
+`nanojira new --input=plan.json --json` (a single object with `children`, so the
 plural shape applies) — IDs in write order (epic, then each task
 immediately followed by its own two subtasks):
 
@@ -1987,19 +1998,19 @@ An element is ready when **all** hold:
 
 Ancestor status does not affect `--ready` — only explicit `depends_on` edges
 do; broken references are caught by the code table instead. So
-`NJ_AUTHOR=agent-7 nj list --ready` shows what agent-7 may take or already
+`NJ_AUTHOR=agent-7 nanojira list --ready` shows what agent-7 may take or already
 holds, and never an element another acting name has claimed; a backlog
 without claims answers exactly as before condition 5 existed.
 
-**Bare `nj`'s own "Ready to work" section additionally excludes a
+**Bare `nanojira`'s own "Ready to work" section additionally excludes a
 container** (DECISIONS 158, EV-4): an element that is `--ready` by the
 five conditions above but has at least one **open child** (neither `done`
-nor archived) is left out of bare `nj`'s list, the same leaf-work rule
+nor archived) is left out of bare `nanojira`'s list, the same leaf-work rule
 `next` applies to its own candidates (§ 12b, DECISIONS 156) — reused here,
 not reimplemented. `list --ready` itself is **unchanged**: it stays a pure
 readiness filter over exactly the five conditions, container or not, so
-`nj list --ready` and bare `nj`'s "Ready to work" can now name different
-sets for the same backlog on purpose — bare `nj` is answering "what could
+`nanojira list --ready` and bare `nanojira`'s "Ready to work" can now name different
+sets for the same backlog on purpose — bare `nanojira` is answering "what could
 I hand out right now", `list --ready` is answering "what satisfies
 `--ready`'s own definition". This is a new, accepted replay class: a
 bare-status call on a backlog containing a container whose children are
@@ -2008,7 +2019,7 @@ same deliberate, named exception the replay gate already carries for
 help-text differences (DECISIONS 151/152/154/155/156).
 
 ```
-$ nj list --ready
+$ nanojira list --ready
 Ready to work:
   TSK-007  Login route
 
@@ -2057,12 +2068,12 @@ when claimed, `null` when not (§ 12 "Claims").
 | Command | JSON shape |
 |---|---|
 | `list`, `show`, `find` | `{backlog, counts, entries: [{…, _problems}]}` — `find`'s shape is identical to `list`'s, no `_match` field (§ 9a); **`show` additionally carries `entry: {…, _problems}`** (DECISIONS 171 C), identical to `entries[0]`, exactly when `entries` has **exactly one** element — never when it has several (a `duplicate_id` target, `entries.length > 1`) or, hypothetically, none; `list`/`find` never carry it, since returning many entries is their own point |
-| `new`, `set`, `note`, `check`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nj new`/`nj set`, `changed` also names the section roles written (`description`, `acceptance`); for `nj check`, `changed` is `["body"]` or `[]` (a no-op); **`nj set` additionally carries `released?: "<holder>"`** (DECISIONS 171 B) when a write setting `status` to the last configured status released an existing claim — absent, not `null`, when there was no claim to release; **and `open_acceptance?: {unticked, total}`** (DECISIONS 176 B) when that same write leaves the element carrying `done:open_acceptance` — absent otherwise |
+| `new`, `set`, `note`, `check`, `rm` | `{ok, id, changed: […], entry: {…, _problems}, _problems}` — the top-level `_problems` mirrors `entry._problems`; `rm` additionally carries `dependents: […]` — the elements whose `depends_on` names the removed one, empty when there are none; for `nanojira new`/`nanojira set`, `changed` also names the section roles written (`description`, `acceptance`); for `nanojira check`, `changed` is `["body"]` or `[]` (a no-op); **`nanojira set` additionally carries `released?: "<holder>"`** (DECISIONS 171 B) when a write setting `status` to the last configured status released an existing claim — absent, not `null`, when there was no claim to release; **and `open_acceptance?: {unticked, total}`** (DECISIONS 176 B) when that same write leaves the element carrying `done:open_acceptance` — absent otherwise |
 | `archive`, `unarchive`, `rm --cascade` | `{ok, ids: […], changed: ["archived" \| "unarchived" \| "deleted"], entries: […], _problems: […]}` — for `rm --cascade` the top-level `_problems` is `[]`: the elements are gone, so their problems are too. `archive` and `unarchive` emit the union, because the elements still exist and can still carry findings. **`rm --cascade` additionally carries `dependents: […]`**, the remaining elements whose `depends_on` names a removed one — archived elements included, since they carry `depends_on:dangling` too and the agent must know it; `archive` and `unarchive` do **not** — a `depends_on` pointing into the archive is satisfied by definition (§ 11), so there is nothing to warn about and nothing an agent must act on. |
 | `claim`, `release` | `{ok, id, changed: […], entry: {…, _problems, _claim}, _problems, claim: {by, since}\|null, stolen_from?, previous_assignee?, released?}` (§ 12 "Claims") — the write-result shape plus `claim`, the element's claim state after the call; `stolen_from` names the previous holder after a `--steal`; `previous_assignee` when the claim overwrote a different `assignee`; `changed` names `assignee` and `status` when written, a `release` reports `changed: ["claim"]`; **`released?: "<holder>"`** (DECISIONS 171 B) on `claim` only, when `--status=<last>` released the very claim this same call just made — absent, not `null`, otherwise; `release` never carries it (a plain release is already reported via `claim: null`); **`open_acceptance?: {unticked, total}`** (DECISIONS 176 B) on `claim` only, same condition as `set`'s own — `release` never carries it, since `release` never writes `status` |
 | `tree` | `{backlog, counts, entries: […]}` — **flat**, each entry carries `parent`; depth-first order conveys the tree |
 | `doctor` | `{backlog, ok, problems: [{code, severity, element?, file?, line?, message}]}` — `severity` ∈ `error`\|`warning` (the Doctor column value; `—` codes never appear as findings); element-level findings carry `element`, backlog-level ones do not |
-| bare `nj` | `{backlog, counts, ready: [entries ≤ 5], incomplete: [entries ≤ 5]}` |
+| bare `nanojira` | `{backlog, counts, ready: [entries ≤ 5], incomplete: [entries ≤ 5]}` |
 | `set`, `note`, `check`, `claim`, `release` with `--id=A,B,C` (two or more IDs) | `{ok, results: [{id, ok, …}]}` — the "Batch writes" wrapper (§ 9 above): `results` names every ID once preflight passes for all of them, or only the ID(s) that failed preflight if it did not; a batch-wide argument error (`unknown_field`, a repeated ID, …) instead uses this table's generic single-write failure shape, no `results` at all; a single `--id=A` is unaffected and keeps the unwrapped success shape on this table's earlier row |
 
 Every entry object always carries `_problems`; the codes come only from the
@@ -2098,7 +2109,7 @@ refused:<reason>      reason ∈ unreadable | unreadable_dir | archived | childr
 fault:<hook>          hook ∈ before-compare | after-tmp-write | before-rename
 ```
 
-`--json` is defined for the command set of this section. `nj help` is not one
+`--json` is defined for the command set of this section. `nanojira help` is not one
 of them, so its output is prose regardless of flags.
 
 ### Failure codes — spec-named paths (DECISIONS 163 D)
@@ -2112,7 +2123,7 @@ recalled from memory, found by grepping every `fail('refused:…', …)` and
 `compareGuard`/`guardedWrite` call site for a flag it checks before
 failing. `—` means no such flag exists: the condition must actually change
 (fix the config, finish the children, wait out the race) or a different
-command must run first (`nj doctor --fix`) — the hint text may still point
+command must run first (`nanojira doctor --fix`) — the hint text may still point
 there, but that is not the **same** call succeeding anyway, which is what
 this column is reserved for. This is docs only — the `--json` shape is
 unchanged; the hint already carried this information in prose, this column
@@ -2128,7 +2139,7 @@ just makes it a lookup instead of a re-read of the hint every time:
 | backlog found but `.nanojira/config.json` is missing | `backlog_without_config` | § 4 | — |
 | backlog in the v2 layout (any command except `doctor`) | `legacy_layout` | § 4 | — |
 | `.nanojira/config.json` violates § 5 | `invalid_config` | § 5 | — |
-| the running `nj` is older than `minVersion` | `needs_newer_nj` | § 5 "`minVersion`" | — (upgrade `nj`; nothing on the same call changes this) |
+| the running `nanojira` is older than `minVersion` | `needs_newer_nj` | § 5 "`minVersion`" | — (upgrade `nanojira`; nothing on the same call changes this) |
 | unknown field flag | `unknown_field` | § 9 | — |
 | a flag other than `--backlog`/`--json` precedes the command word | `unknown_field` | § 9 "Rules" | — |
 | `--version` combined with another flag or an explicit subcommand | `unknown_field` | § 9 | — |
@@ -2156,11 +2167,11 @@ just makes it a lookup instead of a re-read of the hint every time:
 | `rm` while child elements exist | `refused:has_children` | § 9 | `--cascade` |
 | `archive` with an unfinished subtree | `refused:not_done` | § 11 | — (`archive` takes no `--force`) |
 | an archived element as `--parent` | `refused:parent_archived` | § 9 | — |
-| `archive` under `hierarchy` on a subtree not lying in its own folder | `refused:misplaced` | § 11 | — (`nj doctor --fix`, a separate call) |
+| `archive` under `hierarchy` on a subtree not lying in its own folder | `refused:misplaced` | § 11 | — (`nanojira doctor --fix`, a separate call) |
 | `unarchive` on an element that is not archived | `refused:not_archived` | § 11a | — |
 | `unarchive` under an archived parent | `refused:parent_archived` | § 11a | — |
 | `unarchive` while an unreadable stub exists | `refused:unreadable` | § 11a, § 9 | — |
-| `unarchive` of a subtree not lying in its own folder, or with an unresolvable `parent` chain (`hierarchy`) | `refused:misplaced` | § 11a | — (`nj doctor --fix`, a separate call) |
+| `unarchive` of a subtree not lying in its own folder, or with an unresolvable `parent` chain (`hierarchy`) | `refused:misplaced` | § 11a | — (`nanojira doctor --fix`, a separate call) |
 | an `unarchive` target path is occupied | `exists` | § 11a | — |
 | an `NJ_FAULT` hook fires | `fault:<hook>` | § 12 | — (test-only, not a real refusal) |
 | `NJ_AUTHOR` is not a valid name, on a command that uses it | `invalid_env` | § 9 | — (use `--as` instead) |
@@ -2195,7 +2206,7 @@ Human output after a write repeats the element's open problems in the same
 block:
 
 ```
-$ nj set --id=TSK-009 --status=doing
+$ nanojira set --id=TSK-009 --status=doing
 TSK-009 → doing
 ⚠ TSK-009 has no acceptance criteria. Add them before starting.
 ```
@@ -2215,14 +2226,14 @@ deliberately not added: it would be a second name for exactly what
 |---|---|
 | `0` | success — including reads that merely *report* data problems via `_problems` |
 | `1` | command failed — nothing or only partially written; hard errors (no backlog found, unknown field, refusal, retries exhausted) |
-| `2` | `nj doctor` only: at least one `error` finding |
+| `2` | `nanojira doctor` only: at least one `error` finding |
 
 ---
 
-## 9a. `nj find`
+## 9a. `nanojira find`
 
 ```
-nj find "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
+nanojira find "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
                   [--all] [--case-sensitive] [--json]
 ```
 
@@ -2255,7 +2266,7 @@ match a title containing `"İ"`. `toLowerCase()` is locale-independent (the
 same bytes map the same way regardless of the host's configured locale),
 matching this project's existing determinism discipline (`NJ_NOW` pinning,
 § 12; no hidden environment dependence); `toLocaleLowerCase()` would make a
-search's results depend on an environment variable `nj` does not otherwise
+search's results depend on an environment variable `nanojira` does not otherwise
 read anywhere, for any other command. `<text>` given as the literal empty
 string is `invalid_value`, nothing searched — the same "an explicit flag or
 argument given empty is a caller's mistake" reading `--as=` (DECISIONS 119)
@@ -2274,14 +2285,14 @@ shows the matching line, not the whole file; this is prose, not a JSON
 contract.
 
 Reuses the existing full-scan read path (§ 13): bodies are already parsed
-for completeness/title/section checks, so `nj find` adds one substring scan
-over text `nj` has already loaded, not a new read.
+for completeness/title/section checks, so `nanojira find` adds one substring scan
+over text `nanojira` has already loaded, not a new read.
 
 ---
 
-## 10. `nj note`
+## 10. `nanojira note`
 
-`nj note --id=TSK-007 "Parser splits at the first colon"` appends a dated,
+`nanojira note --id=TSK-007 "Parser splits at the first colon"` appends a dated,
 signed line to the body:
 
 ```markdown
@@ -2316,7 +2327,7 @@ Rules:
   lines directly below the heading — no blank line between **two different**
   notes (a blank line *within* one note's own text is a different thing,
   below).
-- An invalid acting name makes `nj note` exit 1 — `invalid_env` for
+- An invalid acting name makes `nanojira note` exit 1 — `invalid_env` for
   `NJ_AUTHOR`, `invalid_value` for `--as` — and writes nothing. Other writes
   (`new`, `set`, …) do not use the acting name and ignore it; reads never
   fail on it. Precedence: argument parsing (`unknown_field`,
@@ -2326,7 +2337,7 @@ Rules:
   `NJ_AUTHOR`, `invalid_value` for `--as`), then target resolution
   (`not_found`, `duplicate_id`), then refusals (e.g. `refused:archived`).
   The wrong-type-`--parent` reading of `invalid_target` does not apply here:
-  `nj note` takes no `--parent`.
+  `nanojira note` takes no `--parent`.
 - The acting name changes only the note line. It never sets or changes
   `assignee`.
 - A note **does not** satisfy the `## Description` requirement. Its write
@@ -2351,7 +2362,7 @@ remains is split on `\n`:
   new list item. A blank line in the middle of the text is still written
   indented (two spaces, nothing else) rather than truly empty — the
   deliberate exception to this project's usual "no trailing whitespace"
-  rule, because it is exactly what tells the reader (and `nj log`,
+  rule, because it is exactly what tells the reader (and `nanojira log`,
   below) that the blank line belongs to *this* note's continuation and
   is not the blank line that would otherwise mark the end of `## Notes`.
   No other line hygiene is applied: a continuation line's own content is
@@ -2366,7 +2377,7 @@ remains is split on `\n`:
   Line four, after a blank line
 ```
 
-**Reading it back** (`parseNotes`, used by `nj find` and `nj log`): after a
+**Reading it back** (`parseNotes`, used by `nanojira find` and `nanojira log`): after a
 line matching `- <ISO-8601> <author>: <text>`, every immediately following
 line that is **either** completely empty **or** starts with exactly two
 spaces is a continuation of that same note, consumed until a line that is
@@ -2375,7 +2386,7 @@ Continuation lines are rejoined with `\n`, in order, the two-space prefix
 stripped where present (a genuinely empty line stays empty) — reconstructing
 the exact text that was written. Because a continuation line is always
 either indented or empty, it can **never** be read as a fresh note (which
-must start at column 0 with `- `) or as a checkbox (`nj check`'s own scope
+must start at column 0 with `- `) or as a checkbox (`nanojira check`'s own scope
 already excludes `## Notes` entirely, § 10a, independent of indentation) —
 a continuation line that happens to read `- [ ] like a checkbox` is just
 more of the previous note's text, indented, nothing else. A line that is
@@ -2392,27 +2403,27 @@ already have none.
 
 **Unaffected by this:** `--as`/`NJ_AUTHOR` validation (§ 9 "The acting
 name") — a multi-line acting name is still `invalid_value`/`invalid_env`,
-unrelated to the note *text*'s own newlines. `nj find`'s substring match
+unrelated to the note *text*'s own newlines. `nanojira find`'s substring match
 (§ 9a) already treats the whole body, notes included, as one block of text;
 a continuation line's two-space indent is just more of that text, nothing
-special-cased. `nj doctor` does not parse note structure at all and is
+special-cased. `nanojira doctor` does not parse note structure at all and is
 unaffected.
 
 Notes are how decisions, findings and verification reports get captured in
-the backlog — the body is the project memory, `nj note` is its sanctioned
+the backlog — the body is the project memory, `nanojira note` is its sanctioned
 writer.
 
 ---
 
-## 10a. `nj check`
+## 10a. `nanojira check`
 
-`nj check` flips one Markdown checkbox in the body — the dedicated, guarded
+`nanojira check` flips one Markdown checkbox in the body — the dedicated, guarded
 writer for exactly this one edit, so ticking a box no longer means a hand
 edit or a full `--acceptance=<text>` rewrite of a section to change one line.
 
 ```
-nj check --id=TSK-009 --text=<substring> [--on | --off] [--force] [--json]
-nj check --id=TSK-009 --item=<n>         [--on | --off] [--force] [--json]
+nanojira check --id=TSK-009 --text=<substring> [--on | --off] [--force] [--json]
+nanojira check --id=TSK-009 --item=<n>         [--on | --off] [--force] [--json]
 ```
 
 (`--file=<path>` instead of `--id`, and `--backlog`, as for every write.)
@@ -2434,7 +2445,7 @@ of which of `[x]`/`[X]` was read, a write never produces `[X]`.
 
 **Scope.** Every section is scanned except `## Notes` (§ 10: an
 append-only audit trail of past decisions — re-ticking history there would
-read as editing the record, not doing the work). `nj check` tracks fence
+read as editing the record, not doing the work). `nanojira check` tracks fence
 state (` ``` ` and `~~~`, either of length 3 or more, matched at the start
 of a line after optional leading whitespace, closed only by a matching or
 longer fence of the same character) line by line and never counts or
@@ -2480,7 +2491,7 @@ Rules:
   apply, with `--force` available as for `set`/`note`.
 - Ticking or unticking does not itself satisfy or un-satisfy completeness
   (§ 7): checkbox state and section completeness are independent.
-- `changed: ["body"]` on a write, `[]` on a no-op — the same marker `nj
+- `changed: ["body"]` on a write, `[]` on a no-op — the same marker `nanojira
   note` uses, since a checkbox flip is a body edit, not a section-role
   write.
 
@@ -2489,9 +2500,9 @@ _problems}` — the § 9 write-result shape, nothing new.
 
 ---
 
-## 11. `nj archive`
+## 11. `nanojira archive`
 
-`nj archive --id=EPIC-001` moves the element and its **entire subtree** into
+`nanojira archive --id=EPIC-001` moves the element and its **entire subtree** into
 the archive folder (`layout.folders.archive`, default `archive/`):
 
 - groups `type` and `flat`: flat, every file directly in the archive folder
@@ -2524,23 +2535,23 @@ the archive folder (`layout.folders.archive`, default `archive/`):
   because a long-lived foreign reference must never deadlock archival.
 - `list`, `tree` and the short status hide archived elements; `--all`
   includes them, and archived entries carry their `archived` timestamp.
-- `nj doctor` validates the archive: `archive:not_done` (error — the
+- `nanojira doctor` validates the archive: `archive:not_done` (error — the
   invariant "archived ⇒ done" carries `depends_on` satisfaction into the
   archive), and `archive:split` — a child outside the archive while its
   parent is inside (error, produced by manual file moves).
-- Un-archiving is `nj unarchive` (§ 11a).
+- Un-archiving is `nanojira unarchive` (§ 11a).
 
 git remains the fine-grained history; the archive is the coarse shelf for
 finished work, keeping the working set small.
 
 ---
 
-## 11a. `nj unarchive`
+## 11a. `nanojira unarchive`
 
-`nj unarchive --id=EPIC-001` (or `--file=<path>`, § 9) moves the archived
+`nanojira unarchive --id=EPIC-001` (or `--file=<path>`, § 9) moves the archived
 element and its **archived subtree** — every descendant of it that lies below
 the archive folder — back to their active places. It is in every respect the
-inverse of `nj archive`. No `--force` (§ 12: `--force` has one meaning, and
+inverse of `nanojira archive`. No `--force` (§ 12: `--force` has one meaning, and
 bulk moves do not take it).
 
 - **Gathering:** the subtree is found from the archive by the element's
@@ -2570,14 +2581,14 @@ bulk moves do not take it).
 - **Frontmatter:** the `archived` key is removed from every moved element and
   `updated` is refreshed. Nothing else changes — `status` stays what it was
   (`done`, by § 11's precondition). Reopening is a separate, explicit
-  `nj set --status=…`.
+  `nanojira set --status=…`.
 - **Order and atomicity**, as `archive` (DECISIONS 91 B16): every file's
   frontmatter is rewritten in place first, through the guarded write of § 12
   (compare before write, no `--force`; `NJ_FAULT=before-compare` fires once
   per file write, in top-down order), then the moves happen. A crash between
   the two leaves files below the archive folder without `archived:` —
   archived by location (§ 4, DECISIONS 92 Q2), no finding; a second
-  `nj unarchive` completes it. `NJ_FAULT=before-rename` fires before the
+  `nanojira unarchive` completes it. `NJ_FAULT=before-rename` fires before the
   first `rename`.
 - **All move targets are verified before the first write.** A target is
   occupied only where a file already exists at a file's target path, or a
@@ -2602,7 +2613,7 @@ bulk moves do not take it).
    element file does (moving the folder would carry it along), or the
    element's `parent` chain does not resolve (`parent:dangling`, `parent:cycle`,
    or an ancestor with either — the active place cannot be computed,
-   DECISIONS 91 B15): `refused:misplaced`, pointing at `nj doctor --fix`.
+   DECISIONS 91 B15): `refused:misplaced`, pointing at `nanojira doctor --fix`.
 5. A move target is occupied (above): `exists`.
 
 Descendants of the element that are *not* archived are untouched; they
@@ -2610,7 +2621,7 @@ already lie at their active places.
 
 **Claims (§ 12 "Claims").** Once every refusal above has cleared — the
 element is confirmed archived, among other things — and before the first
-move, `nj unarchive` removes the element's claim directory wholesale, the
+move, `nanojira unarchive` removes the element's claim directory wholesale, the
 same removal `archive`/`rm` use: normally none exists, since `archive`
 already removed it; this only ever fires on a `claim:orphaned` straggler a
 partially-cleaned archive left behind. A straggler's own in-flight claim
@@ -2644,16 +2655,16 @@ complete file, never half of one. That is why reading never needs to lock.
 
 `STATUS.md` (§ 4) is written the same way: temp file, `fsync`, `rename`.
 
-**Folders under `hierarchy`.** `nj new` creates the element's folder (epic,
+**Folders under `hierarchy`.** `nanojira new` creates the element's folder (epic,
 task) with `mkdir` before writing the file into it; a folder that already
-exists is reused. `nj rm` removes the element's file and then its folder,
+exists is reused. `nanojira rm` removes the element's file and then its folder,
 only if the folder is then empty; `rm --cascade` removes the subtree's files
 children-first and each folder once empty — never a recursive delete of
 whatever else a folder holds. Moving a subtree (`archive`, `doctor --fix`) is
 **one `rename` of its top folder**, atomic within one filesystem.
 
-**Compare before writing.** On `nj set`, `nj note`, `nj check`, `nj archive`
-and `nj unarchive`: read the file, remember the content, re-read immediately
+**Compare before writing.** On `nanojira set`, `nanojira note`, `nanojira check`, `nanojira archive`
+and `nanojira unarchive`: read the file, remember the content, re-read immediately
 before writing and compare **byte for byte**. A difference aborts with
 "changed in parallel, please run again". The comparison runs over the full
 content, not over `updated` — second-level timestamps would be too coarse for
@@ -2671,7 +2682,7 @@ second meaning — the same reason the parent rule got its own flag
 
 **Batch writes (`--id=A,B,C`, § 9 "Batch writes") introduce no new
 mechanism.** Each ID in a batch goes through exactly the same
-compare-before-write (above) or `nj claim`'s read-decide-`link()` loop
+compare-before-write (above) or `nanojira claim`'s read-decide-`link()` loop
 (§ 12a) a single invocation would; atomicity is still per-ID, never across
 the batch — a batch is N uses of the existing mechanism, reported together.
 
@@ -2689,7 +2700,7 @@ file untouched:
   (`set`, `note`, `check` — not `archive` or `unarchive`)
 
 It exists so that criterion AC-9 is testable. The abandoned temp file is
-reported by `nj doctor` (`backlog:stray_tmp`) and removed by `doctor --fix`.
+reported by `nanojira doctor` (`backlog:stray_tmp`) and removed by `doctor --fix`.
 A single command is unchanged by batch writes existing. **Within a batch
 (`--id=A,B,C`, § 9 "Batch writes"), `NJ_FAULT` fires once**: at the first
 write, in execution order, that reaches the injection point. That ID fails
@@ -2699,12 +2710,12 @@ writes normally.
 
 **Clock pinning (verification hook, not a feature).** `NJ_NOW=<ISO-8601 UTC>`
 fixes the clock: if set, every timestamp the tool writes (`created`,
-`updated`, `archived`, `nj note` lines) uses exactly this value; an invalid
+`updated`, `archived`, `nanojira note` lines) uses exactly this value; an invalid
 value exits 1. It exists so that AC-2's byte-exact golden comparison needs no
 normalisation — normalising timestamps in the verifier would silently hide
 serializer defects (wrong format, missing `Z`).
 
-**Claims.** The exclusivity mechanism behind `nj claim`/`nj release`
+**Claims.** The exclusivity mechanism behind `nanojira claim`/`nanojira release`
 (§ 12a). **The claim of an element is an append-only sequence of immutable
 entries**, one directory per element:
 
@@ -2767,8 +2778,8 @@ sequence is the truth for exclusivity; `assignee` is its mirror** (§ 6).
 Claims are local runtime state and are not committed (§ 4).
 
 **Stale claims (`claim:stale`, § 7) are advisory only.** `claim:stale`
-appears in the `_problems` of every entry `nj` returns — `list`, `show`,
-`tree`, bare `nj`, and the write results of `set`, `note` and the rest —
+appears in the `_problems` of every entry `nanojira` returns — `list`, `show`,
+`tree`, bare `nanojira`, and the write results of `set`, `note` and the rest —
 exactly as `claim:mismatch`/`claim:orphaned` already do. It is reported
 when a claimed element's `now − _claim.since` exceeds
 `claims.staleAfterHours` (§ 5, default 24, `0` disables it) — `now` is
@@ -2779,7 +2790,7 @@ already has. This changes nothing about § 12's opening principle:
 condition 5 (§ 9) is unaffected by staleness in either direction — a stale
 claim still hides the element from every other acting name's `--ready`,
 exactly as a fresh one does. It is the same kind of signal reported, acted
-on by a human or agent choosing to `--steal`, never acted on by `nj`
+on by a human or agent choosing to `--steal`, never acted on by `nanojira`
 itself.
 
 ### Limits, disclosed
@@ -2828,7 +2839,7 @@ itself.
   above already settles the other way.
 - **A read caches, per process, whether `.nanojira/claims/` exists —
   a narrow, one-time staleness window.** If a backlog's very first claim
-  ever lands while a `list`/`tree`/bare-`nj`/`show` is already in progress,
+  ever lands while a `list`/`tree`/bare-`nanojira`/`show` is already in progress,
   that one read may report `_claim: null` for elements it checks after the
   moment the claim landed, and may count one of them as ready that no
   longer is. Claim exclusivity itself is unaffected — only `_claim`'s
@@ -2838,18 +2849,18 @@ itself.
 
 ---
 
-## 12a. `nj claim` / `nj release`
+## 12a. `nanojira claim` / `nanojira release`
 
 ```
-nj claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] [--json]
-nj release --id=TSK-007 [--as=<name>] [--json]
+nanojira claim   --id=TSK-007 [--as=<name>] [--status=<s>] [--steal=<holder>] [--json]
+nanojira release --id=TSK-007 [--as=<name>] [--json]
 ```
 
 (`--file=<path>` instead of `--id`, and `--backlog`, as for every write.)
 `release` is its own verb: § 9's "verb as a subcommand, not as a flag". The
 mechanism is § 12 "Claims"; this section is the interface built on it.
 
-**`nj claim`** — with the acting name N (§ 9; none → exit 1,
+**`nanojira claim`** — with the acting name N (§ 9; none → exit 1,
 `missing_argument`):
 
 1. Refused before anything is written: an archived element
@@ -2895,7 +2906,7 @@ mechanism is § 12 "Claims"; this section is the interface built on it.
    `claim:mismatch`.
 
 `--status=<s>` lets an agent claim and start in one write
-(`nj claim --id=TSK-007 --status=doing`), validated as for `nj set`
+(`nanojira claim --id=TSK-007 --status=doing`), validated as for `nanojira set`
 (`invalid_value`; the parent rule of § 9 applies unchanged).
 
 **Stealing.** `--steal=H` takes over a claim held by H — the only way to
@@ -2920,39 +2931,39 @@ third bullet above), so both exit 0; if the steal lands first, the release
 reads a different holder and exits 1 with `refused:claimed` naming the
 stealer. Either way the stealer ends up holding it.
 
-**`nj release`** — the holder gives the claim up. With the state read at
+**`nanojira release`** — the holder gives the claim up. With the state read at
 *g*: `claimed N` → append *g+1* `released N`; on `EEXIST` or `ENOENT`
 re-read — if a stealer got there first, `refused:claimed` naming the new
 holder, since N no longer has anything to release. `claimed H`, H ≠ N →
 `refused:claimed` naming H (a release of someone else's claim is a steal
 and must say so). Unclaimed → exit 0, nothing to do. `assignee` is **left as
 it is** — it records who worked on the element; clearing it is an explicit
-`nj set --assignee=`.
+`nanojira set --assignee=`.
 
 **Final status releases the claim** (DECISIONS 171 B,
 feedback/team-b-tests TSK-013: ten of twelve stale claims found by
 `claim:stale` were on elements already `done`, claimed and never
 released). Whenever a write sets `status` to the **last configured
 status** (§ 5 already requires this to be literally `done`, not merely a
-default) — via `nj set --status=<last>`, `nj claim --status=<last>`, or
-`nj next --status=<last>` (§ 12b, which reuses this same mechanism) — the
+default) — via `nanojira set --status=<last>`, `nanojira claim --status=<last>`, or
+`nanojira next --status=<last>` (§ 12b, which reuses this same mechanism) — the
 element's claim, if it has one, is released **in the same call**, and the
 result reports it additively: `released: "<holder>"`.
 
 - **Whose claim it releases: whoever holds it, even if that is not the
-  acting name.** This is not `nj release`'s own rule (which refuses
+  acting name.** This is not `nanojira release`'s own rule (which refuses
   `refused:claimed` unless the acting name is the holder, above) — it is
   an administrative side effect of the element reaching `done`, not an
   act of giving up one's own claim, so it is unconditional on who is
-  running the command. If alice runs `nj set --id=X --status=done` on an
+  running the command. If alice runs `nanojira set --id=X --status=done` on an
   element bob holds, bob's claim is released, not refused.
-- **`nj claim --status=<last>` releases the claim it just acquired, in
+- **`nanojira claim --status=<last>` releases the claim it just acquired, in
   the same call.** This looks redundant but is the consistent reading of
   "done releases the claim": the claims sequence gains two entries for
   this one invocation (`claimed N`, then `released N`, both at the same
-  timestamp) — `nj log` then shows both, because both genuinely
+  timestamp) — `nanojira log` then shows both, because both genuinely
   happened, in that order, rather than silently collapsing them into
-  nothing. The same applies to `nj next --status=<last>` (§ 12b), which
+  nothing. The same applies to `nanojira next --status=<last>` (§ 12b), which
   claims via this same path.
 - **Unconditional means no ownership check and no "steal" concept** —
   there is nothing to contest, so there is no `refused:claimed` case for
@@ -2978,7 +2989,7 @@ result reports it additively: `released: "<holder>"`.
 - **The rollback interplay with the guarded write.** The claims-sequence
   release is attempted **first** (optimistically), then the element's own
   guarded write (status, and any other fields given in the same call)
-  happens **second** — the same order `nj claim`'s own claim-then-mirror-
+  happens **second** — the same order `nanojira claim`'s own claim-then-mirror-
   write already has (§ 12a step 3, above). If the guarded write fails
   (`changed_in_parallel`, a fault hook, any I/O error), the release is
   **always rolled back** — re-asserting `claimed <holder>` for whoever it
@@ -2993,11 +3004,11 @@ result reports it additively: `released: "<holder>"`.
 - **Batch (`--id=A,B,C`).** Applies per ID, independently, exactly like
   every other per-ID effect a batch already has (§ 9 "Batch writes") — no
   batch-wide behaviour beyond what the existing wrapper already does.
-- **`nj-mcp`'s `set`/`claim`/`next` tools.** No MCP-side change at all:
-  each tool call spawns `dist/nj --json` as a child process and returns
+- **`nanojira-mcp`'s `set`/`claim`/`next` tools.** No MCP-side change at all:
+  each tool call spawns `dist/nanojira --json` as a child process and returns
   its output verbatim (§ 17), so `released` surfaces there automatically,
   the same way every other additive JSON field in this spec always has.
-- **`nj doctor --fix` performs the same unconditional release in bulk**
+- **`nanojira doctor --fix` performs the same unconditional release in bulk**
   (DECISIONS 182 A, § 14 step 7b) for any element that reached the final
   status **before** this release existed, or through any other path that
   left a claim behind — the gap feedback/team-a found as 32
@@ -3011,7 +3022,7 @@ result reports it additively: `released: "<holder>"`.
 **Visibility.** `list` and `show` mark a claimed element with its holder via
 `_claim` (§ 9); a reader lists the directory and reads the highest entry.
 
-**Git (`.gitignore`, amends § 4 and § 14).** `nj init` writes a third
+**Git (`.gitignore`, amends § 4 and § 14).** `nanojira init` writes a third
 pattern, `.nanojira/claims/`, after the two of § 4 (one byte change to
 existing `init` output). An existing backlog gains it through `doctor`:
 
@@ -3033,10 +3044,10 @@ elements that are archived or gone (§ 7 `claim:orphaned`) — not merely
 claimed — and never touches a live claim's entries: no pruning while the
 element could still be claimed. It never resolves a `claim:mismatch` (§ 7)
 either — which of the claim and `assignee` is right is exactly the kind of
-question § 14 forbids guessing. `nj archive` and `nj rm` remove the claim
+question § 14 forbids guessing. `nanojira archive` and `nanojira rm` remove the claim
 directories of the elements they move or delete (entries, then `rmdir`; a
 directory that is not empty afterwards — a stale process appended in
-between — is left for `doctor` as `claim:orphaned`); `nj unarchive` does
+between — is left for `doctor` as `claim:orphaned`); `nanojira unarchive` does
 the same, while the element is still archived (§ 11a).
 
 **Output.** `claim` and `release` return the shape of § 9's JSON-shapes
@@ -3050,10 +3061,10 @@ until cleanup, the same-named re-assertion audit-trail residual).
 
 ---
 
-## 12b. `nj next`
+## 12b. `nanojira next`
 
 ```
-nj next  [--as=<name>] [--status=<s>] [--type=…] [--tag=…] [--parent=…]
+nanojira next  [--as=<name>] [--status=<s>] [--type=…] [--tag=…] [--parent=…]
          [--assignee=…] [--json]
 ```
 
@@ -3064,7 +3075,7 @@ callers can read the same top candidate before either claims it
 
 **Candidates** are the `--ready` set (§ 9 "`--ready`") for the given
 acting name, in `list`'s own order: priority descending, then `id`
-ascending — the same order `list --ready` and bare `nj` already print
+ascending — the same order `list --ready` and bare `nanojira` already print
 their top-ready elements in — **narrowed to leaf work** (DECISIONS 156):
 a `--ready` element with at least one **open child** (a child that is
 neither `done` nor archived) is **not a candidate**, whatever the
@@ -3073,7 +3084,7 @@ filters, including `--type=epic`. Its open children are themselves
 merits. An epic with **no** children, or whose children are **all**
 `done` or archived, stays a candidate — closing it is real work `next`
 may still hand out. This rule is specific to `next`: `list --ready` and
-bare `nj` are **unchanged**, so a container can still appear there as
+bare `nanojira` are **unchanged**, so a container can still appear there as
 "ready to work" exactly as before (tracked for later on TSK-043, not
 changed now) — only `next`'s own candidate set excludes it. The filters
 are `list`'s own: `--type`, `--tag`, `--parent`, and **`--assignee`** —
@@ -3145,7 +3156,7 @@ candidate in order:
    `--ready` does not let an archived or unreadable element through in
    the first place, so meeting one of these here means the backlog
    changed in a way `refused:claimed` does not cover, or is already in a
-   state `nj doctor` should be run against — `next` surfaces that rather
+   state `nanojira doctor` should be run against — `next` surfaces that rather
    than silently skipping past it.
 4. **The candidate list is exhausted** — every candidate lost its race,
    or there were none to begin with — → **`none_ready`**, exit 1 (new
@@ -3179,15 +3190,15 @@ roll back.
 
 ---
 
-## 12c. `nj log`
+## 12c. `nanojira log`
 
 ```
-nj log  --id=TSK-007 [--json]
-nj log  --file=<path> [--json]
+nanojira log  --id=TSK-007 [--json]
+nanojira log  --file=<path> [--json]
 ```
 
 The change history of one element: who did what and when, derived
-**entirely** from data this specification already requires `nj` to keep
+**entirely** from data this specification already requires `nanojira` to keep
 — `created`, the claim generations (`.nanojira/claims/<id>/`, § 12), and
 the body's dated, signed notes (§ 10). **There are no new writes**: no
 write command's output or the bytes it touches change because `log`
@@ -3200,10 +3211,10 @@ easy to miss:**
 1. **No field-level history.** A `set --status=doing`, a priority
    change, a retitling — none of these leave a trace `log` can show;
    only `created`, claims and notes do. An agent that wants a durable
-   record of *why* a field changed should leave one with `nj note`.
-2. **Claim history is local to the working copy.** `nj init` writes
+   record of *why* a field changed should leave one with `nanojira note`.
+2. **Claim history is local to the working copy.** `nanojira init` writes
    `.nanojira/claims/` into `.gitignore` (§ 12a) — it is never committed.
-   A fresh clone, or any machine that has not itself run `nj claim` on
+   A fresh clone, or any machine that has not itself run `nanojira claim` on
    this copy, shows **notes and `created` only**: the claim events
    happened, but their record did not travel with the repository.
    Archiving an element compounds this a different way: `archive`
@@ -3263,7 +3274,7 @@ does not accept a sort flag.
 **Human output** is one line per event, in the same merged order:
 
 ```
-$ nj log --id=TSK-007
+$ nanojira log --id=TSK-007
 2026-09-21T18:00:00Z created
 2026-09-21T18:05:00Z claimed by alice
 2026-09-21T18:10:00Z alice: wired the route
@@ -3308,7 +3319,7 @@ has nothing to derive a history from without reading the element itself
 way `show`'s per-entry shape can; this is the same code `claim` already
 uses for the identical reason (§ 12a).
 
-`nj help` lists `log`.
+`nanojira help` lists `log`.
 
 ---
 
@@ -3348,7 +3359,7 @@ element file stat'ed, and only files whose `ctime` is newer than the
 command's load start minus 2 s are re-read — the rest reuse what the command
 already loaded. A literal re-read of every file was measured first and cost
 one read-scan per write (+70 %: `new` 441 → 712 ms); the `ctime` scan costs
-about a sixth of that. Measured with `tools/perf.js --ab` (10 000 elements,
+about a sixth of that. Measured with `tools/perf.mjs --ab` (10 000 elements,
 15 interleaved rounds, paired), against the pre-`STATUS.md` build `ccbc951`,
 on a machine in Low Power Mode with other agents running (10 of 30 rounds
 started under foreign CPU load; absolute numbers are therefore not comfort-bar
@@ -3373,12 +3384,12 @@ when backlogs approach ~12 000–15 000 elements, or ~9 000 if `list --json` is
 routinely on the agent's hot path. Round one ships without it; the design is
 fixed now so it can land later without touching the data model.
 
-`nj find` (§ 9a) shares this same scan path: bodies are already parsed for
+`nanojira find` (§ 9a) shares this same scan path: bodies are already parsed for
 completeness/title/section checks, so `find` adds one substring scan over
 text already loaded, not a new read. It does not change when the trigger
 above is crossed — the same O(n) scan every other command already does.
 
-- **Location:** `<backlog>/.nanojira/index.json`, listed in `nj init`'s
+- **Location:** `<backlog>/.nanojira/index.json`, listed in `nanojira init`'s
   `.gitignore` as uncommitted — a local cache, never a versioned artifact.
   This keeps it out of git merge conflicts, the failure mode that argues
   against committing derived state.
@@ -3391,14 +3402,14 @@ above is crossed — the same O(n) scan every other command already does.
   and re-parse only stale entries; new files appear via the directory listing.
   The index is thereby **out of the concurrency picture entirely** — no shared
   mutable state, the "no database" property is preserved.
-- `nj doctor --fix` rebuilds it.
+- `nanojira doctor --fix` rebuilds it.
 
 ---
 
-## 14. `nj doctor`
+## 14. `nanojira doctor`
 
 ```
-$ nj doctor
+$ nanojira doctor
 backlog/: 47 entries, 2 errors, 1 warning
 
 ERROR   TSK-104.md: frontmatter unreadable (line 1: no '---')
@@ -3443,7 +3454,7 @@ unprotected:
    `.nanojira-index.json` in `.gitignore` by `.nanojira/index.json` — only
    when that line is present verbatim; otherwise `.gitignore` is left alone
    and a note says so. `README.md` is replaced by the v3 text only when it
-   is byte-identical to the text a v2 `nj init` wrote; otherwise it is left
+   is byte-identical to the text a v2 `nanojira init` wrote; otherwise it is left
    alone and a note says so. If both the v2 and the v3 location of the
    configuration or of the tombstones exist, nothing is moved — ambiguous,
    reported, never merged.
@@ -3545,9 +3556,9 @@ reported, not guessed at.
 
 ## 15. Acceptance Criteria
 
-1. **Basic run.** `nj init` creates the full layout; `nj new` for epic, task,
+1. **Basic run.** `nanojira init` creates the full layout; `nanojira new` for epic, task,
    subtask; `list`, `show`, `set`, `note`, `tree`, `rm`, `archive`, `doctor`
-   and bare `nj` all work end-to-end.
+   and bare `nanojira` all work end-to-end.
 2. **Golden files.** After any number of `set`/`note` cycles, each file is
    byte-identical to the golden fixture produced by the normative serializer
    (fixtures are generated under a fixed `NJ_NOW`, § 12); unknown fields and
@@ -3564,9 +3575,9 @@ reported, not guessed at.
    present.
 6. **Rejection.** `--statuss=done` and other unknown field flags are rejected;
    the file is unchanged (verified by checksum).
-7. **Concurrency.** `seq 1 100 | xargs -P 20 -I{} nj new --type=task
+7. **Concurrency.** `seq 1 100 | xargs -P 20 -I{} nanojira new --type=task
    --parent=EPIC-001 --title="Parallel {}"` yields 100 files, 100 unique IDs,
-   `nj doctor` clean; the "retries exhausted" abort has exit 1 and a defined
+   `nanojira doctor` clean; the "retries exhausted" abort has exit 1 and a defined
    stderr form.
 8. **ID immortality.** Archive 50 elements and delete 10; create one of the
    same type; the new ID is 51 (or the next free number above every tombstone).
@@ -3587,7 +3598,7 @@ reported, not guessed at.
     codes; `changed` lists exactly the fields that changed.
 14. **Determinism.** `list`/`tree` ordering is priority-desc, id-asc, stable
     across platforms and calls.
-15. **No dependencies.** `nj` runs on the Node from `runtime/`, without
+15. **No dependencies.** `nanojira` runs on the Node from `runtime/`, without
     `node_modules`, without network.
 16. **Language.** Non-ASCII values (umlauts, CJK, emoji) survive every write
     cycle byte-exact — except the documented `title` normalisation — and
@@ -3601,19 +3612,19 @@ reported, not guessed at.
     yields `backlog:ids_missing` as ERROR with exit 2 — never a clean pass;
     `doctor --fix` restores tombstones for all surviving element IDs and
     reports that tombstones for deleted IDs are unrecoverable; a subsequent
-    `nj new` allocates above every existing element number.
+    `nanojira new` allocates above every existing element number.
 19. **Doctor axis.** A backlog of freshly created elements yields `doctor`
     exit 0 with an empty `problems[]`; elements carrying only `incomplete:*`
     produce no doctor finding (they surface in `list`/`_problems` only); a
     hand-written unknown status produces a WARNING finding — printed, but
     exit 0; a duplicate ID produces exit 2.
-20. **Section writes.** `nj new`/`nj set` accept `--description`/`--acceptance`
+20. **Section writes.** `nanojira new`/`nanojira set` accept `--description`/`--acceptance`
     (inline, `--…-file=<path>`, or `-` for stdin) and write the configured
     section, so a CLI-created element becomes complete and appears in
     `--ready`. Replacing and emptying follow § 9's byte rule; unknown sections
     and `## Notes` stay untouched; `updated` is refreshed; supplying both value
     forms for one role (or `-` for both roles) is rejected with nothing
-    written. Without the section flags, `nj new`'s scaffold stays
+    written. Without the section flags, `nanojira new`'s scaffold stays
     byte-identical to the AC-2 fixture.
 21. **Backlog location.** Each source works alone: `--backlog` (on every
     command, including `init`), `NJ_BACKLOG`, a `.njrc` in the working
@@ -3649,9 +3660,9 @@ reported, not guessed at.
     `backlog:legacy_layout` (exit 2); `doctor --fix` migrates it. Afterwards
     the configuration and every tombstone are at their v3 places with
     unchanged content, every element file is byte-identical, `doctor` is
-    clean, and the next `nj new` allocates above every existing number. With
+    clean, and the next `nanojira new` allocates above every existing number. With
     both v2 and v3 places present, `--fix` moves nothing and reports it.
-25. **Note author.** With `NJ_AUTHOR` set, `nj note` signs with it — whether
+25. **Note author.** With `NJ_AUTHOR` set, `nanojira note` signs with it — whether
     or not the element has an `assignee` — and the note line is otherwise
     byte-identical to § 10's; the value is trimmed. Unset or empty, the
     signer is the `assignee`, else `?`, exactly as before. A value that is
@@ -3675,7 +3686,7 @@ reported, not guessed at.
     edit aborts with `changed_in_parallel`; with `NJ_FAULT=before-rename`
     nothing has moved and every file is its previous revision.
 
-27. **Claims.** Twenty processes run `nj claim --id=TSK-001` in parallel,
+27. **Claims.** Twenty processes run `nanojira claim --id=TSK-001` in parallel,
     each with its own acting name: exactly one exits 0; the other nineteen
     exit 1 with `refused:claimed` naming the winner; the element is claimed
     by the winner and its `assignee` is the winner's name; `doctor` is clean
@@ -3695,7 +3706,7 @@ reported, not guessed at.
     steal's retry finds it unclaimed and becomes a plain claim) or
     `refused:claimed` naming the stealer (if the steal lands first) — either
     way the stealer ends up holding it, with `assignee` agreeing and no
-    `claim:mismatch`. `NJ_AUTHOR=b nj list --ready` omits an
+    `claim:mismatch`. `NJ_AUTHOR=b nanojira list --ready` omits an
     element claimed by `a` and lists one claimed by `b`; a backlog without
     claims answers `--ready` exactly as before condition 5 existed. A
     claimed element can still be `set`, `note`d, archived and removed by
@@ -3706,10 +3717,10 @@ reported, not guessed at.
     not a release. A done-but-live element keeps its claim through
     `doctor --fix` (only archived or gone elements are `claim:orphaned`); a
     stray temp file in the claims tree is `backlog:stray_tmp`, removed by
-    `doctor --fix`. `nj unarchive` of an element with a leftover orphaned
+    `doctor --fix`. `nanojira unarchive` of an element with a leftover orphaned
     claim directory removes it wholesale, the same as `archive`/`rm`, before
     the first move: the unarchived element starts unclaimed unless a
-    straggler's append raced the removal. `nj init` writes
+    straggler's append raced the removal. `nanojira init` writes
     `.nanojira/claims/` into `.gitignore`; on an existing backlog with
     claims, `doctor --fix` appends it once, keeping CRLF, and never creates
     a missing `.gitignore`. `claim` without a name is `missing_argument`; on
@@ -3721,7 +3732,7 @@ reported, not guessed at.
     list item, at any indentation, followed by `[ ]`, `[x]` or `[X]`; `[x]`
     and `[X]` both count as ticked on read, only `[ ]` as unticked, and a
     write always produces `[x]` (`--on`) or `[ ]` (`--off`), never `[X]`.
-    `nj check --id=TSK-007 --text=<substring>` and `--item=<n>` each
+    `nanojira check --id=TSK-007 --text=<substring>` and `--item=<n>` each
     address the same checkbox when there is exactly one countable match;
     `--on` an unticked box and `--off` a ticked one each flip exactly that
     line's bracket content and nothing else, byte-for-byte, with `updated`
@@ -3758,7 +3769,7 @@ reported, not guessed at.
     as the 24-hour default. `--ready` condition 5 (§ 9) is unaffected by
     staleness in either direction; `_claim`'s shape is unchanged.
 
-30. **Find.** `nj find "<text>"` returns every element whose title or body
+30. **Find.** `nanojira find "<text>"` returns every element whose title or body
     (including `## Notes`) contains `<text>` as a substring, case-insensitive
     by default (`String.prototype.toLowerCase()`'s lowercase mapping on both
     sides, not full Unicode case folding) and exact with
@@ -3798,20 +3809,20 @@ reported, not guessed at.
     failed. A single `--id=A` (no comma) is unaffected and keeps today's
     unwrapped shape.
 
-32. **MCP tool surface.** `nj-mcp`'s `tools/list` names exactly `list`,
+32. **MCP tool surface.** `nanojira-mcp`'s `tools/list` names exactly `list`,
     `show`, `find`, `tree`, `new`, `set`, `note`, `check`, `claim`,
     `release`, `next`, `log`, `archive`, `unarchive`, `doctor`; `rm` is
     never present; `doctor --fix` is present only when the server was
     launched with `--allow-destructive`, absent otherwise.
 33. **Result fidelity.** For every exposed tool, a `tools/call` result's
-    content is byte-identical to `dist/nj --json`'s own output for the
+    content is byte-identical to `dist/nanojira --json`'s own output for the
     equivalent CLI invocation against the same fixture — success and
     failure alike, including `isError` reflecting exit 1/2 and the
     untouched `{ok, error, hint?}` body on failure.
-34. **Backlog resolution and confinement.** `nj-mcp` resolves its backlog
+34. **Backlog resolution and confinement.** `nanojira-mcp` resolves its backlog
     at startup by the same rules as the CLI (§ 4), serves only that
     backlog for its whole life, and takes no per-call backlog override.
-    Every spawned `dist/nj` child is given `--backlog=<that resolved
+    Every spawned `dist/nanojira` child is given `--backlog=<that resolved
     path>` explicitly. No generated tool schema names a `backlog` field.
 35. **Batch and acting-name parity.** A tool call with a comma-joined `id`
     produces the same `{ok, results}` wrapper a CLI batch write would; an
@@ -3830,31 +3841,31 @@ reported, not guessed at.
     request on the modern path naming an unsupported version gets
     `UnsupportedProtocolVersionError` (`-32022`) listing both supported
     versions. A malformed `tools/call` argument (fails the tool's own
-    schema) is rejected `-32602` before any `dist/nj` child is spawned; a
+    schema) is rejected `-32602` before any `dist/nanojira` child is spawned; a
     schema-valid call the CLI itself then rejects surfaces as a tool
     result, `isError: true`, the unmodified `{ok, error, hint?}` body
     (never `-32602`). An unknown method, in either era, is `-32601`.
-38. **`dist/nj-mcp` ships with zero runtime dependencies, mirroring
+38. **`dist/nanojira-mcp` ships with zero runtime dependencies, mirroring
     AC-15.** Copied alone into a bare directory with no `node_modules`,
-    `dist/nj-mcp` starts and completes both an `initialize`/`tools/list`
+    `dist/nanojira-mcp` starts and completes both an `initialize`/`tools/list`
     round trip (legacy) and a `server/discover`/`tools/list` round trip
     (modern).
-39. **`--version`.** `nj --version` prints `nj <version>` and exits 0,
-    with no backlog resolved and no file read but `nj`'s own — confirmed
+39. **`--version`.** `nanojira --version` prints `nanojira <version>` and exits 0,
+    with no backlog resolved and no file read but `nanojira`'s own — confirmed
     by running it in an empty directory with no `.njrc` anywhere above
-    it and `NJ_BACKLOG` unset. `nj --version --json` prints exactly
-    `{"version": "<version>"}`. `nj-mcp --version` behaves identically
-    for `nj-mcp`, and reports the same version `nj --version` does — the
+    it and `NJ_BACKLOG` unset. `nanojira --version --json` prints exactly
+    `{"version": "<version>"}`. `nanojira-mcp --version` behaves identically
+    for `nanojira-mcp`, and reports the same version `nanojira --version` does — the
     one `package.json` source embedded into both at build time; the same
-    value is what `nj-mcp`'s `server/discover`/`initialize` responses
+    value is what `nanojira-mcp`'s `server/discover`/`initialize` responses
     declare as `serverInfo`'s version. `--version` combined with any
     other flag or an explicit subcommand is `unknown_field`.
-40. **`nj next`.** Given `N` **leaf** `--ready` elements and `M`
-    concurrent `nj next --as=<distinct name each>` calls with `M <= N`,
+40. **`nanojira next`.** Given `N` **leaf** `--ready` elements and `M`
+    concurrent `nanojira next --as=<distinct name each>` calls with `M <= N`,
     every call exits 0 and claims a distinct element; with `M > N`,
     exactly `N` calls succeed and the rest exit 1 `none_ready`. A single
-    `nj next --as=a` claims the highest-priority, lowest-`id` `--ready`
-    element among the leaves — the same order `list --ready`/bare `nj`
+    `nanojira next --as=a` claims the highest-priority, lowest-`id` `--ready`
+    element among the leaves — the same order `list --ready`/bare `nanojira`
     print, narrowed to exclude any `--ready` element with an open child
     (DECISIONS 156): an epic with an open task is skipped in favour of
     that task (or whatever else qualifies); a childless epic, and an
@@ -3880,8 +3891,8 @@ reported, not guessed at.
     `refused:claimed` advances to the next candidate. `--id=A,B,C` and
     `--file` are not accepted. A failed mirror write on the winning claim
     rolls back exactly as a plain `claim`'s would (§ 12a).
-41. **`nj log`.** For an element with a `created` timestamp, N claim
-    generations and M notes, `nj log --id=…` returns exactly N+M+1
+41. **`nanojira log`.** For an element with a `created` timestamp, N claim
+    generations and M notes, `nanojira log --id=…` returns exactly N+M+1
     events merged by `at` ascending, each `kind` one of `created |
     claimed | reasserted | stolen | released | note`: a plain claim
     after `unclaimed`/`released` is `claimed`; the same name claiming
@@ -3902,34 +3913,34 @@ reported, not guessed at.
     (§ 12a) — a field-level change (`status`, `priority`, …) is not
     shown at all, by design, and the spec states both limits plainly.
     An unreadable stub addressed directly is `refused:unreadable`.
-42. **Global flags before the command word.** `nj --backlog=<path> list`
-    and `nj --json list --backlog=<path>` both run `list`, byte-identical
+42. **Global flags before the command word.** `nanojira --backlog=<path> list`
+    and `nanojira --json list --backlog=<path>` both run `list`, byte-identical
     to the same call with `--backlog`/`--json` placed after `list`; so
     does any other order or repetition of just those two flags ahead of
-    the command word. `nj --backlog=<path> show --id=X` runs `show
+    the command word. `nanojira --backlog=<path> show --id=X` runs `show
     --id=X` against that backlog, not `unknown_field` for `--id`. A flag
     other than `--backlog`/`--json` ahead of the command word — including
-    one valid for the command that follows, e.g. `nj --status=doing set
+    one valid for the command that follows, e.g. `nanojira --status=doing set
     --id=X` — is `unknown_field` against the bare command's own known
     flags (`--backlog`, `--json`), the whole input parsed as the bare
     invocation; the command word that followed is never run and never
-    silently substituted for. `nj --backlog=X` alone (every token a
-    recognised global flag) is bare `nj` against that backlog, unchanged.
-    `nj --version --backlog=X` and `nj --backlog=X --version` are each
+    silently substituted for. `nanojira --backlog=X` alone (every token a
+    recognised global flag) is bare `nanojira` against that backlog, unchanged.
+    `nanojira --version --backlog=X` and `nanojira --backlog=X --version` are each
     still `unknown_field` for `--version` (DECISIONS 151/152), in either
     order.
-43. **Multi-line notes.** `nj note --id=X "$(printf 'one\ntwo\n\nfour')"`
+43. **Multi-line notes.** `nanojira note --id=X "$(printf 'one\ntwo\n\nfour')"`
     writes `- <ts> <author>: one` followed by three more lines —
     `  two`, a line that is exactly two spaces, and `  four` — each
     indented exactly two spaces; `\r\n` and lone `\r` in the given text
-    normalise to `\n` first, the same as every other write path. `nj log
+    normalise to `\n` first, the same as every other write path. `nanojira log
     --id=X --json`'s matching event's `text` is exactly `"one\ntwo\n\nfour"`
     — continuation lines rejoined, indent stripped, the blank line
     restored empty; its human line prints `one`, then `two`, a blank
     line, then `four`, each of the continuation lines indented the same
-    two spaces the file stores. `nj check` never matches a checkbox-shaped
+    two spaces the file stores. `nanojira check` never matches a checkbox-shaped
     continuation line (`## Notes` is out of its scope entirely, § 10a,
-    independent of indentation); `nj find` still matches a substring
+    independent of indentation); `nanojira find` still matches a substring
     anywhere in the note's text, continuation lines included, as plain
     body text. A hand-added line directly below a note that is neither
     empty nor two-space-indented ends that note's continuation and is
@@ -3937,14 +3948,14 @@ reported, not guessed at.
     155), never merged into the note above it. `--as`/`NJ_AUTHOR` reject
     a multi-line acting name exactly as before — unaffected by any of
     this, since it governs the name, not the note text.
-44. **`nj next` respects an existing `assignee`.** A `--ready`, leaf
+44. **`nanojira next` respects an existing `assignee`.** A `--ready`, leaf
     element with `assignee` set to a name other than the acting name is
     never a candidate: given TSK-001 (`assignee: bob`) and TSK-002
-    (unassigned), both otherwise equally ranked, `nj next --as=alice`
+    (unassigned), both otherwise equally ranked, `nanojira next --as=alice`
     claims TSK-002, skipping TSK-001 entirely (not even in `skipped`,
     since it was never a candidate to begin with — the same way an
     element claimed by someone else never appears as a `next` candidate
-    either). `nj next --as=bob` (matching TSK-001's own `assignee`)
+    either). `nanojira next --as=bob` (matching TSK-001's own `assignee`)
     claims TSK-001. The comparison is exact, byte-for-byte — `Bob` does
     not match `bob`, and an `assignee` with incidental whitespace matches
     nothing. `--assignee=` (empty) narrows to unassigned candidates only;
@@ -3955,34 +3966,34 @@ reported, not guessed at.
     --ready` is unchanged by any of this — confirmed by a fixture where
     `list --ready` still shows an element assigned to someone else, while
     `next --as=<a different name>` does not offer it.
-45. **Bare `nj`'s "Ready to work" applies the leaf rule, `list --ready`
+45. **Bare `nanojira`'s "Ready to work" applies the leaf rule, `list --ready`
     does not.** Given an epic whose only child is open (not `done`, not
-    archived) and otherwise `--ready`, bare `nj` omits the epic from
+    archived) and otherwise `--ready`, bare `nanojira` omits the epic from
     "Ready to work" (the child appears instead, if it is itself `--ready`)
-    while `nj list --ready` still names the epic — the same backlog,
+    while `nanojira list --ready` still names the epic — the same backlog,
     two different, both-correct answers, confirmed in one fixture rather
     than inferred. An epic with no children, or whose children are all
     `done`/archived, appears in both. This is the named, accepted replay
     class DECISIONS 158 records: a bare-status call on a backlog
     containing such a container differs from a pre-v3.6 baseline by
     construction.
-46. **Per-command `--help`.** `nj new --help` prints `new`'s own synopsis
-    and flags, not the general command list; `nj --help`/`nj help` (no
+46. **Per-command `--help`.** `nanojira new --help` prints `new`'s own synopsis
+    and flags, not the general command list; `nanojira --help`/`nanojira help` (no
     command word) are unchanged. `--type`'s and `--priority`'s allowed
     values are always `epic|task|subtask` and `low|normal|high|urgent`;
     `--status`'s are the resolved backlog's own configured `statuses`
     when one resolves cleanly, else the default list — confirmed by one
     fixture with a non-default `statuses` list showing those exact
-    values in `nj set --help`, and one with no backlog at all (an empty
+    values in `nanojira set --help`, and one with no backlog at all (an empty
     directory) still succeeding with the defaults, never `no_backlog`.
     `--json` makes no difference to `--help`'s output, on any command.
     This already answers PA-2 too: `new`/`set`'s existing prose already
     names every open `incomplete:*` code after a write, unchanged by
-    this round (confirmed, not assumed). `nj rm --help` (DECISIONS 163 A)
+    this round (confirmed, not assumed). `nanojira rm --help` (DECISIONS 163 A)
     gets the same per-flag lines (`--id`, `--file`, `--cascade`) — it had
-    none before, only because `rm` is never an `nj-mcp` tool and so had
+    none before, only because `rm` is never an `nanojira-mcp` tool and so had
     never been added to the shared flag table; that table entry answers
-    only this question, and does not make `rm` an `nj-mcp` tool.
+    only this question, and does not make `rm` an `nanojira-mcp` tool.
 47. **Did-you-mean.** `--priority=medium` is still `invalid_value`, its
     hint now `did you mean 'normal'? Known priorities: …` (the fixed
     synonym, checked first). A `--status`/`--type`/`--priority` value
@@ -3997,9 +4008,9 @@ reported, not guessed at.
     distance 2 from `done` — no transposition applies) gets no
     suggestion, where the old flat ≤ 2 rule would have hinted one. No
     alias is ever accepted
-    as the value itself: `nj set --priority=medium` still fails, exactly
+    as the value itself: `nanojira set --priority=medium` still fails, exactly
     as before.
-48. **`nj set --add-tags` / `--remove-tags`.** An incremental alternative
+48. **`nanojira set --add-tags` / `--remove-tags`.** An incremental alternative
     to `--tags=`, for `set` only: `--remove-tags` takes effect first,
     then `--add-tags` appends anything named there not already present,
     in its own order, after whatever tags were not removed (their
@@ -4008,7 +4019,7 @@ reported, not guessed at.
     in the same call is `invalid_value`, nothing written, in every
     combination. Both work in batch (`--id=A,B,C`), each ID's own `tags`
     read and changed independently. Each tag is validated the same as
-    `--tags`'s own items. `nj-mcp`'s `set` tool schema gains both fields.
+    `--tags`'s own items. `nanojira-mcp`'s `set` tool schema gains both fields.
 49. **Acceptance quality warnings.** Two new, never-blocking problem codes
     (task/subtask, **live** elements only — DECISIONS 167): `acceptance:
     no_checkbox` when the acceptance section has content but zero
@@ -4045,30 +4056,30 @@ reported, not guessed at.
     key, or one inside `layout`/`layout.folders`/`claims`/`problems`, is
     now the warning `config:unknown_key` (`doctor` reports it, naming the
     key) instead of `invalid_config` — every command still succeeds. The
-    correction behind this: an older `nj` was assumed to reject an
+    correction behind this: an older `nanojira` was assumed to reject an
     unrecognised top-level key; confirmed live (3.5.0, 3.6.0) that it is
     silently ignored instead, so `problems`/the new `minVersion` key are
     both safe additions for a fleet not yet fully upgraded — a *nested*
-    unknown key stays a hard failure on any `nj` older than this
+    unknown key stays a hard failure on any `nanojira` older than this
     revision, since an already-shipped binary cannot retroactively learn
     the new rule. `minVersion: "X.Y.Z"` (three dot-separated integers; a
     different shape is `invalid_config`) makes every command, including
     `doctor`, fail with `needs_newer_nj` (naming both versions) when the
-    running `nj` compares older, checked before any other validation;
+    running `nanojira` compares older, checked before any other validation;
     `--version` and `--help` are unaffected, structurally, not as a
     special case (neither resolves/depends on config the way every other
     command does).
 52. **Final status releases the claim.** A write that sets `status` to
-    the last configured status (always `done`, § 5) via `nj set`,
-    `nj claim --status=<last>`, or `nj next --status=<last>` releases the
+    the last configured status (always `done`, § 5) via `nanojira set`,
+    `nanojira claim --status=<last>`, or `nanojira next --status=<last>` releases the
     element's existing claim, whoever holds it, in the same call —
     reported additively as `released: "<holder>"`, absent when there was
-    none to release. Unconditional: not `nj release`'s own ownership
+    none to release. Unconditional: not `nanojira release`'s own ownership
     check, since this is a side effect of reaching `done`, not an act of
     giving a claim up. A refused `set --status=done` (`children_open`,
     without `--allow-open-children`) releases nothing; a forced one does.
     The release is attempted before the guarded write and rolled back if
-    that write fails, the same order and rollback discipline `nj claim`'s
+    that write fails, the same order and rollback discipline `nanojira claim`'s
     own mirror write already has.
 53. **`show --json` carries `entry`.** Additive: identical to
     `entries[0]`, present exactly when `entries` has one element — never
@@ -4093,17 +4104,17 @@ reported, not guessed at.
     of strings, one `- [ ] …` line each, so `acceptance:no_checkbox`
     cannot happen through `--input`. `--dry-run` (`new` only, requires
     `--input`) validates and reports the would-be shape, writing nothing.
-55. **`nj set --parent=<id>` reparents a task or subtask.** The id, body
+55. **`nanojira set --parent=<id>` reparents a task or subtask.** The id, body
     and claim log (keyed by id, § 12 "Claims") are unchanged; the type
     never changes. The new parent must exist, be live and be the correct
     type — the error codes **mirror `new`'s own `--parent` validation**:
     missing is `not_found`, wrong-type is `invalid_target`, archived is
     `refused:parent_archived`, given to an epic at all is `invalid_value`
     (DECISIONS 177, correcting D176's original "uniform `invalid_value`"
-    ruling); nothing is written in any of these cases. `nj
+    ruling); nothing is written in any of these cases. `nanojira
     set --parent=<old>` restores the previous state exactly — same file
     location, same frontmatter apart from `updated` — there is no
-    separate `nj undo` command (DECISIONS 177 corrects D176's mistaken
+    separate `nanojira undo` command (DECISIONS 177 corrects D176's mistaken
     mention of one). Under `hierarchy` the file (subtask) or whole folder
     (task) relocates to the new parent in the same write that changes
     `parent`; under `type`/`flat` only the frontmatter changes. `--input
@@ -4123,7 +4134,7 @@ reported, not guessed at.
     same "elaborate a `_problems` code" precedent `rm`'s own `dependents`
     field already set. `problems.ignore` silences the code **and** this
     additive field together.
-57. **`nj doctor --fix` releases every claim on a final-status element**
+57. **`nanojira doctor --fix` releases every claim on a final-status element**
     (DECISIONS 182 A, feedback/team-a: 32 `claim:stale` elements,
     pre-v3.8 `done`, forced to release-as-each-holder by hand). Step 7b
     (§ 14) — live or archived, whoever holds it: the same unconditional
@@ -4140,14 +4151,14 @@ reported, not guessed at.
     second `--fix` releases nothing (nothing left to release).
 58. **The repo is the skill folder** (DECISIONS 185, 187, § 18).
     `SKILL.md` (at the repo root, moved from `skill/`), `bin/`
-    (`bin/{nj,nj-mcp}`, `bin/{nj,nj-mcp}.cmd`) and `dist/`
-    (`dist/{nj,nj-mcp}.mjs`) are committed build output, alongside
+    (`bin/{nanojira,nanojira-mcp}`, `bin/{nanojira,nanojira-mcp}.cmd`) and `dist/`
+    (`dist/{nanojira,nanojira-mcp}.mjs`) are committed build output, alongside
     `src/` and `test/` — there is no `VERSION` file; the version lives
-    in `SKILL.md`'s `metadata.version` and `nj --version`, checked
-    equal to `package.json`'s own `version` directly. `bin/{nj,nj-mcp}`
-    and `bin/{nj,nj-mcp}.cmd` are rendered by `tools/bundle.js` from
+    in `SKILL.md`'s `metadata.version` and `nanojira --version`, checked
+    equal to `package.json`'s own `version` directly. `bin/{nanojira,nanojira-mcp}`
+    and `bin/{nanojira,nanojira-mcp}.cmd` are rendered by `tools/bundle.mjs` from
     `tools/wrapper.sh`/`tools/wrapper.cmd`, each carrying a "Generated
-    by `tools/bundle.js` — do not edit" header; `bundle.js --check`
+    by `tools/bundle.mjs` — do not edit" header; `bundle.mjs --check`
     fails if any of the four differs from a fresh render, or if
     `SKILL.md`'s frontmatter is missing a required field, its
     `description` exceeds 1024 characters, or its `metadata.version`
@@ -4157,12 +4168,12 @@ reported, not guessed at.
     location with a plain `dirname "$0"`, never following a symlink,
     honours `NJ_NODE`, requires Node.js ≥ 24, unsets `NODE_OPTIONS`, and
     on any startup failure exits 127 with exactly one stderr line,
-    prefixed `nj:`/`nj-mcp:`, naming the cause in words ("node not
+    prefixed `nanojira:`/`nanojira-mcp:`, naming the cause in words ("node not
     found", or "node too old (requires Node.js >= 24)"). The bundle is
-    ESM (addendum 9b3d0de: `dist/nj.mjs`/`dist/nj-mcp.mjs`, replacing
+    ESM (addendum 9b3d0de: `dist/nanojira.mjs`/`dist/nanojira-mcp.mjs`, replacing
     the earlier extensionless CommonJS entirely; the build rejects any
-    import but `node:*` built-ins). `nj-mcp` still finds its
-    `dist/nj.mjs` sibling under this layout, unaffected by an ambient
+    import but `node:*` built-ins). `nanojira-mcp` still finds its
+    `dist/nanojira.mjs` sibling under this layout, unaffected by an ambient
     `"type": "module"` wherever `bin/` sits. `node
     tools/export-skill.mts <tag> <dest>` (TypeScript, run directly — no
     build step, no shell; git invoked via `execFileSync`) now only
@@ -4177,7 +4188,7 @@ reported, not guessed at.
 
 ## 16. Not in Round One
 
-Terminal board (`nj board`), Obsidian Dataview snippet, import/export of
+Terminal board (`nanojira board`), Obsidian Dataview snippet, import/export of
 foreign backlogs, attachments, the search index's implementation (§ 13),
 Windows.
 
@@ -4195,9 +4206,9 @@ extensible.
 
 ## 17. MCP Interface
 
-`dist/nj-mcp` is a second, separate entry point (§ 3) that exposes `nj`'s
+`dist/nanojira-mcp` is a second, separate entry point (§ 3) that exposes `nanojira`'s
 existing commands as MCP tools over stdio, for an MCP-speaking agent that
-would otherwise shell out to `dist/nj` and parse `--json` by hand. It
+would otherwise shell out to `dist/nanojira` and parse `--json` by hand. It
 consumes the CLI's own contract (§ 9); it does not extend it. No existing
 command, flag, JSON shape or exit code changes meaning anywhere in this
 document.
@@ -4205,13 +4216,13 @@ document.
 ### Shape and backlog confinement
 
 ```
-dist/nj-mcp [--backlog=<path>] [--allow-destructive]
-dist/nj-mcp --version
+dist/nanojira-mcp [--backlog=<path>] [--allow-destructive]
+dist/nanojira-mcp --version
 ```
 
-**`nj-mcp --version`** follows the same rule § 9 states for `nj
---version`: prints `nj-mcp <version>`, exit 0, no backlog resolved, works
-anywhere, and the version is the identical `package.json` value `nj
+**`nanojira-mcp --version`** follows the same rule § 9 states for `nanojira
+--version`: prints `nanojira-mcp <version>`, exit 0, no backlog resolved, works
+anywhere, and the version is the identical `package.json` value `nanojira
 --version` reports — the two binaries never drift apart because both
 embed the same one source at build time. The `serverInfo`/`initialize`
 version this server declares over MCP (below) is the same value again,
@@ -4221,37 +4232,37 @@ not a separately maintained string.
 (D152): the known ones are `--backlog=<path>`, `--allow-destructive` and
 `--version`. Anything else — an unknown flag, a typo'd one
 (`--allow-destrutive`) — or `--version` together with any other argument
-at all (`nj-mcp` has no `--json` to pair it with, so even that combination
+at all (`nanojira-mcp` has no `--json` to pair it with, so even that combination
 is rejected) is an error: exit 1, exactly one line on stderr naming the
 offending argument and the known ones, nothing on stdout. This is the same
-"a typo must not pass" discipline `nj`'s own argument parsing already
-holds (§ 9) — `nj-mcp` silently ignoring an unknown or misspelled startup
+"a typo must not pass" discipline `nanojira`'s own argument parsing already
+holds (§ 9) — `nanojira-mcp` silently ignoring an unknown or misspelled startup
 flag would otherwise start in a state the caller never asked for (e.g.
 without `--allow-destructive` despite typing it).
 
-`nj-mcp` resolves its backlog exactly once, at startup, by the same rules
+`nanojira-mcp` resolves its backlog exactly once, at startup, by the same rules
 as every command (§ 4: `--backlog`, then `NJ_BACKLOG`, then the nearest
 `.njrc`, then a `backlog/` folder, searched upward from the process's
 cwd) and serves **that one backlog** for the life of the process. There
 is no per-call backlog override on any tool.
 
-Confinement is mechanical, not incidental: **every `dist/nj` child
-`nj-mcp` spawns is given `--backlog=<the server's own resolved path>`
+Confinement is mechanical, not incidental: **every `dist/nanojira` child
+`nanojira-mcp` spawns is given `--backlog=<the server's own resolved path>`
 explicitly** — the one flag that already stops § 4's search before it
-starts — rather than inheriting `nj-mcp`'s cwd/environment and
+starts — rather than inheriting `nanojira-mcp`'s cwd/environment and
 re-running that search itself. A child that re-resolved from scratch
-could in principle land on a different backlog than the one `nj-mcp`
+could in principle land on a different backlog than the one `nanojira-mcp`
 itself resolved, if anything in the search path changed in between; the
 explicit flag removes that possibility entirely.
 
-The MCP client spawns `nj-mcp` as a child process and communicates over
+The MCP client spawns `nanojira-mcp` as a child process and communicates over
 newline-delimited JSON-RPC on stdin/stdout, per the MCP stdio transport.
 stdout carries protocol frames only — never human prose, never a startup
 banner — the same purity § 9 already holds for `--json`'s stdout.
 
 ### Protocol: a dual-era server
 
-`nj-mcp` speaks both eras the MCP specification defines, pinned to one
+`nanojira-mcp` speaks both eras the MCP specification defines, pinned to one
 named revision on each side:
 
 - **Modern** (`2026-07-28`): every request declares its protocol version
@@ -4263,7 +4274,7 @@ Era detection needs no separate step: a request (`server/discover`,
 `tools/list`, `tools/call`) whose `_meta` carries
 `io.modelcontextprotocol/protocolVersion` is modern; a literal
 `initialize` request (no such `_meta` key) is legacy. A single running
-`nj-mcp` process may answer requests of either shape across its
+`nanojira-mcp` process may answer requests of either shape across its
 lifetime.
 
 **Methods, in total:** `server/discover`, `initialize`, `tools/list`,
@@ -4273,17 +4284,17 @@ lifetime.
 - **`server/discover`** (mandatory on the modern/dual-era side) returns
   `{resultType: "complete", supportedVersions: ["2026-07-28",
   "2025-11-25"], capabilities: {tools: {}}, _meta:
-  {"io.modelcontextprotocol/serverInfo": {name: "nj-mcp", version:
-  "<nj-mcp's own version>"}}}`. This is what lets a dual-era client's own
-  stdio backward-compatibility probe succeed against `nj-mcp` directly,
+  {"io.modelcontextprotocol/serverInfo": {name: "nanojira-mcp", version:
+  "<nanojira-mcp's own version>"}}}`. This is what lets a dual-era client's own
+  stdio backward-compatibility probe succeed against `nanojira-mcp` directly,
   rather than falling through an unknown-method error.
 - **`initialize`** (legacy) responds declaring `2025-11-25`, the same
-  `capabilities: {tools: {}}` object, and `serverInfo: {name: "nj-mcp",
-  version: "<nj-mcp's own version>"}` — the identical field
+  `capabilities: {tools: {}}` object, and `serverInfo: {name: "nanojira-mcp",
+  version: "<nanojira-mcp's own version>"}` — the identical field
   `server/discover` carries in its own `_meta`, same value, same source
   (§ 17 "Shape and backlog confinement" above). A version mismatch on the
   protocol revision is the client's decision: it sees the declared
-  revision and disconnects if it cannot work with it; `nj-mcp` does not
+  revision and disconnects if it cannot work with it; `nanojira-mcp` does not
   special-case a mismatch.
 - **An unsupported version on the modern path** (a request whose `_meta`
   names a version other than `2026-07-28`) gets
@@ -4291,9 +4302,9 @@ lifetime.
   {supported: ["2026-07-28", "2025-11-25"], requested: "<the
   requested value>"}`.
 - **Legacy notifications**, accepted and never answered:
-  `notifications/initialized` (post-handshake, fire-and-forget; `nj-mcp`
+  `notifications/initialized` (post-handshake, fire-and-forget; `nanojira-mcp`
   holds no session state that depends on it, since every tool call is
-  already a fresh `dist/nj` process) and `notifications/cancelled`
+  already a fresh `dist/nanojira` process) and `notifications/cancelled`
   (a no-op — the spawned child is not killed mid-call; cancelling a
   write mid-flight is exactly the half-done state § 12's
   compare-before-write exists to prevent).
@@ -4304,7 +4315,7 @@ lifetime.
 - **`-32602` (Invalid params) vs. a tool result with `isError`.** A
   `tools/call` whose `arguments` fail the tool's own declared JSON
   Schema (a required field missing, the wrong type) is rejected
-  `-32602`, **before any `dist/nj` child is spawned** — this is
+  `-32602`, **before any `dist/nanojira` child is spawned** — this is
   structural malformation of the call itself, answered at the same
   protocol level `-32700`/`-32600` already answer for the envelope one
   level up. A call whose `arguments` **pass** schema validation but
@@ -4325,7 +4336,7 @@ lifetime.
   a terminal.
 - **`archive`/`unarchive` are present, ungated**: both are reversible
   (§ 11a exists precisely because an archive is not a one-way door).
-- **`doctor --fix` is present only when `nj-mcp` was launched with
+- **`doctor --fix` is present only when `nanojira-mcp` was launched with
   `--allow-destructive`**, absent from `tools/list` otherwise — the gate
   is schema-level: with the flag off, there is no schema entry a client
   could even construct a call against. The flag is a launch-time
@@ -4333,7 +4344,7 @@ lifetime.
   can toggle it.
 
 **Input schemas** are generated from the same per-command flag table
-`dist/nj`'s own argument parser validates against (§ 9) — the per-command
+`dist/nanojira`'s own argument parser validates against (§ 9) — the per-command
 table only, never the separate table of global controls (`--backlog`,
 `--json`, and the rest of § 9's control-flag list) a command's own flags
 are checked against. **No generated tool schema names a `backlog`
@@ -4356,7 +4367,7 @@ write already returns (§ 9 "Batch writes").
 
 ### Results and errors
 
-A tool call's result **is** the object `dist/nj --json` already returns
+A tool call's result **is** the object `dist/nanojira --json` already returns
 for the equivalent CLI invocation, placed in the MCP result's
 `structuredContent` field, with a JSON-stringified text block as the
 accompanying human-readable fallback. Nothing is renamed, nothing is
@@ -4369,20 +4380,20 @@ generic protocol-level message.
 
 ### Architecture
 
-**One `dist/nj` process per tool call.** A tool call becomes exactly the
+**One `dist/nanojira` process per tool call.** A tool call becomes exactly the
 argument list the equivalent CLI invocation would have, plus the
 explicit `--backlog` above, run as a child process with `--json`; its
 parsed stdout becomes the tool result. This buys zero duplicated logic
-(the result *is* `dist/nj --json`'s own output, because it is the same
+(the result *is* `dist/nanojira --json`'s own output, because it is the same
 binary), zero new concurrency model (every call goes through § 12's
 compare-before-write and § 12a's claim CAS exactly as any other
 concurrent CLI invocation already does), and contract fidelity by
 construction. The per-call overhead this adds over a direct CLI
-invocation is budgeted at p50 ≤ 50 ms, measured against `dist/nj
+invocation is budgeted at p50 ≤ 50 ms, measured against `dist/nanojira
 --json`'s own wall-clock time for the identical invocation.
 
-**A missing sibling** (DECISIONS 185 addendum 9b3d0de: `nj-mcp.mjs`
-looks for `nj.mjs` next to itself, unconditionally — no extension
+**A missing sibling** (DECISIONS 185 addendum 9b3d0de: `nanojira-mcp.mjs`
+looks for `nanojira.mjs` next to itself, unconditionally — no extension
 detection, D179's own matching rule retired along with the extensionless
 build it existed for) fails **fast, as a JSON-RPC protocol-level error**
 on the specific `tools/call` that needed it (`-32603 Internal error`,
@@ -4390,7 +4401,7 @@ naming node's own "cannot find module" text), never a hang and never a
 crash of the server process itself: node starting with a missing entry
 point is not a spawn-level failure (the `node` binary itself still
 exists and starts) but an ordinary non-zero exit with nothing on stdout,
-handled by the same path an `nj` child's any other unparseable-stdout
+handled by the same path an `nanojira` child's any other unparseable-stdout
 exit already takes. The server keeps running and answers later calls
 normally — only the one call that needed the missing sibling fails.
 
@@ -4400,7 +4411,7 @@ MCP resources and prompts (only tools); any transport but stdio (no
 HTTP/SSE — this project's trust model, § 6's "names are labels, not
 identities" and § 9's "no registry, no authentication," was never built
 for a network-reachable, multi-tenant transport); authentication (the
-process that spawns `nj-mcp` is the trust boundary, exactly as it already
+process that spawns `nanojira-mcp` is the trust boundary, exactly as it already
 is for the plain CLI).
 
 ## 18. Packaging: the repo is the skill folder
@@ -4422,12 +4433,12 @@ contains no wrapper template of its own any more.
 
 ```
 SKILL.md
-bin/nj
-bin/nj-mcp
-bin/nj.cmd
-bin/nj-mcp.cmd
-dist/nj.mjs
-dist/nj-mcp.mjs
+bin/nanojira
+bin/nanojira-mcp
+bin/nanojira.cmd
+bin/nanojira-mcp.cmd
+dist/nanojira.mjs
+dist/nanojira-mcp.mjs
 src/…
 test/…
 tools/…
@@ -4436,7 +4447,7 @@ tools/…
 **No symlinks anywhere in the tree, ever** — not written by the build,
 and the wrapper itself never follows one into existence either (see
 below). There is **no `VERSION` file**: the version lives in exactly two
-places, `SKILL.md`'s own `metadata.version` and `nj --version`'s output
+places, `SKILL.md`'s own `metadata.version` and `nanojira --version`'s output
 (both read from `package.json`'s `version`, § 9), and they are checked
 equal directly. `bin/*` and `dist/*.mjs` are committed, generated files —
 not hand-written, not per-export artefacts — so a diff against them is a
@@ -4444,25 +4455,25 @@ real diff, not an opaque binary swap.
 
 ### `bin/` is generated, not hand-written
 
-`tools/bundle.js` renders `bin/nj`, `bin/nj-mcp`, `bin/nj.cmd` and
-`bin/nj-mcp.cmd` from two template files, `tools/wrapper.sh` and
+`tools/bundle.mjs` renders `bin/nanojira`, `bin/nanojira-mcp`, `bin/nanojira.cmd` and
+`bin/nanojira-mcp.cmd` from two template files, `tools/wrapper.sh` and
 `tools/wrapper.cmd` — one template each, parameterised only by the
-generated file's own name (so `bin/nj` and `bin/nj-mcp` share identical
+generated file's own name (so `bin/nanojira` and `bin/nanojira-mcp` share identical
 logic, and so do the two `.cmd` siblings). Every generated file carries a
-header naming its own origin — **"Generated by `tools/bundle.js` — do
+header naming its own origin — **"Generated by `tools/bundle.mjs` — do
 not edit."** — the same discipline `export-skill.mts`'s DECISIONS 185
 wrapper strings could not offer, since a string embedded in a `.mts` file
 cannot itself be diffed or hand-edited by mistake the way a committed
-`bin/nj` now can be (and now is checked for, below). `tools/bundle.js
+`bin/nanojira` now can be (and now is checked for, below). `tools/bundle.mjs
 --check` fails if any of the four generated files differs from a fresh
-render of its template, or is not executable where it must be (`bin/nj`,
-`bin/nj-mcp`) — catching a hand-edit to a generated file the same way it
+render of its template, or is not executable where it must be (`bin/nanojira`,
+`bin/nanojira-mcp`) — catching a hand-edit to a generated file the same way it
 already catches a stale `dist/*.mjs`.
 
 ### The build also checks `SKILL.md`
 
 Matching `write-node-skills/scripts/build.mjs`'s own rule for every Node
-skill under `agent-skills`: `tools/bundle.js` (plain, not only
+skill under `agent-skills`: `tools/bundle.mjs` (plain, not only
 `--check`) fails the build if `SKILL.md`'s frontmatter is missing `name`,
 `description`, `license` or `metadata.version`; if `description` is over
 1024 characters (the field a skill-discovery system reads without
@@ -4506,7 +4517,7 @@ touching this project's own history. Given `<tag>`:
    is replaced wholesale, not merged: no file from a previous version's
    folder survives into the new one.
 
-### The wrapper (`bin/nj`, `bin/nj-mcp`)
+### The wrapper (`bin/nanojira`, `bin/nanojira-mcp`)
 
 One template, parameterised only by its own filename (so both binaries
 share identical logic):
@@ -4515,7 +4526,7 @@ share identical logic):
   `CDPATH`-safe — **it does not follow symlinks**: since neither the
   repo nor an exported folder ever contains one (above), there is
   nothing to resolve, and a caller who does place a symlink elsewhere
-  pointing in at `bin/nj` is outside this contract (`cp -R` the folder
+  pointing in at `bin/nanojira` is outside this contract (`cp -R` the folder
   instead, which does keep working, unlike a symlink to one file
   inside it);
 - `NJ_NODE`, if set, names the node binary to run; otherwise `node` from
@@ -4531,8 +4542,8 @@ share identical logic):
   `NODE_OPTIONS` (e.g. `--require`) cannot load foreign code into the
   tool;
 - on any of the above failing, it **exits 127 with exactly one line on
-  stderr**, prefixed `nj:` (`bin/nj`) or `nj-mcp:` (`bin/nj-mcp`) — the
-  same `<name>: <reason>` convention `nj`'s own CLI already uses (§ 4,
+  stderr**, prefixed `nanojira:` (`bin/nanojira`) or `nanojira-mcp:` (`bin/nanojira-mcp`) — the
+  same `<name>: <reason>` convention `nanojira`'s own CLI already uses (§ 4,
   § 17) — naming the cause in words, not only by exit code:
   - the binary not existing: `` `<name>: node not found (looked for
     '<NJ_NODE or "node">')` ``;
@@ -4544,12 +4555,12 @@ share identical logic):
   Nothing else is written anywhere;
 - otherwise it execs `node <dir>/../dist/<name>.mjs "$@"`, where `<dir>`
   is wherever `bin/` itself resolved to — the repo root or an exported
-  folder's root, identically — the sibling lookup an invoked `nj-mcp`
+  folder's root, identically — the sibling lookup an invoked `nanojira-mcp`
   itself performs internally (its own extension-matching rule, unchanged
-  in spirit from D179, now matching `.mjs`) still resolves `dist/nj.mjs`
+  in spirit from D179, now matching `.mjs`) still resolves `dist/nanojira.mjs`
   correctly, since both `.mjs` bundles ship side by side in the same
   `dist/` directory regardless of where `bin/` sits.
-- `bin/nj.cmd`/`bin/nj-mcp.cmd` provide the same behaviour for Windows'
+- `bin/nanojira.cmd`/`bin/nanojira-mcp.cmd` provide the same behaviour for Windows'
   `cmd.exe`, to the extent its own scripting lets them: `NJ_NODE` or
   `node` from `PATH`, the same `dist/<name>.mjs` entry, the same exit
   127 on failure to start.
@@ -4562,7 +4573,7 @@ of any ambient `type` field, exactly as `.cjs` previously fixed it as
 CommonJS unambiguously (D178/D179) — and the wrapper never asks node to
 resolve an extensionless file either way.
 
-A known limitation, not a defect: `bin/nj`/`bin/nj-mcp` is itself a
+A known limitation, not a defect: `bin/nanojira`/`bin/nanojira-mcp` is itself a
 POSIX shell script, so invoking it from a working directory whose own
 `getcwd()` fails (e.g. an ancestor directory that is unsearchable, or a
 cwd removed out from under the process) makes `/bin/sh`'s own startup
@@ -4571,7 +4582,7 @@ print its own, unrelated line to stderr (typically along the lines of
 wrapper's exec'd `node <dist/<name>.mjs>` ever runs — invoking
 `dist/<name>.mjs` directly (via `node`, skipping the shell entirely)
 does not have this line, since node itself never prints it. Either way
-the exit code and nj's own stderr line (always the *last* line) are
+the exit code and nanojira's own stderr line (always the *last* line) are
 unaffected; only the "exactly one stderr line" shape some of this
 specification's own hardening checks describe is, in this one
 cwd-is-gone class of case, true of `dist/<name>.mjs` run directly but
@@ -4579,16 +4590,16 @@ not guaranteed of `bin/<name>` (D187 addendum, 81cd90a).
 
 ### The bundle is ESM, built only from `node:*` built-ins
 
-(Addendum 9b3d0de.) `tools/bundle.js` writes `dist/nj.mjs` and
-`dist/nj-mcp.mjs` — in the repo, not only in an export — replacing the
-earlier extensionless CommonJS `dist/nj`/`dist/nj-mcp` entirely, old
-tags' own `dist/nj` included (a frozen oracle replay against an old tag
-keeps working by naming that tag's own `dist/nj` explicitly via
-`--nj=<path>`; nothing about replaying an old tag changes). This
+(Addendum 9b3d0de.) `tools/bundle.mjs` writes `dist/nanojira.mjs` and
+`dist/nanojira-mcp.mjs` — in the repo, not only in an export — replacing the
+earlier extensionless CommonJS `dist/nanojira`/`dist/nanojira-mcp` entirely, old
+tags' own `dist/nanojira` included (a frozen oracle replay against an old tag
+keeps working by naming that tag's own `dist/nanojira` explicitly via
+`--nanojira=<path>`; nothing about replaying an old tag changes). This
 matches the convention the other `agent-skills` Node skills
 already use (`dist/<name>.mjs`, esbuild, `node:*` imports only) and is
 feasible because nothing under `src/` uses `__dirname`, `__filename`,
-`require` or `module.exports`, and `nj-mcp` depends on no SDK that
+`require` or `module.exports`, and `nanojira-mcp` depends on no SDK that
 would need a CommonJS-only import. The build step itself additionally
 rejects (fails the build) any import other than a `node:*` built-in —
 nothing from `node_modules` ships in the bundle, enforced at build
@@ -4598,20 +4609,20 @@ time, not merely by convention.
 
 Lives at the repo root (moved from `skill/SKILL.md`, v3.11), the
 committed source the export copies verbatim (never generated, never
-edited post-export) — checked by `tools/bundle.js` itself (above), not
+edited post-export) — checked by `tools/bundle.mjs` itself (above), not
 only by the AC. Frontmatter: `name`, `description` (≤ 1024 characters —
 the field a skill-discovery system reads without opening the file),
 `license`, `metadata.version`. **`metadata.version` must equal
 `package.json`'s own `version`** — checked directly (not merely "close"
-or "compatible"), since `nj --version` carries that exact same string
+or "compatible"), since `nanojira --version` carries that exact same string
 and a skill whose own declared version disagreed with the binary inside
 it would be self-contradictory (there being no separate `VERSION` file
-any more to also agree with). Body: when to use `nj` and when not to,
-how to invoke it (`sh <skill>/bin/nj …`, always with `--json`), the
+any more to also agree with). Body: when to use `nanojira` and when not to,
+how to invoke it (`sh <skill>/bin/nanojira …`, always with `--json`), the
 rules an agent follows while using it, the exit/error-code vocabulary
-(§ 9), and where to report a problem with `nj` itself (the project's
+(§ 9), and where to report a problem with `nanojira` itself (the project's
 own feedback mechanism, not this consuming repo's own tracker). It stays
 generic — no repo-specific tags, workflows or conventions; a consuming
 team's own house rules belong in their own AGENTS.md or equivalent, same
 as Team B's current hand-written skill already separates its
-nj-specific usage notes from its repo-specific always-on rules.
+nanojira-specific usage notes from its repo-specific always-on rules.

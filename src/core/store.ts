@@ -83,7 +83,7 @@ function allocateId(idsDir: string, type: string, elements: Element[]): string {
       n++;
     }
   }
-  return hardExit('id_allocation_failed', `nj: id allocation failed after 100 retries (${prefix})`);
+  return hardExit('id_allocation_failed', `nanojira: id allocation failed after 100 retries (${prefix})`);
 }
 
 // ------------------------------------------------------------ atomic writes
@@ -97,21 +97,21 @@ function atomicWrite(target: string, content: string) {
     fs.writeFileSync(fd, content, 'utf8');
     if (fault === 'after-tmp-write') {
       fs.closeSync(fd);
-      hardExit('fault:after-tmp-write', 'nj: aborted at fault injection point after-tmp-write');
+      hardExit('fault:after-tmp-write', 'nanojira: aborted at fault injection point after-tmp-write');
     }
     fs.fsyncSync(fd);
   } finally {
     try { fs.closeSync(fd); } catch { /* already closed */ }
   }
   if (fault === 'before-rename') {
-    hardExit('fault:before-rename', 'nj: aborted at fault injection point before-rename');
+    hardExit('fault:before-rename', 'nanojira: aborted at fault injection point before-rename');
   }
   fs.renameSync(tmp, target);
 }
 
 /**
  * Identical to atomicWrite, except a fault hook raises a catchable `Fail`
- * instead of exiting the process directly. `nj claim`'s mirror write (§ 12a)
+ * instead of exiting the process directly. `nanojira claim`'s mirror write (§ 12a)
  * must run its rollback after ANY failure, fault hooks included, so it
  * cannot use atomicWrite's own hard-exit shortcut — there would be no
  * process left to perform the rollback.
@@ -125,14 +125,14 @@ function mirrorWrite(target: string, content: string) {
     fs.writeFileSync(fd, content, 'utf8');
     if (fault === 'after-tmp-write') {
       fs.closeSync(fd);
-      fail('fault:after-tmp-write', 'nj: aborted at fault injection point after-tmp-write');
+      fail('fault:after-tmp-write', 'nanojira: aborted at fault injection point after-tmp-write');
     }
     fs.fsyncSync(fd);
   } finally {
     try { fs.closeSync(fd); } catch { /* already closed */ }
   }
   if (fault === 'before-rename') {
-    fail('fault:before-rename', 'nj: aborted at fault injection point before-rename');
+    fail('fault:before-rename', 'nanojira: aborted at fault injection point before-rename');
   }
   fs.renameSync(tmp, target);
 }
@@ -176,7 +176,7 @@ function compareGuard(el: Element, force: boolean, backlog?: string, hint?: stri
     const deadline = Date.now() + 10000;
     while (!fs.existsSync(marker)) {
       if (Date.now() >= deadline) {
-        const msg = 'nj: before-compare timed out after 10s waiting for .nj-fault-go';
+        const msg = 'nanojira: before-compare timed out after 10s waiting for .nj-fault-go';
         if (catchable) fail('fault:before-compare', msg);
         hardExit('fault:before-compare', msg);
       }
@@ -200,7 +200,7 @@ function guardedWrite(el: Element, content: string, force: boolean, backlog?: st
 /**
  * Identical to guardedWrite, except the write goes through mirrorWrite
  * instead of atomicWrite: a batch write (§ 9 "Batch writes") needs its
- * `NJ_FAULT` hook catchable, the same reason `nj claim`'s own mirror write
+ * `NJ_FAULT` hook catchable, the same reason `nanojira claim`'s own mirror write
  * already needs it -- a single-ID command keeps calling guardedWrite
  * unchanged, so `NJ_FAULT` still aborts it outright (D135).
  */

@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj find` (§ 9a).
+// `nanojira find` (§ 9a).
 
 import type { Flags, Element } from '../core/types.ts';
 
@@ -28,7 +28,7 @@ function matchContext(el: Element, needle: string, fold: (s: string) => string):
 
 function cmdFind(flags: Flags, positional: string[]) {
   checkFlags(flags, [], new Set(['json', 'all', ...cliFieldNames('find')]), false);
-  if (positional.length === 0) fail('missing_argument', 'nj find needs the search text as an argument', 'nj find "<text>"');
+  if (positional.length === 0) fail('missing_argument', 'nanojira find needs the search text as an argument', 'nanojira find "<text>"');
   const text = positional.join(' ');
   // The literal empty string is a caller's mistake, not "find nothing" (the
   // same reading --as= and check --text= already get, DECISIONS 119/129).
@@ -44,7 +44,7 @@ function cmdFind(flags: Flags, positional: string[]) {
   const fold = (s: string) => (caseSensitive ? s : s.toLowerCase());
   const needle = fold(text);
   // Title, body AND ## Notes (already one block in the body, § 7) — one
-  // scan over text nj has already loaded, not a new read (§ 13).
+  // scan over text nanojira has already loaded, not a new read (§ 13).
   const matched = filtered.filter((e: Element) => fold(e.title).includes(needle) || fold(e.body).includes(needle));
 
   if (flags.has('json')) {

@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj tree`.
+// `nanojira tree`.
 
 import type { Flags, Element } from '../core/types.ts';
 

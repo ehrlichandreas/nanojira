@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj init`.
+// `nanojira init`.
 
 import type { Flags } from '../core/types.ts';
 

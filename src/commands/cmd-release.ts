@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj release` (§ 12 "Claims", § 12a).
+// `nanojira release` (§ 12 "Claims", § 12a).
 
 import type { Flags, Element, Context } from '../core/types.ts';
 

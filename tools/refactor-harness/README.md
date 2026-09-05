@@ -460,7 +460,7 @@ nichts Last erzeugt. Was zählt, ist **Last, nicht Name oder Anwesenheit**:
 ps -A -o pid=,ppid=,pcpu=,comm=      # eigene Kindprozesse ausschliessen (ppid)
 ```
 
-`tools/perf.js` prüft genau das: ein fremder Prozess über 50 % oder die Summe
+`tools/perf.mjs` prüft genau das: ein fremder Prozess über 50 % oder die Summe
 aller fremden Prozesse über 200 % bricht mit Exit 3 ab und nennt den
 Prozess. Die Zahlen sind auf dieser Maschine gemessen, nicht geschätzt: fünf
 Stichproben im Leerlauf summierten sich auf 70–114 % (WindowServer, ein
@@ -491,10 +491,10 @@ das ist die Einstellung des Nutzers.
 (DECISIONS 90):
 
 ```sh
-$NODE tools/perf.js --ab=<nj A> --ab=<nj B> [--rounds=N] [--gate=all|reads]   # N Standard 7
+$NODE tools/perf.mjs --ab=<nj A> --ab=<nj B> [--rounds=N] [--gate=all|reads]   # N Standard 7
 # z. B. v2 gegen V3-1:
 git show b65aa5f:dist/nj > /tmp/nj-A; git show e5e5e3b:dist/nj > /tmp/nj-B
-$NODE tools/perf.js --ab=/tmp/nj-A --ab=/tmp/nj-B
+$NODE tools/perf.mjs --ab=/tmp/nj-A --ab=/tmp/nj-B
 ```
 
 Drei Seiten, jede auf **eigenem** 10k-Backlog, gebaut mit ihrem **eigenen**
