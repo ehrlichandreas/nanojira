@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj rm`.
+// `nanojira rm`.
 
 import type { Flags, Element, EntryJson } from '../core/types.ts';
 

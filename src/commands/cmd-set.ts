@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj set`.
+// `nanojira set`.
 
 import type { Flags, Element, Context, NonEmptyString } from '../core/types.ts';
 
@@ -60,7 +60,7 @@ function buildSetInputFlags(inputValue: string): Flags {
 }
 
 type SectionRole = 'description' | 'acceptance';
-// The two field namespaces `nj set` can touch: real Element properties, and
+// The two field namespaces `nanojira set` can touch: real Element properties, and
 // the section roles that live in the body rather than the frontmatter.
 type SetField = keyof Element | SectionRole;
 
@@ -222,7 +222,7 @@ function cmdSet(flags: Flags) {
 }
 
 /**
- * Decide what `nj set` would change, without changing anything.
+ * Decide what `nanojira set` would change, without changing anything.
  *
  * Three orderings in here are load-bearing and must not be tidied:
  *  - the section flags are read FIRST, so a rejected value source fails before

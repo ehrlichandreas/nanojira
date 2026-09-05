@@ -13,8 +13,8 @@
 // machinery expecting real, statically-visible named exports to register —
 // and since ours are all type-only and erase to nothing, that registration
 // never happens, so every consumer destructuring a value out of `require()`
-// silently gets `undefined` in the bundled dist/nj (found live: `NEW_FIELDS`
-// was `undefined` in dist/nj, `Cannot read properties of undefined (reading
+// silently gets `undefined` in the bundled dist/nanojira (found live: `NEW_FIELDS`
+// was `undefined` in dist/nanojira, `Cannot read properties of undefined (reading
 // 'includes')` in checkFlags, even though `node core/constants.ts` alone was
 // fine and `tsc` reported zero errors — the bug is bundler-only, and this
 // file's separation from constants.ts/derive.ts is the fix: neither of those

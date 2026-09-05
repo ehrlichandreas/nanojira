@@ -2,8 +2,27 @@
 
 User-facing changes only — not an engineering changelog. Full rules are in
 `docs/SPECIFICATION.md`; `docs/GUIDE.md` is the how-to. Feedback ids in
-parentheses are from each team's own backlog (`nj --backlog=feedback/<team>
+parentheses are from each team's own backlog (`nanojira --backlog=feedback/<team>
 show --id=<id>`), not ours.
+
+## 4.0.0
+
+**Breaking: the CLI binary is renamed from `nj`/`nj-mcp` to
+`nanojira`/`nanojira-mcp`.** No command, flag, JSON shape or exit code
+changed — only the name you invoke. `bin/nj` → `bin/nanojira`, `bin/nj-mcp`
+→ `bin/nanojira-mcp` (and their `.cmd` siblings); `dist/nj.mjs` →
+`dist/nanojira.mjs`, `dist/nj-mcp.mjs` → `dist/nanojira-mcp.mjs`;
+`package.json`'s `bin` keys are `nanojira`/`nanojira-mcp`. `nj --version`'s
+own printed banner now reads `nanojira <version>` (and `nanojira-mcp
+<version>`); `nj help`'s banner and every error hint that named the
+command by name (`run \`nj doctor\`` etc.) now says `nanojira`. The MCP
+server's own reported name (`serverInfo.name`) is now `nanojira-mcp`.
+
+**Migrating:** re-export the skill folder (`node tools/export-skill.mts
+<tag> <dest>`) or re-copy `bin/`/`dist/` from this release, update any
+script, alias, MCP client config or `AGENTS.md` block that names `nj`/
+`nj-mcp` to `nanojira`/`nanojira-mcp`, and re-run `node tools/bundle.mjs` in
+a working copy that builds from source. See `docs/MIGRATION-v4.md`.
 
 ## 3.12.2
 

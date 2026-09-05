@@ -24,7 +24,7 @@ function context(flags: Flags, opts?: { lenient?: boolean; tolerateConfig?: bool
   const legacy = isLegacyBacklog(backlog);
   if (legacy && !(opts && opts.lenient)) {
     fail('legacy_layout', `${backlog} is a legacy (v2) backlog — every command but \`doctor\` refuses it`,
-      'run `nj doctor --fix` to migrate it to the v3 layout');
+      'run `nanojira doctor --fix` to migrate it to the v3 layout');
   }
   const { config, errors, warnings, needsNewerNj } = loadConfig(backlog, legacy);
   // minVersion (§ 5, DECISIONS 166): applies to every command, including
@@ -32,12 +32,12 @@ function context(flags: Flags, opts?: { lenient?: boolean; tolerateConfig?: bool
   // there is nothing `doctor --fix` could repair about the running
   // binary's own version, so this gate is unconditional.
   if (needsNewerNj) {
-    fail('needs_newer_nj', `this backlog requires nj ${needsNewerNj.required} or newer; running ${needsNewerNj.running}`,
-      `running ${needsNewerNj.running}, requires ${needsNewerNj.required} — upgrade nj`);
+    fail('needs_newer_nj', `this backlog requires nanojira ${needsNewerNj.required} or newer; running ${needsNewerNj.running}`,
+      `running ${needsNewerNj.running}, requires ${needsNewerNj.required} — upgrade nanojira`);
   }
   if (errors.length > 0 && !(opts && opts.tolerateConfig)) {
     const configFile = path.join(backlog, legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
-    fail('invalid_config', `invalid configuration in ${configFile}: ${errors[0]}`, 'run `nj doctor` for the full report');
+    fail('invalid_config', `invalid configuration in ${configFile}: ${errors[0]}`, 'run `nanojira doctor` for the full report');
   }
   const idsDir = path.join(backlog, legacy ? LEGACY_IDS_REL : V3_IDS_REL);
   // Taken before the first file is read: STATUS.md's refresh trusts the
@@ -55,7 +55,7 @@ function context(flags: Flags, opts?: { lenient?: boolean; tolerateConfig?: bool
 // § 12a) between argument parsing and target resolution run this syntax
 // half early, on its own, then still call resolveTarget for the lookup --
 // which harmlessly re-derives the same flags (DECISIONS 111, D104 ambiguity
-// 77). Shared by `nj note`, `nj claim` and `nj release`.
+// 77). Shared by `nanojira note`, `nanojira claim` and `nanojira release`.
 function requireTargetFlagSyntax(flags: Flags) {
   const file = flagString(flags, 'file');
   const id = flagString(flags, 'id');
@@ -111,11 +111,11 @@ function resolveById(ctx: Context, id: string, forWrite?: boolean): Element {
 function requireWritable(el: Element) {
   if (el.problems.has('file:unreadable')) {
     fail('refused:unreadable', `${el.id} (${el.file}) cannot be read — refusing to write`,
-      'check the file and its permissions, then run `nj doctor`');
+      'check the file and its permissions, then run `nanojira doctor`');
   }
   if (el.problems.has('frontmatter:unreadable')) {
     fail('refused:unreadable', `${el.id} (${el.file}) has unreadable frontmatter — refusing to write`,
-      'repair the file by hand, then run `nj doctor`');
+      'repair the file by hand, then run `nanojira doctor`');
   }
 }
 
@@ -130,7 +130,7 @@ function requireNoStubs(ctx: Context, verb: string) {
   if (stubs.length === 0) return;
   const names = stubs.map((s) => `  ${s.id}  ${s.file}`).join('\n');
   fail('refused:unreadable', `${verb} is refused while the backlog contains unreadable files — their parents cannot be read, so no subtree can be determined:\n${names}`,
-    'make the files readable (or move them out of the backlog), then run `nj doctor` and retry');
+    'make the files readable (or move them out of the backlog), then run `nanojira doctor` and retry');
 }
 
 // An unreadable directory (`backlog:unreadable_dir`, § 7) hides whatever
@@ -145,14 +145,14 @@ function requireNoUnreadableDirs(ctx: Context, verb: string) {
   if (ctx.scan.unreadable.length === 0) return;
   const names = ctx.scan.unreadable.map((u) => `  ${path.relative(ctx.backlog, u.dir)}`).join('\n');
   fail('refused:unreadable_dir', `${verb} is refused while the backlog contains an unreadable directory — files inside it are not seen, so no subtree can be determined:\n${names}`,
-    'make the directory readable, then run `nj doctor` and retry');
+    'make the directory readable, then run `nanojira doctor` and retry');
 }
 
-// Round one has no `nj unarchive`, so the archive is read-only (§ 9).
+// Round one has no `nanojira unarchive`, so the archive is read-only (§ 9).
 function requireActive(el: Element, verb: string) {
   if (el.archived) {
     fail('refused:archived', `${el.id} is archived — ${verb} is refused on archived elements`,
-      'archived elements are read-only in round one; `nj unarchive` is round two');
+      'archived elements are read-only in round one; `nanojira unarchive` is round two');
   }
 }
 

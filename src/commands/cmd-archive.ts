@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj archive`.
+// `nanojira archive`.
 
 import type { Flags, Element, Context } from '../core/types.ts';
 
@@ -58,7 +58,7 @@ function archiveFlat(ctx: Context, subtree: Element[], ts: string): Element[] {
  */
 function archiveHierarchy(ctx: Context, el: Element, subtree: Element[], ts: string): Element[] {
   const refuse = (why: string): never => fail('refused:misplaced', `${el.id} cannot be archived — ${why}; nothing was moved`,
-    'run `nj doctor --fix` to move the files into their places, then archive again');
+    'run `nanojira doctor --fix` to move the files into their places, then archive again');
   const off = subtree.filter((e: Element) => e.problems.has('layout:misplaced'));
   if (off.length > 0) refuse(`these files are not where the layout puts them: ${off.map((e: Element) => e.id).join(', ')}`);
 

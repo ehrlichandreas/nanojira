@@ -21,31 +21,31 @@ intermediate follow-up commits (V3-2/TSK-029 findings, DECISIONS 102/105/106)
 are folded into the module descriptions below rather than listed separately.
 
 **v3.1–v3.3** added, on top of that round-one core: `NJ_AUTHOR`/`--as` (the
-acting name, `core/actor.ts`), `nj claim`/`nj release`/`nj unarchive`
+acting name, `core/actor.ts`), `nanojira claim`/`nanojira release`/`nanojira unarchive`
 (`core/claims.ts`, `cmd-claim.ts`, `cmd-release.ts`, `cmd-unarchive.ts`),
-`nj check`/`nj find` (`cmd-check.ts`, `cmd-find.ts`), batch writes,
-`--id=A,B,C` (`core/batch.ts`), and the MCP wrapper, `dist/nj-mcp.mjs`
-(`src/nj-mcp.ts`, `core/flag-table.ts`). Each is described in its own place
+`nanojira check`/`nanojira find` (`cmd-check.ts`, `cmd-find.ts`), batch writes,
+`--id=A,B,C` (`core/batch.ts`), and the MCP wrapper, `dist/nanojira-mcp.mjs`
+(`src/nanojira-mcp.ts`, `core/flag-table.ts`). Each is described in its own place
 below rather than repeated here.
 
 **v3.4–v3.5** added two more, read directly from their own source (not
-re-walked backlog-mechanically like § 2's import counts): `nj --version`
+re-walked backlog-mechanically like § 2's import counts): `nanojira --version`
 (`core/version.ts`, read once at build time from `package.json`, embedded
-into both `dist/nj.mjs` and `dist/nj-mcp.mjs`; checked before any command
-dispatches, § 9), `nj next` (`cmd-next.ts`, § 12b — reuses `cmd-list.ts`'s
+into both `dist/nanojira.mjs` and `dist/nanojira-mcp.mjs`; checked before any command
+dispatches, § 9), `nanojira next` (`cmd-next.ts`, § 12b — reuses `cmd-list.ts`'s
 own `applyFilters`/`availableToActor` and `cmd-claim.ts`'s `claimOne`
 rather than re-deriving either; adds the D156 leaf-work filter on top),
-and `nj log` (`cmd-log.ts`, § 12c — a pure read, no `core/store.ts` import
+and `nanojira log` (`cmd-log.ts`, § 12c — a pure read, no `core/store.ts` import
 anywhere in the file; reuses `core/claims.ts`'s generation-reading helpers
 via the new `allEntriesAscending` export and adds `parseNotes` to
-`core/parse.ts`). Both new commands are exposed as `nj-mcp` tools the same
+`core/parse.ts`). Both new commands are exposed as `nanojira-mcp` tools the same
 way every other command already is, through `core/flag-table.ts`'s shared
 schema generation — neither needed its own MCP-side code.
 
 **v3.6** (DECISIONS 158, 160) is docs-and-discoverability plus two outside
 teams' bug reports, not new commands:
 
-- **Global flags before the command word** (EV-6): `nj.ts`'s own
+- **Global flags before the command word** (EV-6): `nanojira.ts`'s own
   `splitCommand` scans a leading run of exactly `--backlog`/`--json`
   looking for the command word; a token that is neither stops the scan
   outright, so the whole, unmodified `argv` becomes the bare invocation's
@@ -53,7 +53,7 @@ teams' bug reports, not new commands:
   different command.
 - **Per-command `--help` and did-you-mean** (EV-2/EV-3/PA-1): `core/help.ts`'s
   `commandHelp` renders one command's own synopsis and flags (reusing
-  `core/flag-table.ts`'s existing schema, the same source `nj-mcp`'s tool
+  `core/flag-table.ts`'s existing schema, the same source `nanojira-mcp`'s tool
   schemas already came from); `core/suggest.ts` is new — a tiny fixed
   synonym table checked first, then an OSA (optimal-string-alignment,
   DECISIONS 160) distance against the allowed values, length-dependent
@@ -62,9 +62,9 @@ teams' bug reports, not new commands:
   accepted vocabulary.
 - **Multi-line notes** (EV-7): `core/parse.ts`'s `parseNotes` now reads a
   two-space-indented continuation line as part of the previous note
-  instead of flattening it; `nj note` writes the same shape back out.
+  instead of flattening it; `nanojira note` writes the same shape back out.
 - **The leaf-work rule reused one more place** (EV-4/D157, on top of
-  D156's rule `next` already used): `cmd-status.ts`'s bare-`nj` "Ready to
+  D156's rule `next` already used): `cmd-status.ts`'s bare-`nanojira` "Ready to
   work" now also filters out any element with an open child, via
   `core/derive.ts`'s shared `hasOpenChild` — `list --ready` itself is
   unchanged, a pure readiness filter with no leaf condition.
@@ -79,7 +79,7 @@ round, again no new commands:
 
 - **`rm`'s own flag-table entry** (163 A): `core/flag-table.ts` gains a
   `rm` spec (`id`, `file`, `cascade`) purely so `core/help.ts`'s
-  `commandHelp` has one to read for `nj rm --help` — `nj-mcp.ts`'s own
+  `commandHelp` has one to read for `nanojira rm --help` — `nanojira-mcp.ts`'s own
   `TOOL_NAMES` still omits `rm` unconditionally, so this does not expose
   it as a tool.
 - **`set --add-tags`/`--remove-tags`** (163 B): `cmd-set.ts` computes the
@@ -160,7 +160,7 @@ existing ones:
 - **`done:open_acceptance`** (176 B): the third deriver alongside
   `acceptance:no_checkbox`/`done:no_acceptance` in `core/load.ts`, reusing
   the same span-and-checkbox scan `core/parse.ts` already exposed for
-  those two (and for `nj check`'s own scan) — one more count read off the
+  those two (and for `nanojira check`'s own scan) — one more count read off the
   same pass, not a second scan. `core/derive.ts`'s new
   `openAcceptanceExtra(el, cfg, isFinal)` is the one place the additive
   `open_acceptance: {unticked, total}` field is built, called from both
@@ -173,36 +173,36 @@ existing ones:
 ## 1. Build
 
 ```
-src/nj.ts      (entry, ES module)              src/nj-mcp.ts  (entry, ES module)
- └─ imports src/commands/*.ts + src/core/*.ts     └─ imports src/core/{args,config,output,flag-table}.ts
-                              │                                       │  — never src/commands/*, § 17:
-                              │  esbuild --bundle --format=esm        │    one dist/nj.mjs child process per tool call
-                              ▼                                       ▼
-                       dist/nj.mjs                             dist/nj-mcp.mjs
+src/nanojira.ts      (entry, ES module)            src/nanojira-mcp.ts  (entry, ES module)
+ └─ imports src/commands/*.ts + src/core/*.ts       └─ imports src/core/{args,config,output,flag-table}.ts
+                              │                                         │  — never src/commands/*, § 17:
+                              │  esbuild --bundle --format=esm          │    one dist/nanojira.mjs child process per tool call
+                              ▼                                         ▼
+                       dist/nanojira.mjs                          dist/nanojira-mcp.mjs
                  (one file, checked into git, what ships, each built the same way)
 ```
 
-`tools/bundle.js` builds **two targets** from the one `src/` tree:
-`dist/nj.mjs` (round one's CLI, importing everything under `src/commands/`
-and `src/core/`) and `dist/nj-mcp.mjs` (§ 17, importing only the handful of
+`tools/bundle.mjs` builds **two targets** from the one `src/` tree:
+`dist/nanojira.mjs` (round one's CLI, importing everything under `src/commands/`
+and `src/core/`) and `dist/nanojira-mcp.mjs` (§ 17, importing only the handful of
 `src/core/` modules it needs to resolve a backlog, parse its own flags and
-generate MCP tool schemas — `dist/nj-mcp.mjs` never imports a `cmd-*.ts`
-module directly; a tool call spawns `dist/nj.mjs --json` as a child process
+generate MCP tool schemas — `dist/nanojira-mcp.mjs` never imports a `cmd-*.ts`
+module directly; a tool call spawns `dist/nanojira.mjs --json` as a child process
 instead). Both are esbuild `--bundle --format=esm` outputs (addendum
-9b3d0de — the earlier extensionless CommonJS `dist/nj`/`dist/nj-mcp` pair
+9b3d0de — the earlier extensionless CommonJS `dist/nanojira`/`dist/nanojira-mcp` pair
 is gone, in the repo and in every export alike), rejecting at build time any
 import that is not a `node:*` built-in; both committed, both checked for
 staleness by `build:check`.
 
-`src/nj.ts` is a real ES module like every other file under `src/`, which a
+`src/nanojira.ts` is a real ES module like every other file under `src/`, which a
 single `src/package.json` (`{"type": "module"}`) marks for the whole
 subtree — one file, not one per module directory: a directory-scoped
 `package.json` would leave the entry's import boundary untyped (`import`
 inside a CommonJS-resolved `.ts` file elaborates to `any`; a probe proved it
 directly — a wrong-arity call across that boundary passed `tsc` with zero
 errors) and Node would additionally warn `MODULE_TYPELESS_PACKAGE_JSON` on
-every direct run. `node src/nj.ts` runs with neither warning, and the same
-probe (a wrong-arity `cmdList` call in `src/nj.ts`) is now a `tsc` error
+every direct run. `node src/nanojira.ts` runs with neither warning, and the same
+probe (a wrong-arity `cmdList` call in `src/nanojira.ts`) is now a `tsc` error
 (TS2554), confirming the entry boundary is type-checked again. Node's native
 `.ts` execution needs no build step for any of this. `core/types.ts` is the
 one exception among the modules: it holds only `export
@@ -212,7 +212,7 @@ only ever reached through `import type`, which erases completely under
 with its own `export` as an ES module regardless of whether the export is
 type-only, and a file that is both ES-module-shaped *and* does
 `module.exports = {…}` at runtime gets a broken bundle (found live during the
-`import`/`export` conversion — `dist/nj.mjs` crashed with `NEW_FIELDS` undefined
+`import`/`export` conversion — `dist/nanojira.mjs` crashed with `NEW_FIELDS` undefined
 while `tsc` reported zero errors). Keeping every real declaration in
 `types.ts` sidesteps the whole class of bug.
 
@@ -225,11 +225,11 @@ decision).
 
 | Command | What it checks |
 |---|---|
-| `npm run typecheck` (`tsc --noEmit`) | `strict: true` + `erasableSyntaxOnly` over all of `src/**/*.ts`, `src/nj.ts` included directly (it carries a real `.ts` extension, so tsc needs no shadow copy) |
-| `npm run build` (`node tools/bundle.js`) | writes both `dist/nj.mjs` (from `src/nj.ts` + `src/commands/` + `src/core/`) and `dist/nj-mcp.mjs` (from `src/nj-mcp.ts` + the handful of `src/core/` modules it needs); refuses to bundle a source file missing its own `'use strict'`, or one that imports anything but a `node:*` built-in; also renders `bin/nj`/`bin/nj-mcp` from `tools/wrapper.sh` and `bin/nj.cmd`/`bin/nj-mcp.cmd` from `tools/wrapper.cmd` (§ 18, DECISIONS 187), each with a "Generated by `tools/bundle.js` — do not edit" header; also checks `SKILL.md`'s frontmatter (`name`, `description` ≤ 1024 characters, `license`, `metadata.version` equal to `package.json`'s `version`) |
-| `npm run build:check` (`node tools/bundle.js --check`) | rebuilds all four generated files in memory, exits 1 unless each is byte-identical to its committed file — catches a stale bundle or a hand-edited `bin/*`; re-checks `SKILL.md` the same way `npm run build` does |
-| `npm test` (`build:check && node test/run-all.js dist/nj.mjs`) | the oracle (§ 5) against the shipped `dist/nj.mjs`; the MCP suites (`test/ac/ac-32-mcp*.js`, `ac-38-*`, `ac-56-*`) additionally drive `dist/nj-mcp.mjs` and the exported skill folder |
-| `npm run perf` (`build:check && node tools/perf.js`) | TSK-003: builds a 10 000-element backlog under `/tmp` and measures `dist/nj.mjs list`/`list --json`/`tree`/`doctor` against SPECIFICATION.md:849's comfort bar (median ≤ 250 ms, worst ≤ 500 ms); aborts instead of measuring if another `node` process is running, so machine load is never reported as an `nj` regression |
+| `npm run typecheck` (`tsc --noEmit`) | `strict: true` + `erasableSyntaxOnly` over all of `src/**/*.ts`, `src/nanojira.ts` included directly (it carries a real `.ts` extension, so tsc needs no shadow copy) |
+| `npm run build` (`node tools/bundle.mjs`) | writes both `dist/nanojira.mjs` (from `src/nanojira.ts` + `src/commands/` + `src/core/`) and `dist/nanojira-mcp.mjs` (from `src/nanojira-mcp.ts` + the handful of `src/core/` modules it needs); refuses to bundle a source file missing its own `'use strict'`, or one that imports anything but a `node:*` built-in; also renders `bin/nanojira`/`bin/nanojira-mcp` from `tools/wrapper.sh` and `bin/nanojira.cmd`/`bin/nanojira-mcp.cmd` from `tools/wrapper.cmd` (§ 18, DECISIONS 187), each with a "Generated by `tools/bundle.mjs` — do not edit" header; also checks `SKILL.md`'s frontmatter (`name`, `description` ≤ 1024 characters, `license`, `metadata.version` equal to `package.json`'s `version`) |
+| `npm run build:check` (`node tools/bundle.mjs --check`) | rebuilds all four generated files in memory, exits 1 unless each is byte-identical to its committed file — catches a stale bundle or a hand-edited `bin/*`; re-checks `SKILL.md` the same way `npm run build` does |
+| `npm test` (`build:check && node test/run-all.js dist/nanojira.mjs`) | the oracle (§ 5) against the shipped `dist/nanojira.mjs`; the MCP suites (`test/ac/ac-32-mcp*.js`, `ac-38-*`, `ac-56-*`) additionally drive `dist/nanojira-mcp.mjs` and the exported skill folder |
+| `npm run perf` (`build:check && node tools/perf.mjs`) | TSK-003: builds a 10 000-element backlog under `/tmp` and measures `dist/nanojira.mjs list`/`list --json`/`tree`/`doctor` against SPECIFICATION.md:849's comfort bar (median ≤ 250 ms, worst ≤ 500 ms); aborts instead of measuring if another `node` process is running, so machine load is never reported as a `nanojira` regression |
 
 `tools/refactor-harness/baseline.js` (record/verify) and
 `tools/blindness-matrix/run.js` are not wired into `npm test` — they are run
@@ -245,12 +245,12 @@ would actually reach for, not every name; "imported by" is exact.
 |---|---|---|---|
 | `core/types.ts` | Every shared interface/type (`Element`, `Context`, `Flags`, the nine-stage `Skeleton→…→Element` chain, `NonEmptyString`) — never `require()`d, only `import type` | `Element`, `Context`, `Flags`, `Config`, `Finding`, `EntryJson`, staged-builder types | 32 other modules (type-only) |
 | `core/constants.ts` | Field tables, status/priority vocab, the closed `SEVERITY` map | `TYPE_DIR`, `PARENT_TYPE`, `SEVERITY`, `DEFAULT_CONFIG`, `SETTABLE_FIELDS`, `NEW_FIELDS` | 15 modules: `args`, `config`, `context`, `derive`, `flag-table`, `help` (v3.6), `layout`, `load`, `parse`, `store`, 5×`cmd-*` |
-| `core/help.ts` | The `nj help` text, plus (v3.6, DECISIONS 158 EV-2) `commandHelp`, one command's own synopsis/flags/allowed values, reusing `flag-table.ts`'s schema and `config.ts`'s backlog resolution to show the resolved backlog's own `statuses` when one resolves cleanly | `HELP`, `commandHelp` | `nj` |
+| `core/help.ts` | The `nanojira help` text, plus (v3.6, DECISIONS 158 EV-2) `commandHelp`, one command's own synopsis/flags/allowed values, reusing `flag-table.ts`'s schema and `config.ts`'s backlog resolution to show the resolved backlog's own `statuses` when one resolves cleanly | `HELP`, `commandHelp` | `nanojira` |
 | `core/derive.ts` | Read-only views over a loaded `Element`: sort order, readiness, JSON entry shape | `elementProblems`, `isReady`, `compareElements`, `entryJson`, `countsOf`, `openAcceptanceExtra` (v3.9, 176 B) | 18 modules: `context`, `output`, `status`, 15×`cmd-*` (v3.5 adds `cmd-next`, reusing `isReady` rather than re-deriving readiness; v3.9 adds `cmd-set`/`cmd-claim` calling `openAcceptanceExtra`) |
-| `core/parse.ts` | Frontmatter grammar and body-section editing, no `Element` knowledge | `parseFile`, `serialize`, `syncH1`, `applySections`, `parseNotes` (v3.5, § 12c — reads `## Notes` lines back out, the read-side mirror of `nj note`'s own write grammar), `CHECKBOX_RE`/`sectionHasCheckbox` (v3.7, 163 E — `CHECKBOX_RE` moved here from `cmd-check.ts` so `acceptance:no_checkbox`'s span check and `nj check`'s own scan can never disagree on what counts as a checkbox) | `args`, `load`, `store`, 5×`cmd-*` (v3.5 adds `cmd-log`; v3.7's `cmd-check` now imports `CHECKBOX_RE` from here instead of defining its own) |
-| `core/output.ts` | The `Fail` error type, `--json` state, all printing — and the one module with a real load-time side effect (below) | `fail`, `hardExit`, `out`, `writeFeedback`, `emitWriteResult`, `emitFailure` | 26 modules: `actor`, `args`, `batch`, `config`, `context`, `nj`, `nj-mcp`, `store`, every `cmd-*` |
-| `core/args.ts` | CLI flag parsing and validation, no filesystem access; `--backlog` is accepted by every command here, in `checkFlags` | `parseArgs`, `checkFlags`, `flagString`, `readSectionFlags` | `actor`, `batch`, `config`, `context`, `nj`, `nj-mcp`, every `cmd-*` |
-| `core/config.ts` | The v3 configuration at `.nanojira/config.json` (including the `layout` block, § 5) — or, on a legacy backlog, the v2 one at the top level; backlog location (`--backlog` > `NJ_BACKLOG` > upward search, `.njrc` before `backlog/` per directory, either place holding a backlog), the strict `.njrc` parser (ownership re-checked unconditionally through the same fd it reads, not only for a symlink). v3.7 (165/166/167) added `problems.ignore`'s validation (a known error/`incomplete:*` code listed there stays `invalid_config`; an unknown one is the warning `config:unknown_code` and is skipped), every config key's unknown-key check now returning a warning (`config:unknown_key`) instead of an `errs` entry, and `minVersion`'s own version-tuple comparison, checked first and short-circuiting into a new `needsNewerNj` result field before any other validation runs | `loadConfig`, `findBacklog`, `initLocation`, `holdsBacklog`, `isLegacyBacklog` | `context`, `nj-mcp`, `cmd-init`, `cmd-doctor`, `core/help.ts` (v3.6 — per-command `--help` resolves the backlog to show its configured `statuses`) |
+| `core/parse.ts` | Frontmatter grammar and body-section editing, no `Element` knowledge | `parseFile`, `serialize`, `syncH1`, `applySections`, `parseNotes` (v3.5, § 12c — reads `## Notes` lines back out, the read-side mirror of `nanojira note`'s own write grammar), `CHECKBOX_RE`/`sectionHasCheckbox` (v3.7, 163 E — `CHECKBOX_RE` moved here from `cmd-check.ts` so `acceptance:no_checkbox`'s span check and `nanojira check`'s own scan can never disagree on what counts as a checkbox) | `args`, `load`, `store`, 5×`cmd-*` (v3.5 adds `cmd-log`; v3.7's `cmd-check` now imports `CHECKBOX_RE` from here instead of defining its own) |
+| `core/output.ts` | The `Fail` error type, `--json` state, all printing — and the one module with a real load-time side effect (below) | `fail`, `hardExit`, `out`, `writeFeedback`, `emitWriteResult`, `emitFailure` | 26 modules: `actor`, `args`, `batch`, `config`, `context`, `nanojira`, `nanojira-mcp`, `store`, every `cmd-*` |
+| `core/args.ts` | CLI flag parsing and validation, no filesystem access; `--backlog` is accepted by every command here, in `checkFlags` | `parseArgs`, `checkFlags`, `flagString`, `readSectionFlags` | `actor`, `batch`, `config`, `context`, `nanojira`, `nanojira-mcp`, every `cmd-*` |
+| `core/config.ts` | The v3 configuration at `.nanojira/config.json` (including the `layout` block, § 5) — or, on a legacy backlog, the v2 one at the top level; backlog location (`--backlog` > `NJ_BACKLOG` > upward search, `.njrc` before `backlog/` per directory, either place holding a backlog), the strict `.njrc` parser (ownership re-checked unconditionally through the same fd it reads, not only for a symlink). v3.7 (165/166/167) added `problems.ignore`'s validation (a known error/`incomplete:*` code listed there stays `invalid_config`; an unknown one is the warning `config:unknown_code` and is skipped), every config key's unknown-key check now returning a warning (`config:unknown_key`) instead of an `errs` entry, and `minVersion`'s own version-tuple comparison, checked first and short-circuiting into a new `needsNewerNj` result field before any other validation runs | `loadConfig`, `findBacklog`, `initLocation`, `holdsBacklog`, `isLegacyBacklog` | `context`, `nanojira-mcp`, `cmd-init`, `cmd-doctor`, `core/help.ts` (v3.6 — per-command `--help` resolves the backlog to show its configured `statuses`) |
 | `core/layout.ts` | Where element files lie (§ 4): the one recursive scan (configured folders first, so a v2 backlog scans in v2's order; never into dot-directories or through directory symlinks), and the place each group gives an element — derived from the frontmatter, never the reverse | `scanBacklog`, `folderOf`, `expectedPlace`, `moveTarget`, `misplacedCode`, `ownFolder` | `load`, `status`, `cmd-archive`, `cmd-doctor`, `cmd-new`, `cmd-rm`, `cmd-unarchive` |
 | `core/store.ts` | Clock, tombstones (keyed by an explicit `idsDir` — `.nanojira/ids`, or a legacy backlog's `.ids`, never assumed), atomic file writes, the write-time compare guard, and the move planner that `archive` and `doctor --fix` share: every target is checked before the first `rename` (ENOENT only, not any other `lstat` failure); existing folders are merged into, a same-file (same dev+ino) target is no move, and existing files are never overwritten (DECISIONS 94, 105 F2, TSK-029 T2) | `nowIso`, `atomicWrite`, `atomicReplace`, `compareGuard`, `guardedWrite`, `planMove`, `runMove`, `renderElement` | 14 modules: `config`, `derive`, `load`, `status`, 10×`cmd-*` (v3.5 adds `cmd-next`) |
 | `core/load.ts` | `loadElement` (nine derivers), `deriveGraph` (eleven steps, `markPlaces` among them), `loadBacklog`. v3.7 (163 E/F, 167) adds `acceptance:no_checkbox`/`done:no_acceptance` to the same deriver that already computes `incomplete:acceptance` — both new codes skip archived elements entirely; v3.9 (176 B) adds `done:open_acceptance` to the same deriver, skipping archived elements the same way | `loadElement`, `deriveGraph`, `childMap`, `descendants`, `loadBacklog` | 11 modules: `context`, `status`, 9×`cmd-*` |
@@ -261,10 +261,10 @@ would actually reach for, not every name; "imported by" is exact.
 | `core/claims.ts` (v3.1, § 12 "Claims"/§ 12a) | The append-only CAS sequence behind `claim`/`release`: no live pruning, rollback only if this invocation appended, a landed steal is never rolled back; also computes `claim:stale` (v3.2, § 5 `claims.staleAfterHours`); `allEntriesAscending` (v3.5, § 12c) is the read-side sibling of `highestEntry` — same numeric-filename filter, but the whole ascending sequence instead of just the top, for `log` to classify generation-by-generation. v3.8 (171 B, § 12a) adds `releaseUnconditional`/`undoRelease` — an unconditional release (whoever holds it) fired from a guarded write reaching the last configured status, rolled back the same way `claim`'s own mirror write already was | `claimsRootDir`, `claimsDir`, `allClaimDirs`, `highestEntry`, `allEntriesAscending`, `readClaim`, `isClaimStale`, `transition`, `rollback`, `removeClaimDirWholesale`, `releaseUnconditional`, `undoRelease` | `cmd-claim`, `cmd-release`, `cmd-rm`, `cmd-archive`, `cmd-doctor`, `cmd-unarchive`, `cmd-list`, `cmd-log` (v3.5), `cmd-set` (v3.8), `core/derive.ts` |
 | `core/input.ts` (v3.8, § 9 "`--input`") | `--input=<file\|->`'s own text source and JSON parse, shared by `new`'s plan form and `set`'s single-object field map — deliberately tiny, no plan logic at all; the whole plan engine (`flattenPlan`/`validatePlanNode`/`emitPlanFailure`) lives in `cmd-new.ts` instead, since `set` never takes a plan | `readInputText`, `parseInputJson` | `cmd-new`, `cmd-set` |
 | `core/batch.ts` (v3.2, § 9 "Batch writes") | `--id=A,B,C` on `set`/`note`/`check`/`claim`/`release`: preflight every ID before any write, then write independently, `STATUS.md` once, `NJ_FAULT` spent after its first firing — one shared orchestration, each command supplies its own single-element logic as two callbacks | `parseBatchIds`, `runBatch` | `cmd-set`, `cmd-note`, `cmd-check`, `cmd-claim`, `cmd-release` |
-| `core/flag-table.ts` (v3.2 D144 C-2, v3.3 § 17, v3.5 `next`/`log`, v3.7 `rm`/tags) | The one per-command flag table both the CLI's own `checkFlags` and `nj-mcp`'s MCP schema generator read — the global `--backlog`/`--json` controls are a separate table, never part of a command's own, so a schema built from this table excludes `backlog` by construction (§ 17). `rm` gained an entry in v3.7 (163 A) purely for `commandHelp` to read — `nj-mcp.ts`'s own `TOOL_NAMES` still omits `rm` unconditionally, so this does not expose it as a tool; `set` gained `add-tags`/`remove-tags` (163 B) | `FLAG_TABLE`, `cliFieldNames`, `commandFields`, `commandFieldNames` | `nj-mcp.ts`, `core/help.ts` (v3.6 — `commandHelp` reuses this same table for each command's own flag list) and 16 `cmd-*` modules (every one except `cmd-init`, `cmd-status`, which take no settable fields; `cmd-rm`'s own entry, v3.7, is read only by `commandHelp`, never by `nj-mcp`) |
+| `core/flag-table.ts` (v3.2 D144 C-2, v3.3 § 17, v3.5 `next`/`log`, v3.7 `rm`/tags) | The one per-command flag table both the CLI's own `checkFlags` and `nanojira-mcp`'s MCP schema generator read — the global `--backlog`/`--json` controls are a separate table, never part of a command's own, so a schema built from this table excludes `backlog` by construction (§ 17). `rm` gained an entry in v3.7 (163 A) purely for `commandHelp` to read — `nanojira-mcp.ts`'s own `TOOL_NAMES` still omits `rm` unconditionally, so this does not expose it as a tool; `set` gained `add-tags`/`remove-tags` (163 B) | `FLAG_TABLE`, `cliFieldNames`, `commandFields`, `commandFieldNames` | `nanojira-mcp.ts`, `core/help.ts` (v3.6 — `commandHelp` reuses this same table for each command's own flag list) and 16 `cmd-*` modules (every one except `cmd-init`, `cmd-status`, which take no settable fields; `cmd-rm`'s own entry, v3.7, is read only by `commandHelp`, never by `nanojira-mcp`) |
 | `core/suggest.ts` (v3.6, DECISIONS 158 EV-3/160) | Did-you-mean: a tiny fixed synonym table checked first, then an OSA (optimal-string-alignment — an adjacent transposition costs 1, not 2) distance against the allowed values, length-dependent threshold (≤ 1 for a ≤ 4-character value, ≤ 2 otherwise), feeding the hint on an `invalid_value` failure — never the message or the accepted vocabulary | `suggestValue`, `valueHint` | 5 modules: `cmd-claim`, `cmd-list`, `cmd-new`, `cmd-next`, `cmd-set` |
-| `commands/cmd-init.ts` … `commands/cmd-log.ts` (18 modules) | One per verb (`init new set note check find show list tree rm archive unarchive claim release next log doctor status`); `init` writes the full `layout` block and the v3 README; `doctor --fix`'s step 0 migrates a legacy layout (unless both places exist, which is ambiguous and moves nothing); `check`/`find` are v3.2 (§ 10a, § 9a), `claim`/`release`/`unarchive` are v3.1 (§ 12a, § 11a), `next`/`log` are v3.5 (§ 12b, § 12c) | one `cmdX` function each | `nj` only |
-| `src/nj-mcp.ts` (v3.3, § 17 "MCP Interface") | A second, separate entry point: the dual-era MCP stdio server. Imports only `core/args.ts`, `core/config.ts`, `core/output.ts` and `core/flag-table.ts` — never a `cmd-*` module directly; a tool call spawns `dist/nj.mjs --json` as a child process instead (process-per-call, § 17), so there is no duplicated command logic to keep in sync | (an entry point, not a library — nothing else imports it) | — |
+| `commands/cmd-init.ts` … `commands/cmd-log.ts` (18 modules) | One per verb (`init new set note check find show list tree rm archive unarchive claim release next log doctor status`); `init` writes the full `layout` block and the v3 README; `doctor --fix`'s step 0 migrates a legacy layout (unless both places exist, which is ambiguous and moves nothing); `check`/`find` are v3.2 (§ 10a, § 9a), `claim`/`release`/`unarchive` are v3.1 (§ 12a, § 11a), `next`/`log` are v3.5 (§ 12b, § 12c) | one `cmdX` function each | `nanojira` only |
+| `src/nanojira-mcp.ts` (v3.3, § 17 "MCP Interface") | A second, separate entry point: the dual-era MCP stdio server. Imports only `core/args.ts`, `core/config.ts`, `core/output.ts` and `core/flag-table.ts` — never a `cmd-*` module directly; a tool call spawns `dist/nanojira.mjs --json` as a child process instead (process-per-call, § 17), so there is no duplicated command logic to keep in sync | (an entry point, not a library — nothing else imports it) | — |
 
 Nothing above `context.ts`/`args.ts`/`output.ts` is imported by anything
 below it — a `cmd-*` module may use CLI helpers and printing, but no CLI
@@ -329,7 +329,7 @@ and the Blindness matrix (Orakel/Korpus/Blindheits-Matrix in team shorthand).
 
 **Oracle** (`test/`, 95 files derived only from `SPECIFICATION.md` — `ac/`
 45, `edge/` 43, `fault/` 6, `stress/` 1 — run via `npm test`): black-box,
-spawns `nj`/`dist/nj.mjs` (and, for the MCP suites, `dist/nj-mcp.mjs`), asserts
+spawns `nanojira`/`dist/nanojira.mjs` (and, for the MCP suites, `dist/nanojira-mcp.mjs`), asserts
 exit code/stdout/stderr/file bytes, never reads implementation source.
 Reach for it to answer "is this still spec-conformant" — it is what
 CI-equivalent gating runs by default.

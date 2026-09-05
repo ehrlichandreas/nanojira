@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj doctor` and `nj doctor --fix`.
+// `nanojira doctor` and `nanojira doctor --fix`.
 
 import type { Flags, Element, Context, Finding } from '../core/types.ts';
 
@@ -32,7 +32,7 @@ function collectFindings(ctx: Context): Finding[] {
   // § 14 — "doctor is the one command that runs on a legacy backlog").
   if (ctx.legacy) {
     findings.push({ code: 'backlog:legacy_layout', severity: 'error', file: path.join(ctx.backlog, LEGACY_CONFIG_REL),
-      message: `the backlog is in the v2 (legacy) layout (${LEGACY_CONFIG_REL}, ${LEGACY_IDS_REL}/) — \`nj doctor --fix\` migrates it to .nanojira/` });
+      message: `the backlog is in the v2 (legacy) layout (${LEGACY_CONFIG_REL}, ${LEGACY_IDS_REL}/) — \`nanojira doctor --fix\` migrates it to .nanojira/` });
   }
   const configFile = path.join(ctx.backlog, ctx.legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
   for (const e of ctx.configErrors) {
@@ -92,12 +92,12 @@ function collectFindings(ctx: Context): Finding[] {
   }
 
   // Without a valid configuration there is no status list to render against
-  // (DECISIONS 100); with `statusFile: false` the file is not nj's (§ 4). A
+  // (DECISIONS 100); with `statusFile: false` the file is not nanojira's (§ 4). A
   // legacy backlog predates STATUS.md and so has none, which is exactly a
   // stale rendering — doctor runs every other check against the v2 places,
   // this included (DECISIONS 101, AMBIGUITIES 74).
   if (ctx.configErrors.length === 0 && ctx.cfg.layout.statusFile && !statusIsFresh(ctx.backlog, ctx.elements, ctx.cfg)) {
-    findings.push({ code: 'backlog:status_stale', severity: 'warning', file: path.join(ctx.backlog, 'STATUS.md'), message: 'STATUS.md is missing or differs from a fresh rendering — `nj doctor --fix` regenerates it' });
+    findings.push({ code: 'backlog:status_stale', severity: 'warning', file: path.join(ctx.backlog, 'STATUS.md'), message: 'STATUS.md is missing or differs from a fresh rendering — `nanojira doctor --fix` regenerates it' });
   }
 
   // problems.ignore (§ 7, DECISIONS 165/166): suppressed everywhere a code
@@ -346,7 +346,7 @@ function fixStep0(ctx: Context, fc: FixShared) {
   const v3Config = path.join(backlog, V3_CONFIG_REL);
   const v3Ids = path.join(backlog, V3_IDS_REL);
   if (fs.existsSync(v3Config) || fs.existsSync(v3Ids)) {
-    fc.notes.push(`both the v2 and the v3 place exist (${LEGACY_CONFIG_REL} / ${LEGACY_IDS_REL} and ${V3_CONFIG_REL} / ${V3_IDS_REL}) — ambiguous, nothing moved; remove one copy by hand and run \`nj doctor --fix\` again`);
+    fc.notes.push(`both the v2 and the v3 place exist (${LEGACY_CONFIG_REL} / ${LEGACY_IDS_REL} and ${V3_CONFIG_REL} / ${V3_IDS_REL}) — ambiguous, nothing moved; remove one copy by hand and run \`nanojira doctor --fix\` again`);
     return;
   }
   fs.mkdirSync(path.join(backlog, V3_DIR_REL), { recursive: true });
@@ -411,7 +411,7 @@ function fixGitignore(backlog: string, fc: FixShared, verbose: boolean) {
   fc.actions.push(`.gitignore: replaced the '${LEGACY_INDEX_REL}' line with '${V3_INDEX_REL}'`);
 }
 
-// Replaced only when byte-identical to the exact text a v2 `nj init` wrote —
+// Replaced only when byte-identical to the exact text a v2 `nanojira init` wrote —
 // a user's own edit, however small, is never overwritten (DECISIONS 102).
 // `verbose`: see fixGitignore above.
 function fixReadme(backlog: string, fc: FixShared, verbose: boolean) {

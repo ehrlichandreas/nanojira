@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj new`.
+// `nanojira new`.
 
 import type { Flags, Context, Element, EntryJson } from '../core/types.ts';
 
@@ -74,7 +74,7 @@ function checkExplicitParent(ctx: Context, type: string, parent: string | undefi
   // its type cannot be verified and § 6 forbids inventing facts (§ 9).
   if (p.problems.has('file:unreadable') || p.problems.has('frontmatter:unreadable')) {
     fail('refused:unreadable', `parent '${parent}' (${p.file}) cannot be read — refusing to create a child under it`,
-      'its type cannot be verified; repair the file, then run `nj doctor`');
+      'its type cannot be verified; repair the file, then run `nanojira doctor`');
   }
   // A wrong-type parent is a bad *target*, not a bad value: the flag names an
   // element that exists and is spelled correctly (§ 9 code table).
@@ -89,14 +89,14 @@ function checkExplicitParent(ctx: Context, type: string, parent: string | undefi
 }
 
 /**
- * Validate everything `nj new` needs, before anything is created.
+ * Validate everything `nanojira new` needs, before anything is created.
  *
  * The ORDER of these checks is observable: with several bad flags at once the
  * first failing check decides the reported code, so type → title → parent
  * (exists → readable → right type → active) → status → priority → deps →
  * section sources must stay exactly as it is.
  *
- * Nothing in here allocates or writes. That is the point: `nj new` must not
+ * Nothing in here allocates or writes. That is the point: `nanojira new` must not
  * burn a tombstone for a call it is going to refuse (§ 8, decision 31), so the
  * caller allocates only after this returns.
  */
@@ -195,7 +195,7 @@ function cmdNew(flags: Flags) {
     dir = path.join(ctx.backlog, ...newPlace(ctx, type, id, parent).split('/'));
     file = path.join(dir, id + '.md');
     if (!collidesCaseInsensitively(dir, id + '.md')) break;
-    if (attempt >= 100) return hardExit('id_allocation_failed', `nj: id allocation failed after 100 retries (${id} collides with an existing file)`);
+    if (attempt >= 100) return hardExit('id_allocation_failed', `nanojira: id allocation failed after 100 retries (${id} collides with an existing file)`);
   }
   const ts = nowIso();
 
@@ -459,7 +459,7 @@ function validatePlanNode(ctx: Context, node: FlatNode, flat: FlatNode[], seenRe
 
 /** A broken internal invariant (DECISIONS 174): never caught by the write
  * loop's own catch and reported as an ordinary plan failure — it must stay
- * loud, the same uncaught crash any other `nj` bug produces, so it is never
+ * loud, the same uncaught crash any other `nanojira` bug produces, so it is never
  * mistaken for an expected, catchable failure mode like a permissions error. */
 class InternalInvariantBroken extends Error {}
 
@@ -577,7 +577,7 @@ function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
         dir = path.join(liveCtx.backlog, ...newPlace(liveCtx, v.type, id, parentId).split('/'));
         file = path.join(dir, id + '.md');
         if (!collidesCaseInsensitively(dir, id + '.md')) break;
-        if (attempt >= 100) return hardExit('id_allocation_failed', `nj: id allocation failed after 100 retries (${id} collides with an existing file)`);
+        if (attempt >= 100) return hardExit('id_allocation_failed', `nanojira: id allocation failed after 100 retries (${id} collides with an existing file)`);
       }
       realIdByIndex[i] = id;
 
@@ -633,7 +633,7 @@ function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
       refreshStatus(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }) as Context);
       // A broken internal invariant (DECISIONS 174) must stay loud, not be
       // dressed up as a normal plan failure — it propagates uncaught, same
-      // as any other `nj` bug.
+      // as any other `nanojira` bug.
       if (e instanceof InternalInvariantBroken) throw e;
       const extra = created.length > 0 ? { created, refs: Object.fromEntries(refRealId) } : undefined;
       if (e instanceof Fail) return emitPlanFailure(e, labelOf(node), extra);
@@ -641,9 +641,9 @@ function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
       // atomicWrite, not a `Fail` this command throws on purpose — is a
       // real, catchable mid-plan write failure (DECISIONS 174): reported as
       // internal_error, the same code an identical failure already gets
-      // from a plain `nj set` on a read-only target, with the same
+      // from a plain `nanojira set` on a read-only target, with the same
       // additive created/refs/failed_at a thrown Fail already gets here.
-      // The message keeps the stack, matching nj.ts's own top-level
+      // The message keeps the stack, matching nanojira.ts's own top-level
       // "anything that reaches here keeps its stack" convention.
       const err = e as { message?: string; stack?: string } | undefined;
       const wrapped = new Fail(err && err.stack ? err.stack : String(e), undefined, 'internal_error');

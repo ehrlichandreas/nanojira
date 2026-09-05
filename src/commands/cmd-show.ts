@@ -1,6 +1,6 @@
 'use strict';
 
-// `nj show`.
+// `nanojira show`.
 
 import type { Flags, Element, Config } from '../core/types.ts';
 

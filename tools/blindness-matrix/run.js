@@ -4,7 +4,7 @@
 //
 //   node run.js <repo> [--nj=<path>] [--compare=<before.json>] [mutant …]
 //
-// --nj       entry point of the mutation base (default <repo>/src/nj.ts). The
+// --nj       entry point of the mutation base (default <repo>/src/nanojira.ts). The
 //            code under test is that file PLUS every module beside it in
 //            commands/ and core/ — the same set tools/refactor-harness/
 //            baseline.js hashes as codeSha. A base without those directories
@@ -30,7 +30,7 @@ const REPO = args.find(a => !a.startsWith('--'));
 const ONLY = args.filter(a => !a.startsWith('--')).slice(1);
 const NODE = process.execPath;
 const ROOT = '/tmp/blind';
-const NJ_PATH = path.resolve(opt('nj') || path.join(REPO, 'src', 'nj.ts'));
+const NJ_PATH = path.resolve(opt('nj') || path.join(REPO, 'src', 'nanojira.ts'));
 const COMPARE = opt('compare');
 
 const sha256 = (buf) => crypto.createHash('sha256').update(buf).digest('hex');

@@ -1,6 +1,6 @@
 'use strict';
 
-// The text of `nj help`, and `nj <command> --help`'s own per-command text
+// The text of `nanojira help`, and `nanojira <command> --help`'s own per-command text
 // (§ 9 "`--help` (per-command)", DECISIONS 158 EV-2/EV-3).
 
 import type { Flags } from './types.ts';
@@ -11,34 +11,34 @@ import { commandFields } from './flag-table.ts';
 
 // --------------------------------------------------------------------- help
 
-const HELP = `nj — NanoJira, a local file-based task tool for agents
+const HELP = `nanojira — NanoJira, a local file-based task tool for agents
 
-  nj --version                           print the version and exit
-  nj                                     short status: counts, top ready, problems
-  nj init                                create the backlog layout
-  nj <any command> --backlog=<path>      use this backlog (else NJ_BACKLOG, else .njrc/backlog/ upward)
-  nj new   --type=task --parent=EPIC-001 --title="…"
-           [--status=…] [--priority=…] [--tags=a,b] [--assignee=…] [--depends-on=…]
-           [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=…]
-  nj set   --id=TSK-009 [--title=…] [--status=…] [--priority=…]
-           [--tags=…] [--assignee=…] [--depends-on=…] [--force] [--allow-open-children]
-           [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=…]
+  nanojira --version                      print the version and exit
+  nanojira                                short status: counts, top ready, problems
+  nanojira init                           create the backlog layout
+  nanojira <any command> --backlog=<path> use this backlog (else NJ_BACKLOG, else .njrc/backlog/ upward)
+  nanojira new --type=task --parent=EPIC-001 --title="…"
+               [--status=…] [--priority=…] [--tags=a,b] [--assignee=…] [--depends-on=…]
+               [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=…]
+  nanojira set --id=TSK-009 [--title=…] [--status=…] [--priority=…]
+               [--tags=…] [--assignee=…] [--depends-on=…] [--force] [--allow-open-children]
+               [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=…]
 
 Section writes replace the section; --<role>-file=- reads stdin.
-  nj note  --id=TSK-009 "text" [--as=…]
-  nj check --id=TSK-009 [--text=<substring> | --item=<n>] [--on | --off] [--force]
-  nj show  --id=TSK-009
-  nj log   --id=TSK-009
-  nj list  [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…] [--ready] [--all]
-  nj find  "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…] [--all] [--case-sensitive]
-  nj tree  [--id=EPIC-001] [--all]
-  nj rm    --id=TSK-009 [--cascade]
-  nj archive --id=EPIC-001
-  nj unarchive --id=EPIC-001
-  nj claim   --id=TSK-009 [--as=…] [--status=…] [--steal=<holder>]
-  nj release --id=TSK-009 [--as=…]
-  nj next    [--as=…] [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
-  nj doctor [--fix]
+  nanojira note --id=TSK-009 "text" [--as=…]
+  nanojira check --id=TSK-009 [--text=<substring> | --item=<n>] [--on | --off] [--force]
+  nanojira show --id=TSK-009
+  nanojira log --id=TSK-009
+  nanojira list [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…] [--ready] [--all]
+  nanojira find "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…] [--all] [--case-sensitive]
+  nanojira tree [--id=EPIC-001] [--all]
+  nanojira rm --id=TSK-009 [--cascade]
+  nanojira archive --id=EPIC-001
+  nanojira unarchive --id=EPIC-001
+  nanojira claim --id=TSK-009 [--as=…] [--status=…] [--steal=<holder>]
+  nanojira release --id=TSK-009 [--as=…]
+  nanojira next [--as=…] [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…]
+  nanojira doctor [--fix]
 
 Every command accepts --json. Write commands accept --file=<path> instead of
 --id to address one file of a duplicated ID unambiguously. set/note/check/
@@ -53,11 +53,11 @@ Exit codes: 0 success · 1 command failed · 2 doctor found at least one error.
 /**
  * `<command>`'s own synopsis line(s), extracted from `HELP` itself — one
  * source, not a second copy to keep in sync (§ 9). A command's block is
- * its `  nj <word> ...` line plus any directly-following continuation
+ * its `  nanojira <word> ...` line plus any directly-following continuation
  * lines (the `[--flag=…]` wraps `new`/`set` already have); anything else
  * (a blank line, a new command's own line, trailing prose) ends it. Null
  * when `command` never appears this way — the bare/no-command lines
- * (`nj`, `nj init`, `nj <any command> --backlog=…`) are not real commands
+ * (`nanojira`, `nanojira init`, `nanojira <any command> --backlog=…`) are not real commands
  * to re-derive a block for.
  */
 function synopsisFor(command: string): string[] | null {
@@ -66,7 +66,7 @@ function synopsisFor(command: string): string[] | null {
   let capturing = false;
   let found = false;
   for (const line of lines) {
-    const m = /^ {2}nj {1,}(\S+)/.exec(line);
+    const m = /^ {2}nanojira {1,}(\S+)/.exec(line);
     if (m) {
       capturing = m[1] === command;
       if (capturing) { found = true; out.push(line); }
@@ -100,8 +100,8 @@ function closedVocab(fieldName: string, flags: Flags): string[] | null {
 }
 
 /**
- * `nj <command> --help` (§ 9): that command's own synopsis, then one line
- * per flag it accepts (from the same `core/flag-table.ts` `nj-mcp`'s own
+ * `nanojira <command> --help` (§ 9): that command's own synopsis, then one line
+ * per flag it accepts (from the same `core/flag-table.ts` `nanojira-mcp`'s own
  * tool schemas read, § 17) — a closed-vocabulary flag names its allowed
  * values on the line, any other flag is left free-form, nothing invented.
  * Falls back to the general `HELP` for anything not a real, known command

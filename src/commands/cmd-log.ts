@@ -1,7 +1,7 @@
 'use strict';
 
-// `nj log` (§ 12c, DECISIONS 154/155): the change history of one element,
-// derived entirely from data `nj` already keeps -- `created`, the claim
+// `nanojira log` (§ 12c, DECISIONS 154/155): the change history of one element,
+// derived entirely from data `nanojira` already keeps -- `created`, the claim
 // generations and the body's dated, signed notes. There are no new writes:
 // nothing here can move the replay gate.
 
@@ -35,11 +35,11 @@ const SOURCE_NOTE = 2;
 function requireReadableForLog(el: Element) {
   if (el.problems.has('file:unreadable')) {
     fail('refused:unreadable', `${el.id} (${el.file}) cannot be read — refusing to log`,
-      'check the file and its permissions, then run `nj doctor`');
+      'check the file and its permissions, then run `nanojira doctor`');
   }
   if (el.problems.has('frontmatter:unreadable')) {
     fail('refused:unreadable', `${el.id} (${el.file}) has unreadable frontmatter — refusing to log`,
-      'repair the file by hand, then run `nj doctor`');
+      'repair the file by hand, then run `nanojira doctor`');
   }
 }
 

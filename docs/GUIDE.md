@@ -1,22 +1,23 @@
-# nj — a guide for agents and humans
+# nanojira — a guide for agents and humans
 
-`nj` keeps a backlog of epics, tasks and subtasks as one Markdown file per
+`nanojira` keeps a backlog of epics, tasks and subtasks as one Markdown file per
 element, next to your code. This guide shows how to use it; the rules behind
-every answer are in `docs/SPECIFICATION.md` (spec v3, through v3.7), and
-where this guide and the spec differ, the spec wins.
+every answer are in `docs/SPECIFICATION.md` (spec v3, current through
+v3.9 — §§ 21–23 below), and where this guide and the spec differ, the
+spec wins.
 
-**Upgrading an existing backlog?** `nj` refuses to touch a v2 backlog
+**Upgrading an existing backlog?** `nanojira` refuses to touch a v2 backlog
 (`.nanojira.json`/`.ids/` at the top level) until you run the one
 `doctor --fix` that migrates it — see `docs/MIGRATION-v3.md`. Upgrading
 from an earlier v3 release (this guide already describes the latest):
 `docs/CHANGES.md`.
 
-This describes spec v3.7's end state. Most examples below were run directly
-against `dist/nj.mjs`; output is shown as it is printed, with the
+This describes spec v3.9's end state. Most examples below were run directly
+against `dist/nanojira.mjs`; output is shown as it is printed, with the
 machine-specific path shortened to `…`.
 
 ```sh
-alias nj="$PWD/dist/nj.mjs"       # or: <runtime-node> dist/nj.mjs  (§ 4)
+alias nanojira="$PWD/dist/nanojira.mjs"       # or: <runtime-node> dist/nanojira.mjs  (§ 4)
 ```
 
 ---
@@ -39,27 +40,27 @@ never the working tree, and nothing else (no `src/`, `test/`, `tools/` or
 ```
 <dest>/
   SKILL.md
-  bin/nj         bin/nj-mcp         (sh launchers)
-  bin/nj.cmd     bin/nj-mcp.cmd     (Windows launchers)
-  dist/nj.mjs    dist/nj-mcp.mjs    (the bundles)
+  bin/nanojira         bin/nanojira-mcp         (sh launchers)
+  bin/nanojira.cmd     bin/nanojira-mcp.cmd     (Windows launchers)
+  dist/nanojira.mjs    dist/nanojira-mcp.mjs    (the bundles)
 ```
 
 **No symlinks anywhere in this folder, and none pointing into or out of
 it.** To move or share it, `cp -R` the whole folder — it keeps working from
 the copy, since nothing in it depends on where it sits. There is no
 `VERSION` file: the version lives in `SKILL.md`'s own `metadata.version`
-and in `nj --version`, both read from `package.json` at build time and
+and in `nanojira --version`, both read from `package.json` at build time and
 checked equal to it directly.
 
-- Working directly in this repo (no export needed): run `bin/nj init`
+- Working directly in this repo (no export needed): run `bin/nanojira init`
   once (§ 2) to create a project's `backlog/`.
-- Per project, if the project uses `nj-mcp`: add one `nj-mcp` entry to
-  that project's MCP client config, pointed at `<dest>/bin/nj-mcp` (or
-  this repo's own `bin/nj-mcp`) with that project's own `--backlog=`
+- Per project, if the project uses `nanojira-mcp`: add one `nanojira-mcp` entry to
+  that project's MCP client config, pointed at `<dest>/bin/nanojira-mcp` (or
+  this repo's own `bin/nanojira-mcp`) with that project's own `--backlog=`
   (§ 4, below, and § 19's client-config shape) — never a single shared
   entry meant to serve several projects.
-- Verify with `bin/nj --version` (or `<dest>/bin/nj --version` after an
-  export), which prints `nj <version>` and exits 0 from anywhere, without
+- Verify with `bin/nanojira --version` (or `<dest>/bin/nanojira --version` after an
+  export), which prints `nanojira <version>` and exits 0 from anywhere, without
   needing a backlog (§ 9 of the spec).
 - `NJ_NODE` picks a specific `node` binary when more than one is on `PATH`.
   The minimum supported version is Node 24; an inherited `NODE_OPTIONS` is
@@ -69,12 +70,12 @@ checked equal to it directly.
 - **Migrating off an earlier release?** Replace a vendored
   `nj.cjs`/`nj-mcp.cjs`, a `bin/nanojira/current/nj` wrapper, or a v3.11
   export that still has a `VERSION` file, with a freshly exported folder,
-  and call `<dest>/bin/nj` in its place — `docs/CHANGES.md` 3.12.0.
+  and call `<dest>/bin/nanojira` in its place — `docs/CHANGES.md` 3.12.0.
 
 ## 2. Start a backlog
 
 ```sh
-$ nj init
+$ nanojira init
 Created backlog at …/proj/backlog
   epics/ tasks/ subtasks/ archive/ .nanojira/
   .nanojira/config.json .nanojira/ids/ .gitignore README.md STATUS.md
@@ -82,24 +83,24 @@ Created backlog at …/proj/backlog
 
 `init` creates `./backlog/` with the default configuration, a `README.md`, a
 `.gitignore`, a `STATUS.md` and the empty type folders `epics/`, `tasks/`,
-`subtasks/`, `archive/`; everything only `nj` needs — the configuration and
+`subtasks/`, `archive/`; everything only `nanojira` needs — the configuration and
 the tombstones — lives in one hidden folder, `.nanojira/`. Commit all of
 the **files**: tombstones (`.nanojira/ids/`) are what guarantee that an ID
 is never reused. **The empty type folders themselves need not be
 committed** — git does not track empty directories at all, so a clean
 checkout of a freshly-`init`ed backlog simply will not have them; this is
-fine, not a defect, because `nj` creates whichever folder it needs the
+fine, not a defect, because `nanojira` creates whichever folder it needs the
 first time something goes into it (`epics/` on the first epic, `archive/`
 on the first archive, and so on) and never treats a missing empty type
-folder as a problem (`nj doctor` stays clean either way).
+folder as a problem (`nanojira doctor` stays clean either way).
 
-- Somewhere else: `nj init --backlog=../shared/backlog`, or with `NJ_BACKLOG`
+- Somewhere else: `nanojira init --backlog=../shared/backlog`, or with `NJ_BACKLOG`
   or a `.njrc` set (next section). `init` never looks for an existing
   `backlog/` folder upward — without a source it always means `./backlog`.
 - `init` refuses with `exists` if anything is already at the target, even an
   empty directory.
 
-## 3. Point nj at a backlog
+## 3. Point nanojira at a backlog
 
 Every command finds its backlog from the **first** of these that is set:
 
@@ -112,7 +113,7 @@ Every command finds its backlog from the **first** of these that is set:
 The **nearest directory wins**, and within one directory `.njrc` beats
 `backlog/`. A `.njrc` in a repository root therefore redirects the whole
 repository, while a project with its own `backlog/` deeper down keeps it.
-This is deliberate, not incidental: running `nj` from **anywhere** that
+This is deliberate, not incidental: running `nanojira` from **anywhere** that
 genuinely has no backlog of its own and no `--backlog`/`NJ_BACKLOG`
 override — including a scratch or temporary directory — will find an
 unrelated `backlog/` sitting in one of its ancestors if one happens to be
@@ -124,14 +125,14 @@ nearby" being true of a path you don't control.
 — either order, either place, repeated or mixed:
 
 ```sh
-$ nj --backlog=../shared/backlog list --json | head -2
+$ nanojira --backlog=../shared/backlog list --json | head -2
 {
   "backlog": "…/shared/backlog",
 ```
 
-runs `list` exactly as `nj list --backlog=../shared/backlog` would; a flag
+runs `list` exactly as `nanojira list --backlog=../shared/backlog` would; a flag
 other than these two ahead of the command word (even one valid for the
-command that follows, like `nj --status=doing set --id=TSK-001`) is
+command that follows, like `nanojira --status=doing set --id=TSK-001`) is
 `unknown_field` against the bare invocation instead — the command word is
 never silently dropped or reached past.
 
@@ -139,19 +140,19 @@ never silently dropped or reached past.
 $ cat repo/.njrc
 # where this repo keeps its backlog
 backlog = ../shared/backlog
-$ cd repo/app/src && nj list --json | head -2
+$ cd repo/app/src && nanojira list --json | head -2
 {
   "backlog": "…/shared/backlog",
 ```
 
-**A chosen source is binding.** If it holds no backlog, `nj` stops — it
+**A chosen source is binding.** If it holds no backlog, `nanojira` stops — it
 never falls back to a lower source, because silently reading the wrong
 backlog is the worst thing it could do:
 
 ```sh
-$ nj list --backlog=/nowhere
+$ nanojira list --backlog=/nowhere
 Error: no backlog at /nowhere (from --backlog)          # exit 1, invalid_backlog_flag
-$ NJ_BACKLOG=/nowhere nj list --json          # JSON shown on one line
+$ NJ_BACKLOG=/nowhere nanojira list --json          # JSON shown on one line
 Error: no backlog at /nowhere (from NJ_BACKLOG)
 { "ok": false, "error": "invalid_backlog_env" }
 ```
@@ -165,7 +166,7 @@ No source at all is `no_backlog` — never an empty list.
 $ cat .njrc
 backlog = ../shared/backlog
 backlogs = x
-$ nj list
+$ nanojira list
 Error: invalid .njrc at …/repo/.njrc: line 2: unknown key 'backlogs'
 ```
 
@@ -182,14 +183,14 @@ Error: invalid .njrc at …/repo/.njrc: line 2: unknown key 'backlogs'
   (for a symlink: the link *and* its target); otherwise `invalid_njrc`,
   naming the uid and suggesting `--backlog`/`NJ_BACKLOG` or changing the
   owner — so a file planted in a shared directory like `/tmp` cannot steer
-  your `nj`. `--backlog` and `NJ_BACKLOG` stop the search before any `.njrc`
+  your `nanojira`. `--backlog` and `NJ_BACKLOG` stop the search before any `.njrc`
   is read.
 - A `.njrc` without `backlog` (only comments) sets nothing; the search goes
   on upward.
 
 ## 4. Many projects on one machine
 
-One `nj` install serves every project on the machine — there is nothing
+One `nanojira` install serves every project on the machine — there is nothing
 project-specific to install per project. What's project-specific is the
 **backlog**: each project resolves its own, by the same search as above
 (§ 3) — `--backlog`, then `NJ_BACKLOG`, then the nearest `.njrc` or
@@ -202,24 +203,24 @@ A `.njrc` can point at a backlog anywhere — outside the project, or shared
 by several projects on purpose — the same way `repo/.njrc` redirecting to
 `../shared/backlog` already works in § 3's example.
 
-**`nj-mcp`, differently: one server process is fixed to one backlog for its
+**`nanojira-mcp`, differently: one server process is fixed to one backlog for its
 whole life**, resolved once at startup (§ 19 below, § 17 of the spec) —
 there is no per-call backlog switch. With several projects, configure one
-`nj-mcp` entry **per project** (each with its own `--backlog=`, or each
+`nanojira-mcp` entry **per project** (each with its own `--backlog=`, or each
 started with that project as its working directory), not one shared entry
-meant to serve all of them: a single `nj-mcp` process can only ever answer
+meant to serve all of them: a single `nanojira-mcp` process can only ever answer
 for the one backlog it started with.
 
 ## 5. The daily loop (and `--json` for agents)
 
 ```sh
-$ nj new --type=epic --title="Login" --description="Users can sign in."
+$ nanojira new --type=epic --title="Login" --description="Users can sign in."
 EPIC-001 created → …/backlog/epics/EPIC-001.md
-$ nj new --type=task --parent=EPIC-001 --title="Login route"
+$ nanojira new --type=task --parent=EPIC-001 --title="Login route"
 TSK-001 created → …/backlog/tasks/TSK-001.md
 ⚠ TSK-001 has no acceptance criteria. Add them before starting.
 ⚠ TSK-001 has no description. Add one before starting.
-$ nj list --ready
+$ nanojira list --ready
 Ready to work:
   EPIC-001  Login
 
@@ -234,31 +235,31 @@ tasks and subtasks a non-empty `## Acceptance Criteria`. A heading with
 nothing under it counts as missing — on purpose.
 
 ```sh
-$ nj set --id=TSK-001 --description="POST /login returns a session." \
+$ nanojira set --id=TSK-001 --description="POST /login returns a session." \
          --acceptance=$'- [ ] 200 with a valid password\n- [ ] 401 otherwise'
 TSK-001 → description=(body section), acceptance=(body section)
-$ nj set --id=TSK-001 --status=doing
+$ nanojira set --id=TSK-001 --status=doing
 TSK-001 → status=doing
-$ nj note --id=TSK-001 "Route wired, tests pending"
+$ nanojira note --id=TSK-001 "Route wired, tests pending"
 TSK-001 note added
-$ nj set --id=TSK-001 --status=done
+$ nanojira set --id=TSK-001 --status=done
 TSK-001 → status=done
 ```
 
-- `nj note` appends `- <time> <author>: <text>` under `## Notes`; the author
+- `nanojira note` appends `- <time> <author>: <text>` under `## Notes`; the author
   is the element's `assignee`, else `?`. A multi-line `<text>` is kept, not
   flattened: every line after the first is indented two spaces under the
-  `- <time> <author>:` line (a Markdown list continuation), and `nj log`
+  `- <time> <author>:` line (a Markdown list continuation), and `nanojira log`
   reads it back out the same way it went in:
 
   ```sh
-  $ nj note --id=TSK-001 "$(printf 'First line\nSecond line')"
+  $ nanojira note --id=TSK-001 "$(printf 'First line\nSecond line')"
   $ tail -3 backlog/tasks/TSK-001.md
   ## Notes
   - 2026-10-06T21:16:23Z alice: First line
     Second line
   ```
-- `nj set --status=done` on a parent with open children is refused
+- `nanojira set --status=done` on a parent with open children is refused
   (`refused:children_open`); `--allow-open-children` forces it and leaves a
   `done:open_children` warning. `--force` means only one thing: overwrite a
   parallel change.
@@ -266,12 +267,12 @@ TSK-001 → status=done
   --assignee --depends-on`. An unknown flag is rejected and nothing is
   written — `--statuss=done` does not "almost work".
 - **`--tags=` replaces the whole list** — easy to lose one by hand if you
-  only meant to change one. `nj set --add-tags=<list>` /
+  only meant to change one. `nanojira set --add-tags=<list>` /
   `--remove-tags=<list>` edit it incrementally instead: remove takes
   effect first, then add appends anything not already present.
 
   ```sh
-  $ nj set --id=EPIC-001 --remove-tags=waiting:user --add-tags=blocked:review
+  $ nanojira set --id=EPIC-001 --remove-tags=waiting:user --add-tags=blocked:review
   EPIC-001 → tags=repo:app-test,blocked:review
   ```
 
@@ -279,20 +280,20 @@ TSK-001 → status=done
   that tag, not an error. Combined with `--tags=` in the same call is
   rejected — pick one or the other. Works in batch (`--id=A,B,C`) too,
   each ID's own tags read and changed independently.
-- Reads: bare `nj` (short status), `nj list [--status --type --tag --parent
-  --assignee --ready --all]`, `nj tree`, `nj show --id=…`, `nj find "<text>"`
+- Reads: bare `nanojira` (short status), `nanojira list [--status --type --tag --parent
+  --assignee --ready --all]`, `nanojira tree`, `nanojira show --id=…`, `nanojira find "<text>"`
   (§ 17 below).
 
 **Don't guess which `--type`/`--status`/`--priority` values are allowed —
-ask.** `nj <command> --help` prints that command's own flags, including the
+ask.** `nanojira <command> --help` prints that command's own flags, including the
 allowed values for each (the backlog's own configured `statuses` when one
 resolves, else the defaults):
 
 ```sh
-$ nj set --help
-  nj set   --id=TSK-009 [--title=…] [--status=…] [--priority=…]
-           [--tags=…] [--assignee=…] [--depends-on=…] [--force] [--allow-open-children]
-           [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=…]
+$ nanojira set --help
+  nanojira set --id=TSK-009 [--title=…] [--status=…] [--priority=…]
+               [--tags=…] [--assignee=…] [--depends-on=…] [--force] [--allow-open-children]
+               [--description=… | --description-file=…] [--acceptance=… | --acceptance-file=…]
 
   --id
   --file
@@ -306,7 +307,7 @@ and a typo'd value — one close enough to exactly one allowed value —
 names it in the hint, never silently, never as an accepted alias:
 
 ```sh
-$ nj set --id=EPIC-001 --priority=hgih --json
+$ nanojira set --id=EPIC-001 --priority=hgih --json
 {
   "ok": false,
   "error": "invalid_value",
@@ -315,7 +316,7 @@ $ nj set --id=EPIC-001 --priority=hgih --json
 ```
 
 **For agents: add `--json` to every call.** Reads return `{backlog, counts,
-entries}` — `nj show --json` on a single id additionally carries `entry`,
+entries}` — `nanojira show --json` on a single id additionally carries `entry`,
 identical to `entries[0]`, so a script resolving exactly one element can
 read `.entry` directly instead of indexing into `entries`; it's absent for
 a `duplicate_id` target (two entries) and never appears on `list`/`find`.
@@ -328,12 +329,12 @@ from `doctor`: at least one error finding.
 ## 6. Descriptions and acceptance criteria
 
 `--description` and `--acceptance` write the configured sections of the body
-on `nj new` and `nj set`, each in one of three forms:
+on `nanojira new` and `nanojira set`, each in one of three forms:
 
 ```sh
-nj set --id=TSK-002 --description="One paragraph."          # inline, newlines allowed
-nj set --id=TSK-002 --acceptance-file=criteria.md           # a file, relative to the working directory
-printf 'Line one\nLine two\n' | nj set --id=TSK-002 --description-file=-   # stdin
+nanojira set --id=TSK-002 --description="One paragraph."          # inline, newlines allowed
+nanojira set --id=TSK-002 --acceptance-file=criteria.md           # a file, relative to the working directory
+printf 'Line one\nLine two\n' | nanojira set --id=TSK-002 --description-file=-   # stdin
 ```
 
 - A section write **replaces** the section; `--description=` empties it. The
@@ -359,18 +360,18 @@ block (`.nanojira/config.json`, written by `init` in full):
 `layout.folders` renames `epics`, `tasks`, `subtasks`, `archive` — any subset;
 names match `[A-Za-z0-9][A-Za-z0-9_-]*`, differ from each other ignoring
 case, are not ID-shaped (`TSK-12`) and not `backlog`. An unknown key or a bad
-name makes every command except `doctor` fail, pointing at `nj doctor`.
+name makes every command except `doctor` fail, pointing at `nanojira doctor`.
 
 **Changing the layout is always allowed.** Edit `layout`, then:
 
 ```sh
-$ nj doctor
+$ nanojira doctor
 backlog/: 3 entries, 3 errors, 0 warnings
 
 ERROR   EPIC-001: file lies in 'epics/', not where the layout puts it
 ERROR   SUB-001: file lies in 'subtasks/', not where the layout puts it
 ERROR   TSK-001: file lies in 'tasks/', not where the layout puts it
-$ nj doctor --fix
+$ nanojira doctor --fix
 FIXED   moved EPIC-001 → EPIC-001/
 FIXED   moved TSK-001 → EPIC-001/TSK-001/
 FIXED   moved SUB-001 → EPIC-001/TSK-001/
@@ -387,14 +388,14 @@ backlog/: 3 entries, 0 errors, 0 warnings remaining
   hand-edited `parent` makes the file misplaced and `--fix` moves it.
 - An element whose `parent` chain does not resolve is reported and never
   moved. A task without `parent` lives at the top of the tree.
-- `nj` reads every `*.md` below the backlog except the top-level `README.md`
+- `nanojira` reads every `*.md` below the backlog except the top-level `README.md`
   and `STATUS.md` and anything in a directory starting with `.` — a stray
   Markdown file elsewhere is read as an element and reported.
 
 ## 8. `STATUS.md`
 
 A generated overview of the active backlog by status, readable in an editor
-or a forge without `nj` — here for a backlog configured with the statuses
+or a forge without `nanojira` — here for a backlog configured with the statuses
 `todo`, `doing`, `done` (§ 5's example):
 
 ```
@@ -413,11 +414,11 @@ or a forge without `nj` — here for a backlog configured with the statuses
 ```
 
 - Rewritten by `init` and after every successful `new`, `set`, `note`, `rm`,
-  `archive` and `doctor --fix`; never read by `nj`. Commit it.
+  `archive` and `doctor --fix`; never read by `nanojira`. Commit it.
 - One section per configured status, in order, even when empty; unknown
   statuses under `## ? (n)`; `list` order within; archived elements left out.
-- Stale after a hand edit, a merge or a race: `nj doctor` reports
-  `backlog:status_stale` (a warning, exit 0) and `nj doctor --fix` rewrites
+- Stale after a hand edit, a merge or a race: `nanojira doctor` reports
+  `backlog:status_stale` (a warning, exit 0) and `nanojira doctor --fix` rewrites
   it — which also resolves a merge conflict in it.
 - A link is the real on-disk path, casing included: renaming a folder (even
   only in case, `tasks/` → `Tasks/`) makes the stored links stale even
@@ -441,30 +442,30 @@ in `.nanojira/config.json`:
 ```
 
 (merge with whatever else `layout` already has — only `statusFile` needs
-to change). Verified live: with it off, `nj doctor` does not check
+to change). Verified live: with it off, `nanojira doctor` does not check
 `STATUS.md` at all (no `backlog:status_stale`, clean either way) and
 `STATUS.md` itself, if one already existed from before the flag was
-flipped, is simply left wherever it was — `nj` never touches it again.
+flipped, is simply left wherever it was — `nanojira` never touches it again.
 Nothing else about the backlog changes: IDs, claims and every element's
 own file are exactly as they'd be with the file on.
 
-The same overview `STATUS.md` gave for free still has two `nj` equivalents,
+The same overview `STATUS.md` gave for free still has two `nanojira` equivalents,
 neither of which writes anything:
 
 ```sh
-$ nj                 # bare: counts, top 5 ready, same "Ready to work" as always
-$ nj list --json     # every element, filterable the same way STATUS.md's
+$ nanojira                 # bare: counts, top 5 ready, same "Ready to work" as always
+$ nanojira list --json     # every element, filterable the same way STATUS.md's
                       # sections group them (--status, --type, --tag, …)
 ```
 
 A forge or an editor browsing the repo directly loses the generated
-Markdown view, but every agent (and `nj doctor`) already gets the same
-information from `nj`/`nj list` on demand, without the merge noise.
+Markdown view, but every agent (and `nanojira doctor`) already gets the same
+information from `nanojira`/`nanojira list` on demand, without the merge noise.
 
 ## 9. Archive
 
 ```sh
-$ nj archive --id=EPIC-001
+$ nanojira archive --id=EPIC-001
 EPIC-001 archived → …/backlog/archive/EPIC-001.md
 TSK-001 archived → …/backlog/archive/TSK-001.md
 ```
@@ -474,27 +475,27 @@ TSK-001 archived → …/backlog/archive/TSK-001.md
   (`refused:not_done` lists the open ones); there is no `--force`.
 - All targets are checked before the first move — an occupied one is
   `exists`, and nothing moves.
-- Archived elements are hidden from `list`, `tree` and bare `nj`; `--all`
+- Archived elements are hidden from `list`, `tree` and bare `nanojira`; `--all`
   shows them. They are read-only: `set`, `note`, `rm` and `archive` refuse
   with `refused:archived`. A `depends_on` pointing into the archive is
   satisfied.
 - Under `hierarchy` the subtree's folder moves as a whole and merges into
   archive folders left by earlier archives; a subtree that does not lie in
-  its own folder is `refused:misplaced` — run `nj doctor --fix` first.
+  its own folder is `refused:misplaced` — run `nanojira doctor --fix` first.
 - `archive`, `rm` and `set --status=done` all refuse with
   `refused:unreadable_dir` while an unreadable directory lies anywhere in
   the backlog — files inside it aren't seen, so a subtree or an open-children
-  check can't be trusted. Fix the permissions (`nj doctor` names the
+  check can't be trusted. Fix the permissions (`nanojira doctor` names the
   directory) and retry.
 
 ## 10. `doctor` and `doctor --fix`
 
-`nj doctor` checks the configuration, every element against the problem
+`nanojira doctor` checks the configuration, every element against the problem
 table (§ 7 of the spec), duplicate IDs, misplaced files, tombstones, stray
 temp files, the archive rules, unreadable directories and `STATUS.md`. Exit
 `2` when at least one **error** exists; warnings are printed but exit `0`.
 
-`nj doctor --fix` repairs only what is unambiguous, in this order: migrate a
+`nanojira doctor --fix` repairs only what is unambiguous, in this order: migrate a
 v2 layout; write a missing `id` from the file name and a missing `type`
 from the ID prefix; rename a file to match its `id` when the name is free;
 move files to their layout place; restore missing tombstones; fill a
@@ -522,7 +523,7 @@ code anywhere in the configuration (`problems` included) is itself just
 another warning (`config:unknown_key`/`config:unknown_code`), never a
 hard failure — a typo stays visible without stopping work.
 
-**No rollout order needed for this one:** an `nj` older than 3.7 already
+**No rollout order needed for this one:** a `nanojira` older than 3.7 already
 silently ignores an unrecognised *top-level* config key (confirmed
 directly against 3.5.0 and 3.6.0), so adding `"problems"` or
 `"minVersion"` (below) today is safe even while some machines haven't
@@ -530,20 +531,20 @@ upgraded yet — they simply won't act on either key until they do.
 
 **`"minVersion": "X.Y.Z"`** makes every command, including `doctor`,
 fail with `needs_newer_nj` (naming both the running and required
-versions) when this `nj` is older than that — `nj --version` and `nj
+versions) when this `nanojira` is older than that — `nanojira --version` and `nanojira
 <command> --help` still work regardless, since neither depends on the
 backlog's configuration the way every other command does.
 
 ## 11. Who's acting: `NJ_AUTHOR` and `--as`
 
-`nj note`, `nj claim` and `nj release` need to know who is acting. In order:
+`nanojira note`, `nanojira claim` and `nanojira release` need to know who is acting. In order:
 an explicit `--as=<name>` where the command has one, else `NJ_AUTHOR=<name>`
 from the environment, else none. A name must be non-empty after trimming
 leading/trailing spaces and tabs, a single line, and contain no `:`.
 
 ```sh
-$ NJ_AUTHOR=alice nj note --id=TSK-001 "wired the route"
-$ nj claim --id=TSK-001 --as=bob
+$ NJ_AUTHOR=alice nanojira note --id=TSK-001 "wired the route"
+$ nanojira claim --id=TSK-001 --as=bob
 ```
 
 An invalid name is a hard error on a command that needs one, nothing
@@ -552,37 +553,37 @@ outranks a malformed `NJ_AUTHOR`). Names are labels, not identities: there
 is no registry, no authentication; two callers using the same name are the
 same actor.
 
-## 12. `nj unarchive`
+## 12. `nanojira unarchive`
 
 Moves an archived element — and its archived subtree — back to where it
 would live today, byte-identical except `updated` and a removed
 `archived:` field:
 
 ```sh
-$ nj unarchive --id=EPIC-001
+$ nanojira unarchive --id=EPIC-001
 EPIC-001 unarchived → …/backlog/epics/EPIC-001.md
 TSK-001 unarchived → …/backlog/tasks/TSK-001.md
 ```
 
 Refuses `refused:not_archived` if it isn't archived, `refused:parent_archived`
 under an archived parent, `refused:misplaced` if its hierarchy chain can't
-be resolved first — `nj doctor --fix`, same pointer `archive`'s own
+be resolved first — `nanojira doctor --fix`, same pointer `archive`'s own
 refusals give.
 
-## 13. `nj claim` / `nj release`
+## 13. `nanojira claim` / `nanojira release`
 
 One acting name at a time can hold an element. A claim is exclusive only
 against another claim — never against a read or any other write:
 
 ```sh
-$ nj claim --id=TSK-001 --as=alice
+$ nanojira claim --id=TSK-001 --as=alice
 TSK-001 claimed by alice
-$ nj claim --id=TSK-001 --as=bob
+$ nanojira claim --id=TSK-001 --as=bob
 Error: TSK-001 is already claimed by alice — refused          # exit 1, refused:claimed
 use --steal=<holder> to take it over
-$ nj claim --id=TSK-001 --as=bob --steal=alice
+$ nanojira claim --id=TSK-001 --as=bob --steal=alice
 TSK-001 claimed by bob
-$ nj release --id=TSK-001 --as=bob
+$ nanojira release --id=TSK-001 --as=bob
 TSK-001 released by bob
 ```
 
@@ -602,50 +603,50 @@ changed hands, not to whom it previously belonged.
   signal for a human or agent to act on with `--steal`, except for the
   bulk cleanup `doctor --fix` performs below, which is explicit, not
   automatic on every read.
-- **History.** These claim events feed into `nj log` (§ 15, below).
+- **History.** These claim events feed into `nanojira log` (§ 15, below).
 - **A write that reaches the last configured status releases the claim
-  on its own** — `nj set --status=done`, `nj claim --status=done`, `nj
+  on its own** — `nanojira set --status=done`, `nanojira claim --status=done`, `nanojira
   next --status=done` alike, whoever holds it, in the same call:
 
   ```sh
-  $ nj claim --id=TSK-001 --as=alice
+  $ nanojira claim --id=TSK-001 --as=alice
   TSK-001 claimed by alice
-  $ nj set --id=TSK-001 --status=done --json
+  $ nanojira set --id=TSK-001 --status=done --json
   { "ok": true, "id": "TSK-001", "changed": ["status"], "...": "...",
     "released": "alice" }
   ```
 
-  No more separate `nj release` after finishing — `released` is simply
+  No more separate `nanojira release` after finishing — `released` is simply
   absent from the result when nothing was claimed. A write refused for
   another reason (`refused:children_open` without
   `--allow-open-children`, for one) releases nothing; the claim survives.
 - **Old claims on already-`done` items** — left over from before the
   above existed, or from any other path that reached the final status
-  without going through `nj` — are cleaned up in bulk with `nj doctor
+  without going through `nanojira` — are cleaned up in bulk with `nanojira doctor
   --fix`, live or archived, whoever holds them. This replaces posing as
   each holder in turn with `release --as=<holder>`:
 
   ```sh
-  $ nj doctor
+  $ nanojira doctor
   backlog/: 2 entries, 0 errors, 1 warning
 
   WARNING TSK-001: claimed by 'alice' since 2026-01-01T00:00:00Z, past the
   24h staleness threshold
-  $ nj doctor --fix
+  $ nanojira doctor --fix
   FIXED   TSK-001: released alice
   ```
 
   Claims on anything not yet in the final status are left alone, stale or
   not — see § 10 for the rest of `--fix`.
 
-## 14. `nj next`
+## 14. `nanojira next`
 
 `list --ready` then `claim` by hand leaves a gap: two callers can read the
-same top candidate before either claims it. `nj next` closes it — one
+same top candidate before either claims it. `nanojira next` closes it — one
 call picks the highest-ranked `--ready` element and claims it:
 
 ```sh
-$ nj next --as=alice --status=doing
+$ nanojira next --as=alice --status=doing
 TSK-001 claimed by alice (status: doing)
 ```
 
@@ -659,8 +660,8 @@ TSK-001 claimed by alice (status: doing)
   assigned to someone else is never a candidate — `next` never hands out
   work a human or a prior `claim`/`next` explicitly gave to a specific
   name. Assign a review (or anything else) to a particular person or
-  agent with `nj set --id=<id> --assignee=<name>`, and only that name's
-  own `next` (or an explicit `nj claim --id=<id> --as=<name>`) will pick
+  agent with `nanojira set --id=<id> --assignee=<name>`, and only that name's
+  own `next` (or an explicit `nanojira claim --id=<id> --as=<name>`) will pick
   it up. This is also the answer to "an author shouldn't review their
   own work": assign the review task to the reviewer, not the author, and
   `next` keeps it out of the author's hands on its own.
@@ -668,7 +669,7 @@ TSK-001 claimed by alice (status: doing)
   archived) is never a candidate — its child is, instead:
 
   ```sh
-  $ nj next --as=alice
+  $ nanojira next --as=alice
   TSK-001 claimed by alice
   ```
 
@@ -679,7 +680,7 @@ TSK-001 claimed by alice (status: doing)
   bug:
 
   ```sh
-  $ nj next --as=carol --json
+  $ nanojira next --as=carol --json
   {
     "ok": false,
     "error": "none_ready"
@@ -703,14 +704,14 @@ TSK-001 claimed by alice (status: doing)
   (`bob` lost the race for `TSK-001` — someone else claimed it a moment
   earlier — and `next` moved on to `TSK-002` instead of giving up.)
 
-## 15. `nj log`
+## 15. `nanojira log`
 
 The change history of one element — what already exists, merged into one
 timeline: when it was created, every claim/re-claim/steal/release, and
 its notes.
 
 ```sh
-$ nj log --id=TSK-001
+$ nanojira log --id=TSK-001
 2026-10-05T22:43:37Z created
 2026-10-05T22:43:38Z claimed by alice
 2026-10-05T22:43:40Z alice: Parser splits at the first colon
@@ -718,7 +719,7 @@ $ nj log --id=TSK-001
 ```
 
 ```sh
-$ nj log --id=TSK-001 --json
+$ nanojira log --id=TSK-001 --json
 {
   "ok": true,
   "id": "TSK-001",
@@ -739,8 +740,8 @@ $ nj log --id=TSK-001 --json
   else, even right after a field changes:
 
   ```sh
-  $ nj set --id=TSK-001 --status=doing --priority=high
-  $ nj log --id=TSK-001
+  $ nanojira set --id=TSK-001 --status=doing --priority=high
+  $ nanojira log --id=TSK-001
   2026-10-05T22:43:37Z created
   2026-10-05T22:43:38Z claimed by alice
   2026-10-05T22:43:40Z alice: Parser splits at the first colon
@@ -748,9 +749,9 @@ $ nj log --id=TSK-001 --json
   ```
 
   (identical to the run above — the `set` changed nothing `log` can see.
-  Leave a `nj note` if a field change is worth remembering later.)
+  Leave a `nanojira note` if a field change is worth remembering later.)
 - **Claim history is local, and archiving erases it outright.**
-  `.nanojira/claims/` is git-ignored (one of the lines `nj init` writes
+  `.nanojira/claims/` is git-ignored (one of the lines `nanojira init` writes
   into `.gitignore`, § 2 above; spec § 12a), so a fresh
   clone shows `created` and notes only — the claims happened, but their
   record never left the machine that made them. `archive` goes further:
@@ -758,8 +759,8 @@ $ nj log --id=TSK-001 --json
   loses the claim events even on the machine that made them:
 
   ```sh
-  $ nj archive --id=TSK-001
-  $ nj log --id=TSK-001
+  $ nanojira archive --id=TSK-001
+  $ nanojira log --id=TSK-001
   2026-10-05T22:43:37Z created
   2026-10-05T22:43:40Z alice: Parser splits at the first colon
   ```
@@ -772,13 +773,13 @@ manual complement for the one thing `log` doesn't show: field-level diffs,
 at the cost of only seeing whatever was actually committed, in whatever
 granularity your commits happen to have.
 
-## 16. `nj check`
+## 16. `nanojira check`
 
 Ticks or unticks one Markdown checkbox in the body, without touching
 anything else:
 
 ```sh
-$ nj check --id=TSK-001 --text="200 with a valid password" --on
+$ nanojira check --id=TSK-001 --text="200 with a valid password" --on
 TSK-001 checked
 ```
 
@@ -790,12 +791,12 @@ TSK-001 checked
   matched. `--text` naming zero countable checkboxes is `not_found`; two or
   more is `ambiguous_target`.
 
-## 17. `nj find`
+## 17. `nanojira find`
 
 Full-text search over title, body and notes:
 
 ```sh
-$ nj find "rate limiting"
+$ nanojira find "rate limiting"
   TSK-002  todo     Rate-limit the login route  incomplete:acceptance
     We need rate limiting here.
 ```
@@ -818,7 +819,7 @@ string is `invalid_value`.
 to apply the same field map or action to several elements in one call:
 
 ```sh
-$ nj set --id=TSK-001,TSK-002,TSK-003 --status=done --json
+$ nanojira set --id=TSK-001,TSK-002,TSK-003 --status=done --json
 ```
 
 Every named ID is resolved and validated **before** anything is written —
@@ -829,26 +830,26 @@ competing claim) never stops the others. The result is `{ok, results:
 [{id, ok, …}]}` instead of one write's usual shape; a single `--id=A` (no
 comma) is unaffected.
 
-## 19. `nj-mcp` — the MCP wrapper
+## 19. `nanojira-mcp` — the MCP wrapper
 
-`dist/nj-mcp.mjs` is a second binary, built alongside `dist/nj.mjs`, that
+`dist/nanojira-mcp.mjs` is a second binary, built alongside `dist/nanojira.mjs`, that
 exposes the same commands as MCP tools over stdio instead of a CLI an agent
 has to shell out to and parse `--json` from:
 
 ```sh
-$ dist/nj-mcp.mjs --backlog=./backlog [--allow-destructive]
+$ dist/nanojira-mcp.mjs --backlog=./backlog [--allow-destructive]
 ```
 
 In an exported skill folder (§ 1, § 18 of the spec), start it through the
 wrapper instead, which resolves `node` and the bundle for you:
 
 ```sh
-$ <dest>/bin/nj-mcp --backlog=./backlog [--allow-destructive]
+$ <dest>/bin/nanojira-mcp --backlog=./backlog [--allow-destructive]
 ```
 
 - Resolves its backlog once at startup, the same rules as the CLI
   (`--backlog`, `NJ_BACKLOG`, `.njrc`), and serves only that one backlog.
-- Every tool's result **is** exactly the JSON `dist/nj.mjs --json` would
+- Every tool's result **is** exactly the JSON `dist/nanojira.mjs --json` would
   return for the equivalent CLI call — nothing to learn beyond the contract
   above.
 - Tools: `list`, `show`, `find`, `tree`, `new`, `set`, `note`, `check`,
@@ -857,9 +858,9 @@ $ <dest>/bin/nj-mcp --backlog=./backlog [--allow-destructive]
   `doctor --fix` only exists as a tool when the server was started with
   `--allow-destructive`.
 - A minimal client config — the shape only; where this goes is your MCP
-  client's own concern, not `nj`'s:
+  client's own concern, not `nanojira`'s:
   ```json
-  { "command": "sh", "args": ["/path/to/<skill>/bin/nj-mcp", "--backlog=/path/to/backlog"] }
+  { "command": "sh", "args": ["/path/to/<skill>/bin/nanojira-mcp", "--backlog=/path/to/backlog"] }
   ```
 
 ## 20. Failure codes an agent should handle
@@ -868,12 +869,12 @@ With `--json`, `error` is one of a closed set. The ones an agent meets:
 
 | `error` | Meaning | What to do |
 |---|---|---|
-| `no_backlog` | no source found a backlog | `nj init`, or set `--backlog` / `NJ_BACKLOG` / `.njrc` |
-| `invalid_backlog_flag` / `_env` / `_njrc` | that source points at no backlog | fix that source — `nj` does not fall back |
+| `no_backlog` | no source found a backlog | `nanojira init`, or set `--backlog` / `NJ_BACKLOG` / `.njrc` |
+| `invalid_backlog_flag` / `_env` / `_njrc` | that source points at no backlog | fix that source — `nanojira` does not fall back |
 | `invalid_njrc` | a reached `.njrc` is malformed or not yours | fix the named line or file |
-| `backlog_without_config` | a `backlog/` was found without its configuration | `nj doctor` |
-| `invalid_config` | the configuration violates § 5 | `nj doctor` names the defect |
-| `legacy_layout` | a v2 backlog | `nj doctor --fix` migrates it (`docs/MIGRATION-v3.md`) |
+| `backlog_without_config` | a `backlog/` was found without its configuration | `nanojira doctor` |
+| `invalid_config` | the configuration violates § 5 | `nanojira doctor` names the defect |
+| `legacy_layout` | a v2 backlog | `nanojira doctor --fix` migrates it (`docs/MIGRATION-v3.md`) |
 | `unknown_field`, `unknown_command` | a typo | the hint lists the known flags |
 | `missing_argument`, `missing_value`, `invalid_value`, `invalid_target` | the call itself is wrong | fix the call |
 | `ambiguous_target` | `check --text` matches two or more checkboxes | narrow the text, or use `--item=<n>` |
@@ -887,9 +888,9 @@ With `--json`, `error` is one of a closed set. The ones an agent meets:
 | `refused:claimed` | `claim`/`release` where another acting name holds it | `--steal=<holder>` if that's intended |
 | `refused:not_archived` | `unarchive` of something that isn't archived | nothing to do |
 | `refused:archived`, `refused:parent_archived` | writing, or adding a child to, an archived element | archived work is read-only |
-| `refused:unreadable` | an unreadable file exists (`rm`, `archive`, as `--parent`) | fix or remove the file `nj doctor` names |
-| `refused:misplaced` | a hierarchy archive of a subtree outside its folder | `nj doctor --fix` |
-| `refused:unreadable_dir` | an unreadable directory hides part of the backlog | fix its permissions, then `nj doctor` |
+| `refused:unreadable` | an unreadable file exists (`rm`, `archive`, as `--parent`) | fix or remove the file `nanojira doctor` names |
+| `refused:misplaced` | a hierarchy archive of a subtree outside its folder | `nanojira doctor --fix` |
+| `refused:unreadable_dir` | an unreadable directory hides part of the backlog | fix its permissions, then `nanojira doctor` |
 | `exists` | `init` target occupied, or an archive target occupied | choose another target, or clear it |
 | `io_error` | a filesystem call on a named path failed | read the message; nothing was half-written |
 | `id_allocation_failed` | 100 ID retries exhausted under contention | retry |
@@ -902,10 +903,10 @@ table is § 7 of the spec.
 ## 21. Creating a whole plan with `--input`
 
 Field flags build one element per call. For an epic with several tasks
-and subtasks, cross-referencing each other via `depends_on`, `nj new
+and subtasks, cross-referencing each other via `depends_on`, `nanojira new
 --input=<file|->` takes the whole thing as one JSON plan instead — an
 object, or an array of objects, each of which may nest its own `children`
-(the parent is implied by the nesting, never given alongside it). `nj set
+(the parent is implied by the nesting, never given alongside it). `nanojira set
 --input=` takes the same field map `set` already accepts via flags, just
 sourced from JSON — addressing (`--id=`/`--file=`) stays on the CLI either
 way, so there's no plan form for `set`.
@@ -932,7 +933,7 @@ $ cat plan.json
           "acceptance": ["Code reviewed", "Tests reviewed"] }
       ] }
   ] }
-$ nj new --input=plan.json --json
+$ nanojira new --input=plan.json --json
 {
   "ok": true,
   "ids": ["EPIC-001", "TSK-001", "SUB-001", "SUB-002"],
@@ -948,7 +949,7 @@ Piping a heredoc through stdin works the same way and avoids a stray
 `plan.json` in the working tree:
 
 ```sh
-$ nj new --input=- --json <<'EOF'
+$ nanojira new --input=- --json <<'EOF'
 { "type": "subtask", "parent": "TSK-001", "title": "Hotfix",
   "description": "D.", "acceptance": ["Covered by a regression test"] }
 EOF
@@ -975,7 +976,7 @@ EOF
   was ever assigned. Use it to check a plan before committing to it:
 
   ```sh
-  $ nj new --input=plan.json --dry-run --json
+  $ nanojira new --input=plan.json --dry-run --json
   { "ok": true, "dry_run": true,
     "entries": [
       { "type": "epic", "title": "Login", "_problems": [] },
@@ -1007,16 +1008,16 @@ duplicates, not pick up where it left off), and re-run with what remains,
 using `refs` to recover which real id each already-written `ref` resolved
 to if a dropped element is still depended on by one that's left.
 
-## 22. Reparenting: `nj set --parent`
+## 22. Reparenting: `nanojira set --parent`
 
-`nj set --id=<id> --parent=<new-parent-id>` moves a task under a different
+`nanojira set --id=<id> --parent=<new-parent-id>` moves a task under a different
 epic, or a subtask under a different task — the id, the body (description,
 acceptance, notes) and the claim log all come along unchanged; a claim is
 keyed by id, never by file path. The type never changes: there's no flag
 that turns a task into a subtask or back.
 
 ```sh
-$ nj set --id=TSK-001 --parent=EPIC-002 --json
+$ nanojira set --id=TSK-001 --parent=EPIC-002 --json
 { "ok": true, "id": "TSK-001", "changed": ["parent"],
   "entry": { "id": "TSK-001", "parent": "EPIC-002", "...": "..." },
   "_problems": [] }
@@ -1034,19 +1035,19 @@ task, a task for a subtask) — not a new vocabulary, the same codes `new
 --parent` already uses:
 
 ```sh
-$ nj set --id=TSK-001 --parent=TSK-002       # wrong type: a task needs an epic
+$ nanojira set --id=TSK-001 --parent=TSK-002       # wrong type: a task needs an epic
 Error: parent 'TSK-002' is a task, but a task needs an epic          # invalid_target
-$ nj set --id=TSK-001 --parent=EPIC-999      # does not exist
+$ nanojira set --id=TSK-001 --parent=EPIC-999      # does not exist
 Error: parent 'EPIC-999' does not exist                              # not_found
-$ nj set --id=TSK-001 --parent=EPIC-003      # archived
+$ nanojira set --id=TSK-001 --parent=EPIC-003      # archived
 Error: parent 'EPIC-003' is archived — refusing to move a child under it  # refused:parent_archived
 a fresh child of an archived parent would immediately carry archive:split
-$ nj set --id=EPIC-001 --parent=EPIC-002     # an epic never has a parent
+$ nanojira set --id=EPIC-001 --parent=EPIC-002     # an epic never has a parent
 Error: epics must not have a --parent                                # invalid_value
 ```
 
 Nothing is written in any of the four cases above. To undo a reparent,
-there's no separate command — `nj set --parent=<old>` moves it right back
+there's no separate command — `nanojira set --parent=<old>` moves it right back
 and restores the previous state exactly (same file location, same
 frontmatter apart from `updated`), same as moving it anywhere else.
 `--input set` accepts `parent` as one more field in its JSON object (§ 21).
@@ -1060,16 +1061,16 @@ count, and never shown for an archived element (nobody can act on a
 warning about history):
 
 - `acceptance:no_checkbox` — the section has text but no `- [ ]` line, so
-  `nj check` has nothing to tick.
+  `nanojira check` has nothing to tick.
 - `done:no_acceptance` — a `done` element's section is absent or empty.
 - `done:open_acceptance` — a `done` element's section has at least one
   checkbox still unticked:
 
   ```sh
-  $ nj set --id=TSK-001 --status=done
+  $ nanojira set --id=TSK-001 --status=done
   TSK-001 → status=done
   ⚠ TSK-001 is done with 2 of 3 acceptance boxes still unticked.
-  $ nj doctor
+  $ nanojira doctor
   ./: 2 entries, 0 errors, 1 warning
 
   WARNING TSK-001: done with 2 of 3 acceptance boxes still unticked

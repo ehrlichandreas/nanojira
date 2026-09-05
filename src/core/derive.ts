@@ -46,7 +46,7 @@ function isReady(el: Element, cfg: Config) {
 
 /**
  * The leaf-work rule (DECISIONS 156, reused by `next` and, since v3.6
- * DECISIONS 158 EV-4, bare `nj`'s own "Ready to work"): true when `el` has
+ * DECISIONS 158 EV-4, bare `nanojira`'s own "Ready to work"): true when `el` has
  * at least one child that is neither `done` nor archived. `list --ready`
  * never calls this — it stays a pure readiness filter over § 9's five
  * conditions, container or not.
@@ -109,7 +109,7 @@ function entryJson(el: Element, backlog: string, cfg: Config): EntryJson {
 }
 
 // `backlogErrors` folds in error-severity findings that are not about any
-// one element — an unreadable directory hiding files nj never even saw is
+// one element — an unreadable directory hiding files nanojira never even saw is
 // exactly the sort of problem a caller must not read past as "0 errors"
 // (DECISIONS 106 F4).
 function countsOf(scope: Element[], backlogErrors = 0) {

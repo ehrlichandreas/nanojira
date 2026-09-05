@@ -177,7 +177,7 @@ function deriveOptionals(el: WithParent, p: ParsedFile): WithOptionals {
   // Deliberately NOT normalised to `null` like `parent` above — a missing
   // `assignee` stays `''`. `cmdSet` (commands/cmd-set.ts) compares
   // `assignee !== el.assignee` and turns a `''` into an `undefined` override,
-  // which is how `nj set --assignee=` deletes the field. Unifying this with
+  // which is how `nanojira set --assignee=` deletes the field. Unifying this with
   // `parent`'s `null` convention would silently change that delete behaviour.
   const asg = p.fields.get('assignee');
   const assignee = typeof asg === 'string' ? asg : '';
@@ -475,7 +475,7 @@ function markMissingTombstones(elements: Element[], idsDir: string) {
 
 /**
  * Last, and MUTATING. Two readers, both on the first graph: `el.byId` in
- * isReady(), `el.children` in the children_open check of `nj set`. Commands
+ * isReady(), `el.children` in the children_open check of `nanojira set`. Commands
  * call deriveGraph a second time after writing, on a derived array, and rely
  * on the marks above landing on the real objects — a pass that computed into
  * copies would leave the feedback lines and `_problems` empty while every
