@@ -29,21 +29,21 @@ NODE=/home/dev/workspace/portable/runtime/darwin-arm64/bin/node
 NJ=/path/to/nanojira          # absolute, or resolved against your shell's cwd
 
 # the whole oracle, with a summary
-$NODE run-all.mjs "$NJ"
+$NODE run-all.ts "$NJ"
 
 # one test
-$NODE ac/ac-01-basic-run.mjs "$NJ"
+$NODE ac/ac-01-basic-run.ts "$NJ"
 ```
 
-`ac/ac-15-no-dependencies.mjs` needs the runtime Node itself, not just any
+`ac/ac-15-no-dependencies.ts` needs the runtime Node itself, not just any
 Node: it takes `NJ_NODE` when set, otherwise the first
 `runtime/<platform>/bin/node` or `portable/runtime/<platform>/bin/node` found
 walking up from the project directory, and reports `CANNOT RUN` when there is
 none.
 
-Run these commands from this directory (`test/`): `run-all.mjs` and the test
+Run these commands from this directory (`test/`): `run-all.ts` and the test
 folders are addressed relative to it. From the project root the same invocation
-is `$NODE test/run-all.mjs "$NJ"`, and a relative `$NJ` then resolves against the
+is `$NODE test/run-all.ts "$NJ"`, and a relative `$NJ` then resolves against the
 project root, not `test/`.
 
 The path is resolved to an absolute one when the harness loads, because tests
@@ -51,12 +51,12 @@ run `nanojira` with a scratch directory as its cwd — a relative path handed to
 child would be re-resolved against that scratch directory and every test would
 report `CANNOT RUN`, blaming the suite for a missing argument.
 
-`run-all.mjs` runs the suite — every file under `ac/`, `fault/`, `edge/` and
+`run-all.ts` runs the suite — every file under `ac/`, `fault/`, `edge/` and
 `stress/` — prints each result and then a summary that separates *failed* from
 *could not run* — those mean different things, and collapsing them would hide a
 missing prerequisite behind a green-ish number. One result line is the
-delegated pair: `ac/ac-07-concurrency.mjs` is executed as `stress/concurrency.mjs`
-(that is the `concurrency.mjs` line, reported in AC-7's slot), so there is one
+delegated pair: `ac/ac-07-concurrency.ts` is executed as `stress/concurrency.ts`
+(that is the `concurrency.ts` line, reported in AC-7's slot), so there is one
 fewer result line than test-bearing files. Nothing is skipped.
 
 Each test prints `PASS <file> (n checks)` and exits 0, or `FAIL <file> — k of n
@@ -75,11 +75,11 @@ test ever fails with an unrelated `ENOENT` about a file that was never created.
 
 | Path | What it is |
 |---|---|
-| `lib/harness.mjs` | The shared contract: process runner, fixture builders, assertions |
+| `lib/harness.ts` | The shared contract: process runner, fixture builders, assertions |
 | `golden/` | Byte-exact expected file content, one fixture per write path |
 | `golden/MANIFEST.sha256` | Frozen hashes — see "Freezing" below |
-| `ac/ac-NN-*.mjs` | One executable test per acceptance criterion, AC-1 … AC-28 (AC-21–27 are derived from spec v3/v3.1, AC-28 from spec v3.2, each written ahead of its step) |
-| `proposed/` | Empty for now: proposal-v3.1 suites written ahead of spec acceptance live here until promoted into `ac/`; excluded from `run-all.mjs` discovery. Holds the still-unpromoted § C (`nanojira claim`) suite once it exists |
+| `ac/ac-NN-*.ts` | One executable test per acceptance criterion, AC-1 … AC-28 (AC-21–27 are derived from spec v3/v3.1, AC-28 from spec v3.2, each written ahead of its step) |
+| `proposed/` | Empty for now: proposal-v3.1 suites written ahead of spec acceptance live here until promoted into `ac/`; excluded from `run-all.ts` discovery. Holds the still-unpromoted § C (`nanojira claim`) suite once it exists |
 | `fault/` | `NJ_FAULT` and `NJ_NOW` verification hooks (§ 12) |
 | `stress/` | The 20-wide concurrency run that AC-7 needs |
 | `edge/` | Boundary cases the ACs name but do not fully pin |

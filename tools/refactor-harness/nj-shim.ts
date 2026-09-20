@@ -1,0 +1,112 @@
+#!/usr/bin/env node
+// Recording shim. Stands in for `nj` anywhere a caller takes an nj path —
+// the oracle (`NJ=<this>`), the Oracle's scratch scripts, and the fixture corpus.
+//
+// It forwards every call to the real nj unchanged and appends one NDJSON
+// record per call: argv, the env that matters, cwd, stdout, stderr, exit code,
+// and a SHA256 of every backlog file afterwards.
+//
+// The real nj path is NEVER guessed. HARNESS_NJ must name it explicitly; a
+// shim that fell back to "some nj on PATH" could silently record the wrong
+// binary, which is the one failure this whole harness exists to prevent.
+
+import fs from 'fs';
+import path from 'path';
+import { spawnSync } from 'child_process';
+import * as R from './lib/record.ts';
+
+const REAL = process.env.HARNESS_NJ;
+const OUT = process.env.HARNESS_RECORD;
+const LABEL = process.env.HARNESS_LABEL || '';
+
+if (!REAL) {
+  process.stderr.write('nj-shim: HARNESS_NJ is not set — refusing to guess the real nj path\n');
+  process.exit(97);
+}
+if (!fs.existsSync(REAL)) {
+  process.stderr.write(`nj-shim: HARNESS_NJ points at a missing file: ${REAL}\n`);
+  process.exit(97);
+}
+
+const args = process.argv.slice(2);
+const cwd = process.cwd();
+
+// Forward stdin (--description-file=- reads it). In a spawnSync child stdin is
+// a pipe that is already at EOF when the caller passed no input, so this does
+// not block; on a real terminal we skip it rather than hang.
+let input: Buffer | undefined;
+if (!process.stdin.isTTY) {
+  try { input = fs.readFileSync(0); } catch { input = undefined; }
+}
+
+const env: Record<string, string | undefined> = Object.assign({}, process.env);
+delete env.HARNESS_NJ;
+delete env.HARNESS_RECORD;
+delete env.HARNESS_LABEL;
+// Determinism: a caller that forgot the clock still gets the pinned one.
+if (!env.NJ_NOW) env.NJ_NOW = R.FIXED_NOW;
+
+const r = spawnSync(process.execPath, [REAL].concat(args), {
+  cwd,
+  env,
+  input,
+  encoding: 'buffer',
+  maxBuffer: 64 * 1024 * 1024,
+});
+
+const stdout = r.stdout || Buffer.alloc(0);
+const stderr = r.stderr || Buffer.alloc(0);
+
+if (OUT) {
+  try {
+    const ctx = {
+      projectRoot: path.resolve(import.meta.dirname, '..', '..'),
+      home: process.env.HOME || undefined,
+      // Our own fixture root, so its deliberately named directories keep their
+      // names instead of being mistaken for mkdtemp output.
+      fixtureRoot: process.env.HARNESS_SCRATCH || undefined,
+    };
+    const backlog = R.findBacklog(cwd, env);
+    const rec = {
+      label: LABEL,
+      argv: args.map((a) => R.normalize(a, ctx)),
+      cwd: R.normalize(cwd, ctx),
+      // Every cwd normalises to the same token, which would lose the fact that
+      // two calls worked on DIFFERENT backlogs. This hash groups calls by
+      // backlog without putting an absolute machine path in the record; the
+      // driver turns it into a per-run ordinal, which is comparable.
+      cwdHash: R.sha256(cwd).slice(0, 12),
+      // Which scratch-backlog scenario this cwd was made under (e.g.
+      // 'ac27-c5-claim'), or null — recovered from the mkdtemp dir name, so
+      // the driver can taint nondeterministic records by SCENARIO, not just
+      // by whole suite file (baseline.ts CONCURRENT_BACKLOG_PREFIXES).
+      backlogLabel: R.backlogLabel(cwd),
+      env: {
+        NJ_NOW: env.NJ_NOW === undefined ? null : env.NJ_NOW,
+        NJ_FAULT: env.NJ_FAULT === undefined ? null : env.NJ_FAULT,
+        NJ_BACKLOG: env.NJ_BACKLOG === undefined ? null : R.normalize(env.NJ_BACKLOG, ctx),
+      },
+      exit: r.status,
+      signal: r.signal || null,
+      stdout: R.normalize(stdout.toString('utf8'), ctx),
+      stderr: R.normalize(stderr.toString('utf8'), ctx),
+      after: R.snapshotBacklog(backlog, ctx),
+    };
+    fs.appendFileSync(OUT, JSON.stringify(rec) + '\n');
+  } catch (e) {
+    // A broken recorder must not change what the caller observes, but it must
+    // not pass unnoticed either.
+    try {
+      fs.appendFileSync(OUT, JSON.stringify({ label: LABEL, recorderError: String(e && (e as Error).message) }) + '\n');
+    } catch { /* give up quietly; the driver counts records */ }
+  }
+}
+
+process.stdout.write(stdout);
+process.stderr.write(stderr);
+// NOT process.exit(): when stdout is a pipe, a large write is still queued and
+// process.exit() drops the remainder. The shim would then truncate exactly the
+// big payloads (Unicode boundary cases, wide JSON) that the corpus cares about,
+// and the suites would fail through the shim while passing directly against nj.
+// Setting exitCode lets Node flush and exit with the same status.
+process.exitCode = r.status === null ? 98 : r.status;

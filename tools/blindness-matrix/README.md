@@ -38,11 +38,11 @@ two cases are indistinguishable.
 
 ```sh
 NODE=/…/runtime/darwin-arm64/bin/node
-$NODE tools/blindness-matrix/run.js /abs/path/to/repo            # every mutant
-$NODE tools/blindness-matrix/run.js /abs/path/to/repo doc-sum-warn
+$NODE tools/blindness-matrix/run.ts /abs/path/to/repo            # every mutant
+$NODE tools/blindness-matrix/run.ts /abs/path/to/repo doc-sum-warn
 # before/after around a test/ change — same base nj, compared automatically:
-$NODE tools/blindness-matrix/run.js $REPO --nj=/tmp/base-nj
-$NODE tools/blindness-matrix/run.js $REPO --nj=/tmp/base-nj --compare=/tmp/blind/matrix-<digest8>-<code8>.json
+$NODE tools/blindness-matrix/run.ts $REPO --nj=/tmp/base-nj
+$NODE tools/blindness-matrix/run.ts $REPO --nj=/tmp/base-nj --compare=/tmp/blind/matrix-<digest8>-<code8>.json
 ```
 
 `--nj=` names the **entry point** (default `<repo>/src/nj.ts`); `commands/`
@@ -54,7 +54,7 @@ the shared index.
 The result file names what it measured: `/tmp/blind/matrix-<testDigest8>-<codeSha8>.json`,
 with the full `testDigest` (same scope and folding as the refactor harness),
 `codeSha256` over `nj` + `commands/` + `core/` (byte-identical to `codeSha()` in
-`tools/refactor-harness/baseline.js`), the entry-only `njSha256`, node version
+`tools/refactor-harness/baseline.ts`), the entry-only `njSha256`, node version
 and date in a `header`. Two runs are comparable only when their code identity
 agrees — `--compare` refuses otherwise, with its own message, because the
 mutants are textual edits of that code and a different base is a different
