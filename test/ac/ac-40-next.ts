@@ -554,7 +554,16 @@ function readyFixture(label: string, n: number): Fixture {
     const onTop = ja && ja.id === 'TSK-001' ? ja : jb;
     const onSecond = ja && ja.id === 'TSK-001' ? jb : ja;
     T.eq('N11 (skipped) whoever got TSK-001 (the top candidate) skipped nothing', onTop && onTop.skipped, []);
-    T.eq('N11 (skipped) whoever fell through to TSK-002 skipped TSK-001', onSecond && onSecond.skipped, ['TSK-001']);
+    // § 15 clause 44: the loser's own candidate-filter does a live read of the
+    // claims directory, separate from and later than its elements snapshot.
+    // If the winner's claim has already landed by the time the loser builds
+    // its candidate list, TSK-001 is never a candidate there at all (skipped:
+    // []) rather than attempted-and-lost (skipped: ['TSK-001']) — both are
+    // spec-valid outcomes of the same race, depending on timing.
+    const secondSkipped = onSecond && onSecond.skipped;
+    T.check('N11 (skipped) whoever fell through to TSK-002 either attempted-and-lost TSK-001 or never saw it as a candidate',
+      JSON.stringify(secondSkipped) === JSON.stringify(['TSK-001']) || JSON.stringify(secondSkipped) === JSON.stringify([]),
+      JSON.stringify(secondSkipped));
   }
 
   /* ===================================================================== */
