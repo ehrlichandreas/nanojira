@@ -56,6 +56,14 @@ and subtasks, one Markdown file per element, committed alongside the code.
   "<your-name>"`; there's no separate `nanojira release` to remember afterward.
   If you're stopping *without* finishing, release explicitly instead:
   `nanojira release --id=<id> --as=<your-name>`, so someone else can claim it.
+- Running nanojira alongside an external coordination system (a team/chat
+  board, ticket tracker, anything outside nanojira itself)? Update nanojira
+  first — status, acceptance, notes — and only report completion on the
+  external system afterward, never the other way around. nanojira has no
+  daemon, no hooks and no network (`next` is pull-only — docs/GUIDE.md § 14):
+  nothing keeps it in sync with an external system automatically, so if the
+  external side is marked done first, nanojira can only stay stale until
+  someone remembers to go back and fix it by hand.
 - Never hand-edit files under `backlog/` — always go through `nanojira`.
 - Tick acceptance criteria with `nanojira check --id=<id> --text="<substring>"`,
   never by editing the checkbox text yourself — and tick every box
