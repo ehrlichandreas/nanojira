@@ -704,6 +704,16 @@ TSK-001 claimed by alice (status: doing)
   (`bob` lost the race for `TSK-001` — someone else claimed it a moment
   earlier — and `next` moved on to `TSK-002` instead of giving up.)
 
+**`next` is pull, never push.** `nanojira` is a local, file-based CLI with
+no daemon, no hooks and no network — it cannot notify or wake anyone on
+its own when an element becomes `--ready` or a dependency clears; nothing
+happens until something calls `next`/`claim` and asks. Whatever "wake
+someone when X is ready" a team wants — a teammate polling `next` on an
+interval, a message when a dependency is satisfied, a scheduled check-in
+— has to come from that team's own orchestration layer (messages, a task
+board, a cron job), not from `nanojira` itself. That's deliberate, not a
+gap to fill.
+
 ## 15. `nanojira log`
 
 The change history of one element — what already exists, merged into one
