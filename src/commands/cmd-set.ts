@@ -17,6 +17,7 @@ import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, out, writeFeedback, emitWriteResult } from '../core/output.ts';
 import { syncH1, normalizeTitle, applySections } from '../core/parse.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags, warnTagNearMatches } from '../core/tags.ts';
 import { valueHint } from '../core/suggest.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement, planMove, runMove } from '../core/store.ts';
 import { releaseUnconditional, undoRelease } from '../core/claims.ts';
@@ -159,7 +160,7 @@ function cmdSet(flags: Flags) {
         // frontmatter write it depends on has actually landed.
         if (item.movePlan !== null) runMove(item.movePlan);
         const fresh = loadElement(item.moveDst ?? item.el.file, ctx.backlog, ctx.cfg);
-        deriveGraph(ctx.elements.map((e: Element) => (e.file === item.el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+        deriveGraph(ctx.elements.map((e: Element) => (e.file === item.el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
         const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
         return Object.assign(
           { ok: true, changed: item.changed, entry, _problems: entry._problems },
@@ -168,7 +169,7 @@ function cmdSet(flags: Flags) {
         );
       },
     );
-    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    if (result.anyWritten) { refreshStatus(ctx.backlog, ctx.cfg, ctx); refreshTags(ctx.backlog, ctx.cfg, ctx); }
     const wrapper = { ok: result.ok, results: result.results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results as any[]) out(r.ok ? `${r.id} → ${(r.changed || []).join(', ') || 'unchanged'}` : `${r.id}: Error: ${r.error}`);
@@ -211,8 +212,9 @@ function cmdSet(flags: Flags) {
   // frontmatter write it depends on has actually landed.
   if (movePlan !== null) runMove(movePlan);
   const fresh = loadElement(moveDst ?? el.file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) {
     const extra = Object.assign({}, released !== undefined ? { released: released.holder } : {}, openAcceptanceExtra(fresh, ctx.cfg, isFinal));
     emitWriteResult(true, fresh, changed, ctx.backlog, ctx.cfg, extra);
@@ -382,6 +384,8 @@ function collectSetOverrides(ctx: Context, el: Element, flags: Flags, allowOpen:
     if (nextTags.length !== cur.length || nextTags.some((x, i) => x !== cur[i])) {
       overrides.set('tags', nextTags.length === 0 ? undefined : nextTags);
       changed.push('tags');
+      const added = nextTags.filter((t) => !cur.includes(t));
+      if (added.length > 0) warnTagNearMatches(added, ctx.elements.flatMap((e) => e.tags));
     }
   }
 

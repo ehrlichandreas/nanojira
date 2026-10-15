@@ -50,10 +50,19 @@ const DEFAULT_CONFIG: Config = {
     group: 'type',
     folders: { epics: 'epics', tasks: 'tasks', subtasks: 'subtasks', archive: 'archive' },
     statusFile: true,
+    tagsFile: true,
   },
   claims: { staleAfterHours: 24 },
   problems: { ignore: [] },
+  ids: { shardSize: 0 },
 };
+
+// Zero-padded width for a bucket directory name under `ids/<TYPE>/` (§ 8).
+// Fixed forever: `allocateId`'s "highest bucket via a sorted listing" trick
+// (store.ts) only works when every bucket name in a directory has the same
+// width, so this can never grow or shrink once chosen. At `shardSize=1` that
+// is still room for 999,999 buckets per type -- effectively unreachable.
+const IDS_BUCKET_PAD = 6;
 
 // Closed problem vocabulary (§ 7). severity null === workflow-only code.
 const SEVERITY: Record<string, string | null> = {
@@ -110,4 +119,4 @@ const BLOCKS_READY = new Set([
 
 const BACKLOG_LEVEL = new Set(['backlog:stray_tmp', 'backlog:ids_missing', 'backlog:unreadable_dir', 'config:invalid', 'config:unknown_key', 'config:unknown_code']);
 
-export { TYPE_PREFIX, PREFIX_TYPE, TYPE_FOLDER_ROLE, FOLDER_ROLES, GROUPS, TYPES, PARENT_TYPE, PRIORITIES, PRIORITY_WEIGHT, FIELD_ORDER, LIST_FIELDS, SECTION_ROLES, SETTABLE_FIELDS, NEW_FIELDS, DEFAULT_CONFIG, SEVERITY, BLOCKS_READY, BACKLOG_LEVEL, V3_DIR_REL, V3_CONFIG_REL, V3_IDS_REL, V3_INDEX_REL, LEGACY_CONFIG_REL, LEGACY_IDS_REL, LEGACY_INDEX_REL };
+export { TYPE_PREFIX, PREFIX_TYPE, TYPE_FOLDER_ROLE, FOLDER_ROLES, GROUPS, TYPES, PARENT_TYPE, PRIORITIES, PRIORITY_WEIGHT, FIELD_ORDER, LIST_FIELDS, SECTION_ROLES, SETTABLE_FIELDS, NEW_FIELDS, DEFAULT_CONFIG, SEVERITY, BLOCKS_READY, BACKLOG_LEVEL, V3_DIR_REL, V3_CONFIG_REL, V3_IDS_REL, V3_INDEX_REL, LEGACY_CONFIG_REL, LEGACY_IDS_REL, LEGACY_INDEX_REL, IDS_BUCKET_PAD };

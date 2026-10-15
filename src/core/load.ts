@@ -292,7 +292,7 @@ function loadElement(file: string, backlog: string, cfg: Config, folder: string 
 function loadBacklog(backlog: string, cfg: Config, idsDir: string): { elements: Element[]; scan: Scan } {
   const scan = scanBacklog(backlog, cfg.layout);
   const elements = scan.files.map(({ file, folder }) => loadElement(file, backlog, cfg, folder));
-  deriveGraph(elements, idsDir, cfg.layout);
+  deriveGraph(elements, idsDir, cfg);
   return { elements, scan };
 }
 
@@ -466,8 +466,8 @@ function markPlaces(elements: Element[], byId: Map<string, Element>, layout: Lay
   }
 }
 
-function markMissingTombstones(elements: Element[], idsDir: string) {
-  const ids = readTombstones(idsDir);
+function markMissingTombstones(elements: Element[], idsDir: string, shardSize: number) {
+  const ids = readTombstones(idsDir, shardSize);
   for (const el of elements) {
     if (!ids.has(el.id)) el.problems.add('id:no_tombstone');
   }
@@ -502,7 +502,7 @@ function attachGraph(elements: Element[], byId: Map<string, Element>, children: 
  * unobservable. The first pass that reads what another wrote makes the order
  * load-bearing, and nothing here would notice the breach.
  */
-function deriveGraph(elements: Element[], idsDir: string, layout: Layout) {
+function deriveGraph(elements: Element[], idsDir: string, cfg: Config) {
   const { byId, counts } = indexById(elements);
   markDuplicateIds(elements, counts);
   markParentEdges(elements, byId);
@@ -511,8 +511,8 @@ function deriveGraph(elements: Element[], idsDir: string, layout: Layout) {
   markDependsOnCycles(elements, byId);
   const children = childMap(elements);
   markOpenChildren(elements, children);
-  markPlaces(elements, byId, layout);
-  markMissingTombstones(elements, idsDir);
+  markPlaces(elements, byId, cfg.layout);
+  markMissingTombstones(elements, idsDir, cfg.ids.shardSize);
   attachGraph(elements, byId, children);
   return byId;
 }

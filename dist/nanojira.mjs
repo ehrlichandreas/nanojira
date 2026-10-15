@@ -46,11 +46,14 @@ var DEFAULT_CONFIG = {
   layout: {
     group: "type",
     folders: { epics: "epics", tasks: "tasks", subtasks: "subtasks", archive: "archive" },
-    statusFile: true
+    statusFile: true,
+    tagsFile: true
   },
   claims: { staleAfterHours: 24 },
-  problems: { ignore: [] }
+  problems: { ignore: [] },
+  ids: { shardSize: 0 }
 };
+var IDS_BUCKET_PAD = 6;
 var SEVERITY = {
   "frontmatter:unreadable": "error",
   "file:unreadable": "error",
@@ -670,21 +673,98 @@ function mtimeIso(file) {
 function sleepMs(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
-function readTombstones(dir) {
+function readTombstones(dir, shardSize) {
   const out2 = /* @__PURE__ */ new Set();
-  let names;
+  if (!shardSize) {
+    let names;
+    try {
+      names = fs2.readdirSync(dir);
+    } catch {
+      return out2;
+    }
+    for (const n of names) {
+      if (n.startsWith(".")) continue;
+      out2.add(n);
+    }
+    return out2;
+  }
+  let types;
   try {
-    names = fs2.readdirSync(dir);
+    types = fs2.readdirSync(dir);
   } catch {
     return out2;
   }
-  for (const n of names) {
-    if (n.startsWith(".")) continue;
-    out2.add(n);
+  for (const t of types) {
+    if (t.startsWith(".")) continue;
+    const typeDir = path2.join(dir, t);
+    let buckets;
+    try {
+      buckets = fs2.readdirSync(typeDir);
+    } catch {
+      continue;
+    }
+    for (const b of buckets) {
+      if (b.startsWith(".")) continue;
+      let names;
+      try {
+        names = fs2.readdirSync(path2.join(typeDir, b));
+      } catch {
+        continue;
+      }
+      for (const n of names) if (!n.startsWith(".")) out2.add(n);
+    }
   }
   return out2;
 }
-function allocateId(idsDir, type, elements) {
+function bucketName(n, shardSize) {
+  const b = Math.floor(n / shardSize);
+  const s = String(b).padStart(IDS_BUCKET_PAD, "0");
+  if (s.length > IDS_BUCKET_PAD) {
+    return hardExit(
+      "id_allocation_failed",
+      `nanojira: bucket ${b} (for id number ${n}, ids.shardSize=${shardSize}) needs more than ${IDS_BUCKET_PAD} digits \u2014 this is a hard limit`
+    );
+  }
+  return s;
+}
+var TOMBSTONE_ID_RE = /^(EPIC|TSK|SUB)-(\d+)$/;
+function tombstoneLocation(idsDir, id, shardSize) {
+  if (!shardSize) return { dir: idsDir, file: path2.join(idsDir, id) };
+  const m = TOMBSTONE_ID_RE.exec(id);
+  const prefix = m ? m[1] : id;
+  const n = m ? parseInt(m[2], 10) : 0;
+  const dir = path2.join(idsDir, prefix, bucketName(n, shardSize));
+  return { dir, file: path2.join(dir, id) };
+}
+function highestShardedMax(idsDir, prefix) {
+  const typeDir = path2.join(idsDir, prefix);
+  let buckets;
+  try {
+    buckets = fs2.readdirSync(typeDir).filter((b) => !b.startsWith("."));
+  } catch {
+    return 0;
+  }
+  if (buckets.length === 0) return 0;
+  buckets.sort();
+  const hi = buckets[buckets.length - 1];
+  let names;
+  try {
+    names = fs2.readdirSync(path2.join(typeDir, hi));
+  } catch {
+    return 0;
+  }
+  const re = new RegExp("^" + prefix + "-(\\d+)$");
+  let max = 0;
+  for (const n of names) {
+    const m = re.exec(n);
+    if (m) {
+      const v = parseInt(m[1], 10);
+      if (v > max) max = v;
+    }
+  }
+  return max;
+}
+function allocateId(idsDir, type, elements, shardSize) {
   const prefix = TYPE_PREFIX[type];
   fs2.mkdirSync(idsDir, { recursive: true });
   let max = 0;
@@ -695,13 +775,16 @@ function allocateId(idsDir, type, elements) {
       if (n2 > max) max = n2;
     }
   };
-  for (const t of readTombstones(idsDir)) consider(t);
+  if (shardSize) max = highestShardedMax(idsDir, prefix);
+  else for (const t of readTombstones(idsDir)) consider(t);
   for (const el of elements) consider(el.id);
   let n = max + 1;
   for (let i = 0; i < 100; i++) {
     const id = prefix + "-" + String(n).padStart(3, "0");
+    const { dir, file } = tombstoneLocation(idsDir, id, shardSize);
+    if (dir !== idsDir) fs2.mkdirSync(dir, { recursive: true });
     try {
-      fs2.closeSync(fs2.openSync(path2.join(idsDir, id), "wx"));
+      fs2.closeSync(fs2.openSync(file, "wx"));
       return id;
     } catch (e) {
       if (e.code !== "EEXIST") throw e;
@@ -1114,8 +1197,8 @@ function readSectionFlags(flags) {
 }
 
 // src/commands/cmd-archive.ts
-import * as fs9 from "node:fs";
-import * as path8 from "node:path";
+import * as fs10 from "node:fs";
+import * as path9 from "node:path";
 
 // src/core/flag-table.ts
 var str = (name) => ({ name, kind: "string" });
@@ -1190,7 +1273,7 @@ function compareVersionTuples(a, b) {
 }
 
 // src/core/config.ts
-var TOP_LEVEL_KEYS = ["schema", "statuses", "sections", "layout", "claims", "problems", "minVersion"];
+var TOP_LEVEL_KEYS = ["schema", "statuses", "sections", "layout", "claims", "problems", "minVersion", "ids"];
 function validateConfig(obj) {
   const errs = [];
   const warnings = [];
@@ -1231,6 +1314,11 @@ function validateConfig(obj) {
   }
   if (obj.problems !== void 0) {
     const r = validateProblems(obj.problems);
+    errs.push(...r.errors);
+    warnings.push(...r.warnings);
+  }
+  if (obj.ids !== void 0) {
+    const r = validateIds(obj.ids);
     errs.push(...r.errors);
     warnings.push(...r.warnings);
   }
@@ -1282,17 +1370,37 @@ function readClaims(c) {
   const d = DEFAULT_CONFIG.claims.staleAfterHours;
   return { staleAfterHours: c && c.staleAfterHours !== void 0 ? c.staleAfterHours : d };
 }
+function validateIds(c) {
+  if (c === null || typeof c !== "object" || Array.isArray(c)) return { errors: ["ids must be an object"], warnings: [] };
+  const errs = [];
+  const warnings = [];
+  for (const k of Object.keys(c)) {
+    if (k !== "shardSize") warnings.push({ code: "config:unknown_key", message: `unknown key 'ids.${k}'` });
+  }
+  if (c.shardSize !== void 0) {
+    const v = c.shardSize;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0) {
+      errs.push(`ids.shardSize must be a non-negative integer (got ${JSON.stringify(v)})`);
+    }
+  }
+  return { errors: errs, warnings };
+}
+function readIds(c) {
+  const d = DEFAULT_CONFIG.ids.shardSize;
+  return { shardSize: c && c.shardSize !== void 0 ? c.shardSize : d };
+}
 function validateLayout(lay) {
   if (lay === null || typeof lay !== "object" || Array.isArray(lay)) return { errors: ["layout must be an object"], warnings: [] };
   const errs = [];
   const warnings = [];
   for (const k of Object.keys(lay)) {
-    if (!["group", "folders", "statusFile"].includes(k)) warnings.push({ code: "config:unknown_key", message: `unknown key 'layout.${k}'` });
+    if (!["group", "folders", "statusFile", "tagsFile"].includes(k)) warnings.push({ code: "config:unknown_key", message: `unknown key 'layout.${k}'` });
   }
   if (lay.group !== void 0 && !GROUPS.includes(lay.group)) {
     errs.push(`layout.group must be one of ${GROUPS.join(", ")} (got ${JSON.stringify(lay.group)})`);
   }
   if (lay.statusFile !== void 0 && typeof lay.statusFile !== "boolean") errs.push("layout.statusFile must be true or false");
+  if (lay.tagsFile !== void 0 && typeof lay.tagsFile !== "boolean") errs.push("layout.tagsFile must be true or false");
   const f = lay.folders;
   if (f === void 0) return { errors: errs, warnings };
   if (f === null || typeof f !== "object" || Array.isArray(f)) {
@@ -1318,11 +1426,12 @@ function validateLayout(lay) {
 }
 function readLayout(lay) {
   const d = DEFAULT_CONFIG.layout;
-  if (lay === void 0) return { group: d.group, folders: { ...d.folders }, statusFile: d.statusFile };
+  if (lay === void 0) return { group: d.group, folders: { ...d.folders }, statusFile: d.statusFile, tagsFile: d.tagsFile };
   return {
     group: lay.group === void 0 ? d.group : lay.group,
     folders: { ...d.folders, ...lay.folders || {} },
-    statusFile: lay.statusFile === void 0 ? d.statusFile : lay.statusFile
+    statusFile: lay.statusFile === void 0 ? d.statusFile : lay.statusFile,
+    tagsFile: lay.tagsFile === void 0 ? d.tagsFile : lay.tagsFile
   };
 }
 function loadConfig(backlog, legacy) {
@@ -1355,7 +1464,8 @@ function loadConfig(backlog, legacy) {
       sections: { description: obj.sections.description.slice(), acceptance: obj.sections.acceptance.slice() },
       layout: readLayout(obj.layout),
       claims: readClaims(obj.claims),
-      problems: readProblems(obj.problems)
+      problems: readProblems(obj.problems),
+      ids: readIds(obj.ids)
     },
     errors: [],
     warnings,
@@ -1563,7 +1673,7 @@ import * as path5 from "node:path";
 import * as fs5 from "node:fs";
 import * as path4 from "node:path";
 var INTERNAL_DIRS = [".ids", ".nanojira"];
-var TOP_LEVEL_DOCS = /* @__PURE__ */ new Set(["README.md", "STATUS.md"]);
+var TOP_LEVEL_DOCS = /* @__PURE__ */ new Set(["README.md", "STATUS.md", "TAGS.md"]);
 var ID_FOLDER = /^(EPIC|TSK|SUB)-\d+$/;
 function foldEq(a, b) {
   return a.toLowerCase() === b.toLowerCase();
@@ -1885,7 +1995,7 @@ function loadElement(file, backlog, cfg, folder = folderOf(backlog, file)) {
 function loadBacklog(backlog, cfg, idsDir) {
   const scan = scanBacklog(backlog, cfg.layout);
   const elements = scan.files.map(({ file, folder }) => loadElement(file, backlog, cfg, folder));
-  deriveGraph(elements, idsDir, cfg.layout);
+  deriveGraph(elements, idsDir, cfg);
   return { elements, scan };
 }
 function indexById(elements) {
@@ -2008,8 +2118,8 @@ function markPlaces(elements, byId, layout) {
     if (want !== null && !samePlace(want, el.folder, layout)) el.problems.add(code);
   }
 }
-function markMissingTombstones(elements, idsDir) {
-  const ids = readTombstones(idsDir);
+function markMissingTombstones(elements, idsDir, shardSize) {
+  const ids = readTombstones(idsDir, shardSize);
   for (const el of elements) {
     if (!ids.has(el.id)) el.problems.add("id:no_tombstone");
   }
@@ -2020,7 +2130,7 @@ function attachGraph(elements, byId, children) {
     el.children = children.get(el.id) || [];
   }
 }
-function deriveGraph(elements, idsDir, layout) {
+function deriveGraph(elements, idsDir, cfg) {
   const { byId, counts } = indexById(elements);
   markDuplicateIds(elements, counts);
   markParentEdges(elements, byId);
@@ -2029,8 +2139,8 @@ function deriveGraph(elements, idsDir, layout) {
   markDependsOnCycles(elements, byId);
   const children = childMap(elements);
   markOpenChildren(elements, children);
-  markPlaces(elements, byId, layout);
-  markMissingTombstones(elements, idsDir);
+  markPlaces(elements, byId, cfg.layout);
+  markMissingTombstones(elements, idsDir, cfg.ids.shardSize);
   attachGraph(elements, byId, children);
   return byId;
 }
@@ -2228,14 +2338,165 @@ function refreshStatus(backlog, cfg, ctx) {
   }
 }
 
+// src/core/tags.ts
+import * as fs9 from "node:fs";
+import * as path8 from "node:path";
+
+// src/core/suggest.ts
+var SYNONYMS = {
+  type: {},
+  status: {},
+  priority: { medium: "normal" }
+};
+var FIELD_LABEL = { type: "types", status: "statuses", priority: "priorities" };
+function osaDistance(a, b) {
+  const m = a.length, n = b.length;
+  const d = [];
+  for (let i = 0; i <= m; i++) d.push([i]);
+  for (let j = 1; j <= n; j++) d[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      let v = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
+        v = Math.min(v, d[i - 2][j - 2] + 1);
+      }
+      d[i][j] = v;
+    }
+  }
+  return d[m][n];
+}
+function suggestValue(field, value, allowed) {
+  const synonym = SYNONYMS[field][value];
+  if (synonym !== void 0 && allowed.includes(synonym)) return synonym;
+  const threshold = value.length <= 4 ? 1 : 2;
+  let best = [];
+  let bestDist = Infinity;
+  for (const v of allowed) {
+    const d = osaDistance(value, v);
+    if (d < bestDist) {
+      bestDist = d;
+      best = [v];
+    } else if (d === bestDist) best.push(v);
+  }
+  return bestDist <= threshold && best.length === 1 ? best[0] : null;
+}
+function valueHint(field, value, allowed) {
+  const known = `Known ${FIELD_LABEL[field]}: ${allowed.join(", ")}`;
+  const suggestion = suggestValue(field, value, allowed);
+  return suggestion === null ? known : `did you mean '${suggestion}'? ${known}`;
+}
+
+// src/core/tags.ts
+function tagsPath(backlog) {
+  return path8.join(backlog, "TAGS.md");
+}
+function tagCounts(elements) {
+  const counts = /* @__PURE__ */ new Map();
+  for (const el of elements) {
+    for (const t of el.tags) counts.set(t, (counts.get(t) || 0) + 1);
+  }
+  return counts;
+}
+function renderTags(elements, cfg) {
+  void cfg;
+  const counts = tagCounts(elements);
+  const names = Array.from(counts.keys()).sort();
+  const lines = names.map((name) => `- \`${name}\` (${counts.get(name)})`);
+  const body = lines.length > 0 ? lines.join("\n") : "(no tags in use)";
+  return `# Tags
+
+${body}
+`;
+}
+function tagsIsFresh(backlog, elements, cfg) {
+  let current;
+  try {
+    current = fs9.readFileSync(tagsPath(backlog), "utf8");
+  } catch {
+    return false;
+  }
+  return current === renderTags(elements, cfg);
+}
+var CTIME_MARGIN_MS2 = 2e3;
+function refreshTags(backlog, cfg, ctx) {
+  if (!cfg.layout.tagsFile) return false;
+  try {
+    const known = new Map(ctx ? ctx.elements.map((e) => [e.file, e]) : []);
+    const cutoff = ctx ? ctx.loadedAt - CTIME_MARGIN_MS2 : -Infinity;
+    const elements = scanBacklog(backlog, cfg.layout).files.map(({ file, folder }) => {
+      const had = known.get(file);
+      if (had !== void 0) {
+        let ctime = Infinity;
+        try {
+          ctime = fs9.statSync(file).ctimeMs;
+        } catch {
+        }
+        if (ctime < cutoff) return had;
+      }
+      return loadElement(file, backlog, cfg, folder);
+    });
+    const fresh = renderTags(elements, cfg);
+    let current = null;
+    try {
+      current = fs9.readFileSync(tagsPath(backlog), "utf8");
+    } catch {
+    }
+    if (current === fresh) return false;
+    atomicReplace(tagsPath(backlog), fresh);
+    return true;
+  } catch (e) {
+    const reason = e && e.message ? String(e.message).split("\n")[0] : String(e);
+    process.stderr.write(`Warning: TAGS.md not updated (${reason})
+`);
+    return false;
+  }
+}
+function normalizeTag(s) {
+  return s.toLowerCase().replace(/[-_]/g, "");
+}
+function nearMatchTag(tag, known) {
+  const target = normalizeTag(tag);
+  const threshold = target.length <= 4 ? 1 : 2;
+  const byNorm = /* @__PURE__ */ new Map();
+  for (const k of known) {
+    const nk = normalizeTag(k);
+    if (!byNorm.has(nk)) byNorm.set(nk, k);
+  }
+  let best = [];
+  let bestDist = Infinity;
+  for (const [nk, raw] of byNorm) {
+    const d = osaDistance(target, nk);
+    if (d < bestDist) {
+      bestDist = d;
+      best = [raw];
+    } else if (d === bestDist) best.push(raw);
+  }
+  return bestDist <= threshold && best.length === 1 ? best[0] : null;
+}
+function warnTagNearMatches(newTags, priorTags) {
+  const known = new Set(priorTags);
+  for (const tag of newTags) {
+    if (known.has(tag)) continue;
+    const match = nearMatchTag(tag, Array.from(known));
+    if (match !== null) {
+      process.stderr.write(
+        `Warning: tag '${tag}' looks like it might be a drifted spelling of existing tag '${match}' -- did you mean to reuse '${match}'?
+`
+      );
+    }
+    known.add(tag);
+  }
+}
+
 // src/commands/cmd-archive.ts
 var STABLE_HINT = "retry once the backlog is stable \u2014 archive takes no --force";
 function archiveFlat(ctx, subtree, ts) {
-  const archiveDir = path8.join(ctx.backlog, ctx.cfg.layout.folders.archive);
-  fs9.mkdirSync(archiveDir, { recursive: true });
-  const plan = subtree.map((e) => ({ el: e, target: path8.join(archiveDir, path8.basename(e.file)) }));
+  const archiveDir = path9.join(ctx.backlog, ctx.cfg.layout.folders.archive);
+  fs10.mkdirSync(archiveDir, { recursive: true });
+  const plan = subtree.map((e) => ({ el: e, target: path9.join(archiveDir, path9.basename(e.file)) }));
   for (const { target } of plan) {
-    if (fs9.existsSync(target)) {
+    if (fs10.existsSync(target)) {
       fail(
         "exists",
         `${target} already exists \u2014 refusing to overwrite; nothing was moved`,
@@ -2247,7 +2508,7 @@ function archiveFlat(ctx, subtree, ts) {
   const moved = [];
   for (const { el: e, target } of plan) {
     atomicWrite(target, renderElement(e, /* @__PURE__ */ new Map([["archived", ts], ["updated", ts]]), void 0));
-    fs9.unlinkSync(e.file);
+    fs10.unlinkSync(e.file);
     moved.push(loadElement(target, ctx.backlog, ctx.cfg));
   }
   return moved;
@@ -2264,14 +2525,14 @@ function archiveHierarchy(ctx, el, subtree, ts) {
   if (el.type !== "subtask") {
     const own = ownFolder(el);
     if (own === null) return refuse(`${el.file} does not lie in a folder of its own named ${el.id}/`);
-    const inside = (f) => f.startsWith(own + path8.sep);
+    const inside = (f) => f.startsWith(own + path9.sep);
     const outside = subtree.filter((e) => !inside(e.file));
     if (outside.length > 0) refuse(`part of its subtree lies outside ${own}/: ${outside.map((e) => e.id).join(", ")}`);
     const foreign = ctx.elements.filter((e) => inside(e.file) && !subtree.includes(e));
     if (foreign.length > 0) refuse(`${own}/ also holds files of other elements: ${foreign.map((e) => e.id).join(", ")}`);
     src = own;
   }
-  const dst = path8.join(ctx.backlog, ctx.cfg.layout.folders.archive, path8.relative(ctx.backlog, src));
+  const dst = path9.join(ctx.backlog, ctx.cfg.layout.folders.archive, path9.relative(ctx.backlog, src));
   const plan = planMove(src, dst);
   if (plan.conflicts.length > 0) {
     fail(
@@ -2283,7 +2544,7 @@ function archiveHierarchy(ctx, el, subtree, ts) {
   for (const e of subtree) compareGuard(e, false, ctx.backlog, STABLE_HINT);
   for (const e of subtree) atomicWrite(e.file, renderElement(e, /* @__PURE__ */ new Map([["archived", ts], ["updated", ts]]), void 0));
   runMove(plan);
-  return subtree.map((e) => loadElement(path8.join(dst, path8.relative(src, e.file)), ctx.backlog, ctx.cfg));
+  return subtree.map((e) => loadElement(path9.join(dst, path9.relative(src, e.file)), ctx.backlog, ctx.cfg));
 }
 function cmdArchive(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("archive")]), true);
@@ -2308,8 +2569,9 @@ ${names}`,
   const ts = nowIso();
   const moved = ctx.cfg.layout.group === "hierarchy" ? archiveHierarchy(ctx, el, subtree, ts) : archiveFlat(ctx, subtree, ts);
   for (const e of subtree) removeClaimDirWholesale(ctx.backlog, e.id);
-  deriveGraph(ctx.elements.filter((e) => !subtree.includes(e)).concat(moved), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.filter((e) => !subtree.includes(e)).concat(moved), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) {
     out(JSON.stringify({
       ok: true,
@@ -2448,12 +2710,15 @@ function cmdCheck(flags) {
         }
         guardedWriteCatchable(prepared2.el, renderElement(prepared2.el, /* @__PURE__ */ new Map([["updated", ts2]]), prepared2.newBody), flags.has("force"), ctx.backlog);
         const fresh2 = loadElement(prepared2.el.file, ctx.backlog, ctx.cfg);
-        deriveGraph(ctx.elements.map((e) => e.file === prepared2.el.file ? fresh2 : e), ctx.idsDir, ctx.cfg.layout);
+        deriveGraph(ctx.elements.map((e) => e.file === prepared2.el.file ? fresh2 : e), ctx.idsDir, ctx.cfg);
         const entry = entryJson(fresh2, ctx.backlog, ctx.cfg);
         return { ok: true, changed: ["body"], entry, _problems: entry._problems };
       }
     );
-    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    if (result.anyWritten) {
+      refreshStatus(ctx.backlog, ctx.cfg, ctx);
+      refreshTags(ctx.backlog, ctx.cfg, ctx);
+    }
     const wrapper = { ok: result.ok, results: result.results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results) out(r.ok ? `${r.id} ${wantOn ? "checked" : "unchecked"}` : `${r.id}: Error: ${r.error}`);
@@ -2471,8 +2736,9 @@ function cmdCheck(flags) {
   const ts = nowIso();
   guardedWrite(el, renderElement(el, /* @__PURE__ */ new Map([["updated", ts]]), prepared.newBody), flags.has("force"), ctx.backlog);
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) emitWriteResult(true, fresh, ["body"], ctx.backlog, ctx.cfg);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} ${wantOn ? "checked" : "unchecked"}`);
   return 0;
@@ -2504,51 +2770,6 @@ function actingNameForRead() {
   const envRaw = process.env.NJ_AUTHOR;
   if (envRaw === void 0 || envRaw === "") return null;
   return validActorName(envRaw);
-}
-
-// src/core/suggest.ts
-var SYNONYMS = {
-  type: {},
-  status: {},
-  priority: { medium: "normal" }
-};
-var FIELD_LABEL = { type: "types", status: "statuses", priority: "priorities" };
-function osaDistance(a, b) {
-  const m = a.length, n = b.length;
-  const d = [];
-  for (let i = 0; i <= m; i++) d.push([i]);
-  for (let j = 1; j <= n; j++) d[0][j] = j;
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      let v = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + cost);
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) {
-        v = Math.min(v, d[i - 2][j - 2] + 1);
-      }
-      d[i][j] = v;
-    }
-  }
-  return d[m][n];
-}
-function suggestValue(field, value, allowed) {
-  const synonym = SYNONYMS[field][value];
-  if (synonym !== void 0 && allowed.includes(synonym)) return synonym;
-  const threshold = value.length <= 4 ? 1 : 2;
-  let best = [];
-  let bestDist = Infinity;
-  for (const v of allowed) {
-    const d = osaDistance(value, v);
-    if (d < bestDist) {
-      bestDist = d;
-      best = [v];
-    } else if (d === bestDist) best.push(v);
-  }
-  return bestDist <= threshold && best.length === 1 ? best[0] : null;
-}
-function valueHint(field, value, allowed) {
-  const known = `Known ${FIELD_LABEL[field]}: ${allowed.join(", ")}`;
-  const suggestion = suggestValue(field, value, allowed);
-  return suggestion === null ? known : `did you mean '${suggestion}'? ${known}`;
 }
 
 // src/commands/cmd-claim.ts
@@ -2594,7 +2815,7 @@ function claimOne(ctx, el, name, status, steal, ts) {
     throw e;
   }
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg);
   const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
   const claim2 = released !== void 0 ? null : { by: name, since: ts };
   return Object.assign(
@@ -2628,7 +2849,10 @@ function cmdClaim(flags) {
       },
       (el2) => claimOne(ctx, el2, name, status, steal, nowIso())
     );
-    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    if (result.anyWritten) {
+      refreshStatus(ctx.backlog, ctx.cfg, ctx);
+      refreshTags(ctx.backlog, ctx.cfg, ctx);
+    }
     const wrapper = { ok: result.ok, results: result.results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results) out(r.ok ? `${r.id} claimed by ${name}` : `${r.id}: Error: ${r.error}`);
@@ -2640,6 +2864,7 @@ function cmdClaim(flags) {
   const ts = nowIso();
   const single = claimOne(ctx, el, name, status, steal, ts);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) {
     out(JSON.stringify(Object.assign({ ok: single.ok, id: el.id }, single), null, 2));
   } else {
@@ -2760,25 +2985,25 @@ function cmdFind(flags, positional) {
 }
 
 // src/commands/cmd-doctor.ts
+import * as fs13 from "node:fs";
+import * as path11 from "node:path";
+
+// src/commands/cmd-new.ts
 import * as fs12 from "node:fs";
 import * as path10 from "node:path";
 
-// src/commands/cmd-new.ts
-import * as fs11 from "node:fs";
-import * as path9 from "node:path";
-
 // src/core/input.ts
-import * as fs10 from "node:fs";
+import * as fs11 from "node:fs";
 function readInputText(value) {
   if (value === "-") {
     try {
-      return fs10.readFileSync(0, "utf8");
+      return fs11.readFileSync(0, "utf8");
     } catch (e) {
       return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`, "pipe the JSON in, or pass a path with --input=<path>");
     }
   }
   try {
-    return fs10.readFileSync(value, "utf8");
+    return fs11.readFileSync(value, "utf8");
   } catch (e) {
     return fail("not_found", `--input: cannot read '${value}' \u2014 ${e.message}`);
   }
@@ -2795,7 +3020,7 @@ function parseInputJson(raw) {
 function collidesCaseInsensitively(dir, name) {
   let names;
   try {
-    names = fs11.readdirSync(dir);
+    names = fs12.readdirSync(dir);
   } catch {
     return false;
   }
@@ -2898,9 +3123,9 @@ function cmdNew(flags) {
   const { type, cleanTitle, parent, status, priority, assignee, tags, deps, sections } = validateNewFlags(ctx, flags);
   let id, dir, file;
   for (let attempt = 0; ; attempt++) {
-    id = allocateId(ctx.idsDir, type, ctx.elements);
-    dir = path9.join(ctx.backlog, ...newPlace(ctx, type, id, parent).split("/"));
-    file = path9.join(dir, id + ".md");
+    id = allocateId(ctx.idsDir, type, ctx.elements, ctx.cfg.ids.shardSize);
+    dir = path10.join(ctx.backlog, ...newPlace(ctx, type, id, parent).split("/"));
+    file = path10.join(dir, id + ".md");
     if (!collidesCaseInsensitively(dir, id + ".md")) break;
     if (attempt >= 100) return hardExit("id_allocation_failed", `nanojira: id allocation failed after 100 retries (${id} collides with an existing file)`);
   }
@@ -2918,11 +3143,13 @@ function cmdNew(flags) {
   fields.set("created", ts);
   fields.set("updated", ts);
   const body = buildBody(ctx, type, cleanTitle, sections);
-  fs11.mkdirSync(dir, { recursive: true });
+  fs12.mkdirSync(dir, { recursive: true });
   atomicWrite(file, serialize(fields, Array.from(fields.keys()), body));
+  if (tags !== void 0 && tags.length > 0) warnTagNearMatches(tags, ctx.elements.flatMap((e) => e.tags));
   const el = loadElement(file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.concat([el]), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.concat([el]), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   const changed = FIELD_ORDER.filter((f) => fields.has(f) && f !== "created" && f !== "updated").concat(SECTION_ROLES.filter((r) => sections.has(r)));
   if (json) emitWriteResult(true, el, changed, ctx.backlog, ctx.cfg);
   else writeFeedback(el, ctx.cfg, `${id} created \u2192 ${file}`);
@@ -2930,9 +3157,9 @@ function cmdNew(flags) {
 }
 var REAL_ID_SHAPE = new RegExp("^(" + Object.values(TYPE_PREFIX).join("|") + ")-\\d+$");
 var PLAN_ALLOWED_KEYS = /* @__PURE__ */ new Set([...NEW_FIELDS, "ref"]);
-function failAtPath(code, message, path14) {
+function failAtPath(code, message, path15) {
   const e = new Fail(message, void 0, code);
-  e.failedAt = path14;
+  e.failedAt = path15;
   throw e;
 }
 function flattenPlan(nodes, basePath, parentIndex, out2) {
@@ -2978,7 +3205,7 @@ function collectNodeSections(raw, nodePath, stdinState) {
         stdinState.consumed = true;
         let stdinText;
         try {
-          stdinText = fs11.readFileSync(0, "utf8");
+          stdinText = fs12.readFileSync(0, "utf8");
         } catch (e) {
           return fail("invalid_value", `cannot read stdin \u2014 ${e.message}`);
         }
@@ -2987,7 +3214,7 @@ function collectNodeSections(raw, nodePath, stdinState) {
       }
       let text;
       try {
-        text = fs11.readFileSync(filePath, "utf8");
+        text = fs12.readFileSync(filePath, "utf8");
       } catch (e) {
         return fail("not_found", `'${role}-file': cannot read '${filePath}' \u2014 ${e.message}`);
       }
@@ -3193,9 +3420,9 @@ function cmdNewInput(ctx, inputValue, dryRun) {
       const parentId = v.parentMode === "explicit" ? v.explicitParentId : v.parentMode === "implied" ? realIdByIndex[v.parentIndex] : void 0;
       let id = "", dir = "", file = "";
       for (let attempt = 0; ; attempt++) {
-        id = allocateId(liveCtx.idsDir, v.type, liveCtx.elements);
-        dir = path9.join(liveCtx.backlog, ...newPlace(liveCtx, v.type, id, parentId).split("/"));
-        file = path9.join(dir, id + ".md");
+        id = allocateId(liveCtx.idsDir, v.type, liveCtx.elements, liveCtx.cfg.ids.shardSize);
+        dir = path10.join(liveCtx.backlog, ...newPlace(liveCtx, v.type, id, parentId).split("/"));
+        file = path10.join(dir, id + ".md");
         if (!collidesCaseInsensitively(dir, id + ".md")) break;
         if (attempt >= 100) return hardExit("id_allocation_failed", `nanojira: id allocation failed after 100 retries (${id} collides with an existing file)`);
       }
@@ -3222,16 +3449,18 @@ function cmdNewInput(ctx, inputValue, dryRun) {
       lastFields = fields;
       lastSections = v.sections;
       const body = buildBody(ctx, v.type, v.cleanTitle, v.sections);
-      fs11.mkdirSync(dir, { recursive: true });
+      fs12.mkdirSync(dir, { recursive: true });
       atomicWrite(file, serialize(fields, Array.from(fields.keys()), body));
       created.push(id);
       if (typeof node.raw.ref === "string") refRealId.set(node.raw.ref, id);
+      if (v.tags !== void 0 && v.tags.length > 0) warnTagNearMatches(v.tags, elements.flatMap((e) => e.tags));
       const el = loadElement(file, liveCtx.backlog, liveCtx.cfg);
       elements = elements.concat([el]);
-      deriveGraph(elements, liveCtx.idsDir, liveCtx.cfg.layout);
+      deriveGraph(elements, liveCtx.idsDir, liveCtx.cfg);
       entries.push(entryJson(el, ctx.backlog, ctx.cfg));
     } catch (e) {
       refreshStatus(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }));
+      refreshTags(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }));
       if (e instanceof InternalInvariantBroken) throw e;
       const extra = created.length > 0 ? { created, refs: Object.fromEntries(refRealId) } : void 0;
       if (e instanceof Fail) return emitPlanFailure(e, labelOf(node), extra);
@@ -3241,6 +3470,7 @@ function cmdNewInput(ctx, inputValue, dryRun) {
     }
   }
   refreshStatus(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }));
+  refreshTags(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }));
   if (isSingular && flat.length === 1) {
     const fields = lastFields;
     const sections = lastSections;
@@ -3323,11 +3553,11 @@ function collectFindings(ctx) {
     findings.push({
       code: "backlog:legacy_layout",
       severity: "error",
-      file: path10.join(ctx.backlog, LEGACY_CONFIG_REL),
+      file: path11.join(ctx.backlog, LEGACY_CONFIG_REL),
       message: `the backlog is in the v2 (legacy) layout (${LEGACY_CONFIG_REL}, ${LEGACY_IDS_REL}/) \u2014 \`nanojira doctor --fix\` migrates it to .nanojira/`
     });
   }
-  const configFile = path10.join(ctx.backlog, ctx.legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
+  const configFile = path11.join(ctx.backlog, ctx.legacy ? LEGACY_CONFIG_REL : V3_CONFIG_REL);
   for (const e of ctx.configErrors) {
     findings.push({ code: "config:invalid", severity: "error", file: configFile, message: e });
   }
@@ -3364,19 +3594,35 @@ function collectFindings(ctx) {
     findings.push({
       code: "backlog:claims_unignored",
       severity: "warning",
-      file: path10.join(ctx.backlog, ".gitignore"),
+      file: path11.join(ctx.backlog, ".gitignore"),
       message: ".nanojira/claims/ exists but .gitignore has no line that is exactly '.nanojira/claims/'"
     });
   }
   for (const { dir, reason } of scan.unreadable) {
     findings.push({ code: "backlog:unreadable_dir", severity: "error", file: dir, message: `folder cannot be listed (${reason}) \u2014 element files in it are not seen` });
   }
-  const tombs = readTombstones(ctx.idsDir);
+  const tombs = readTombstones(ctx.idsDir, ctx.cfg.ids.shardSize);
   if (ctx.elements.length > 0 && tombs.size === 0) {
-    findings.push({ code: "backlog:ids_missing", severity: "error", file: ctx.idsDir, message: `${path10.relative(ctx.backlog, ctx.idsDir)}/ is missing or empty while element files exist \u2014 the never-reuse guarantee is not in force` });
+    findings.push({ code: "backlog:ids_missing", severity: "error", file: ctx.idsDir, message: `${path11.relative(ctx.backlog, ctx.idsDir)}/ is missing or empty while element files exist \u2014 the never-reuse guarantee is not in force` });
+  }
+  if (ctx.configErrors.length === 0) {
+    const actual = detectIdsLayout(ctx.idsDir);
+    const wantSharded = ctx.cfg.ids.shardSize > 0;
+    if (actual === "mixed" || actual === "flat" && wantSharded || actual === "sharded" && !wantSharded) {
+      const want = wantSharded ? `sharded (ids.shardSize=${ctx.cfg.ids.shardSize})` : "flat";
+      findings.push({
+        code: "backlog:ids_layout_mismatch",
+        severity: "error",
+        file: ctx.idsDir,
+        message: `${path11.relative(ctx.backlog, ctx.idsDir)}/ is laid out ${actual} on disk but the configuration wants ${want} \u2014 \`nanojira doctor --fix\` moves the tombstones`
+      });
+    }
   }
   if (ctx.configErrors.length === 0 && ctx.cfg.layout.statusFile && !statusIsFresh(ctx.backlog, ctx.elements, ctx.cfg)) {
-    findings.push({ code: "backlog:status_stale", severity: "warning", file: path10.join(ctx.backlog, "STATUS.md"), message: "STATUS.md is missing or differs from a fresh rendering \u2014 `nanojira doctor --fix` regenerates it" });
+    findings.push({ code: "backlog:status_stale", severity: "warning", file: path11.join(ctx.backlog, "STATUS.md"), message: "STATUS.md is missing or differs from a fresh rendering \u2014 `nanojira doctor --fix` regenerates it" });
+  }
+  if (ctx.configErrors.length === 0 && ctx.cfg.layout.tagsFile && !tagsIsFresh(ctx.backlog, ctx.elements, ctx.cfg)) {
+    findings.push({ code: "backlog:tags_stale", severity: "warning", file: path11.join(ctx.backlog, "TAGS.md"), message: "TAGS.md is missing or differs from a fresh rendering \u2014 `nanojira doctor --fix` regenerates it" });
   }
   if (ctx.cfg.problems.ignore.length === 0) return findings;
   const ignore = new Set(ctx.cfg.problems.ignore);
@@ -3387,11 +3633,11 @@ function strayTmpFiles(dirs) {
   for (const dir of dirs) {
     let names;
     try {
-      names = fs12.readdirSync(dir);
+      names = fs13.readdirSync(dir);
     } catch {
       continue;
     }
-    for (const n of names.sort()) if (n.startsWith(".nj-tmp-")) found.push(path10.join(dir, n));
+    for (const n of names.sort()) if (n.startsWith(".nj-tmp-")) found.push(path11.join(dir, n));
   }
   return found;
 }
@@ -3435,14 +3681,14 @@ var CLAIMS_GITIGNORE_LINE = ".nanojira/claims/";
 function gitignoreHasClaimsLine(backlog) {
   let content;
   try {
-    content = fs12.readFileSync(path10.join(backlog, ".gitignore"), "utf8");
+    content = fs13.readFileSync(path11.join(backlog, ".gitignore"), "utf8");
   } catch {
     return false;
   }
   return content.split("\n").some((l) => l.replace(/\r$/, "") === CLAIMS_GITIGNORE_LINE);
 }
 function claimsNeedGitignoreLine(backlog) {
-  return fs12.existsSync(claimsRootDir(backlog)) && !gitignoreHasClaimsLine(backlog);
+  return fs13.existsSync(claimsRootDir(backlog)) && !gitignoreHasClaimsLine(backlog);
 }
 function appendGitignoreLine(content, line) {
   if (content === "") return line + "\n";
@@ -3451,7 +3697,7 @@ function appendGitignoreLine(content, line) {
   return content + "\n" + line + "\n";
 }
 function backlogLabel(backlog) {
-  const rel = path10.relative(workingDir(), backlog);
+  const rel = path11.relative(workingDir(), backlog);
   return (rel === "" ? "." : rel) + "/";
 }
 function describeFinding(code, el, dupGroups, cfg) {
@@ -3530,7 +3776,7 @@ function cmdDoctor(flags) {
     out(`${backlogLabel(ctx.backlog)}: ${ctx.elements.length} entries, ${errors.length} error${errors.length === 1 ? "" : "s"}, ${warnings.length} warning${warnings.length === 1 ? "" : "s"}`);
     if (findings.length > 0) out("");
     for (const f of findings) {
-      const where = f.element ? f.element : path10.relative(ctx.backlog, f.file);
+      const where = f.element ? f.element : path11.relative(ctx.backlog, f.file);
       const line = f.line ? ` (line ${f.line})` : "";
       out(`${f.severity === "error" ? "ERROR  " : "WARNING"} ${where}: ${f.message}${line}`);
     }
@@ -3539,7 +3785,7 @@ function cmdDoctor(flags) {
 }
 function fixSkip(el, notes) {
   if (el.problems.has("file:unreadable")) {
-    notes.push(`${path10.basename(el.file)}: cannot be read \u2014 not touched by --fix`);
+    notes.push(`${path11.basename(el.file)}: cannot be read \u2014 not touched by --fix`);
     return true;
   }
   if (el.problems.has("frontmatter:unreadable")) {
@@ -3572,14 +3818,14 @@ function makeFixCtx(flags) {
       if (k === from) {
         mtimes.delete(k);
         mtimes.set(to, v);
-      } else if (k.startsWith(from + path10.sep)) {
+      } else if (k.startsWith(from + path11.sep)) {
         mtimes.delete(k);
         mtimes.set(to + k.slice(from.length), v);
       }
     }
   };
   const rename = (from, to) => {
-    fs12.renameSync(from, to);
+    fs13.renameSync(from, to);
     rekey(from, to);
   };
   const move = (plan) => {
@@ -3590,34 +3836,123 @@ function makeFixCtx(flags) {
 }
 function fixStep0(ctx, fc) {
   const backlog = ctx.backlog;
-  const v3Config = path10.join(backlog, V3_CONFIG_REL);
-  const v3Ids = path10.join(backlog, V3_IDS_REL);
-  if (fs12.existsSync(v3Config) || fs12.existsSync(v3Ids)) {
+  const v3Config = path11.join(backlog, V3_CONFIG_REL);
+  const v3Ids = path11.join(backlog, V3_IDS_REL);
+  if (fs13.existsSync(v3Config) || fs13.existsSync(v3Ids)) {
     fc.notes.push(`both the v2 and the v3 place exist (${LEGACY_CONFIG_REL} / ${LEGACY_IDS_REL} and ${V3_CONFIG_REL} / ${V3_IDS_REL}) \u2014 ambiguous, nothing moved; remove one copy by hand and run \`nanojira doctor --fix\` again`);
     return;
   }
-  fs12.mkdirSync(path10.join(backlog, V3_DIR_REL), { recursive: true });
-  fc.rename(path10.join(backlog, LEGACY_CONFIG_REL), v3Config);
-  fc.rename(path10.join(backlog, LEGACY_IDS_REL), v3Ids);
-  const legacyIndex = path10.join(backlog, LEGACY_INDEX_REL);
-  if (fs12.existsSync(legacyIndex)) fs12.unlinkSync(legacyIndex);
+  fs13.mkdirSync(path11.join(backlog, V3_DIR_REL), { recursive: true });
+  fc.rename(path11.join(backlog, LEGACY_CONFIG_REL), v3Config);
+  fc.rename(path11.join(backlog, LEGACY_IDS_REL), v3Ids);
+  const legacyIndex = path11.join(backlog, LEGACY_INDEX_REL);
+  if (fs13.existsSync(legacyIndex)) fs13.unlinkSync(legacyIndex);
   fc.actions.push(`migrated the legacy layout: ${LEGACY_CONFIG_REL} \u2192 ${V3_CONFIG_REL}, ${LEGACY_IDS_REL}/ \u2192 ${V3_IDS_REL}/`);
 }
 function fixStrayIds(ctx, fc) {
   const backlog = ctx.backlog;
-  const strayDir = path10.join(backlog, LEGACY_IDS_REL);
-  if (!fs12.existsSync(strayDir)) return;
+  const strayDir = path11.join(backlog, LEGACY_IDS_REL);
+  if (!fs13.existsSync(strayDir)) return;
   const stray = readTombstones(strayDir);
-  const real = readTombstones(path10.join(backlog, V3_IDS_REL));
+  const real = readTombstones(path11.join(backlog, V3_IDS_REL), ctx.cfg.ids.shardSize);
   for (const id of stray) if (!real.has(id)) return;
-  fs12.rmSync(strayDir, { recursive: true, force: true });
+  fs13.rmSync(strayDir, { recursive: true, force: true });
   fc.notes.push(`removed the stray top-level ${LEGACY_IDS_REL}/ (every tombstone in it was already in ${V3_IDS_REL}/, \xA7 14 step 0)`);
 }
+var TOMBSTONE_RE = /^(EPIC|TSK|SUB)-(\d+)$/;
+function detectIdsLayout(idsDir) {
+  let entries;
+  try {
+    entries = fs13.readdirSync(idsDir, { withFileTypes: true });
+  } catch {
+    return "empty";
+  }
+  let flat = false, sharded = false;
+  for (const e of entries) {
+    if (e.name.startsWith(".")) continue;
+    if (!e.isDirectory() && TOMBSTONE_RE.test(e.name)) flat = true;
+    else if (e.isDirectory() && Object.prototype.hasOwnProperty.call(PREFIX_TYPE, e.name)) sharded = true;
+  }
+  if (flat && sharded) return "mixed";
+  if (flat) return "flat";
+  if (sharded) return "sharded";
+  return "empty";
+}
+function fixIdsLayout(ctx, fc) {
+  const idsDir = ctx.idsDir;
+  const actual = detectIdsLayout(idsDir);
+  const wantSharded = ctx.cfg.ids.shardSize > 0;
+  if (actual === "empty") return;
+  if (actual === "flat" && !wantSharded) return;
+  if (actual === "sharded" && wantSharded) return;
+  let moved = 0;
+  if (!wantSharded) {
+    for (const prefix of Object.keys(PREFIX_TYPE)) {
+      const typeDir = path11.join(idsDir, prefix);
+      let buckets;
+      try {
+        buckets = fs13.readdirSync(typeDir);
+      } catch {
+        continue;
+      }
+      for (const b of buckets) {
+        if (b.startsWith(".")) continue;
+        const bucketDir = path11.join(typeDir, b);
+        let names;
+        try {
+          names = fs13.readdirSync(bucketDir);
+        } catch {
+          continue;
+        }
+        for (const n of names) {
+          if (n.startsWith(".")) continue;
+          const target = path11.join(idsDir, n);
+          if (fs13.existsSync(target)) {
+            fc.notes.push(`${path11.join(prefix, b, n)}: cannot move to the flat layout \u2014 ${n} already exists there`);
+            continue;
+          }
+          fs13.renameSync(path11.join(bucketDir, n), target);
+          moved++;
+        }
+        try {
+          fs13.rmdirSync(bucketDir);
+        } catch {
+        }
+      }
+      try {
+        fs13.rmdirSync(typeDir);
+      } catch {
+      }
+    }
+  } else {
+    let entries;
+    try {
+      entries = fs13.readdirSync(idsDir);
+    } catch {
+      entries = [];
+    }
+    for (const n of entries) {
+      if (n.startsWith(".")) continue;
+      if (!TOMBSTONE_RE.test(n)) continue;
+      const { dir, file } = tombstoneLocation(idsDir, n, ctx.cfg.ids.shardSize);
+      if (fs13.existsSync(file)) {
+        fc.notes.push(`${n}: cannot move to the sharded layout \u2014 already exists at ${path11.relative(idsDir, file)}`);
+        continue;
+      }
+      fs13.mkdirSync(dir, { recursive: true });
+      fs13.renameSync(path11.join(idsDir, n), file);
+      moved++;
+    }
+  }
+  if (moved > 0) {
+    fc.actions.push(`moved ${moved} tombstone${moved === 1 ? "" : "s"} in ${path11.relative(ctx.backlog, idsDir)}/ to the ${wantSharded ? "sharded" : "flat"} layout`);
+  }
+}
 function fixGitignore(backlog, fc, verbose) {
-  const p = path10.join(backlog, ".gitignore");
+  const p = path11.join(backlog, ".gitignore");
   let content;
   try {
-    content = fs12.readFileSync(p, "utf8");
+    content = fs13.readFileSync(p, "utf8");
   } catch {
     if (verbose) fc.notes.push(".gitignore does not exist \u2014 not created");
     return;
@@ -3637,10 +3972,10 @@ function fixGitignore(backlog, fc, verbose) {
   fc.actions.push(`.gitignore: replaced the '${LEGACY_INDEX_REL}' line with '${V3_INDEX_REL}'`);
 }
 function fixReadme(backlog, fc, verbose) {
-  const p = path10.join(backlog, "README.md");
+  const p = path11.join(backlog, "README.md");
   let content;
   try {
-    content = fs12.readFileSync(p, "utf8");
+    content = fs13.readFileSync(p, "utf8");
   } catch {
     return;
   }
@@ -3677,13 +4012,13 @@ function fixStep2(fc) {
   for (const el of ctx.elements) {
     if (fc.guard(el)) continue;
     if (!el.problems.has("id:mismatch")) continue;
-    const target = path10.join(path10.dirname(el.file), el.id + ".md");
-    if (fs12.existsSync(target)) {
-      fc.notes.push(`${el.file}: cannot rename to ${path10.basename(target)} \u2014 target exists`);
+    const target = path11.join(path11.dirname(el.file), el.id + ".md");
+    if (fs13.existsSync(target)) {
+      fc.notes.push(`${el.file}: cannot rename to ${path11.basename(target)} \u2014 target exists`);
       continue;
     }
     fc.rename(el.file, target);
-    fc.actions.push(`renamed ${path10.basename(el.file)} \u2192 ${path10.basename(target)}`);
+    fc.actions.push(`renamed ${path11.basename(el.file)} \u2192 ${path11.basename(target)}`);
   }
   return { ...fc, stage: 3 };
 }
@@ -3721,9 +4056,9 @@ function fixStep3(fc) {
           continue;
         }
         const src = own === null ? el.file : own;
-        const dst = own === null ? path10.join(ctx.backlog, dir, path10.basename(el.file)) : path10.join(ctx.backlog, dir);
+        const dst = own === null ? path11.join(ctx.backlog, dir, path11.basename(el.file)) : path11.join(ctx.backlog, dir);
         const shown = (dir === "" ? "." : dir) + "/";
-        if (layout.group === "type") fs12.mkdirSync(path10.dirname(dst), { recursive: true });
+        if (layout.group === "type") fs13.mkdirSync(path11.dirname(dst), { recursive: true });
         const plan = planMove(src, dst);
         if (plan.conflicts.length > 0) {
           fc.notes.push(`${el.id}: cannot move into ${shown} \u2014 target exists`);
@@ -3731,7 +4066,7 @@ function fixStep3(fc) {
           continue;
         }
         fc.move(plan);
-        left.add(path10.dirname(src));
+        left.add(path11.dirname(src));
         fc.actions.push(own === null ? `moved ${el.id} \u2192 ${shown}` : `moved ${el.id} with its folder \u2192 ${shown}`);
         moved = true;
         break;
@@ -3742,7 +4077,7 @@ function fixStep3(fc) {
   return { ...fc, stage: 4 };
 }
 function folderArchivedAgrees(elements, own, expectArchived) {
-  const prefix = own + path10.sep;
+  const prefix = own + path11.sep;
   return elements.every((e) => !e.file.startsWith(prefix) || (e.archived || e.archivedAt !== null) === expectArchived);
 }
 function chainProblem(el) {
@@ -3757,19 +4092,22 @@ function chainProblem(el) {
 function fixStep4(fc) {
   const ctx = fc.reload();
   const dir = ctx.idsDir;
-  fs12.mkdirSync(dir, { recursive: true });
-  const tombs = readTombstones(dir);
+  const shardSize = ctx.cfg.ids.shardSize;
+  fs13.mkdirSync(dir, { recursive: true });
+  const tombs = readTombstones(dir, shardSize);
   let created = 0;
   for (const el of ctx.elements) {
     if (!idShaped(el) || tombs.has(el.id)) continue;
+    const { dir: tdir, file } = tombstoneLocation(dir, el.id, shardSize);
+    if (tdir !== dir) fs13.mkdirSync(tdir, { recursive: true });
     try {
-      fs12.closeSync(fs12.openSync(path10.join(dir, el.id), "wx"));
+      fs13.closeSync(fs13.openSync(file, "wx"));
       created++;
     } catch {
     }
   }
   if (created > 0) {
-    fc.actions.push(`created ${created} missing tombstone${created === 1 ? "" : "s"} in ${path10.relative(ctx.backlog, dir)}/`);
+    fc.actions.push(`created ${created} missing tombstone${created === 1 ? "" : "s"} in ${path11.relative(ctx.backlog, dir)}/`);
     fc.notes.push("tombstones for already-deleted IDs cannot be recovered \u2014 the never-reuse guarantee is void for those numbers");
   }
   return { ...fc, stage: 5 };
@@ -3803,8 +4141,8 @@ function fixStep6(fc) {
 function fixStep7(fc) {
   const ctx = fc.reload();
   for (const file of strayTmpFiles(ctx.scan.dirs.concat(claimsScanDirs(ctx.backlog)))) {
-    fs12.unlinkSync(file);
-    fc.actions.push(`removed stray temp file ${path10.relative(ctx.backlog, file)}`);
+    fs13.unlinkSync(file);
+    fc.actions.push(`removed stray temp file ${path11.relative(ctx.backlog, file)}`);
   }
   return { ...fc, stage: 8 };
 }
@@ -3816,14 +4154,14 @@ function fixStep7a(fc) {
     const entry = highestEntry(dir);
     const holder = entry && entry.kind === "claimed" ? entry.name : null;
     removeClaimDirWholesale(ctx.backlog, id);
-    if (fs12.existsSync(dir)) continue;
+    if (fs13.existsSync(dir)) continue;
     fc.actions.push(holder !== null ? `${id}: released ${holder}` : `removed the orphaned claim directory for ${id}`);
   }
   if (claimsNeedGitignoreLine(ctx.backlog)) {
-    const p = path10.join(ctx.backlog, ".gitignore");
+    const p = path11.join(ctx.backlog, ".gitignore");
     let content;
     try {
-      content = fs12.readFileSync(p, "utf8");
+      content = fs13.readFileSync(p, "utf8");
     } catch {
       fc.notes.push(".gitignore does not exist \u2014 not created (the claims/ line was not added)");
       return { ...fc, stage: 8 };
@@ -3850,6 +4188,7 @@ function fixStep8(fc) {
 }
 function fixStep9(fc) {
   const before = fc.reload();
+  if (refreshTags(before.backlog, before.cfg, before)) fc.actions.push("regenerated TAGS.md");
   if (refreshStatus(before.backlog, before.cfg, before)) fc.actions.push("regenerated STATUS.md");
   const ctx = fc.reload();
   const findings = collectFindings(ctx);
@@ -3869,6 +4208,7 @@ function doctorFix(flags, json) {
   if (start.legacy || start.configErrors.length > 0) return fixReport(json, fc0.actions, fc0.notes, start, collectFindings(start));
   fixGitignore(start.backlog, fc0, wasLegacy);
   fixReadme(start.backlog, fc0, wasLegacy);
+  fixIdsLayout(start, fc0);
   const fc1 = fixSnapshotMtimes(fc0);
   const fc2 = fixStep1(fc1);
   const fc3 = fixStep2(fc2);
@@ -3895,7 +4235,7 @@ function fixReport(json, actions, notes, ctx, findings) {
     const warnings = findings.filter((f) => f.severity === "warning");
     out(`${backlogLabel(ctx.backlog)}: ${ctx.elements.length} entries, ${errors.length} error${errors.length === 1 ? "" : "s"}, ${warnings.length} warning${warnings.length === 1 ? "" : "s"} remaining`);
     for (const f of findings) {
-      const where = f.element ? f.element : path10.relative(ctx.backlog, f.file);
+      const where = f.element ? f.element : path11.relative(ctx.backlog, f.file);
       out(`${f.severity === "error" ? "ERROR  " : "WARNING"} ${where}: ${f.message}`);
     }
   }
@@ -3903,33 +4243,35 @@ function fixReport(json, actions, notes, ctx, findings) {
 }
 
 // src/commands/cmd-init.ts
-import * as fs13 from "node:fs";
-import * as path11 from "node:path";
+import * as fs14 from "node:fs";
+import * as path12 from "node:path";
 function cmdInit(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json"]), false);
   const json = flags.has("json");
   const backlog = initLocation(flags);
-  if (fs13.existsSync(backlog)) fail("exists", `${backlog} already exists`);
+  if (fs14.existsSync(backlog)) fail("exists", `${backlog} already exists`);
   try {
-    fs13.mkdirSync(backlog, { recursive: true });
+    fs14.mkdirSync(backlog, { recursive: true });
     for (const d of ["epics", "tasks", "subtasks", "archive", V3_IDS_REL]) {
-      fs13.mkdirSync(path11.join(backlog, d), { recursive: true });
+      fs14.mkdirSync(path12.join(backlog, d), { recursive: true });
     }
-    const { claims, problems, ...written } = DEFAULT_CONFIG;
+    const { claims, problems, ids, ...written } = DEFAULT_CONFIG;
     void claims;
     void problems;
-    fs13.writeFileSync(path11.join(backlog, ".nanojira", "config.json"), JSON.stringify(written, null, 2) + "\n", "utf8");
-    fs13.writeFileSync(path11.join(backlog, ".gitignore"), ".nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n", "utf8");
-    fs13.writeFileSync(path11.join(backlog, "README.md"), V3_README, "utf8");
+    void ids;
+    fs14.writeFileSync(path12.join(backlog, ".nanojira", "config.json"), JSON.stringify(written, null, 2) + "\n", "utf8");
+    fs14.writeFileSync(path12.join(backlog, ".gitignore"), ".nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n", "utf8");
+    fs14.writeFileSync(path12.join(backlog, "README.md"), V3_README, "utf8");
   } catch (e) {
     fail("io_error", `cannot create the backlog at ${backlog}: ${oneLine(e)}`);
   }
   refreshStatus(backlog, { ...DEFAULT_CONFIG });
+  refreshTags(backlog, { ...DEFAULT_CONFIG });
   if (json) out(JSON.stringify({ ok: true, backlog, changed: ["created"] }, null, 2));
   else {
     out(`Created backlog at ${backlog}`);
     out("  epics/ tasks/ subtasks/ archive/ .nanojira/");
-    out("  .nanojira/config.json .nanojira/ids/ .gitignore README.md STATUS.md");
+    out("  .nanojira/config.json .nanojira/ids/ .gitignore README.md STATUS.md TAGS.md");
   }
   return 0;
 }
@@ -4021,6 +4363,7 @@ function cmdNext(flags) {
       throw e;
     }
     refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    refreshTags(ctx.backlog, ctx.cfg, ctx);
     if (json) {
       out(JSON.stringify(Object.assign({ ok: single.ok, id: el.id }, single, { skipped }), null, 2));
     } else {
@@ -4095,12 +4438,15 @@ function cmdNote(flags, positional) {
         const newBody2 = withNote(el2, text, signer2, ts2);
         guardedWriteCatchable(el2, renderElement(el2, /* @__PURE__ */ new Map([["updated", ts2]]), newBody2), flags.has("force"), ctx.backlog);
         const fresh2 = loadElement(el2.file, ctx.backlog, ctx.cfg);
-        deriveGraph(ctx.elements.map((e) => e.file === el2.file ? fresh2 : e), ctx.idsDir, ctx.cfg.layout);
+        deriveGraph(ctx.elements.map((e) => e.file === el2.file ? fresh2 : e), ctx.idsDir, ctx.cfg);
         const entry = entryJson(fresh2, ctx.backlog, ctx.cfg);
         return { ok: true, changed: ["body"], entry, _problems: entry._problems };
       }
     );
-    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    if (result.anyWritten) {
+      refreshStatus(ctx.backlog, ctx.cfg, ctx);
+      refreshTags(ctx.backlog, ctx.cfg, ctx);
+    }
     const wrapper = { ok: result.ok, results: result.results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results) out(r.ok ? `${r.id} note added` : `${r.id}: Error: ${r.error}`);
@@ -4115,8 +4461,9 @@ function cmdNote(flags, positional) {
   const overrides = /* @__PURE__ */ new Map([["updated", ts]]);
   guardedWrite(el, renderElement(el, overrides, newBody), flags.has("force"), ctx.backlog);
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) emitWriteResult(true, fresh, ["body"], ctx.backlog, ctx.cfg);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} note added`);
   return 0;
@@ -4177,10 +4524,10 @@ function cmdRelease(flags) {
 }
 
 // src/commands/cmd-rm.ts
-import * as fs14 from "node:fs";
+import * as fs15 from "node:fs";
 function removeIfEmpty(dir) {
   try {
-    fs14.rmdirSync(dir);
+    fs15.rmdirSync(dir);
   } catch {
   }
 }
@@ -4216,12 +4563,13 @@ ${archivedVictims.map((v) => "  " + v.id).join("\n")}`,
   const dependents = ctx.elements.filter((e) => !victimIds.has(e.id) && e.depends_on.some((d) => victimIds.has(d))).sort(compareElements);
   const entries = victims.map((v) => entryJson(v, ctx.backlog, ctx.cfg));
   for (const v of victims.slice().reverse()) {
-    fs14.unlinkSync(v.file);
+    fs15.unlinkSync(v.file);
     const own = ctx.cfg.layout.group === "hierarchy" ? ownFolder(v) : null;
     if (own !== null) removeIfEmpty(own);
     removeClaimDirWholesale(ctx.backlog, v.id);
   }
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) {
     if (flags.has("cascade") && kids.length > 0) {
       out(JSON.stringify({ ok: true, ids: victims.map((v) => v.id), changed: ["deleted"], entries, _problems: [], dependents: dependents.map((d) => d.id) }, null, 2));
@@ -4239,7 +4587,7 @@ ${archivedVictims.map((v) => "  " + v.id).join("\n")}`,
 }
 
 // src/commands/cmd-set.ts
-import * as path12 from "node:path";
+import * as path13 from "node:path";
 function buildSetInputFlags(inputValue) {
   const raw = readInputText(inputValue);
   const parsed = parseInputJson(raw);
@@ -4272,9 +4620,9 @@ function reparentMove(ctx, el, newParentId) {
   const shadow = { ...el, parent: newParentId };
   byId.set(el.id, shadow);
   const dir = expectedPlace(shadow, byId, ctx.cfg.layout);
-  if (el.type === "subtask") return { src: el.file, dst: path12.join(ctx.backlog, dir, path12.basename(el.file)) };
+  if (el.type === "subtask") return { src: el.file, dst: path13.join(ctx.backlog, dir, path13.basename(el.file)) };
   const own = ownFolder(el);
-  return { src: own, dst: path12.join(ctx.backlog, dir) };
+  return { src: own, dst: path13.join(ctx.backlog, dir) };
 }
 function setsFinalStatus(ctx, overrides) {
   return overrides.get("status") === ctx.cfg.statuses[ctx.cfg.statuses.length - 1];
@@ -4328,7 +4676,7 @@ function cmdSet(flags) {
         }
         if (item.movePlan !== null) runMove(item.movePlan);
         const fresh2 = loadElement(item.moveDst ?? item.el.file, ctx.backlog, ctx.cfg);
-        deriveGraph(ctx.elements.map((e) => e.file === item.el.file ? fresh2 : e), ctx.idsDir, ctx.cfg.layout);
+        deriveGraph(ctx.elements.map((e) => e.file === item.el.file ? fresh2 : e), ctx.idsDir, ctx.cfg);
         const entry = entryJson(fresh2, ctx.backlog, ctx.cfg);
         return Object.assign(
           { ok: true, changed: item.changed, entry, _problems: entry._problems },
@@ -4337,7 +4685,10 @@ function cmdSet(flags) {
         );
       }
     );
-    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    if (result.anyWritten) {
+      refreshStatus(ctx.backlog, ctx.cfg, ctx);
+      refreshTags(ctx.backlog, ctx.cfg, ctx);
+    }
     const wrapper = { ok: result.ok, results: result.results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results) out(r.ok ? `${r.id} \u2192 ${(r.changed || []).join(", ") || "unchanged"}` : `${r.id}: Error: ${r.error}`);
@@ -4368,8 +4719,9 @@ function cmdSet(flags) {
   }
   if (movePlan !== null) runMove(movePlan);
   const fresh = loadElement(moveDst ?? el.file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.map((e) => e.file === el.file ? fresh : e), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) {
     const extra = Object.assign({}, released !== void 0 ? { released: released.holder } : {}, openAcceptanceExtra(fresh, ctx.cfg, isFinal));
     emitWriteResult(true, fresh, changed, ctx.backlog, ctx.cfg, extra);
@@ -4441,7 +4793,7 @@ function collectSetOverrides(ctx, el, flags, allowOpen) {
           );
         }
         movePlan = plan;
-        moveDst = el.type === "subtask" ? move.dst : path12.join(move.dst, path12.basename(el.file));
+        moveDst = el.type === "subtask" ? move.dst : path13.join(move.dst, path13.basename(el.file));
       }
     }
   }
@@ -4490,6 +4842,8 @@ ${names}`,
     if (nextTags.length !== cur.length || nextTags.some((x, i) => x !== cur[i])) {
       overrides.set("tags", nextTags.length === 0 ? void 0 : nextTags);
       changed.push("tags");
+      const added = nextTags.filter((t) => !cur.includes(t));
+      if (added.length > 0) warnTagNearMatches(added, ctx.elements.flatMap((e) => e.tags));
     }
   }
   const depsV = parseListFlag(flags, "depends_on");
@@ -4603,6 +4957,21 @@ function cmdStatus(flags) {
   return 0;
 }
 
+// src/commands/cmd-tags.ts
+function cmdTags(flags) {
+  checkFlags(flags, [], /* @__PURE__ */ new Set(["json"]), false);
+  const ctx = context(flags);
+  const counts = tagCounts(ctx.elements);
+  const names = Array.from(counts.keys()).sort();
+  if (flags.has("json")) {
+    out(JSON.stringify({ ok: true, tags: names.map((name) => ({ name, count: counts.get(name) })) }, null, 2));
+    return 0;
+  }
+  if (names.length === 0) out("(no tags in use)");
+  for (const name of names) out(`${name} (${counts.get(name)})`);
+  return 0;
+}
+
 // src/commands/cmd-tree.ts
 function cmdTree(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", "all", ...cliFieldNames("tree")]), false);
@@ -4649,7 +5018,7 @@ function cmdTree(flags) {
 }
 
 // src/commands/cmd-unarchive.ts
-import * as path13 from "node:path";
+import * as path14 from "node:path";
 var STABLE_HINT3 = "retry once the backlog is stable \u2014 unarchive takes no --force";
 var FIX_HINT = "run `nanojira doctor --fix` to move the files into their places, then unarchive again";
 function orderedSubtree(ctx, el) {
@@ -4680,7 +5049,7 @@ function buildUnits(stillArchived, hierarchy) {
   for (const e of stillArchived) {
     const own = hierarchy ? ownFolder(e) : null;
     const src = own !== null ? own : e.file;
-    if (covered.some((d) => src === d || src.startsWith(d + path13.sep))) continue;
+    if (covered.some((d) => src === d || src.startsWith(d + path14.sep))) continue;
     units.push({ e, src, dir: own !== null });
     if (own !== null) covered.push(own);
   }
@@ -4688,8 +5057,8 @@ function buildUnits(stillArchived, hierarchy) {
 }
 function unitTarget(backlog, byId, layout, u) {
   const dirRel = placeOf(u.e, byId, layout, false);
-  const dir = path13.join(backlog, dirRel);
-  return u.dir ? dir : path13.join(dir, path13.basename(u.e.file));
+  const dir = path14.join(backlog, dirRel);
+  return u.dir ? dir : path14.join(dir, path14.basename(u.e.file));
 }
 function cmdUnarchive(flags) {
   checkFlags(flags, [], /* @__PURE__ */ new Set(["json", ...cliFieldNames("unarchive")]), true);
@@ -4719,7 +5088,7 @@ function cmdUnarchive(flags) {
   if (hierarchy) {
     for (const u of units) {
       if (!u.dir) continue;
-      const prefix = u.src + path13.sep;
+      const prefix = u.src + path14.sep;
       const foreign = ctx.elements.filter((x) => x.file.startsWith(prefix) && !full.includes(x));
       if (foreign.length > 0) {
         refuse(`${u.src} also holds files of other elements: ${foreign.map((f) => f.id).join(", ")}`);
@@ -4745,22 +5114,23 @@ function cmdUnarchive(flags) {
   const emptiedFrom = /* @__PURE__ */ new Set();
   for (const { u, plan } of plans) {
     runMove(plan);
-    emptiedFrom.add(path13.dirname(u.src));
+    emptiedFrom.add(path14.dirname(u.src));
   }
   removeEmptiedIdFolders(ctx.backlog, emptiedFrom);
   const moved = stillArchived.map((e) => {
     const own = units.find((u) => u.e.id === e.id);
     if (own) {
       const target2 = unitTarget(ctx.backlog, byId, layout, own);
-      return loadElement(own.dir ? path13.join(target2, path13.basename(e.file)) : target2, ctx.backlog, ctx.cfg);
+      return loadElement(own.dir ? path14.join(target2, path14.basename(e.file)) : target2, ctx.backlog, ctx.cfg);
     }
-    const covering = units.find((u) => u.dir && e.file.startsWith(u.src + path13.sep));
+    const covering = units.find((u) => u.dir && e.file.startsWith(u.src + path14.sep));
     const target = covering ? unitTarget(ctx.backlog, byId, layout, covering) : e.file;
-    const file = covering ? path13.join(target, path13.relative(covering.src, e.file)) : target;
+    const file = covering ? path14.join(target, path14.relative(covering.src, e.file)) : target;
     return loadElement(file, ctx.backlog, ctx.cfg);
   });
-  deriveGraph(ctx.elements.filter((e) => !stillArchived.includes(e)).concat(moved), ctx.idsDir, layout);
+  deriveGraph(ctx.elements.filter((e) => !stillArchived.includes(e)).concat(moved), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) {
     out(JSON.stringify({
       ok: true,
@@ -4797,6 +5167,7 @@ Section writes replace the section; --<role>-file=- reads stdin.
   nanojira list [--status=\u2026] [--type=\u2026] [--tag=\u2026] [--parent=\u2026] [--assignee=\u2026] [--ready] [--all]
   nanojira find "<text>" [--status=\u2026] [--type=\u2026] [--tag=\u2026] [--parent=\u2026] [--assignee=\u2026] [--all] [--case-sensitive]
   nanojira tree [--id=EPIC-001] [--all]
+  nanojira tags                           every tag in use, with its carrier count
   nanojira rm --id=TSK-009 [--cascade]
   nanojira archive --id=EPIC-001
   nanojira unarchive --id=EPIC-001
@@ -4925,6 +5296,8 @@ function main(argv) {
       return cmdFind(flags, positional);
     case "tree":
       return cmdTree(flags);
+    case "tags":
+      return cmdTags(flags);
     case "rm":
       return cmdRm(flags);
     case "archive":

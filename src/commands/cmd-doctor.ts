@@ -22,7 +22,8 @@ import { syncH1, sectionCheckboxCounts } from '../core/parse.ts';
 import { article } from './cmd-new.ts';
 import { V2_README, V3_README } from '../core/readme-texts.ts';
 import { statusIsFresh, refreshStatus } from '../core/status.ts';
-import { nowIso, nowMs, mtimeIso, readTombstones, atomicWrite, planMove, runMove, renderElement } from '../core/store.ts';
+import { tagsIsFresh, refreshTags } from '../core/tags.ts';
+import { nowIso, nowMs, mtimeIso, readTombstones, tombstoneLocation, atomicWrite, planMove, runMove, renderElement } from '../core/store.ts';
 
 // ------------------------------------------------------------------- doctor
 
@@ -86,9 +87,25 @@ function collectFindings(ctx: Context): Finding[] {
     findings.push({ code: 'backlog:unreadable_dir', severity: 'error', file: dir, message: `folder cannot be listed (${reason}) — element files in it are not seen` });
   }
 
-  const tombs = readTombstones(ctx.idsDir);
+  const tombs = readTombstones(ctx.idsDir, ctx.cfg.ids.shardSize);
   if (ctx.elements.length > 0 && tombs.size === 0) {
     findings.push({ code: 'backlog:ids_missing', severity: 'error', file: ctx.idsDir, message: `${path.relative(ctx.backlog, ctx.idsDir)}/ is missing or empty while element files exist — the never-reuse guarantee is not in force` });
+  }
+  // backlog:ids_layout_mismatch (§ 5 `ids.shardSize`, § 8): the on-disk
+  // tombstone layout disagrees with what the current configuration asks
+  // for — the same "configuration changed, the backlog hasn't caught up
+  // yet" condition `backlog:legacy_layout` reports, ERROR for the same
+  // reason (DECISIONS: no silent dual-layout support forever). Gated on a
+  // valid configuration exactly like the checks above it: while
+  // `config:invalid` holds there is no target layout to compare against.
+  if (ctx.configErrors.length === 0) {
+    const actual = detectIdsLayout(ctx.idsDir);
+    const wantSharded = ctx.cfg.ids.shardSize > 0;
+    if (actual === 'mixed' || (actual === 'flat' && wantSharded) || (actual === 'sharded' && !wantSharded)) {
+      const want = wantSharded ? `sharded (ids.shardSize=${ctx.cfg.ids.shardSize})` : 'flat';
+      findings.push({ code: 'backlog:ids_layout_mismatch', severity: 'error', file: ctx.idsDir,
+        message: `${path.relative(ctx.backlog, ctx.idsDir)}/ is laid out ${actual} on disk but the configuration wants ${want} — \`nanojira doctor --fix\` moves the tombstones` });
+    }
   }
 
   // Without a valid configuration there is no status list to render against
@@ -98,6 +115,12 @@ function collectFindings(ctx: Context): Finding[] {
   // this included (DECISIONS 101, AMBIGUITIES 74).
   if (ctx.configErrors.length === 0 && ctx.cfg.layout.statusFile && !statusIsFresh(ctx.backlog, ctx.elements, ctx.cfg)) {
     findings.push({ code: 'backlog:status_stale', severity: 'warning', file: path.join(ctx.backlog, 'STATUS.md'), message: 'STATUS.md is missing or differs from a fresh rendering — `nanojira doctor --fix` regenerates it' });
+  }
+  // Same mechanism, same rationale, applied to TAGS.md (DECISIONS 101, 102
+  // above apply unchanged: no vocabulary to render against without a valid
+  // configuration; `tagsFile: false` means it is not nanojira's file).
+  if (ctx.configErrors.length === 0 && ctx.cfg.layout.tagsFile && !tagsIsFresh(ctx.backlog, ctx.elements, ctx.cfg)) {
+    findings.push({ code: 'backlog:tags_stale', severity: 'warning', file: path.join(ctx.backlog, 'TAGS.md'), message: 'TAGS.md is missing or differs from a fresh rendering — `nanojira doctor --fix` regenerates it' });
   }
 
   // problems.ignore (§ 7, DECISIONS 165/166): suppressed everywhere a code
@@ -370,11 +393,97 @@ function fixStrayIds(ctx: Context, fc: FixShared) {
   const backlog = ctx.backlog;
   const strayDir = path.join(backlog, LEGACY_IDS_REL);
   if (!fs.existsSync(strayDir)) return;
+  // The stray `.ids/` is always flat (a v2 leftover; v2 never sharded), but
+  // the "real" `.nanojira/ids/` it is compared against may now be sharded —
+  // `readTombstones` needs the current configuration's layout to see it.
   const stray = readTombstones(strayDir);
-  const real = readTombstones(path.join(backlog, V3_IDS_REL));
+  const real = readTombstones(path.join(backlog, V3_IDS_REL), ctx.cfg.ids.shardSize);
   for (const id of stray) if (!real.has(id)) return;
   fs.rmSync(strayDir, { recursive: true, force: true });
   fc.notes.push(`removed the stray top-level ${LEGACY_IDS_REL}/ (every tombstone in it was already in ${V3_IDS_REL}/, § 14 step 0)`);
+}
+
+// Which of the two `ids/` layouts (§ 8) is actually on disk, independent of
+// what the configuration currently asks for: a flat tombstone (`EPIC-003`)
+// sitting directly in `idsDir`, or a type directory (`EPIC`, `TSK`, `SUB`)
+// holding bucket subdirectories. `'mixed'` means both kinds of entry exist
+// side by side — a partial migration (crash mid-`--fix`) — and, like
+// `'flat'`/`'sharded'` disagreeing with the configuration, is always a
+// `backlog:ids_layout_mismatch`, never silently tolerated.
+const TOMBSTONE_RE = /^(EPIC|TSK|SUB)-(\d+)$/;
+
+function detectIdsLayout(idsDir: string): 'empty' | 'flat' | 'sharded' | 'mixed' {
+  let entries;
+  try { entries = fs.readdirSync(idsDir, { withFileTypes: true }); } catch { return 'empty'; }
+  let flat = false, sharded = false;
+  for (const e of entries) {
+    if (e.name.startsWith('.')) continue;
+    if (!e.isDirectory() && TOMBSTONE_RE.test(e.name)) flat = true;
+    else if (e.isDirectory() && Object.prototype.hasOwnProperty.call(PREFIX_TYPE, e.name)) sharded = true;
+  }
+  if (flat && sharded) return 'mixed';
+  if (flat) return 'flat';
+  if (sharded) return 'sharded';
+  return 'empty';
+}
+
+// Moves every tombstone between the flat and sharded layouts to match
+// whatever `ids.shardSize` currently asks for (§ 5, § 8) — the
+// `backlog:ids_layout_mismatch` repair, run unconditionally like
+// `fixGitignore`/`fixReadme` (it needs no element mtime/guard bookkeeping:
+// tombstones carry no content, only their path). One pass, one direction —
+// never a dual-layout reader afterwards (same reasoning as step 0's legacy
+// migration). A target already occupied (only possible from a corrupted,
+// `'mixed'` on-disk state) is left alone and noted rather than overwritten.
+function fixIdsLayout(ctx: Context, fc: FixShared) {
+  const idsDir = ctx.idsDir;
+  const actual = detectIdsLayout(idsDir);
+  const wantSharded = ctx.cfg.ids.shardSize > 0;
+  if (actual === 'empty') return;
+  if (actual === 'flat' && !wantSharded) return;
+  if (actual === 'sharded' && wantSharded) return;
+
+  let moved = 0;
+  if (!wantSharded) {
+    for (const prefix of Object.keys(PREFIX_TYPE)) {
+      const typeDir = path.join(idsDir, prefix);
+      let buckets;
+      try { buckets = fs.readdirSync(typeDir); } catch { continue; }
+      for (const b of buckets) {
+        if (b.startsWith('.')) continue;
+        const bucketDir = path.join(typeDir, b);
+        let names;
+        try { names = fs.readdirSync(bucketDir); } catch { continue; }
+        for (const n of names) {
+          if (n.startsWith('.')) continue;
+          const target = path.join(idsDir, n);
+          if (fs.existsSync(target)) { fc.notes.push(`${path.join(prefix, b, n)}: cannot move to the flat layout — ${n} already exists there`); continue; }
+          fs.renameSync(path.join(bucketDir, n), target);
+          moved++;
+        }
+        // Only an EMPTY bucket is removed -- a left-alone collision (just
+        // above) must stay on disk, never be swept away by tidying up the
+        // directory around it (never discard a tombstone, § 8).
+        try { fs.rmdirSync(bucketDir); } catch { /* not empty: a collision was left behind */ }
+      }
+      try { fs.rmdirSync(typeDir); } catch { /* a bucket under it survived */ }
+    }
+  } else {
+    let entries: string[];
+    try { entries = fs.readdirSync(idsDir); } catch { entries = []; }
+    for (const n of entries) {
+      if (n.startsWith('.')) continue;
+      if (!TOMBSTONE_RE.test(n)) continue;
+      const { dir, file } = tombstoneLocation(idsDir, n, ctx.cfg.ids.shardSize);
+      if (fs.existsSync(file)) { fc.notes.push(`${n}: cannot move to the sharded layout — already exists at ${path.relative(idsDir, file)}`); continue; }
+      fs.mkdirSync(dir, { recursive: true });
+      fs.renameSync(path.join(idsDir, n), file);
+      moved++;
+    }
+  }
+  if (moved > 0) {
+    fc.actions.push(`moved ${moved} tombstone${moved === 1 ? '' : 's'} in ${path.relative(ctx.backlog, idsDir)}/ to the ${wantSharded ? 'sharded' : 'flat'} layout`);
+  }
 }
 
 // The ONE verbatim line, replaced in place; a trailing `\r` is line-end
@@ -590,12 +699,15 @@ function chainProblem(el: Element): boolean {
 function fixStep4(fc: FixCtx<4>): FixCtx<5> {
   const ctx = fc.reload();
   const dir = ctx.idsDir;
+  const shardSize = ctx.cfg.ids.shardSize;
   fs.mkdirSync(dir, { recursive: true });
-  const tombs = readTombstones(dir);
+  const tombs = readTombstones(dir, shardSize);
   let created = 0;
   for (const el of ctx.elements) {
     if (!idShaped(el) || tombs.has(el.id)) continue;
-    try { fs.closeSync(fs.openSync(path.join(dir, el.id), 'wx')); created++; } catch { /* raced */ }
+    const { dir: tdir, file } = tombstoneLocation(dir, el.id, shardSize);
+    if (tdir !== dir) fs.mkdirSync(tdir, { recursive: true });
+    try { fs.closeSync(fs.openSync(file, 'wx')); created++; } catch { /* raced */ }
   }
   if (created > 0) {
     fc.actions.push(`created ${created} missing tombstone${created === 1 ? '' : 's'} in ${path.relative(ctx.backlog, dir)}/`);
@@ -720,6 +832,11 @@ function fixStep8(fc: FixCtx<8>): FixCtx<9> {
 //    bytes changed (DECISIONS 100). Then collect what remains for the report.
 function fixStep9(fc: FixCtx<9>): FixResult {
   const before = fc.reload();
+  // TAGS.md before STATUS.md: existing callers (AC-23) rely on STATUS.md's
+  // own regeneration staying the LAST `fixed[]` entry when both happen in
+  // the same --fix run — the two are otherwise independent, neither
+  // reflects anything about the other.
+  if (refreshTags(before.backlog, before.cfg, before)) fc.actions.push('regenerated TAGS.md');
   if (refreshStatus(before.backlog, before.cfg, before)) fc.actions.push('regenerated STATUS.md');
   const ctx = fc.reload();
   const findings = collectFindings(ctx);
@@ -765,6 +882,10 @@ function doctorFix(flags: Flags, json: boolean) {
   // every `--fix`.
   fixGitignore(start.backlog, fc0, wasLegacy);
   fixReadme(start.backlog, fc0, wasLegacy);
+  // ids/ layout migration (§ 5 `ids.shardSize`, § 8), before step 4 backfills
+  // any missing tombstones below — those must land in the already-correct
+  // layout, not get created in one and then have to move again.
+  fixIdsLayout(start, fc0);
   const fc1 = fixSnapshotMtimes(fc0);
   const fc2 = fixStep1(fc1);
   const fc3 = fixStep2(fc2);

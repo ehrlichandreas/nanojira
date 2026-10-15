@@ -13,6 +13,7 @@ import { ownFolder } from '../core/layout.ts';
 import { descendants } from '../core/load.ts';
 import { fail, out } from '../core/output.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 
 function removeIfEmpty(dir: string) {
   try { fs.rmdirSync(dir); } catch { /* not empty (or already gone): it stays */ }
@@ -58,7 +59,7 @@ function cmdRm(flags: Flags) {
     removeClaimDirWholesale(ctx.backlog, v.id);
   }
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) {
     if (flags.has('cascade') && kids.length > 0) {
       out(JSON.stringify({ ok: true, ids: victims.map((v: Element) => v.id), changed: ['deleted'], entries, _problems: [], dependents: dependents.map((d: Element) => d.id) }, null, 2));

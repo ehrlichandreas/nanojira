@@ -27,6 +27,7 @@ import { cmdRm } from './commands/cmd-rm.ts';
 import { cmdSet } from './commands/cmd-set.ts';
 import { cmdShow } from './commands/cmd-show.ts';
 import { cmdStatus } from './commands/cmd-status.ts';
+import { cmdTags } from './commands/cmd-tags.ts';
 import { cmdTree } from './commands/cmd-tree.ts';
 import { cmdUnarchive } from './commands/cmd-unarchive.ts';
 import { HELP, commandHelp } from './core/help.ts';
@@ -100,6 +101,7 @@ function main(argv: string[]) {
     case 'list': return cmdList(flags);
     case 'find': return cmdFind(flags, positional);
     case 'tree': return cmdTree(flags);
+    case 'tags': return cmdTags(flags);
     case 'rm': return cmdRm(flags);
     case 'archive': return cmdArchive(flags);
     case 'unarchive': return cmdUnarchive(flags);

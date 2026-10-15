@@ -12,6 +12,7 @@ import { DEFAULT_CONFIG, V3_IDS_REL } from '../core/constants.ts';
 import { fail, out } from '../core/output.ts';
 import { V3_README } from '../core/readme-texts.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 
 function cmdInit(flags: Flags) {
   checkFlags(flags, [], new Set(['json']), false);
@@ -28,12 +29,14 @@ function cmdInit(flags: Flags) {
     }
     // The full block, so the defaults are visible where they are changed
     // (§ 5, DECISIONS 92 Q1) — at the v3 place, nothing at the top level.
-    // `claims` and `problems` are both excluded: § 5 says neither is
-    // "written by init" — their absence IS the default (24h staleness,
-    // empty ignore list), not merely an unset key (DECISIONS 130, 165).
-    const { claims, problems, ...written } = DEFAULT_CONFIG;
+    // `claims`, `problems` and `ids` are all excluded: § 5 says none of
+    // them is "written by init" — their absence IS the default (24h
+    // staleness, empty ignore list, flat tombstones), not merely an unset
+    // key (DECISIONS 130, 165; `ids` follows the same rule, § 8).
+    const { claims, problems, ids, ...written } = DEFAULT_CONFIG;
     void claims;
     void problems;
+    void ids;
     fs.writeFileSync(path.join(backlog, '.nanojira', 'config.json'), JSON.stringify(written, null, 2) + '\n', 'utf8');
     fs.writeFileSync(path.join(backlog, '.gitignore'), '.nanojira/index.json\n.nj-tmp-*\n.nanojira/claims/\n', 'utf8');
     fs.writeFileSync(path.join(backlog, 'README.md'), V3_README, 'utf8');
@@ -42,12 +45,13 @@ function cmdInit(flags: Flags) {
   }
   // The overview of an empty backlog: every configured status, all empty (§ 4).
   refreshStatus(backlog, { ...DEFAULT_CONFIG });
+  refreshTags(backlog, { ...DEFAULT_CONFIG });
 
   if (json) out(JSON.stringify({ ok: true, backlog, changed: ['created'] }, null, 2));
   else {
     out(`Created backlog at ${backlog}`);
     out('  epics/ tasks/ subtasks/ archive/ .nanojira/');
-    out('  .nanojira/config.json .nanojira/ids/ .gitignore README.md STATUS.md');
+    out('  .nanojira/config.json .nanojira/ids/ .gitignore README.md STATUS.md TAGS.md');
   }
   return 0;
 }

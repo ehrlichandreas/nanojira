@@ -67,6 +67,8 @@ const TABLE = [
   'backlog:unreadable_dir',
   'backlog:legacy_layout',
   'backlog:status_stale',
+  /* tags: TAGS.md's own staleness check, same mechanism as STATUS.md's */
+  'backlog:tags_stale',
   /* spec v3.1 § C, promoted b7ffad6: claims */
   'claim:mismatch',
   'claim:orphaned',

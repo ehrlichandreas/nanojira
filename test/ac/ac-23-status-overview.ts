@@ -114,6 +114,10 @@ function mkFixture(label: string, layout: ConfigLayout | undefined,
     else fs.writeFileSync(p, content as string);
   }
   for (const id of ids || []) fs.writeFileSync(path.join(bl, IDS_REL, id), '');
+  // This suite is about STATUS.md; a fresh TAGS.md keeps backlog:tags_stale
+  // out of every doctorSet assertion below that was written before TAGS.md
+  // existed (DECISIONS 100, same rationale status.ts's own fixtures get).
+  H.writeTags(bl);
   return { dir, bl };
 }
 
@@ -504,6 +508,10 @@ for (const [how, block, unblock] of UNWRITABLE_CASES) {
   }
   const doc = runJ(['doctor'], fx);
   T.exit(tag + ' the next doctor: exit 0', doc, 0);
+  // TAGS.md never needs a write here at all (freshSmall's fixture and the
+  // CLAIM_STEPS below never touch tags, so its content is "(no tags in
+  // use)" throughout, matching reality even if a write attempt would have
+  // been blocked) -- backlog:tags_stale never enters into either case.
   T.sameSet(tag + ' the next doctor reports backlog:status_stale', H.doctorSet(doc) || ['<no problems array>'],
     ['backlog:status_stale:warning']);
 }

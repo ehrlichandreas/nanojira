@@ -338,13 +338,13 @@ refusal('L1 .njrc → <v2 backlog>, list', ['list'], viaSource('rc'));
   T.exit('L2 doctor --json: exit 2', rj, 2);
   T.check('L2 doctor --json: the doctor shape {backlog, ok:false, problems[]} (§ 9)',
     !!rj.json && rj.json.ok === false && Array.isArray(rj.json.problems), J(rj.json).slice(0, 300));
-  /* The fixture is otherwise clean. STATUS.md does not exist in a v2
-   * backlog and statusFile defaults to true, so its absence is the one other
-   * finding § 14 predicts (`backlog:status_stale`, warning). RULED
-   * (DECISIONS 101, AMBIGUITIES 74): doctor runs every other check against
-   * the v2 places. */
-  T.sameSet('L2 doctor: backlog:legacy_layout (error) — and nothing but the missing STATUS.md',
-    H.doctorSet(rj) || ['<no problems array>'], LEGACY_SET.concat(['backlog:status_stale:warning']));
+  /* The fixture is otherwise clean. Neither STATUS.md nor TAGS.md exists in
+   * a v2 backlog, and both *File keys default to true, so their absence is
+   * what § 14 predicts (`backlog:status_stale`/`backlog:tags_stale`, both
+   * warning). RULED (DECISIONS 101, AMBIGUITIES 74): doctor runs every
+   * other check against the v2 places. */
+  T.sameSet('L2 doctor: backlog:legacy_layout (error) — and nothing but the missing STATUS.md/TAGS.md',
+    H.doctorSet(rj) || ['<no problems array>'], LEGACY_SET.concat(['backlog:status_stale:warning', 'backlog:tags_stale:warning']));
   const f = (rj.json && rj.json.problems || []).find((p: any) => p && p.code === 'backlog:legacy_layout');
   T.check('L2 backlog:legacy_layout is backlog-level: no element (§ 9)', !!f && f.element === undefined, J(f));
   sameTree('L2 doctor changes nothing', before, snapshot(x.dir));
@@ -362,7 +362,7 @@ refusal('L1 .njrc → <v2 backlog>, list', ['list'], viaSource('rc'));
   T.exit('L2 doctor on a v2 backlog with findings: exit 2', rj, 2);
   T.sameSet('L2 doctor reads .nanojira.json and .ids/: `review` is unknown to the v2 statuses, TSK-005 has no tombstone',
     H.doctorSet(rj) || ['<no problems array>'],
-    LEGACY_SET.concat(['backlog:status_stale:warning', 'unknown:status:warning', 'id:no_tombstone:warning']));
+    LEGACY_SET.concat(['backlog:status_stale:warning', 'backlog:tags_stale:warning', 'unknown:status:warning', 'id:no_tombstone:warning']));
 }
 
 /* ===================================================================== */
@@ -370,7 +370,7 @@ refusal('L1 .njrc → <v2 backlog>, list', ['list'], viaSource('rc'));
 /* ===================================================================== */
 
 /* Everything outside the bookkeeping must be byte-identical afterwards. */
-const BOOKKEEPING = new Set([V2_CONFIG, V2_INDEX, '.gitignore', 'STATUS.md', 'README.md']);
+const BOOKKEEPING = new Set([V2_CONFIG, V2_INDEX, '.gitignore', 'STATUS.md', 'TAGS.md', 'README.md']);
 function outsideBookkeeping(map: Record<string, string>): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(map)) {

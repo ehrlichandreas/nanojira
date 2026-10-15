@@ -15,6 +15,7 @@ import { entryJson, openAcceptanceExtra } from '../core/derive.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, out } from '../core/output.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 import { compareGuard, mirrorWrite, nowIso, renderElement } from '../core/store.ts';
 import { valueHint } from '../core/suggest.ts';
 
@@ -79,7 +80,7 @@ function claimOne(ctx: Context, el: Element, name: string, status: string | unde
   }
 
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
   const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
   const claim = released !== undefined ? null : { by: name, since: ts };
   return Object.assign(
@@ -122,7 +123,7 @@ function cmdClaim(flags: Flags) {
       },
       (el) => claimOne(ctx, el, name, status, steal, nowIso()),
     );
-    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    if (result.anyWritten) { refreshStatus(ctx.backlog, ctx.cfg, ctx); refreshTags(ctx.backlog, ctx.cfg, ctx); }
     const wrapper = { ok: result.ok, results: result.results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results as any[]) out(r.ok ? `${r.id} claimed by ${name}` : `${r.id}: Error: ${r.error}`);
@@ -136,7 +137,7 @@ function cmdClaim(flags: Flags) {
   const ts = nowIso();
   const single = claimOne(ctx, el, name, status, steal, ts);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) {
     // Field order: `ok` then `id`, matching every other single-ID JSON
     // shape (rm, set, note, check) — Object.assign keeps a key already in

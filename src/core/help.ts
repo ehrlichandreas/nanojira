@@ -32,6 +32,7 @@ Section writes replace the section; --<role>-file=- reads stdin.
   nanojira list [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…] [--ready] [--all]
   nanojira find "<text>" [--status=…] [--type=…] [--tag=…] [--parent=…] [--assignee=…] [--all] [--case-sensitive]
   nanojira tree [--id=EPIC-001] [--all]
+  nanojira tags                           every tag in use, with its carrier count
   nanojira rm --id=TSK-009 [--cascade]
   nanojira archive --id=EPIC-001
   nanojira unarchive --id=EPIC-001

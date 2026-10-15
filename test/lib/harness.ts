@@ -198,6 +198,7 @@ function mkBacklog(opts?: BacklogOpts): string {
     fs.writeFileSync(path.join(bl, IDS_REL, id), '');
   }
   writeStatus(bl);
+  writeTags(bl);
   return dir;
 }
 
@@ -309,7 +310,7 @@ function statusFor(backlogDir: string): string | null {
       try { st = fs.statSync(p); } catch (e) { /* dangling symlink */ }
       if (lst.isDirectory()) { if (!n.startsWith('.')) walk(p, r); continue; }
       if (lst.isSymbolicLink() && st && st.isDirectory()) continue;
-      if (!n.endsWith('.md') || (!rel && (n === 'README.md' || n === 'STATUS.md'))) continue;
+      if (!n.endsWith('.md') || (!rel && (n === 'README.md' || n === 'STATUS.md' || n === 'TAGS.md'))) continue;
       if (r === archive || r.startsWith(archive + '/')) continue;
       let text: string | null = null;
       try { text = fs.readFileSync(p, 'utf8'); } catch (e) { /* stub */ }
@@ -319,6 +320,99 @@ function statusFor(backlogDir: string): string | null {
     }
   })(backlogDir, '');
   return renderStatus(entries, statuses);
+}
+
+/**
+ * Parses a `tags: [a, b, "c, d"]` line's array value — the only on-disk
+ * shape a list field ever takes (parse.ts's own `serializeValue`, always
+ * one physical line, newlines in an item already folded to spaces before
+ * serialization). Just enough fidelity for the quoting rules
+ * `serializeItem` uses (quoted only when an item needs it): this harness's
+ * own fixtures never need more.
+ */
+function parseTagsArray(raw: string): string[] {
+  const m = /^\[([\s\S]*)\]$/.exec(raw.trim());
+  if (!m) return [];
+  const inner = m[1].trim();
+  if (inner === '') return [];
+  const items: string[] = [];
+  let i = 0;
+  while (i < inner.length) {
+    while (inner[i] === ' ') i++;
+    if (inner[i] === '"') {
+      let j = i + 1, s = '';
+      while (j < inner.length && inner[j] !== '"') {
+        if (inner[j] === '\\' && j + 1 < inner.length) { s += inner[j + 1]; j += 2; } else { s += inner[j]; j++; }
+      }
+      items.push(s);
+      i = j + 1;
+      while (inner[i] === ' ') i++;
+      if (inner[i] === ',') i++;
+    } else {
+      let j = inner.indexOf(',', i);
+      if (j === -1) j = inner.length;
+      items.push(inner.slice(i, j).trim());
+      i = j + 1;
+    }
+  }
+  return items;
+}
+
+/** The `tags` field of one element file, [] for a stub or one with none. */
+function tagsOf(text: string): string[] {
+  const t = text.replace(/^﻿/, '').replace(/\r\n/g, '\n');
+  const lines = t.split('\n');
+  if (lines[0] !== '---') return [];
+  const end = lines.indexOf('---', 1);
+  if (end === -1) return [];
+  for (let i = 1; i < end; i++) {
+    const m = /^tags:(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    let v = m[1];
+    if (v.startsWith(' ')) v = v.slice(1);
+    return parseTagsArray(v);
+  }
+  return [];
+}
+
+/**
+ * The TAGS.md `nj` would write for a hand-built backlog (DECISIONS: mirrors
+ * `statusFor`, applied to the tag vocabulary instead of status): every tag
+ * across every `*.md` below the backlog (top-level README.md/STATUS.md/
+ * TAGS.md excluded, same scan as `statusFor`), WITH archived elements
+ * included this time — unlike `STATUS.md`, there is no per-status grouping
+ * to carve an archived exception out of, and vocabulary drift is exactly as
+ * real for an archived element's tags as for a live one's. Returns null
+ * under the same conditions `statusFor` does (config unreadable/invalid, or
+ * `tagsFile: false`).
+ */
+function tagsFor(backlogDir: string): string | null {
+  let cfg: any;
+  try { cfg = JSON.parse(fs.readFileSync(path.join(backlogDir, STATUS_CONFIG_REL), 'utf8')); } catch (e) { return null; }
+  if (!configValidForStatus(cfg)) return null;
+  const layout = cfg.layout || {};
+  if (layout.tagsFile === false) return null;
+  const counts = new Map<string, number>();
+  (function walk(d: string, rel: string) {
+    let names: string[];
+    try { names = fs.readdirSync(d).sort(); } catch (e) { return; }
+    for (const n of names) {
+      const r = rel ? rel + '/' + n : n;
+      const p = path.join(d, n);
+      let lst: fs.Stats, st: fs.Stats | null = null;
+      try { lst = fs.lstatSync(p); } catch (e) { continue; }
+      try { st = fs.statSync(p); } catch (e) { /* dangling symlink */ }
+      if (lst.isDirectory()) { if (!n.startsWith('.')) walk(p, r); continue; }
+      if (lst.isSymbolicLink() && st && st.isDirectory()) continue;
+      if (!n.endsWith('.md') || (!rel && (n === 'README.md' || n === 'STATUS.md' || n === 'TAGS.md'))) continue;
+      let text: string | null = null;
+      try { text = fs.readFileSync(p, 'utf8'); } catch (e) { continue; /* stub: no tags */ }
+      for (const tag of tagsOf(text)) counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+  })(backlogDir, '');
+  const names = Array.from(counts.keys()).sort();
+  const body = names.length > 0 ? names.map((n) => '- `' + n + '` (' + counts.get(n) + ')').join('\n') : '(no tags in use)';
+  return '# Tags\n\n' + body + '\n';
 }
 
 /**
@@ -338,9 +432,10 @@ function configValidForStatus(cfg: any): boolean {
   if (cfg.layout === undefined) return true;
   const L = cfg.layout;
   if (!L || typeof L !== 'object' || Array.isArray(L)) return false;
-  if (Object.keys(L).some(k => !['group', 'folders', 'statusFile'].includes(k))) return false;
+  if (Object.keys(L).some(k => !['group', 'folders', 'statusFile', 'tagsFile'].includes(k))) return false;
   if (L.group !== undefined && !['type', 'hierarchy', 'flat'].includes(L.group)) return false;
   if (L.statusFile !== undefined && typeof L.statusFile !== 'boolean') return false;
+  if (L.tagsFile !== undefined && typeof L.tagsFile !== 'boolean') return false;
   if (L.folders !== undefined) {
     const F = L.folders;
     if (!F || typeof F !== 'object' || Array.isArray(F)) return false;
@@ -367,6 +462,14 @@ function writeStatus(dirOrBacklog: string): string | null {
   const bl = fs.existsSync(path.join(dirOrBacklog, STATUS_CONFIG_REL)) ? dirOrBacklog : path.join(dirOrBacklog, 'backlog');
   const s = statusFor(bl);
   if (s !== null) fs.writeFileSync(path.join(bl, 'STATUS.md'), s);
+  return s;
+}
+
+/** `writeStatus`'s own twin, for TAGS.md — `H.mkBacklog` calls both. */
+function writeTags(dirOrBacklog: string): string | null {
+  const bl = fs.existsSync(path.join(dirOrBacklog, STATUS_CONFIG_REL)) ? dirOrBacklog : path.join(dirOrBacklog, 'backlog');
+  const s = tagsFor(bl);
+  if (s !== null) fs.writeFileSync(path.join(bl, 'TAGS.md'), s);
   return s;
 }
 
@@ -811,7 +914,7 @@ export {
   CONFIG_REL, IDS_REL, INDEX_REL, GITIGNORE,
   TMP_ROOT,
   T,
-  renderStatus, statusFor, writeStatus, configValidForStatus,
+  renderStatus, statusFor, writeStatus, configValidForStatus, tagsFor, writeTags,
   freshDir, mkBacklog, writeRaw, readInBacklog, existsInBacklog, listFiles, lsOrEmpty, readOrNull,
   requireNj, requireNjMcp,
   isDirectExec, copyShippedUnit,

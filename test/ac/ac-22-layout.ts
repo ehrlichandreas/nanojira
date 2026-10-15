@@ -149,6 +149,7 @@ function mkLayoutBacklog(label: string, block: Block, model: ElModel): { dir: st
     fs.writeFileSync(path.join(bl, IDS_REL, id), '');
   }
   H.writeStatus(bl);      // a fresh overview, as every hand-built fixture has (DECISIONS 100)
+  H.writeTags(bl);
   return { dir, bl, L, model };
 }
 
@@ -172,7 +173,7 @@ function mdFiles(bl: string): string[] {
       const r = rel ? rel + '/' + e.name : e.name;
       if (!rel && skip.has(e.name)) continue;
       if (e.isDirectory()) walk(path.join(d, e.name), r);
-      else if (e.name.endsWith('.md') && r !== 'README.md' && r !== 'STATUS.md') res.push(r);
+      else if (e.name.endsWith('.md') && r !== 'README.md' && r !== 'STATUS.md' && r !== 'TAGS.md') res.push(r);
     }
   })(bl, '');
   return res.sort();
@@ -570,6 +571,7 @@ for (const M of MIGRATIONS) {
    * locations, not the overview (AC-23's): refresh it, so the pinned set
    * holds before V3-3 and after it alike (DECISIONS 100). */
   H.writeStatus(bl);
+  H.writeTags(bl);
   const pre = runJ(['doctor'], bl);
   T.exit(tag + ' doctor before --fix: exit 2', pre, 2);
   T.sameSet(tag + ' doctor before --fix: only ' + M.code + ' findings',
@@ -953,6 +955,7 @@ for (const M of MIGRATIONS) {
   writeFile(bl, 'misc/notes.md', '# private\n');
   fs.chmodSync(locked, 0o000);
   H.writeStatus(bl);      // the overview as nj can see it: misc/ is unlisted
+  H.writeTags(bl);
   try {
     const canList = (() => { try { fs.readdirSync(locked); return true; } catch (e) { return false; } })();
     if (canList) {

@@ -15,6 +15,7 @@ import { context, resolveById, requireWritable, requireActive } from '../core/co
 import { isReady, hasOpenChild } from '../core/derive.ts';
 import { Fail, fail, out } from '../core/output.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 import { nowIso } from '../core/store.ts';
 import { valueHint } from '../core/suggest.ts';
 import { applyFilters, availableToActor } from './cmd-list.ts';
@@ -69,6 +70,7 @@ function cmdNext(flags: Flags) {
     }
 
     refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    refreshTags(ctx.backlog, ctx.cfg, ctx);
     if (json) {
       out(JSON.stringify(Object.assign({ ok: (single as any).ok, id: el.id }, single, { skipped }), null, 2));
     } else {

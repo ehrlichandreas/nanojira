@@ -13,6 +13,7 @@ import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, out, writeFeedback, emitWriteResult } from '../core/output.ts';
 import { CHECKBOX_RE } from '../core/parse.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement } from '../core/store.ts';
 
 // CHECKBOX_RE (core/parse.ts): after optional leading whitespace, a list
@@ -121,12 +122,12 @@ function cmdCheck(flags: Flags) {
         }
         guardedWriteCatchable(prepared.el, renderElement(prepared.el, new Map([['updated', ts]]), prepared.newBody), flags.has('force'), ctx.backlog);
         const fresh = loadElement(prepared.el.file, ctx.backlog, ctx.cfg);
-        deriveGraph(ctx.elements.map((e: Element) => (e.file === prepared.el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+        deriveGraph(ctx.elements.map((e: Element) => (e.file === prepared.el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
         const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
         return { ok: true, changed: ['body'], entry, _problems: entry._problems };
       },
     );
-    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    if (result.anyWritten) { refreshStatus(ctx.backlog, ctx.cfg, ctx); refreshTags(ctx.backlog, ctx.cfg, ctx); }
     const wrapper = { ok: result.ok, results: result.results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results as any[]) out(r.ok ? `${r.id} ${wantOn ? 'checked' : 'unchecked'}` : `${r.id}: Error: ${r.error}`);
@@ -148,8 +149,9 @@ function cmdCheck(flags: Flags) {
   guardedWrite(el, renderElement(el, new Map([['updated', ts]]), prepared.newBody), flags.has('force'), ctx.backlog);
 
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) emitWriteResult(true, fresh, ['body'], ctx.backlog, ctx.cfg);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} ${wantOn ? 'checked' : 'unchecked'}`);
   return 0;

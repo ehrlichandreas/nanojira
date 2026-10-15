@@ -103,6 +103,8 @@ export interface Layout {
   folders: Folders;
   /** Validated now, acted on from V3-3 (STATUS.md). */
   statusFile: boolean;
+  /** Same mechanism as `statusFile`, applied to TAGS.md. */
+  tagsFile: boolean;
 }
 
 export interface Config {
@@ -116,6 +118,10 @@ export interface Config {
    * suppressed everywhere they're reported, never in the readiness
    * computation. Default empty -- nothing suppressed. */
   problems: { ignore: string[] };
+  /** § 5 `ids`: not written by `init`; 0 (or absent) keeps today's flat
+   * `ids/<TYPE>-<n>` layout. A positive `shardSize` buckets tombstones at
+   * `ids/<TYPE>/<bucket>/<TYPE>-<n>` (§ 8). */
+  ids: { shardSize: number };
 }
 
 /** One walk over the backlog (layout.ts `scanBacklog`). */

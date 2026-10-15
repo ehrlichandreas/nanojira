@@ -18,7 +18,7 @@ import { VERSION, parseVersionTuple, compareVersionTuples } from './version.ts';
 interface ConfigWarning { code: string; message: string }
 interface ValidationResult { errors: string[]; warnings: ConfigWarning[] }
 
-const TOP_LEVEL_KEYS = ['schema', 'statuses', 'sections', 'layout', 'claims', 'problems', 'minVersion'];
+const TOP_LEVEL_KEYS = ['schema', 'statuses', 'sections', 'layout', 'claims', 'problems', 'minVersion', 'ids'];
 
 function validateConfig(obj: any): ValidationResult {
   const errs: string[] = [];
@@ -64,6 +64,11 @@ function validateConfig(obj: any): ValidationResult {
   }
   if (obj.problems !== undefined) {
     const r = validateProblems(obj.problems);
+    errs.push(...r.errors);
+    warnings.push(...r.warnings);
+  }
+  if (obj.ids !== undefined) {
+    const r = validateIds(obj.ids);
     errs.push(...r.errors);
     warnings.push(...r.warnings);
   }
@@ -139,6 +144,31 @@ function readClaims(c: any): { staleAfterHours: number } {
   return { staleAfterHours: c && c.staleAfterHours !== undefined ? c.staleAfterHours : d };
 }
 
+// § 5 `ids`: an optional top-level block, not written by `init`. `shardSize`
+// undefined or `0` both mean today's flat `ids/<TYPE>-<n>` layout -- `0` is
+// "off", the same reading `layout.statusFile`/`claims.staleAfterHours: 0`
+// already get, never a literal divisor (that would be `Infinity`/`NaN`).
+function validateIds(c: any): ValidationResult {
+  if (c === null || typeof c !== 'object' || Array.isArray(c)) return { errors: ['ids must be an object'], warnings: [] };
+  const errs: string[] = [];
+  const warnings: ConfigWarning[] = [];
+  for (const k of Object.keys(c)) {
+    if (k !== 'shardSize') warnings.push({ code: 'config:unknown_key', message: `unknown key 'ids.${k}'` });
+  }
+  if (c.shardSize !== undefined) {
+    const v = c.shardSize;
+    if (typeof v !== 'number' || !Number.isInteger(v) || v < 0) {
+      errs.push(`ids.shardSize must be a non-negative integer (got ${JSON.stringify(v)})`);
+    }
+  }
+  return { errors: errs, warnings };
+}
+
+function readIds(c: any): { shardSize: number } {
+  const d = DEFAULT_CONFIG.ids.shardSize;
+  return { shardSize: c && c.shardSize !== undefined ? c.shardSize : d };
+}
+
 // § 5: every part of `layout` is optional, but what is there must be right.
 // An unknown key inside it is now a warning (DECISIONS 166) rather than
 // fatal -- a typo stays visible without stopping work.
@@ -147,12 +177,13 @@ function validateLayout(lay: any): ValidationResult {
   const errs: string[] = [];
   const warnings: ConfigWarning[] = [];
   for (const k of Object.keys(lay)) {
-    if (!['group', 'folders', 'statusFile'].includes(k)) warnings.push({ code: 'config:unknown_key', message: `unknown key 'layout.${k}'` });
+    if (!['group', 'folders', 'statusFile', 'tagsFile'].includes(k)) warnings.push({ code: 'config:unknown_key', message: `unknown key 'layout.${k}'` });
   }
   if (lay.group !== undefined && !GROUPS.includes(lay.group)) {
     errs.push(`layout.group must be one of ${GROUPS.join(', ')} (got ${JSON.stringify(lay.group)})`);
   }
   if (lay.statusFile !== undefined && typeof lay.statusFile !== 'boolean') errs.push('layout.statusFile must be true or false');
+  if (lay.tagsFile !== undefined && typeof lay.tagsFile !== 'boolean') errs.push('layout.tagsFile must be true or false');
   const f = lay.folders;
   if (f === undefined) return { errors: errs, warnings };
   if (f === null || typeof f !== 'object' || Array.isArray(f)) { errs.push('layout.folders must be an object'); return { errors: errs, warnings }; }
@@ -179,11 +210,12 @@ function validateLayout(lay: any): ValidationResult {
 
 function readLayout(lay: any): Layout {
   const d = DEFAULT_CONFIG.layout;
-  if (lay === undefined) return { group: d.group, folders: { ...d.folders }, statusFile: d.statusFile };
+  if (lay === undefined) return { group: d.group, folders: { ...d.folders }, statusFile: d.statusFile, tagsFile: d.tagsFile };
   return {
     group: lay.group === undefined ? d.group : lay.group,
     folders: { ...d.folders, ...(lay.folders || {}) },
     statusFile: lay.statusFile === undefined ? d.statusFile : lay.statusFile,
+    tagsFile: lay.tagsFile === undefined ? d.tagsFile : lay.tagsFile,
   };
 }
 
@@ -226,6 +258,7 @@ function loadConfig(backlog: string, legacy?: boolean) {
       layout: readLayout(obj.layout),
       claims: readClaims(obj.claims),
       problems: readProblems(obj.problems),
+      ids: readIds(obj.ids),
     },
     errors: [],
     warnings,

@@ -81,4 +81,4 @@ function valueHint(field: VocabField, value: string, allowed: string[]): string 
 }
 
 export type { VocabField };
-export { suggestValue, valueHint };
+export { suggestValue, valueHint, osaDistance };

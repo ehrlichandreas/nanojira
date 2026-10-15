@@ -15,6 +15,7 @@ import { ownFolder } from '../core/layout.ts';
 import { loadElement, deriveGraph, descendants } from '../core/load.ts';
 import { fail, out } from '../core/output.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 import { nowIso, atomicWrite, compareGuard, planMove, runMove, renderElement } from '../core/store.ts';
 
 const STABLE_HINT = 'retry once the backlog is stable — archive takes no --force';
@@ -111,9 +112,9 @@ function cmdArchive(flags: Flags) {
   // archive ends every live claim relationship by design (§ 12a): the
   // elements it moves or deletes lose their claim directory wholesale.
   for (const e of subtree) removeClaimDirWholesale(ctx.backlog, e.id);
-  deriveGraph(ctx.elements.filter((e: Element) => !subtree.includes(e)).concat(moved), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.filter((e: Element) => !subtree.includes(e)).concat(moved), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) {
     out(JSON.stringify({
       ok: true, ids: moved.map((m) => m.id), changed: ['archived'],

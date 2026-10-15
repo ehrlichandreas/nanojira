@@ -1110,3 +1110,62 @@ it would otherwise appear:
 
 Any warning-severity code from `docs/SPECIFICATION.md` § 7 can be listed
 this way (§ 10 above); an error code or an `incomplete:*` code cannot.
+
+## 24. Tags: `TAGS.md`, `nanojira tags`, and healing drift
+
+`tags` is free-form text (§ 5) — nothing stops `backend`, `back-end` and
+`Backend` from all being in use at once, each looking unrelated to `list
+--tag=`. `TAGS.md` gives that drift "one place to look," generated the same
+way `STATUS.md` is (§ 8): every tag currently in use across every element,
+with how many elements carry it, sorted —
+
+```
+# Tags
+
+- `backend` (3)
+- `bug` (7)
+- `urgent` (1)
+```
+
+- Rewritten after every successful write that could touch `tags` (§ 8's
+  own list of write commands, unchanged); stale after a hand edit, and
+  `nanojira doctor --fix` regenerates it the same way it does `STATUS.md`
+  (`backlog:tags_stale`, a warning).
+- `layout.tagsFile: false` turns it off, same as `layout.statusFile: false`
+  — an existing file is then left alone, and `doctor` stops checking it.
+- `nanojira tags [--json]` answers the same question on demand, without
+  depending on the generated file at all (it reads straight from the
+  elements, the same way `nanojira list --json` does not need `STATUS.md`):
+
+```sh
+$ nanojira tags
+backend (3)
+bug (7)
+urgent (1)
+$ nanojira tags --json
+{"ok": true, "tags": [{"name": "backend", "count": 3}, {"name": "bug", "count": 7}, {"name": "urgent", "count": 1}]}
+```
+
+**Introducing a tag that looks like a drifted spelling of one already in
+use** — `back-end` when `backend` already exists, `Bug` when `bug`
+already exists — prints a non-blocking warning to stderr from `new` or
+`set --tags=`/`--add-tags=`. It never changes the exit code, never blocks
+the write, and never appears in `--json` output; it is a nudge, not a
+rule — there is deliberately no closed tag vocabulary to enforce.
+
+**Healing a tag that already drifted** has no dedicated rename command —
+renaming a tag is rare enough, and the two primitives already needed for
+anything else compose into it directly: find every carrier of the old
+spelling, then flip each one over in a single batch write.
+
+```sh
+$ nanojira list --tag=back-end --json                # every carrier of the old spelling
+$ nanojira set --id=TSK-003,TSK-011,TSK-014 --add-tags=backend --remove-tags=back-end
+```
+
+(`--id=` takes a comma-separated list — § 18 "Batch writes" — so every
+carrier is fixed in one call, each one's own other tags left untouched;
+`--remove-tags`/`--add-tags` edit the list incrementally, § 5 above, so
+nothing else about any of those elements' tags needs to be re-specified by
+hand.) `nanojira doctor --fix` (or the next successful write to any element)
+regenerates `TAGS.md` to match once the carriers are fixed.

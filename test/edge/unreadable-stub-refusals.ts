@@ -58,6 +58,7 @@ function fixture(label: string, stubAt: string) {
   /* the stub came after mkBacklog: refresh the overview (spec v3 § 4), so the
    * pinned doctor set below does not gain backlog:status_stale (DECISIONS 100) */
   H.writeStatus(d);
+  H.writeTags(d);
   return { dir: d, stubRel: stubAt };
 }
 

@@ -46,6 +46,7 @@ fs.utimesSync(p(d, 'tasks/TSK-002.md'), T_B, T_B);
 /* the elements came after mkBacklog: refresh the overview (spec v3 § 4) so
  * the pinned set below does not gain backlog:status_stale (DECISIONS 100) */
 H.writeStatus(d);
+H.writeTags(d);
 
 const before = H.runJson(['doctor'], { cwd: d });
 /* The complete § 7 set for this fixture, not just the duplicate: both files

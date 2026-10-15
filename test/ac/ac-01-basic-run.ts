@@ -66,6 +66,7 @@ function entriesOf(r: JsonRunResult): any[] { return (r.json && Array.isArray(r.
     group: 'type',
     folders: { epics: 'epics', tasks: 'tasks', subtasks: 'subtasks', archive: 'archive' },
     statusFile: true,
+    tagsFile: true,
   });
   /* § 5: "claims.staleAfterHours ... not written by init", and the same for
    * problems.ignore / minVersion (DECISIONS 165/166) -- each is an optional
@@ -92,6 +93,7 @@ function entriesOf(r: JsonRunResult): any[] { return (r.json && Array.isArray(r.
         group: 'type',
         folders: { epics: 'epics', tasks: 'tasks', subtasks: 'subtasks', archive: 'archive' },
         statusFile: true,
+        tagsFile: true,
       },
     }, null, 2) + '\n');
   T.check('init writes no v2 file (.nanojira.json, .ids/) at the top level',

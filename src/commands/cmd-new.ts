@@ -18,6 +18,7 @@ import { Fail, fail, hardExit, out, writeFeedback, emitWriteResult, output } fro
 import { serialize, normalizeTitle, normalizeSectionContent, sectionPresent, sectionHasCheckbox, applySections } from '../core/parse.ts';
 import { valueHint } from '../core/suggest.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags, warnTagNearMatches } from '../core/tags.ts';
 import { nowIso, allocateId, atomicWrite } from '../core/store.ts';
 
 /** Whether `dir` already holds a file named `name`, comparing case-insensitively. */
@@ -191,7 +192,7 @@ function cmdNew(flags: Flags) {
   // value, so the retry is bounded exactly as allocation itself is (§ 8).
   let id: string, dir: string, file: string;
   for (let attempt = 0; ; attempt++) {
-    id = allocateId(ctx.idsDir, type, ctx.elements);
+    id = allocateId(ctx.idsDir, type, ctx.elements, ctx.cfg.ids.shardSize);
     dir = path.join(ctx.backlog, ...newPlace(ctx, type, id, parent).split('/'));
     file = path.join(dir, id + '.md');
     if (!collidesCaseInsensitively(dir, id + '.md')) break;
@@ -219,9 +220,12 @@ function cmdNew(flags: Flags) {
   fs.mkdirSync(dir, { recursive: true });
   atomicWrite(file, serialize(fields, Array.from(fields.keys()), body));
 
+  if (tags !== undefined && tags.length > 0) warnTagNearMatches(tags, ctx.elements.flatMap((e) => e.tags));
+
   const el = loadElement(file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.concat([el]), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.concat([el]), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
 
   const changed: string[] = FIELD_ORDER.filter((f: string) => fields.has(f) && f !== 'created' && f !== 'updated')
     .concat(SECTION_ROLES.filter((r: string) => sections.has(r)));
@@ -573,7 +577,7 @@ function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
 
       let id = '', dir = '', file = '';
       for (let attempt = 0; ; attempt++) {
-        id = allocateId(liveCtx.idsDir, v.type, liveCtx.elements);
+        id = allocateId(liveCtx.idsDir, v.type, liveCtx.elements, liveCtx.cfg.ids.shardSize);
         dir = path.join(liveCtx.backlog, ...newPlace(liveCtx, v.type, id, parentId).split('/'));
         file = path.join(dir, id + '.md');
         if (!collidesCaseInsensitively(dir, id + '.md')) break;
@@ -625,12 +629,15 @@ function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
       // to here changes nothing else.
       if (typeof node.raw.ref === 'string') refRealId.set(node.raw.ref, id);
 
+      if (v.tags !== undefined && v.tags.length > 0) warnTagNearMatches(v.tags, elements.flatMap((e) => e.tags));
+
       const el = loadElement(file, liveCtx.backlog, liveCtx.cfg);
       elements = elements.concat([el]);
-      deriveGraph(elements, liveCtx.idsDir, liveCtx.cfg.layout);
+      deriveGraph(elements, liveCtx.idsDir, liveCtx.cfg);
       entries.push(entryJson(el, ctx.backlog, ctx.cfg));
     } catch (e) {
       refreshStatus(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }) as Context);
+      refreshTags(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }) as Context);
       // A broken internal invariant (DECISIONS 174) must stay loud, not be
       // dressed up as a normal plan failure — it propagates uncaught, same
       // as any other `nanojira` bug.
@@ -652,6 +659,7 @@ function cmdNewInput(ctx: Context, inputValue: string, dryRun: boolean) {
   }
 
   refreshStatus(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }) as Context);
+  refreshTags(ctx.backlog, ctx.cfg, Object.assign({}, ctx, { elements }) as Context);
 
   if (isSingular && flat.length === 1) {
     const fields = lastFields as Map<string, string | string[]>;

@@ -14,6 +14,7 @@ import { ownFolder, placeOf, removeEmptiedIdFolders } from '../core/layout.ts';
 import { deriveGraph } from '../core/load.ts';
 import { fail, out } from '../core/output.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 import { nowIso, atomicWrite, compareGuard, planMove, runMove, renderElement } from '../core/store.ts';
 import { loadElement } from '../core/load.ts';
 
@@ -157,9 +158,9 @@ function cmdUnarchive(flags: Flags) {
     return loadElement(file, ctx.backlog, ctx.cfg);
   });
 
-  deriveGraph(ctx.elements.filter((e: Element) => !stillArchived.includes(e)).concat(moved), ctx.idsDir, layout);
+  deriveGraph(ctx.elements.filter((e: Element) => !stillArchived.includes(e)).concat(moved), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
-
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) {
     out(JSON.stringify({
       ok: true, ids: moved.map((m) => m.id), changed: ['unarchived'],

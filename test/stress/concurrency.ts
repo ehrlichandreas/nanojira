@@ -102,13 +102,17 @@ async function main() {
   T.exit('doctor exits 0 on a fresh backlog', doc, 0);
   T.check('doctor --json ok=true', doc.json && doc.json.ok === true,
     JSON.stringify(doc.json && doc.json.ok));
-  /* DECISIONS 100: racing writers may leave STATUS.md one write behind
-   * (spec v3 § 4) — backlog:status_stale is the one tolerated warning;
-   * nothing else, and never an error. */
-  T.check('doctor problems[] is empty but for a tolerated backlog:status_stale',
+  /* DECISIONS 100: racing writers may leave STATUS.md (and, same mechanism,
+   * TAGS.md) one write behind (spec v3 § 4) — backlog:status_stale and
+   * backlog:tags_stale are the only tolerated warnings, each at most once
+   * (a backlog-level code appears at most once, Verifier T2); nothing
+   * else, and never an error. */
+  const TOLERATED = new Set(['backlog:status_stale', 'backlog:tags_stale']);
+  T.check('doctor problems[] is empty but for tolerated backlog:*_stale warnings',
     doc.json && Array.isArray(doc.json.problems) &&
-    doc.json.problems.length <= 1 &&   /* a backlog-level code appears at most once (Verifier T2) */
-    doc.json.problems.every((p: any) => p.code === 'backlog:status_stale' && p.severity === 'warning'),
+    doc.json.problems.length <= 2 &&
+    new Set(doc.json.problems.map((p: any) => p.code)).size === doc.json.problems.length &&
+    doc.json.problems.every((p: any) => TOLERATED.has(p.code) && p.severity === 'warning'),
     JSON.stringify(doc.json && doc.json.problems));
 
   /* ---- the "retries exhausted" abort ------------------------------------

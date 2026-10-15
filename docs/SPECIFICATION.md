@@ -402,7 +402,8 @@ backlog = ../shared/backlog
       "subtasks": "subtasks",
       "archive": "archive"
     },
-    "statusFile": true
+    "statusFile": true,
+    "tagsFile": true
   }
 }
 ```
@@ -429,6 +430,9 @@ Rules:
   folder names under `hierarchy`). Under `hierarchy` and `flat` only
   `archive` is used; the other three are still validated.
 - `layout.statusFile`: `true` or `false` (§ 4, `STATUS.md`).
+- `layout.tagsFile`: `true` or `false` — same mechanism as `layout.statusFile`,
+  applied to `TAGS.md` (the tag vocabulary overview, § 7
+  `backlog:tags_stale`, `nanojira tags`).
 - While the configuration is invalid (`config:invalid`), no placement is
   judged: `type:folder` and `layout:misplaced` are not reported, because the
   layout they would be judged against is unknown (DECISIONS 102).
@@ -482,10 +486,24 @@ Rules:
   three dot-separated non-negative integers is `invalid_config` — a bad
   *value* for a recognised key, the same category `layout.statusFile: not
   a boolean` already is, not a version-skew question at all.
+- **`ids.shardSize`** (§ 8 "Identifiers"): an optional top-level
+  `"ids": {"shardSize": <n>}` block, not written by `init`. A non-negative
+  integer. Default when the key or the whole `ids` block is absent: **0**.
+  `0` (or the key absent) means today's flat `ids/<TYPE>-<n>` tombstone
+  layout — the same "`0` turns the feature off" reading
+  `claims.staleAfterHours: 0` already gets, never a literal divisor (that
+  would make the bucket arithmetic `Infinity`/`NaN`, not "one infinite
+  bucket"). A positive value buckets tombstones at
+  `ids/<TYPE>/<bucket>/<TYPE>-<n>`, `bucket = floor(n / shardSize)`, so no
+  single directory ever holds more than `shardSize` tombstones for a type.
+  A negative or non-integer value makes the configuration invalid
+  (`config:invalid`). Changing `shardSize` on a backlog whose tombstones
+  are already laid out the other way is `backlog:ids_layout_mismatch` (§ 7)
+  until `nanojira doctor --fix` moves them.
 - **Unknown keys are warnings, not errors** (DECISIONS 166, correcting
   165/163 D's own premise): an unknown **top-level** key (anything other
   than `schema`, `statuses`, `sections`, `layout`, `claims`, `problems`,
-  `minVersion`) — and, as of this same revision, an unknown key **inside**
+  `minVersion`, `ids`) — and, as of this same revision, an unknown key **inside**
   `layout`, `layout.folders`, `claims` or `problems` too — no longer makes
   the configuration invalid. Every command still succeeds; `doctor`
   reports the warning `config:unknown_key`, naming the key, so a typo
@@ -689,10 +707,12 @@ condition that produces it:
 | `id:no_tombstone` | element file has no tombstone (hand-created, or partial tombstone loss) | warning | no |
 | `backlog:stray_tmp` | stray `.nj-tmp-*` file (crashed write), backlog-level | warning | — |
 | `backlog:ids_missing` | `.nanojira/ids/` absent or empty while element files exist, backlog-level | error | — |
+| `backlog:ids_layout_mismatch` | `.nanojira/ids/` is laid out flat/sharded on disk but `ids.shardSize` (§ 5, § 8) asks for the other, or both are mixed together, backlog-level | error | — |
 | `config:invalid` | `.nanojira/config.json` violates § 5 (backlog-level) | error | — |
 | `backlog:legacy_layout` | v2 layout (`.nanojira.json`, `.ids/` at the top level), backlog-level | error | — |
 | `backlog:unreadable_dir` | a directory below the backlog cannot be listed (permissions), backlog-level | error | — |
 | `backlog:status_stale` | `STATUS.md` differs from a fresh rendering or is missing (§ 4), backlog-level | warning | — |
+| `backlog:tags_stale` | `TAGS.md` differs from a fresh rendering or is missing (§ 5 `layout.tagsFile`), backlog-level | warning | — |
 | `backlog:claims_unignored` | `.nanojira/claims/` exists and `.gitignore` has no line that is exactly `.nanojira/claims/`, backlog-level | warning | — |
 | `config:unknown_key` | an unrecognised top-level config key, or an unrecognised key inside `layout`/`layout.folders`/`claims`/`problems`, backlog-level (DECISIONS 166) | warning | — |
 | `config:unknown_code` | a code in `problems.ignore` outside § 7's closed vocabulary, backlog-level (DECISIONS 166) | warning | — |
@@ -960,6 +980,41 @@ risk, disclosed: a lost `ids/` can still recycle the numbers of elements
 deleted with `nanojira rm`, if their tombstones were lost with it — live and
 archived elements are always protected by the file-scan start value. A
 tombstone without an element is normal (deleted or archived).
+
+### Sharding `ids/` for large backlogs (`ids.shardSize`)
+
+A flat `ids/` directory accumulates one file **per ID ever allocated**,
+never shrinking (never-reuse, above) — at real scale this becomes a single
+unwieldy directory. `ids.shardSize` (§ 5), a positive integer `S`, buckets
+tombstones instead: `ids/<TYPE>/<bucket>/<TYPE>-<n>`, where
+`bucket = floor(n / S)`, the bucket directory name zero-padded to a fixed
+six digits so a plain sorted directory listing orders buckets numerically.
+Range-bucketed, not hash-sharded, by design: the live allocation frontier —
+where every new ID lands — always sits in one small, recently-written
+bucket, rather than scattered across the whole keyspace by a hash. `0` (or
+the key absent) keeps today's flat layout; this is the default, and an
+existing backlog is untouched unless it opts in.
+
+`O_CREAT|O_EXCL` on the tombstone file remains the **sole** claiming
+authority either way — sharding changes only the path depth, nothing about
+the atomicity guarantee. The start-value computation changes similarly:
+under sharding, the allocator finds the highest-numbered **bucket** via a
+sorted listing of `ids/<TYPE>/` (small and bounded, however large the
+backlog), then scans tombstone names only inside that one bucket — never
+the whole, unboundedly large `ids/<TYPE>/` tree. This is safe because
+tombstones are never removed and allocation only ever probes upward, so IDs
+are dense with no permanent gaps below the current maximum: the highest
+bucket that exists is always the one holding it. The element-file
+cross-check (hand-placed IDs raise the start value, above) is unchanged —
+it was never the expensive part.
+
+Changing `ids.shardSize` on a backlog whose tombstones already exist in the
+*other* layout is `backlog:ids_layout_mismatch`, an ERROR (same "no silent
+dual-layout support forever" rule as `backlog:legacy_layout`). `doctor
+--fix` moves every tombstone into whichever layout the configuration
+currently specifies, flat → sharded or sharded → flat, in one pass (§ 14).
+Only `ids/` tombstones move — element files and folders are untouched
+(`layout.folders` governs those, independently).
 
 ---
 
@@ -3423,7 +3478,9 @@ from their v2 places); configuration validity (§ 5); every condition whose
 Doctor column is not `—` (table in § 7); unreadable frontmatter lines;
 duplicate IDs; files outside their layout place (`type:folder`,
 `layout:misplaced`);
-a missing or empty `ids/` while elements exist (`backlog:ids_missing`);
+a missing or empty `ids/` while elements exist (`backlog:ids_missing`); the
+on-disk `ids/` layout disagreeing with `ids.shardSize`
+(`backlog:ids_layout_mismatch`, § 8 "Sharding `ids/`");
 element files without tombstones (`id:no_tombstone`); stray `.nj-tmp-*`
 files, including inside `.nanojira/claims/` (`backlog:stray_tmp`, § 12
 "Claims"); archive rules (§ 11); claim directories that are mismatched,
@@ -3471,6 +3528,15 @@ unprotected:
    `.nanojira/ids/` is left alone entirely. This is a `--fix` note only, no
    new problem code: the leftover is harmless one-time migration residue,
    not a current defect for `doctor` to name
+
+   **`backlog:ids_layout_mismatch`** (§ 8 "Sharding `ids/`") is repaired
+   here too, unconditionally like the gitignore/README fix-ups: every
+   tombstone moves into whichever of the flat or sharded layouts
+   `ids.shardSize` currently specifies, in one pass, before step 4 below
+   backfills any missing tombstones — those must land in the already-
+   correct layout, not get created in one and then have to move again. A
+   target already occupied (only reachable from a corrupted, mixed
+   on-disk state) is left alone and noted rather than overwritten.
 1. write the `id` from the file name, and the `type` from the ID prefix, when
    missing
 2. rename the file to match the `id` when frontmatter and file name disagree

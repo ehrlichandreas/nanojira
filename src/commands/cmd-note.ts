@@ -13,6 +13,7 @@ import { entryJson } from '../core/derive.ts';
 import { loadElement, deriveGraph } from '../core/load.ts';
 import { fail, out, writeFeedback, emitWriteResult } from '../core/output.ts';
 import { refreshStatus } from '../core/status.ts';
+import { refreshTags } from '../core/tags.ts';
 import { nowIso, guardedWrite, guardedWriteCatchable, renderElement } from '../core/store.ts';
 
 /**
@@ -94,12 +95,12 @@ function cmdNote(flags: Flags, positional: string[]) {
         const newBody = withNote(el, text, signer, ts);
         guardedWriteCatchable(el, renderElement(el, new Map([['updated', ts]]), newBody), flags.has('force'), ctx.backlog);
         const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
-        deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+        deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
         const entry = entryJson(fresh, ctx.backlog, ctx.cfg);
         return { ok: true, changed: ['body'], entry, _problems: entry._problems };
       },
     );
-    if (result.anyWritten) refreshStatus(ctx.backlog, ctx.cfg, ctx);
+    if (result.anyWritten) { refreshStatus(ctx.backlog, ctx.cfg, ctx); refreshTags(ctx.backlog, ctx.cfg, ctx); }
     const wrapper = { ok: result.ok, results: result.results };
     if (json) out(JSON.stringify(wrapper, null, 2));
     else for (const r of result.results as any[]) out(r.ok ? `${r.id} note added` : `${r.id}: Error: ${r.error}`);
@@ -118,8 +119,9 @@ function cmdNote(flags: Flags, positional: string[]) {
   guardedWrite(el, renderElement(el, overrides, newBody), flags.has('force'), ctx.backlog);
 
   const fresh = loadElement(el.file, ctx.backlog, ctx.cfg);
-  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg.layout);
+  deriveGraph(ctx.elements.map((e: Element) => (e.file === el.file ? fresh : e)), ctx.idsDir, ctx.cfg);
   refreshStatus(ctx.backlog, ctx.cfg, ctx);
+  refreshTags(ctx.backlog, ctx.cfg, ctx);
   if (json) emitWriteResult(true, fresh, ['body'], ctx.backlog, ctx.cfg);
   else writeFeedback(fresh, ctx.cfg, `${fresh.id} note added`);
   return 0;
