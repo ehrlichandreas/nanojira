@@ -37,8 +37,15 @@ function collect(dir: string): string[] {
  *
  * `proposed/` is deliberately not collected either: it holds proposal-v3.1
  * suites (AC-25/26) written ahead of spec acceptance. They are not gated
- * until v3.1 is promoted into the spec and moved into ac/. */
-const tests: string[] = [...collect('ac'), ...collect('fault'), ...collect('edge')];
+ * until v3.1 is promoted into the spec and moved into ac/.
+ *
+ * `tools/` holds regression tests for this repo's own dev-time tooling
+ * (TSK-003: tools/release.ts), not spec-pinned behaviour of the `nj` binary
+ * itself -- unlike ac/fault/edge, nothing there reads the NJ path this
+ * runner passes as argv[2]. Collected anyway: a release wrapper that
+ * itself gates on `npm test` is only as good as `npm test` actually
+ * running its regression test. */
+const tests: string[] = [...collect('ac'), ...collect('fault'), ...collect('edge'), ...collect('tools')];
 
 if (tests.length === 0) {
   console.log('no tests found under ' + ROOT);
